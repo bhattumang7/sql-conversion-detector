@@ -7,13 +7,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates.DynamicSqlValue;
 
-/// <summary>
-/// End-to-end slice: <see cref="DynamicSqlCfg"/> + <see cref="DynamicSqlTransfer"/> +
-/// <see cref="ExpressionEvaluator"/> wired together over real parsed T-SQL, covering DECLARE,
-/// SET (including <c>+=</c>), SELECT-assignment, and the havoc-default for an unmodeled
-/// statement (docs/dynamic-sql-rebuild-plan.md Phase 3 §4). EXEC/script emission and parameter/
-/// call-graph/output-summary seeding are a separate, later increment - not exercised here.
-/// </summary>
 public sealed class DynamicSqlTransferTests
 {
     private const int Cap = 32;
@@ -101,9 +94,6 @@ public sealed class DynamicSqlTransferTests
     [Fact]
     public void Set_AddEquals_OnUninitializedDeclareHole_AppendsRatherThanTainting()
     {
-        // @x starts as an UninitializedDeclare hole (unknown content, known type) - += still
-        // APPENDS onto it (Concat never requires a fully-concrete left operand), preserving more
-        // information than tainting outright: "whatever @x's real value is, followed by 'b'".
         var result = Run("DECLARE @x NVARCHAR(50); SET @x += 'b';");
 
         var template = Assert.IsType<SqlTextValue.Template>(result["@x"]);
@@ -112,8 +102,7 @@ public sealed class DynamicSqlTransferTests
         Assert.Equal("b", Assert.IsType<TemplatePiece.Lit>(template.Pieces[1]).Text);
     }
 
-    /// <summary>@x's declared type (INT) is a hard T-SQL guarantee regardless of this scanner not modeling `-=` - degrades to a typed HavocWrite hole, not a bare taint, matching <see cref="FetchIntoVariable_UnmodeledStatement_HavocsToTypedHoleWhenDeclaredTypeKnown"/>'s own contract.</summary>
-    [Fact]
+[Fact]
     public void Set_UnsupportedAssignmentKind_HavocsToTypedHoleWhenDeclaredTypeKnown()
     {
         var result = Run("DECLARE @x INT = 5; SET @x -= 1;");
@@ -140,8 +129,7 @@ public sealed class DynamicSqlTransferTests
         Assert.Equal("literal", LitText(result["@x"]));
     }
 
-    /// <summary>@x's declared type (NVARCHAR(50)) is a hard T-SQL guarantee regardless of the FROM clause making the assigned value data-dependent - degrades to a typed HavocWrite hole, not a bare taint.</summary>
-    [Fact]
+[Fact]
     public void SelectAssignment_WithFromClause_HavocsToTypedHoleWhenDeclaredTypeKnown()
     {
         var result = Run("DECLARE @x NVARCHAR(50); SELECT @x = name FROM sys.tables;");
@@ -271,8 +259,7 @@ public sealed class DynamicSqlTransferTests
         Assert.Equal("non-literal-argument", Assert.Single(findings).Reason);
     }
 
-    /// <summary>@rc's declared type (INT) is a hard T-SQL guarantee regardless of this scanner not seeing what dbo.SomeProc does internally - degrades to a typed HavocWrite hole, not a bare taint.</summary>
-    [Fact]
+[Fact]
     public void OrdinaryProcedureCall_HavocsReferencedTrackedVariablesToTypedHoleWhenDeclaredTypeKnown()
     {
         var result = Run(
@@ -281,22 +268,13 @@ public sealed class DynamicSqlTransferTests
             out var findings, out var scripts);
 
         Assert.Empty(scripts);
-        Assert.Empty(findings); // the ordinary-call path taints state; it never emits a finding/script itself
-        var template = Assert.IsType<SqlTextValue.Template>(result["@rc"]);
+        Assert.Empty(findings);        var template = Assert.IsType<SqlTextValue.Template>(result["@rc"]);
         var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
         Assert.Equal(HoleKind.HavocWrite, hole.Kind);
         Assert.Equal(new SqlType(SqlTypeCategory.Int), hole.Type);
-        Assert.Equal("kept", LitText(result["@unrelated"])); // never mentioned by this call, so untouched
-    }
+        Assert.Equal("kept", LitText(result["@unrelated"]));    }
 
-    /// <summary>
-    /// sp_executesql's own @params declaration can name an OUTPUT parameter, bound to a caller
-    /// variable exactly like an ordinary stored-procedure call's OUTPUT argument - this scanner
-    /// cannot see what the dynamic SQL text itself assigns to it, so @v must be tainted/havoced
-    /// after the call, not left holding whatever value was proven before it. Without this, a
-    /// later `EXEC(@v)` would be analyzed against SQL that isn't what actually runs.
-    /// </summary>
-    [Fact]
+[Fact]
     public void SpExecuteSql_WithOutputArgument_HavocsCallerVariable()
     {
         var result = Run(
@@ -304,8 +282,7 @@ public sealed class DynamicSqlTransferTests
             "EXEC sp_executesql N'SELECT 1', N'@out nvarchar(50) OUTPUT', @out = @v OUTPUT;",
             out _, out var scripts);
 
-        Assert.NotEmpty(scripts); // @stmt itself still resolves and emits normally
-        var template = Assert.IsType<SqlTextValue.Template>(result["@v"]);
+        Assert.NotEmpty(scripts);        var template = Assert.IsType<SqlTextValue.Template>(result["@v"]);
         var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
         Assert.Equal(HoleKind.HavocWrite, hole.Kind);
         Assert.Equal(new SqlType(SqlTypeCategory.NVarChar, Length: 50), hole.Type);

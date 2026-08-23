@@ -5,27 +5,14 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second full-archive practitioner sweep (2026-08-18)" §G "Multi-hop
-/// trigger recursion cycle across tables" - see <see cref="TriggerRecursionCycleFinding"/> for the
-/// full precision story, the gating correction, and the oracle evidence. A WHOLE-SCAN pass, not a
-/// per-file one: the two (or more) triggers forming a cycle routinely live in different files.
-/// </summary>
 public static class TriggerRecursionCycleScanner
 {
-    /// <summary>How deep the cycle search walks before giving up on a given starting table - see
-    /// <see cref="TriggerRecursionCycleFinding"/>'s own doc comment for why this is a stated
-    /// scope-down rather than an unbounded search.</summary>
-    private const int MaxCycleDepth = 8;
+private const int MaxCycleDepth = 8;
 
     public static IReadOnlyList<TriggerRecursionCycleFinding> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog)
     {
         if (catalog.IsNestedTriggersEnabled != true)
         {
-            // Live-mode-only, gated strictly on a live-confirmed TRUE - file-mode (null) and a
-            // live-confirmed FALSE both mean a cross-table cascade is a structural no-op past the
-            // first hop, so never overclaim a risk that is not actually live (see
-            // DatabaseCatalog.IsNestedTriggersEnabled's own doc comment).
             return [];
         }
 
@@ -58,10 +45,7 @@ public static class TriggerRecursionCycleScanner
         return findings;
     }
 
-    /// <summary>Groups the parts of a cycle search that stay constant across the whole recursive
-    /// walk from one starting table - only <c>currentTable</c>/<c>path</c>/<c>visited</c>/<c>depth</c>
-    /// change per recursive step, so those stay as directly threaded parameters.</summary>
-    private readonly record struct CycleSearchContext(
+private readonly record struct CycleSearchContext(
         string StartTable,
         IReadOnlyDictionary<string, IReadOnlyList<TriggerRecursionCycleHop>> Graph,
         HashSet<string> SeenCanonicalKeys,
@@ -79,7 +63,6 @@ public static class TriggerRecursionCycleScanner
         {
             if (path.Count == 0 && string.Equals(edge.ToTableQualifiedName, context.StartTable, StringComparison.OrdinalIgnoreCase))
             {
-                // A single-hop self-loop is DirectRecursiveTrigger's own claim, not this stream's.
                 continue;
             }
 
@@ -91,9 +74,6 @@ public static class TriggerRecursionCycleScanner
 
             if (visited.Contains(edge.ToTableQualifiedName))
             {
-                // Only simple cycles (no repeated intermediate table) count - a table revisited
-                // mid-path would just be a shorter cycle this same starting-table search already
-                // finds (or will find) on its own.
                 continue;
             }
 
@@ -105,13 +85,7 @@ public static class TriggerRecursionCycleScanner
         }
     }
 
-    /// <summary>
-    /// Canonicalizes the closed cycle (a list of hops whose FromTable sequence revisits its own
-    /// first table at the end) by rotating it to start at its alphabetically-first table - the same
-    /// real cycle discovered from two different starting tables during the outer search collapses
-    /// to the same canonical key here and is only reported once.
-    /// </summary>
-    private static void RecordCycle(IReadOnlyList<TriggerRecursionCycleHop> hops, HashSet<string> seenCanonicalKeys, List<TriggerRecursionCycleFinding> findings)
+private static void RecordCycle(IReadOnlyList<TriggerRecursionCycleHop> hops, HashSet<string> seenCanonicalKeys, List<TriggerRecursionCycleFinding> findings)
     {
         var tables = hops.Select(h => h.FromTableQualifiedName).ToList();
         var minIndex = 0;
@@ -151,9 +125,6 @@ public static class TriggerRecursionCycleScanner
 
         private void VisitTrigger(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject, StatementList? statementList)
         {
-            // A DDL/LOGON trigger (TriggerObject.Name null) has no DML target table of its own to
-            // start a cycle from - the same guard TypedPredicateExtractor/NonSargablePredicateScanner
-            // already apply for the identical reason.
             if (triggerObject.Name is not { } targetTableName || statementList is null)
             {
                 return;
@@ -176,14 +147,7 @@ public static class TriggerRecursionCycleScanner
         }
     }
 
-    /// <summary>
-    /// Every DISTINCT real base table (other than the trigger's own target - a self-write is
-    /// DirectRecursiveTrigger's own claim, not this pass's) that this trigger's own body writes to
-    /// directly, first-occurrence line only. Only direct <see cref="NamedTableReference"/> targets
-    /// count - never a view, never a temp table/table variable (private per session, cannot
-    /// participate in a cross-table trigger cascade the same way).
-    /// </summary>
-    private sealed class WriteTargetCollector(DatabaseCatalog catalog, string ownTargetQualifiedName) : TSqlFragmentVisitor
+private sealed class WriteTargetCollector(DatabaseCatalog catalog, string ownTargetQualifiedName) : TSqlFragmentVisitor
     {
         private readonly HashSet<string> _seen = new(StringComparer.OrdinalIgnoreCase);
 

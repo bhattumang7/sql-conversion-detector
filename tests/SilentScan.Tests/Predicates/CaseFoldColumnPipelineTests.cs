@@ -6,16 +6,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability stream" #4 -
-/// UPPER/LOWER on a column. Oracle-corrected relative to the checklist's original framing: SQL
-/// Server does NOT special-case away the wrap for a case-insensitive collation - an indexed
-/// UPPER(Code)/LOWER(Code) predicate produces an Index Scan under EITHER collation family, so
-/// this stream is syntactic-with-index-weighting (never suppressed by collation), and only the
-/// finding's own remediation message changes. Confirms that claim directly against the real
-/// oracle, plus the generalized computed-column precision guard
-/// (<see cref="ComputedColumnMatcher"/>).
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class CaseFoldColumnPipelineTests : OracleTestFixture
 {

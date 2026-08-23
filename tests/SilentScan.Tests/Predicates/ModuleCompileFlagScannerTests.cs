@@ -4,12 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Small precise adds" - WITH RECOMPILE (sys.sql_modules.is_recompiled)
-/// and a non-schema-bound table-valued function's RETURNS TABLE column using database collation
-/// (sys.sql_modules.uses_database_collation), both live-mode-only catalog flags, same test shape
-/// as <see cref="SetOptionScannerTests"/>.
-/// </summary>
 public sealed class ModuleCompileFlagScannerTests
 {
     private const string ModuleName = "dbo.usp_Test";
@@ -60,7 +54,6 @@ public sealed class ModuleCompileFlagScannerTests
     [Fact]
     public void IsRecompiledUnknown_NeverGuessesFire()
     {
-        // Flag never registered at all (as in a file-mode scan) - must never be treated as true.
         var findings = Scan("CREATE PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END");
 
         Assert.Empty(findings);
@@ -80,10 +73,6 @@ public sealed class ModuleCompileFlagScannerTests
     [Fact]
     public void UsesDatabaseCollationTrue_SchemaBound_DoesNotFire()
     {
-        // Oracle-confirmed 2026-08-17: schema-binding sets uses_database_collation
-        // unconditionally, string data or not - excluded here as a redundant, always-true,
-        // zero-information signal for a schema-bound module (see
-        // ModuleCompileFlagFinding's own doc comment for the full oracle write-up).
         var findings = Scan(
             "CREATE FUNCTION dbo.usp_Test() RETURNS @t TABLE (Val VARCHAR(50)) AS BEGIN RETURN; END",
             usesDatabaseCollation: true, isSchemaBound: true);

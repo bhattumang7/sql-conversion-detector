@@ -6,13 +6,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability stream" #2 - the
-/// generalized <see cref="ComputedColumnMatcher"/> precision guard applied to date-part
-/// functions, oracle-confirmed both directions: no matching computed column really scans, a
-/// matching indexed one really seeks. Mirrors JsonComputedColumnSuppressionTests'/
-/// CaseFoldColumnPipelineTests' structure.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class DateFunctionColumnPipelineTests : OracleTestFixture
 {

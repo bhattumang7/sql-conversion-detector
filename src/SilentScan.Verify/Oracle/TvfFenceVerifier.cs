@@ -5,16 +5,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Verify.Oracle;
 
-/// <summary>
-/// Oracle-confirms a <see cref="TvfFenceFinding"/> (docs/detection-checklist.md Tier 1 #2).
-/// The marker is plan SHAPE, oracle-verified directly against the local Docker instance: a
-/// multi-statement/CLR TVF reference produces a <c>PhysicalOp="Table-valued function"</c> RelOp
-/// (with the fixed 1/100-row cardinality guess as its own <c>EstimateRows</c>); an inline TVF
-/// reference dissolves into ordinary base operators and never produces that node - confirmed by
-/// probing both shapes against a scratch database and diffing the captured plan XML.
-/// <c>INSERT ... EXEC</c> has its own marker, <c>StatementType="INSERT EXEC"</c>, also
-/// oracle-verified directly.
-/// </summary>
 public sealed class TvfFenceVerifier
 {
     private const string InsertExecMarker = "StatementType=\"INSERT EXEC\"";
@@ -73,14 +63,6 @@ public sealed class TvfFenceVerifier
                 $"The plan for '{qualifiedName}' shows no Table-valued function operator naming '{qualifiedName}' itself - it dissolved into base operators like an inline TVF (or the plan's only TVF operator names a different function entirely), contradicting the finding's own claim.");
     }
 
-    // Checking for a bare "PhysicalOp=\"Table-valued function\"" anywhere in the plan document
-    // would confirm off an entirely unrelated TVF the same batch happens to reference - this
-    // parses the plan and requires the RelOp's own name to match THIS finding's function.
-    // Unlike <UserDefinedFunction FunctionName="...">, showplan's own <TableValuedFunction>
-    // element carries no FunctionName attribute at all (oracle-verified directly against
-    // Docker) - the function's identity instead sits on a nested
-    // <Object Database="[..]" Schema="[..]" Table="[..]"> element, exactly like an ordinary
-    // table reference's own Object element.
     private static bool HasMatchingTableValuedFunction(string planXml, string qualifiedName)
     {
         var doc = XDocument.Parse(planXml);
@@ -91,11 +73,6 @@ public sealed class TvfFenceVerifier
             .Any(obj => NamesSameFunction(obj, qualifiedName));
     }
 
-    // The plan's Schema/Table attributes are bracketed and split apart, while
-    // finding.FunctionQualifiedName is always the unbracketed "schema.name"
-    // (SchemaObjectNameHelper.QualifyFunctionCall) - this rebuilds "schema.name" from the plan's
-    // own attributes and compares case-insensitively, ignoring the plan's own Database attribute
-    // exactly like the scalar-UDF check does (a qualified name is never database-prefixed here).
     private static bool NamesSameFunction(XElement objectElement, string qualifiedName)
     {
         var schema = TrimBrackets((string?)objectElement.Attribute("Schema"));

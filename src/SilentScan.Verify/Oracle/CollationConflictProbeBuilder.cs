@@ -2,15 +2,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Verify.Oracle;
 
-/// <summary>
-/// Builds a self-authored, compile-only probe for a <see cref="CollationConflictFinding"/> -
-/// a plain cross join comparing the two real, already-deployed columns directly, borrowing only
-/// their table/column names from the corpus, never its logic. Both columns' own DDL-declared
-/// collations do the rest; unlike <see cref="CorpusFindingProbeBuilder"/> there is no operand
-/// type to reconstruct or COLLATE clause to add, since a collation conflict finding is always a
-/// direct column-vs-column comparison by its own definition (never a value/literal, which is
-/// always coercible and can never conflict).
-/// </summary>
 public static class CollationConflictProbeBuilder
 {
     public static string Build(CollationConflictFinding finding)

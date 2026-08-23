@@ -4,22 +4,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Local-variable predicates" - oracle-confirms the general
-/// mechanism once (per this session's own precedent - not per finding): comparing a column to a
-/// value the optimizer can see at compile time (a sniffed/literal formal-parameter value) versus
-/// a value it genuinely cannot (a <c>DECLARE</c>'d local variable, whose runtime value is opaque
-/// to the compiler even though it is a compile-time-fixed value for that one compile) produces
-/// materially different cardinality estimates against a skewed column - this is exactly the
-/// "invisible to estimator" premise <see cref="LocalVariablePredicateFinding"/>'s own doc comment
-/// states.
-///
-/// Unlike the catch-all-predicate stream's oracle (<see cref="CatchAllPredicateOracleTests"/>),
-/// this is a genuinely COMPILE-TIME phenomenon - the local-variable estimate is a fixed density
-/// guess baked in at compile time, not something that only reveals itself at execution - so the
-/// existing compile-only <see cref="PlanXmlCapture"/> (<c>SET SHOWPLAN_XML ON</c>) is the right
-/// tool here, unlike for RECOMPILE.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LocalVariablePredicateOracleTests : OracleTestFixture
 {
@@ -60,15 +44,9 @@ public sealed class LocalVariablePredicateOracleTests : OracleTestFixture
     {
         var capture = new PlanXmlCapture(Options);
 
-        // The literal is compile-time visible, so the optimizer can use the real histogram step
-        // for 'Common' (1900 of 2000 rows) - a large, accurate estimate.
         var literalPlan = await capture.CaptureAsync(
             DatabaseName, "SELECT Id FROM dbo.Customers WHERE Region = 'Common';");
 
-        // The DECLARE'd local variable's value is opaque to the compiler even though it is fixed
-        // for this one compile, so the optimizer falls back to a generic density guess instead of
-        // the real histogram step - producing a materially different (much smaller) estimate for
-        // the exact same underlying value.
         var localVariablePlan = await capture.CaptureAsync(
             DatabaseName, "DECLARE @p VARCHAR(20) = 'Common'; SELECT Id FROM dbo.Customers WHERE Region = @p;");
 
@@ -83,8 +61,6 @@ public sealed class LocalVariablePredicateOracleTests : OracleTestFixture
 
     private static double ExtractEstimateRows(string planXml)
     {
-        // The relevant RelOp is the first (outermost) EstimateRows in the plan - the Index
-        // Seek/Scan operator on Customers, which is what the predicate's selectivity drives.
         const string Marker = "EstimateRows=\"";
         var start = planXml.IndexOf(Marker, StringComparison.Ordinal);
         Assert.True(start >= 0, "expected the plan XML to contain an EstimateRows attribute.");

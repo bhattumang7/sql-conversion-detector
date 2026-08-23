@@ -4,6 +4,7 @@
     <Project Path="src/SilentScan.Cli/SilentScan.Cli.csproj" />
     <Project Path="src/SilentScan.Core/SilentScan.Core.csproj" />
     <Project Path="src/SilentScan.Live/SilentScan.Live.csproj" />
+    <Project Path="src/SilentScan.NoCommentsAnalyzer/SilentScan.NoCommentsAnalyzer.csproj" />
     <Project Path="src/SilentScan.Verify/SilentScan.Verify.csproj" />
   </Folder>
   <Folder Name="/tests/">

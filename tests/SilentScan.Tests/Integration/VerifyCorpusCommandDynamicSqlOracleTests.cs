@@ -4,15 +4,6 @@ using SilentScan.Verify.Commands;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// The whole reason this migration exists (task "migrate VerifyCorpusCommand off the file-parsed
-/// catalog to live-catalog/sys.sql_modules"): before it, verify-corpus never deployed procedure
-/// bodies at all, so a dynamic-SQL finding living inside one - the overwhelmingly common real
-/// shape - could never be oracle-confirmed by verify-corpus no matter what. This proves the fix
-/// end-to-end against the live Docker oracle, not a synthesized scenario: a proc body building
-/// `EXEC(@sql)` from a literal must deploy, get read back from `sys.sql_modules`, get analyzed,
-/// and get oracle-confirmed by `verify-corpus` itself.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class VerifyCorpusCommandDynamicSqlOracleTests : IDisposable
 {
@@ -31,10 +22,6 @@ public sealed class VerifyCorpusCommandDynamicSqlOracleTests : IDisposable
             GO
             """);
 
-        // A fully literal EXEC(@sql) build - Tier A of CLAUDE.md's dynamic SQL policy, no
-        // placeholder involved at all - so this must be findable and oracle-confirmable at the
-        // DEFAULT (High) confidence threshold. Only reachable via procPaths, never ddlPaths -
-        // proving procedure bodies now actually deploy, which they never did before this task.
         File.WriteAllText(Path.Combine(cloneDir, "Procedures", "usp_find_active.sql"), """
             CREATE PROCEDURE dbo.usp_FindActive AS
             BEGIN
@@ -91,16 +78,6 @@ public sealed class VerifyCorpusCommandDynamicSqlOracleTests : IDisposable
     }
 }
 
-/// <summary>
-/// An audit finding surfaced by the same migration: verify-corpus's own "did this run actually
-/// verify anything" exit-code gate checked Confirmed/NotConfirmed/ConfirmedViaScratchIndex but
-/// forgot ConfirmedUnindexed - a real, oracle-confirmed outcome (CONVERT_IMPLICIT genuinely
-/// observed on the column; only the RangeSeek-vs-ScanForced plan-SHAPE distinction is untestable
-/// without a deployed index) and the overwhelmingly common one for a corpus's own DDL, which
-/// rarely indexes every column its own predicates compare. A repo whose ONLY probe-worthy
-/// finding lands there was being reported as exit 1 ("verified nothing") despite genuinely
-/// having been oracle-confirmed.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class VerifyCorpusCommandConfirmedUnindexedExitCodeTests : IDisposable
 {
@@ -113,12 +90,6 @@ public sealed class VerifyCorpusCommandConfirmedUnindexedExitCodeTests : IDispos
         var cloneDir = Path.Combine(_root, "clones", "example");
         Directory.CreateDirectory(cloneDir);
 
-        // Status is deliberately VARCHAR(MAX) - not indexed, and not scratch-indexable either
-        // (IndexDeploymentChecker.TryDeployScratchIndexAsync's own doc comment: "MAX-length
-        // string, XML, ..." can't be indexed at all) - an ordinary indexable-but-unindexed
-        // VARCHAR(20) would take the ConfirmedViaScratchIndex path instead, which was already
-        // counted as coverage even before this fix; MAX is the one shape that actually reaches
-        // ConfirmedUnindexed.
         File.WriteAllText(Path.Combine(cloneDir, "schema.sql"), """
             CREATE TABLE dbo.Orders (Status VARCHAR(MAX) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
             GO

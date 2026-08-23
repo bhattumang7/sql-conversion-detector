@@ -5,15 +5,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Hint and index-shape catalog checks": "Composite index
-/// leading-column violation" - see <see cref="CompositeIndexLeadingColumnFinding"/> for the full
-/// mechanism. Own standalone scanner, the same "spans the whole statement's FROM/WHERE/ON, not a
-/// single comparison" reasoning <see cref="PartialCompositeForeignKeyJoinScanner"/>/<see
-/// cref="CatchAllPredicateScanner"/> already document for why this isn't folded into <see
-/// cref="TypedPredicateExtractor"/>'s one-comparison-at-a-time walk - this rule needs to see every
-/// predicate touching a table before it can say a specific column was never bound anywhere.
-/// </summary>
 public static class CompositeIndexLeadingColumnScanner
 {
     public static IReadOnlyList<CompositeIndexLeadingColumnFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
@@ -37,10 +28,6 @@ public static class CompositeIndexLeadingColumnScanner
 
         protected override void InspectStatement(ConstrainedStatement statement)
         {
-            // Referenced anywhere at all - deliberately broader than the AND-constrained set
-            // (includes OR branches, IS NULL checks, every comparison operator) - used only to
-            // suppress a violation, never to trigger one, so being liberal here is the safe
-            // direction: a leading column referenced ANYWHERE, even weakly, is enough to decline.
             var anyReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.Instance);
             var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, anyReferencedColumns);
             statement.WhereCondition?.Accept(referenceVisitor);
@@ -68,8 +55,6 @@ public static class CompositeIndexLeadingColumnScanner
                 var leadingColumn = index.KeyColumns[0];
                 if (anyReferencedColumns.Contains((table.QualifiedName, leadingColumn)))
                 {
-                    // Leading column is bound (or at least referenced) somewhere in the statement -
-                    // this index has a real starting point, not a violation.
                     continue;
                 }
 
@@ -81,11 +66,6 @@ public static class CompositeIndexLeadingColumnScanner
                         continue;
                     }
 
-                    // Precision guard: only fire when no OTHER usable index on this table leads
-                    // with the SAME violating column - if one does, the query has a real seekable
-                    // path via that index regardless of this one's own shape, so flagging this
-                    // index specifically would be index-shape noise, not a genuine "cannot seek
-                    // anywhere" claim.
                     var hasAlternativeSeekPath = usableIndexes.Any(other =>
                         !ReferenceEquals(other, index)
                         && string.Equals(other.KeyColumns[0], violatingColumn, StringComparison.OrdinalIgnoreCase));
@@ -97,8 +77,7 @@ public static class CompositeIndexLeadingColumnScanner
                     Findings.Add(new CompositeIndexLeadingColumnFinding(
                         table.QualifiedName, index.Name, index.KeyColumns, violatingColumn, position,
                         SourcePath, node.StartLine, node.StartColumn));
-                    break; // one finding per index - the earliest violating column is evidence enough.
-                }
+                    break;                }
             }
         }
     }

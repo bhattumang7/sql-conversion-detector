@@ -2,16 +2,6 @@ using System.Text.RegularExpressions;
 
 namespace SilentScan.Core.Parsing;
 
-/// <summary>
-/// Best-effort read of the object a dropped batch's raw text was defining, for a batch
-/// ScriptDOM never turned into an AST at all (see <see cref="UnanalyzedBatch"/>). This is a
-/// text-level heuristic, not a parse - it exists only because the real parser already failed on
-/// this exact text, so there is nothing more authoritative to consult. Anything short of a
-/// confident <c>CREATE</c>/<c>ALTER</c> header match degrades to
-/// <see cref="UnanalyzedObjectKind.Unidentified"/> rather than guessing a name or kind - the
-/// same "unresolved stays unknown, never guessed" discipline the typed-predicate and lineage
-/// passes already follow.
-/// </summary>
 public static partial class DroppedBatchObjectSniffer
 {
     [GeneratedRegex(@"\A(\s|--[^\n]*|/\*.*?\*/)*", RegexOptions.Singleline)]

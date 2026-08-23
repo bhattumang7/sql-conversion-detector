@@ -36,10 +36,6 @@ public sealed class TypedPredicateSummaryTests
     [Fact]
     public void From_MixedVerdicts_CountsEachBucketIncludingSeekPreserved()
     {
-        // The whole point of this summary: SeekPreserved findings are dropped from the
-        // report's TypedFindings list before publication, but the denominator they'd
-        // otherwise take with them must survive here - "31 ScanForced" means something
-        // different next to "3,000 classified" than next to "40 classified".
         var findings = new[]
         {
             Finding(Verdict.SeekPreserved),
@@ -65,10 +61,6 @@ public sealed class TypedPredicateSummaryTests
     [Fact]
     public void From_RepeatedIdenticalScanForcedFindings_DistinctCountCollapsesButRawCountDoesNot()
     {
-        // The DNN Platform case: the same table/column/operator/other-type bug re-issued
-        // across many incremental upgrade scripts. Raw count must still reflect every
-        // occurrence (it's real data about the repo's history); distinct count must collapse
-        // to the single underlying defect.
         var findings = new[]
         {
             Finding(Verdict.ScanForced, "dbo.Documents", "CreatedByUser", line: 10),
@@ -86,10 +78,6 @@ public sealed class TypedPredicateSummaryTests
     [Fact]
     public void From_RepeatedFindingsAcrossVerdicts_DistinctTotalClassifiedUsesSameBasisAsDistinctScanForced()
     {
-        // Quoting "N distinct ScanForced out of M classified" mixes a deduplicated numerator
-        // with a non-deduplicated denominator unless the denominator is deduplicated the same
-        // way - the exact repeated-CREATE mechanism (DNN Platform's incremental upgrade scripts)
-        // that inflates the numerator inflates the denominator identically (an audit finding).
         var findings = new[]
         {
             Finding(Verdict.ScanForced, "dbo.Documents", "CreatedByUser", line: 10),

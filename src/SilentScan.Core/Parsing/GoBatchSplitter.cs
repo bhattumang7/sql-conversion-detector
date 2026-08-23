@@ -3,19 +3,6 @@ using System.Text.RegularExpressions;
 
 namespace SilentScan.Core.Parsing;
 
-/// <summary>
-/// Splits a .sql script on GO batch separators. GO is a client-side convention (sqlcmd/SSMS),
-/// not T-SQL grammar, so it must be handled before anything reaches the server - ScriptDOM
-/// itself already batches on GO when parsing, but the raw deploy path works directly against
-/// SqlClient and needs its own split.
-///
-/// Splitting is lexer-aware, not a blind line regex over raw text: a line that looks like a GO
-/// separator but sits inside a single-quoted string literal, a block comment, or after a line
-/// comment marker is real script content, not a batch boundary - a naive `^\s*GO\s*$` regex
-/// corrupts both adjacent batches whenever real-world DDL happens to contain one (a seed
-/// script's string literal, a commented-out block). `GO n` repeats the preceding batch n times,
-/// matching sqlcmd/SSMS semantics.
-/// </summary>
 public static partial class GoBatchSplitter
 {
     [GeneratedRegex(@"^GO\s*(\d+)?\s*(--.*|/\*.*\*/)?$", RegexOptions.IgnoreCase)]
@@ -52,16 +39,7 @@ public static partial class GoBatchSplitter
         return batches;
     }
 
-    /// <summary>
-    /// Same lexer-aware split as <see cref="Split"/>, but returns each GO-separated segment
-    /// exactly once (never repeated for `GO n`) together with its character offset/length in
-    /// <paramref name="script"/> - for correlating ScriptDOM's own surviving
-    /// <c>TSqlBatch.StartOffset</c>/<c>FragmentLength</c> spans against the raw text to find a
-    /// batch ScriptDOM silently dropped on a syntax error. <c>Start</c>/<c>Length</c> bound the
-    /// trimmed <c>Text</c> exactly (leading/trailing whitespace around a batch is not part of
-    /// its span), matching how <see cref="Split"/> itself trims each batch.
-    /// </summary>
-    public static IReadOnlyList<(int Start, int Length, string Text)> SplitWithSpans(string script)
+public static IReadOnlyList<(int Start, int Length, string Text)> SplitWithSpans(string script)
     {
         var spans = new List<(int Start, int Length, string Text)>();
         var state = LexState.Default;
@@ -173,16 +151,7 @@ public static partial class GoBatchSplitter
         }
     }
 
-    /// <summary>
-    /// Re-scans one line character by character, tracking whether it ends inside a string
-    /// literal, a bracketed identifier (<c>[...]</c>), a double-quoted identifier
-    /// (<c>"..."</c> - delimited here regardless of QUOTED_IDENTIFIER, since either way it isn't
-    /// a real GO separator underneath it), or a block comment, so the caller never treats a
-    /// GO-shaped line inside any of them as a real separator. <paramref name="startCommentDepth"/>
-    /// tracks nested block comments (<c>/* ... /* ... */ ... */</c>) - only the OUTERMOST
-    /// <c>*/</c> actually exits, matching T-SQL's own nesting behavior.
-    /// </summary>
-    private static (string Line, LexState EndState, int EndCommentDepth) ScanLine(string line, LexState startState, int startCommentDepth)
+private static (string Line, LexState EndState, int EndCommentDepth) ScanLine(string line, LexState startState, int startCommentDepth)
     {
         var state = startState;
         var commentDepth = startCommentDepth;
@@ -227,16 +196,13 @@ public static partial class GoBatchSplitter
 
         if (i + 1 < line.Length && line[i] == '-' && line[i + 1] == '-')
         {
-            // Line comment: nothing after this point on the line is code, but whatever
-            // preceded it still is - just stop scanning this line.
             return (line.Length, LexState.Default, 0);
         }
 
         return (i + 1, LexState.Default, 0);
     }
 
-    /// <summary>Shared escaping rule for both <c>'...'</c> string literals and <c>"..."</c> quoted identifiers - a doubled delimiter is a literal instance of it, not the end of the region.</summary>
-    private static (int NextIndex, LexState NextState, int CommentDepth) ScanInDelimited(string line, int i, char delimiter, LexState inState)
+private static (int NextIndex, LexState NextState, int CommentDepth) ScanInDelimited(string line, int i, char delimiter, LexState inState)
     {
         if (line[i] != delimiter)
         {
@@ -248,8 +214,7 @@ public static partial class GoBatchSplitter
             : (i + 1, LexState.Default, 0);
     }
 
-    /// <summary>A doubled <c>]]</c> inside a bracketed identifier is a literal <c>]</c>, not the identifier's end - same escaping shape as a quoted string/identifier, but bracket-specific since <c>[</c> itself never needs escaping inside one.</summary>
-    private static (int NextIndex, LexState NextState, int CommentDepth) ScanInBracket(string line, int i)
+private static (int NextIndex, LexState NextState, int CommentDepth) ScanInBracket(string line, int i)
     {
         if (line[i] != ']')
         {

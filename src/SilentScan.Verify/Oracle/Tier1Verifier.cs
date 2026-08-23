@@ -4,18 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Verify.Oracle;
 
-/// <summary>
-/// Roadmap Phase E3: oracle-confirms a <see cref="SargabilityFinding"/> - previously Tier-1 had
-/// zero presence in the corpus verify pipeline at all, only the classifier's own fixture tests.
-/// The signal is plan SHAPE, not CONVERT_IMPLICIT (a syntactic wrap like <c>UPPER(Code)</c> is
-/// not an implicit conversion at all): oracle-verified directly (Docker) that a wrapped
-/// predicate against an indexed column produces an Index Scan (or Compute Scalar + Index Scan),
-/// never an Index Seek, while the same column compared bare produces an Index Seek - so absence
-/// of "Index Seek" anywhere in the plan is the confirming signal. Reuses
-/// <see cref="IndexDeploymentChecker"/>'s scratch-index mechanism exactly like
-/// <see cref="CorpusFindingVerifier"/> does, since the same "most corpus columns are unindexed"
-/// problem applies here too.
-/// </summary>
 public sealed class Tier1Verifier
 {
     private readonly PlanXmlCapture _planXmlCapture;
@@ -36,19 +24,8 @@ public sealed class Tier1Verifier
             return new Tier1Result(finding, Tier1Outcome.NotProbeable, "No rendered predicate fragment, resolved table, or resolvable column type.");
         }
 
-        // finding.Indexed already resolved this through the same catalog/lineage machinery the
-        // typed-finding path uses - reused here rather than a second HasLeadingKeyIndexAsync
-        // round trip for the common (already indexed) case, falling back to the scratch-index
-        // path exactly like CorpusFindingVerifier only when it's false/null. Either way the plan-
-        // shape check itself needs the REAL index name, not just "an index exists" - checking for
-        // an Index Seek anywhere in the whole plan document would confirm off a completely
-        // unrelated index (a different table, a lookup, a spool feed).
         if (finding.Indexed == true)
         {
-            // Resolved concurrently with (not gating) the capture below - a table the catalog
-            // believes exists but was dropped/renamed live must still surface as ProbeFailed from
-            // the capture attempt itself, not a premature NotProbeable from this lookup alone
-            // finding nothing (OBJECT_ID() on a missing table just returns no rows, no error).
             var indexName = await _indexChecker.TryGetLeadingKeyIndexNameAsync(
                 database, finding.TableQualifiedName!, finding.ColumnName, cancellationToken);
             return await CaptureAndClassifyAsync(database, finding, probe, indexName, cancellationToken);
@@ -88,11 +65,6 @@ public sealed class Tier1Verifier
 
         if (indexName is null)
         {
-            // A real plan was captured, but the finding's own leading-key index could not be
-            // re-resolved live (the catalog and the live server disagree on a column the finding
-            // itself was told is indexed) - there is no specific index name left to scope the
-            // plan-shape check to, so this declines rather than falling back to an unscoped
-            // whole-plan check.
             return new Tier1Result(
                 finding, Tier1Outcome.NotProbeable,
                 $"'{finding.ColumnName}' was reported indexed but no leading-key index for it could be re-resolved live on {finding.TableQualifiedName} - the catalog and the live server disagree.");

@@ -25,10 +25,6 @@ public sealed class SqlTypeReferenceResolverTests
     [InlineData("SysName")]
     public void Resolve_Sysname_ResolvesToNVarChar128(string spelling)
     {
-        // Oracle-verified indirectly: sysname always parses as UserDataTypeReference, never a
-        // built-in SqlDataTypeOption - confirmed against the real parser (docs/audit-
-        // remediation-plan.md Phase 6.2, audit finding: "sysname (equivalent to nvarchar(128))
-        // - pervasive in the admin-script repos this study targets").
         var type = SqlTypeReferenceResolver.Resolve(ParseColumnDataType(spelling), columnCollation: null);
 
         Assert.Equal(SqlTypeCategory.NVarChar, type!.Category);
@@ -56,8 +52,6 @@ public sealed class SqlTypeReferenceResolverTests
     [Fact]
     public void Resolve_UserDataType_MatchingCatalogedAlias_ResolvesToUnderlyingType()
     {
-        // docs/audit-remediation-plan.md Phase 6.2: "catalog CREATE TYPE ... FROM aliases and
-        // resolve through them."
         var aliases = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase)
         {
             ["dbo.MyIntAlias"] = new SqlType(SqlTypeCategory.Int),
@@ -71,8 +65,6 @@ public sealed class SqlTypeReferenceResolverTests
     [Fact]
     public void Resolve_UnqualifiedUserDataType_MatchesDefaultSchemaQualifiedAlias()
     {
-        // An alias declared as dbo.MyStr and referenced bare as MyStr must still match - the
-        // same default-schema qualification every other name lookup in this codebase applies.
         var aliases = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase)
         {
             ["dbo.MyStr"] = new SqlType(SqlTypeCategory.VarChar, Length: 50),

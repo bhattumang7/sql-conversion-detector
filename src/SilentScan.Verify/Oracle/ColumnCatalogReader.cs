@@ -11,8 +11,7 @@ public sealed class ColumnCatalogReader
         _options = options;
     }
 
-    /// <summary>Reads the resolved column types for a table or view via sys.columns, in column order.</summary>
-    public async Task<IReadOnlyList<CatalogColumnInfo>> ReadColumnsAsync(
+public async Task<IReadOnlyList<CatalogColumnInfo>> ReadColumnsAsync(
         string database, string schemaQualifiedObjectName, CancellationToken cancellationToken = default)
     {
         const string sql = """

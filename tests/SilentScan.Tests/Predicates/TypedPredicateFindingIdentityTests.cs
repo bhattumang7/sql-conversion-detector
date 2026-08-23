@@ -16,8 +16,6 @@ public sealed class TypedPredicateFindingIdentityTests
         var column = Column("dbo.Orders", "Code");
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar));
 
-        // Deliberately no source position in either call - the fingerprint's whole point is to
-        // stay stable across two scans even when unrelated line-number shifts occur elsewhere.
         var first = TypedPredicateFindingIdentity.ComputeFingerprint(column, other, "=");
         var second = TypedPredicateFindingIdentity.ComputeFingerprint(column, other, "=");
 
@@ -27,8 +25,6 @@ public sealed class TypedPredicateFindingIdentityTests
     [Fact]
     public void ComputeFingerprint_TableNameVsColumnNameBoundaryShift_DoesNotCollide()
     {
-        // "dbo.A" + column "BC" must never hash the same as table "dbo.AB" + column "C" - the
-        // separator between joined parts is what prevents this, not the parts' own content.
         var columnA = Column("dbo.A", "BC");
         var columnB = Column("dbo.AB", "C");
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int));

@@ -5,13 +5,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-reference.md Appendix 8 - the eleven <see cref="ForcedParameterizationFindingKind"/>
-/// clause shapes, each independently oracle-confirmed. Syntax-only, no catalog: the live
-/// precondition (<c>sys.databases.is_parameterization_forced</c>) is read and gated entirely by the
-/// caller (<c>SilentScan.Live</c>) - see <see cref="ForcedParameterizationFinding"/>'s own doc
-/// comment for why this scanner never reads it itself.
-/// </summary>
 public static class ForcedParameterizationScanner
 {
     public static IReadOnlyList<ForcedParameterizationFinding> Scan(IEnumerable<SqlParseResult> parseResults)
@@ -143,9 +136,6 @@ public static class ForcedParameterizationScanner
         {
             foreach (var element in node.OrderByElements)
             {
-                // A BARE literal as the whole ORDER BY element (the ordinal-position idiom,
-                // "ORDER BY 1") is a structurally different, untested shape - deliberately
-                // excluded, see this kind's own doc comment.
                 if (element.Expression is Literal)
                 {
                     continue;
@@ -257,14 +247,7 @@ public static class ForcedParameterizationScanner
 
         private static string LiteralText(Literal literal) => literal.Value ?? "NULL";
 
-        /// <summary>Finds any <see cref="Literal"/> nested anywhere within a subtree - used only
-        /// where the caller has already excluded the "bare literal at the top" shape itself.
-        /// Each concrete <see cref="Literal"/> subtype's own <c>Accept</c> dispatches to the
-        /// visitor overload matching its OWN concrete type, never the abstract <see cref="Literal"/>
-        /// signature - so every concrete subtype needs its own override here, confirmed directly
-        /// (an override on the abstract <see cref="Literal"/> signature alone silently never
-        /// fires).</summary>
-        private sealed class LiteralFinder : TSqlFragmentVisitor
+private sealed class LiteralFinder : TSqlFragmentVisitor
         {
             public Literal? Found { get; private set; }
 
@@ -281,10 +264,7 @@ public static class ForcedParameterizationScanner
             public override void ExplicitVisit(OdbcLiteral node) => Found ??= node;
         }
 
-        /// <summary>Direct comparison operands only (never a nested subquery's own predicates) -
-        /// the same "never overclaim into arbitrarily nested search conditions" discipline as
-        /// every other reparse in this codebase.</summary>
-        private static IEnumerable<Literal> FindDirectComparisonLiterals(BooleanExpression expression)
+private static IEnumerable<Literal> FindDirectComparisonLiterals(BooleanExpression expression)
         {
             switch (expression)
             {

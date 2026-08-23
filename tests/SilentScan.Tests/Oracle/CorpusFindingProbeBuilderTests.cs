@@ -74,10 +74,6 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_LiteralOperand_RendersTheLiteralInsteadOfADeclare()
     {
-        // docs/audit-remediation-plan.md Phase 5.2, audit finding C2: a DECLARE @p probe can be
-        // constant-folded differently than the original literal comparison, so a literal-
-        // sourced operand reconstructs the literal text exactly rather than substituting a
-        // same-typed variable.
         var column = new PredicateOperand.Column("dbo.Users", "DisplayName", new SqlType(SqlTypeCategory.VarChar, Length: 40), Indexed: true, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 5), IsLiteral: true, LiteralText: "N'Alice'");
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -100,9 +96,6 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_InOperator_NormalizesToEqualityForProbeSyntax()
     {
-        // `Col IN (@p)` isn't valid SQL for a single scalar operand - the IN-list classifier
-        // already collapsed the list to one effective type (docs/audit-remediation-plan.md
-        // Phase 4.3), so an equality probe against that same type is a faithful stand-in.
         var column = new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: false, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "IN", "file.sql", 1, 1);
@@ -118,10 +111,6 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_ColumnHasImmediateRelation_QueriesTheViewNotTheBaseTable()
     {
-        // A depth>=1 finding's TableQualifiedName/ColumnName always name the ultimate base
-        // table (needed for the plan-matching signal), but the probe itself must query what the
-        // source predicate actually referenced - the view - or it never exercises the view
-        // layer the finding claims the conversion is inherited through at all.
         var column = new PredicateOperand.Column(
             "dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: true, Depth: 1, Provenance,
             ImmediateRelationQualifiedName: "dbo.vw_Orders", ImmediateColumnName: "Code");
@@ -155,8 +144,6 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_NoImmediateRelation_FallsBackToBaseTable()
     {
-        // Depth 0 (a direct base-table predicate) never sets ImmediateRelation - falls back to
-        // the same TableQualifiedName/ColumnName every existing test above already exercises.
         var column = new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 10), Indexed: true, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 10));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -169,11 +156,6 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_ColumnIsTempTable_PrependsACreateTableDeclaration()
     {
-        // A temp table (proc-body-scoped: CLAUDE.md's "the only parser-derived catalog data is
-        // module-body objects the engine can't expose") never exists standalone in a probe
-        // session on its own - without a CREATE TABLE first, this probe would fail to compile
-        // with "Invalid object name" even though the finding's own classification never depended
-        // on the probe succeeding.
         var column = new PredicateOperand.Column("#TraceStatus", "TraceFlag", new SqlType(SqlTypeCategory.VarChar, Length: 10), Indexed: false, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -206,9 +188,6 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_ColumnVsColumnSelfJoinOnSameTempTable_DeclaresBothColumnsOnOneCreateTable()
     {
-        // A self-join (BuildColumnProbe aliasing the same temp table as t1 and t2) must not
-        // synthesize two colliding CREATE TABLEs, and must not drop whichever column only the
-        // SECOND reference named - both live on the one object this probe actually creates.
         var column = new PredicateOperand.Column("#T", "ColA", new SqlType(SqlTypeCategory.Int), Indexed: false, Depth: 0, Provenance);
         var other = new PredicateOperand.Column("#T", "ColB", new SqlType(SqlTypeCategory.BigInt), Indexed: false, Depth: 0, Provenance);
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -224,8 +203,6 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_ColumnIsOrdinaryTable_NoCreateTableDeclarationPrepended()
     {
-        // Regression guard: an ordinary (non-#temp) table must never get a synthesized CREATE
-        // TABLE prepended - it already exists as a real deployed object.
         var column = new PredicateOperand.Column("dbo.Orders", "Status", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: true, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -238,11 +215,6 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_TableIsAFunction_RendersDummyTypedArgumentList()
     {
-        // A finding's table can actually be an inline/multi-statement TVF - a bare reference
-        // ("FROM dbo.SplitStrings_CTE") is rejected by SQL Server outright ("Parameters were not
-        // supplied"), so a dummy CAST(NULL AS ...) per resolved parameter is synthesized instead.
-        // A dummy argument is never itself compared against anything, so its exact value has no
-        // bearing on the CONVERT_IMPLICIT signal this probe checks for the finding's own column.
         var column = new PredicateOperand.Column("dbo.SplitStrings_CTE", "Item", new SqlType(SqlTypeCategory.NVarChar, Length: 4000), Indexed: false, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.VarChar, Length: 10));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -278,10 +250,6 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_FunctionArgumentsProvidedButTableNotInIt_LeavesReferenceBare()
     {
-        // Only the qualified names FunctionArguments actually resolved get argument lists - a
-        // finding whose own table isn't a key (an ordinary table alongside a function
-        // resolved elsewhere in the same probe) must render bare, exactly as if the parameter
-        // were never supplied at all.
         var column = new PredicateOperand.Column("dbo.Orders", "Status", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: true, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);

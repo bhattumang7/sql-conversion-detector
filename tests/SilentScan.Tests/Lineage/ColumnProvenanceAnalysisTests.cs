@@ -34,14 +34,12 @@ public sealed class ColumnProvenanceAnalysisTests
     [Fact]
     public void IsExpressionDerived_Unknown_False()
     {
-        // Unresolvable provenance is its own honestly-reported UNKNOWN case, not this rule's concern.
         Assert.False(ColumnProvenanceAnalysis.IsExpressionDerived(new ColumnProvenance.Unknown("reason")));
     }
 
     [Fact]
     public void IsExpressionDerived_UnionWithOneExpressionDerivedBranch_True()
     {
-        // CLAUDE.md: mixed-branch UNIONs must not lose the expression-derived branch.
         var other = new ColumnProvenance.BaseColumn("dbo.Orders", "CustomerId", new SqlType(SqlTypeCategory.VarChar, Length: 20));
         var cast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), Base);
         var union = new ColumnProvenance.Union([other, cast]);
@@ -61,7 +59,6 @@ public sealed class ColumnProvenanceAnalysisTests
     [Fact]
     public void IsExpressionDerived_NestedUnionWithExpressionDerivedBranch_True()
     {
-        // A UNION of three or more branches nests as Union([Union([A, B]), C]).
         var other = new ColumnProvenance.BaseColumn("dbo.Orders", "CustomerId", new SqlType(SqlTypeCategory.Int));
         var cast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), Base);
         var nested = new ColumnProvenance.Union([new ColumnProvenance.Union([Base, other]), cast]);
@@ -80,7 +77,6 @@ public sealed class ColumnProvenanceAnalysisTests
     [Fact]
     public void FindUnderlyingBaseColumns_CastOfCastOfBaseColumn_ReturnsTheBaseColumn()
     {
-        // Mirrors the int -> varchar -> int round trip: two stacked CASTs, one base column underneath.
         var innerCast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), Base);
         var outerCast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.Int), innerCast);
 
@@ -158,9 +154,6 @@ public sealed class ColumnProvenanceAnalysisTests
     [Fact]
     public void TryGetScalarType_UnionOfDifferingLengthStringBranches_WidensToTheWider()
     {
-        // Oracle-verified (sys.dm_exec_describe_first_result_set off a real deployed view):
-        // varchar(10) UNION ALL varchar(200) resolves varchar(200) - the WIDER of the two, not
-        // whichever branch happened to be first.
         var narrow = new ColumnProvenance.BaseColumn("dbo.A", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 10));
         var wide = new ColumnProvenance.BaseColumn("dbo.B", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 200));
         var union = new ColumnProvenance.Union([narrow, wide]);
@@ -197,9 +190,6 @@ public sealed class ColumnProvenanceAnalysisTests
     [Fact]
     public void TryGetScalarType_UnionOfDecimalBranches_WidensPrecisionAndScale()
     {
-        // Oracle-verified: DECIMAL(5,3) UNION ALL DECIMAL(10,1) resolves DECIMAL(12,3) - scale
-        // widens to MAX(3,1)=3; integer digits widen to MAX(5-3,10-1)=MAX(2,9)=9; precision =
-        // 9+3=12. Not Math.Max of each facet independently (that would wrongly give (10,3)).
         var a = new ColumnProvenance.BaseColumn("dbo.A", "Col", new SqlType(SqlTypeCategory.Decimal, Precision: 5, Scale: 3));
         var b = new ColumnProvenance.BaseColumn("dbo.B", "Col", new SqlType(SqlTypeCategory.Decimal, Precision: 10, Scale: 1));
         var union = new ColumnProvenance.Union([a, b]);

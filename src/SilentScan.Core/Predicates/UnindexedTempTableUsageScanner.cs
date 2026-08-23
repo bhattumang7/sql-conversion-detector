@@ -5,13 +5,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>docs/detection-checklist.md "Second OSS/commercial sweep": SELECT INTO temp table
-/// later joined/filtered with no index. Two AST passes over the same scoped walk: collect every
-/// <c>SELECT ... INTO #temp</c> declaration site, then collect every qualifying usage site
-/// (a JOIN operand, or the sole FROM-clause source under a WHERE clause) in the SAME
-/// proc/trigger/batch scope - reuses the catalog's own already-tracked <see
-/// cref="CatalogTable.Indexes"/> for the "no index" half (see <see
-/// cref="UnindexedTempTableUsageFinding"/> for the full precision-guard rationale).</summary>
 public static class UnindexedTempTableUsageScanner
 {
     public static IReadOnlyList<UnindexedTempTableUsageFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)

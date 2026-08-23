@@ -5,18 +5,8 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>A candidate view: its own source location, its SELECT * line, and its already-*-expanded full output column set (from <see cref="LineageCatalog.AllRelations"/>).</summary>
 public readonly record struct SelectStarViewCandidate(string ViewSourcePath, int StarLine, IReadOnlyList<string> FullColumns, int Depth);
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Lineage-metric findings" - "SELECT * inside a view or
-/// inline TVF". Two-step, matching <see cref="ViewExpansionMap"/> + <see cref="PostExpansionJoinWidthScanner"/>'s
-/// own "build a small side-map once, then scan per-file against it" shape: <see cref="BuildCandidates"/>
-/// finds every view/TVF whose own outermost SELECT is a bare/qualified <c>*</c> and whose <see
-/// cref="ViewExpansionOrigin.Depth"/> is ≥ 1, then <see cref="Scan"/> walks every query site
-/// corpus-wide for a consumer that explicitly selects a strict, named subset of that view's full
-/// column set.
-/// </summary>
 public static class SelectStarViewScanner
 {
     public static IReadOnlyDictionary<string, SelectStarViewCandidate> BuildCandidates(
@@ -50,8 +40,7 @@ public static class SelectStarViewScanner
         return candidates;
     }
 
-    /// <summary>Only the view's own OUTERMOST query specification's own SELECT list is inspected - a * nested only inside an inner derived-table subquery does not itself qualify the view, and a top-level UNION declines rather than guessing which branch's star matters.</summary>
-    private static int? FindOutermostStarLine(QueryExpression queryExpression) =>
+private static int? FindOutermostStarLine(QueryExpression queryExpression) =>
         queryExpression switch
         {
             QueryParenthesisExpression parenthesis => FindOutermostStarLine(parenthesis.QueryExpression),
@@ -85,14 +74,7 @@ public static class SelectStarViewScanner
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyCteRelations = new Dictionary<string, ResolvedRelation>();
 
-        /// <summary>
-        /// The enclosing SELECT's own CTE scope - a QuerySpecification has no direct access to
-        /// its enclosing SelectStatement's WithCtesAndXmlNamespaces. A CTE is never schema-
-        /// qualified, so it always shadows a same-named real base table/view; resolving without
-        /// it (cteRelations always null, pre-fix) could match a CTE-shadowed reference against an
-        /// unrelated real view sharing its name (2026-08 audit).
-        /// </summary>
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -128,8 +110,6 @@ public static class SelectStarViewScanner
 
                 if (wholeQueryStar is not null || AliasHasOwnStar(node, alias))
                 {
-                    // The consumer itself does SELECT * (bare, or alias.*) - never narrows
-                    // anything by construction, so it can never be the finding this rule targets.
                     continue;
                 }
 
@@ -149,8 +129,7 @@ public static class SelectStarViewScanner
             node.SelectElements.OfType<SelectStarExpression>()
                 .Any(s => s.Qualifier is { Count: > 0 } q && string.Equals(q[^1].Value, alias, StringComparison.OrdinalIgnoreCase));
 
-        /// <summary>Only a bare ColumnReferenceExpression explicitly qualified with this alias, or unqualified when this is the query's ONLY FROM source (no ambiguity to resolve), counts as "selected" - any other shape is declined, not guessed.</summary>
-        private static List<string> CollectExplicitSelectedColumns(QuerySpecification node, string alias, bool isOnlySource, IReadOnlyList<string> fullColumns)
+private static List<string> CollectExplicitSelectedColumns(QuerySpecification node, string alias, bool isOnlySource, IReadOnlyList<string> fullColumns)
         {
             var selected = new List<string>();
 

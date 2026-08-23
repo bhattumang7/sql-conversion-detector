@@ -3,8 +3,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>docs/detection-checklist.md "Second OSS/commercial sweep": TRUNCATE TABLE inside a
-/// TRY block whose CATCH swallows the error. Fully syntax-only.</summary>
 public static class TruncateSwallowedScanner
 {
     public static IReadOnlyList<TruncateSwallowedFinding> Scan(SqlParseResult parseResult)

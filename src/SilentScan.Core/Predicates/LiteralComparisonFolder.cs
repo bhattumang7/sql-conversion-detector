@@ -2,20 +2,6 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// Folds a comparison between two literal-only expressions (optionally with one level of
-/// literal <c>+ - * /</c> arithmetic on either side) to a definite truth value, or a literal
-/// arithmetic expression to its numeric value - shared by <see cref="DuplicationScanner"/> (its
-/// "always true/false literal comparison" check) and <see cref="TypedPredicateExtractor"/> (to
-/// give a foldable tautology/contradiction its own distinct no-column-operand ledger entry
-/// instead of an undifferentiated one). Mirrors <c>TypeInference.ExpressionTypeInferencer</c>'s
-/// shape: stateless, pure, called ad hoc per-expression.
-///
-/// Deliberately narrow: non-composed (no AND/OR propagation), literals only (no column/variable
-/// folding), and NULL-excluded outright - NULL comparison semantics are their own hazard (three-
-/// valued logic) and folding them here would be a different, riskier claim than "these two
-/// literals are provably equal/unequal".
-/// </summary>
 public static class LiteralComparisonFolder
 {
     public static bool? TryFoldComparison(ScalarExpression first, ScalarExpression second, BooleanComparisonType op)
@@ -34,15 +20,9 @@ public static class LiteralComparisonFolder
         return null;
     }
 
-    /// <summary>
-    /// A numeric literal as-is, or one level of literal <c>+ - * /</c> folded to its value.
-    /// Division by zero is never folded - that is a real runtime error in T-SQL, not a value
-    /// this can assert a truth about.
-    /// </summary>
-    public static decimal? TryFoldToNumeric(ScalarExpression expression) => expression switch
+public static decimal? TryFoldToNumeric(ScalarExpression expression) => expression switch
     {
-        NullLiteral => null, // Never fold NULL - see this type's own doc comment.
-        IntegerLiteral integer when decimal.TryParse(integer.Value, out var value) => value,
+        NullLiteral => null,        IntegerLiteral integer when decimal.TryParse(integer.Value, out var value) => value,
         NumericLiteral numeric when decimal.TryParse(numeric.Value, out var value) => value,
         BinaryExpression binary => TryFoldArithmetic(binary),
         _ => null,
@@ -76,11 +56,7 @@ public static class LiteralComparisonFolder
         _ => null,
     };
 
-    /// <summary>Only a byte-identical (case-sensitive, ordinal) textual match/mismatch is
-    /// collation-proof - two textually DIFFERENT string literals are declined entirely for both
-    /// '=' and '&lt;&gt;', since a case-insensitive collation could still make them compare equal
-    /// at runtime. Never guess.</summary>
-    private static bool? EvaluateExactStringMatch(BooleanComparisonType op, StringLiteral first, StringLiteral second)
+private static bool? EvaluateExactStringMatch(BooleanComparisonType op, StringLiteral first, StringLiteral second)
     {
         if (!string.Equals(first.Value, second.Value, StringComparison.Ordinal))
         {

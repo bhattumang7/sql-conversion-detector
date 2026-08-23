@@ -4,18 +4,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Regression coverage for nested sp_executesql declared-parameter propagation via explicit
-/// argument binding (ConstructCoverage.json's "ExecuteStatement / sp_executesql (nested
-/// declared-parameter propagation)" gap, formerly verifiedBy: null): when a nested
-/// sp_executesql call's own @params argument can't be resolved (here, itself a bare variable
-/// reference undeclared in the reparsed fragment's fresh scope), but that same call binds one
-/// of its formal parameters to a bare variable reference matching one of the ENCLOSING script's
-/// own declared parameters (<c>@P = @Code</c>), DynamicSqlPipeline lets the enclosing script's
-/// type for @Code stand in for @P - CLAUDE.md's "never guess" bar is met because this is an
-/// explicit value hand-off at the call site, not a name match across unrelated scopes. Runs
-/// through ScanReportBuilder, the same entry point production uses.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class DynamicSqlNestedParameterBindingPipelineTests
 {
@@ -51,10 +39,6 @@ public sealed class DynamicSqlNestedParameterBindingPipelineTests
     [Fact]
     public async Task NestedCallBindsFormalParameterToNameOnlyMatch_NoEnclosingParameterOfThatName_StaysUnknown()
     {
-        // @Code here isn't declared anywhere the outer script can see - it isn't the outer's
-        // own sp_executesql parameter, so there is nothing to bind through. Guessing from the
-        // name alone (rather than a genuine argument-binding hand-off) is exactly what CLAUDE.md
-        // and the design note for this gap forbid.
         var report = await Scan("""
             CREATE TABLE dbo.Vendors (VendorCode varchar(50) NOT NULL, INDEX IX_VendorCode (VendorCode));
             GO

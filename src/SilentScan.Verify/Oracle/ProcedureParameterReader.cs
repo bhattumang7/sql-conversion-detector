@@ -5,16 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Verify.Oracle;
 
-/// <summary>
-/// Resolves a stored procedure's own parameter list from <c>sys.parameters</c> - the
-/// INSERT...EXEC fence probe (<see cref="TvfFenceProbeBuilder.BuildInsertExecProbe"/>) needs to
-/// call the executed procedure itself, and a procedure with required parameters rejects a bare
-/// <c>EXEC dbo.Proc</c> exactly like a function rejects a bare reference (the same problem
-/// <see cref="FunctionParameterReader"/> solves for functions - not reused directly here since
-/// its own <c>IsKnownObjectAsync</c> restricts "zero parameters is real, not just absent" to
-/// <c>sys.objects.type IN ('FN','TF','IF','FT')</c>, which a procedure's <c>'P'</c> never
-/// matches).
-/// </summary>
 public sealed class ProcedureParameterReader
 {
     private readonly SqlServerOptions _options;
@@ -24,8 +14,7 @@ public sealed class ProcedureParameterReader
         _options = options;
     }
 
-    /// <summary>Returns the procedure's parameter types in declaration order, or null when at least one parameter's type has no T-SQL rendering (an OUTPUT parameter or a table-valued parameter, since neither belongs in a plain positional argument list a dummy-value probe can supply) - a genuinely zero-parameter procedure returns an empty, non-null list.</summary>
-    public async Task<IReadOnlyList<SqlType>?> TryGetParameterTypesAsync(
+public async Task<IReadOnlyList<SqlType>?> TryGetParameterTypesAsync(
         string database, string qualifiedName, CancellationToken cancellationToken = default)
     {
         const string sql = """
@@ -52,10 +41,6 @@ public sealed class ProcedureParameterReader
             var isTableValued = reader.GetBoolean(5);
             if (isOutput || isTableValued)
             {
-                // An OUTPUT parameter or a table-valued parameter can't be supplied as a plain
-                // positional dummy value the way an ordinary IN parameter can - the probe would
-                // need EXEC ... @p OUTPUT / a real table variable, out of scope for this
-                // compile-only fence probe. Reported as unrenderable rather than guessed.
                 return null;
             }
 

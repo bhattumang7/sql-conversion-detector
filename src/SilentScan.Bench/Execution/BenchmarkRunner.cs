@@ -9,15 +9,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Bench.Execution;
 
-/// <summary>
-/// Runs the full CLAUDE.md Benchmark protocol matrix: per scenario x row count x CE mode x
-/// matched/mismatched x selectivity, median-of-5 warm runs. Compat level pinned to 160 (via
-/// DatabaseProvisioner), MAXDOP 1 for reproducibility. The selectivity dimension (an audit
-/// finding) exists because a single-row equality probe can't tell a genuine `RangeSeek` apart
-/// from a `ScanForced` one on cost alone - both touch one row regardless of which plan shape
-/// `GetRangeThroughConvert` produces; only a multi-row range predicate exercises that
-/// machinery at a scale where its overhead (or the scan's) actually shows up.
-/// </summary>
 public sealed class BenchmarkRunner(SqlServerOptions options)
 {
     private const int WarmRuns = 1;
@@ -66,9 +57,6 @@ public sealed class BenchmarkRunner(SqlServerOptions options)
         }
         finally
         {
-            // Otherwise a 10M-row synthetic benchmark database persists on disk indefinitely -
-            // every other disposable-database consumer in this codebase (Verify, TypeMatrixGenerator)
-            // drops in a finally; this was the one that didn't.
             await provisioner.DropIfExistsAsync(databaseName, cancellationToken);
         }
     }
@@ -103,13 +91,7 @@ public sealed class BenchmarkRunner(SqlServerOptions options)
             StaticVerdict(cell.Scenario, cell.Matched));
     }
 
-    /// <summary>
-    /// What <see cref="VerdictClassifier"/> itself predicts for this cell's exact type pair - a
-    /// Matched row is always SeekPreserved by construction (its param IS the column's own type/
-    /// collation, never reclassified), never a guess; a Mismatched row is classified for real,
-    /// reusing the same code path the scan pipeline uses rather than duplicating its logic.
-    /// </summary>
-    private static Verdict StaticVerdict(TypePairScenario scenario, bool matched)
+private static Verdict StaticVerdict(TypePairScenario scenario, bool matched)
     {
         if (matched)
         {
@@ -121,15 +103,8 @@ public sealed class BenchmarkRunner(SqlServerOptions options)
         return VerdictClassifier.Classify(columnType, otherType, otherIsLiteral: false, operatorText: "=");
     }
 
-    /// <summary>One cell's identity within the benchmark matrix - bundled so <see cref="RunCellAsync"/> stays under the parameter-count limit as the matrix grows another dimension.</summary>
-    private sealed record BenchmarkCell(TypePairScenario Scenario, string TableName, int RowCount, bool LegacyCardinalityEstimation, bool Matched, QuerySelectivity Selectivity);
+private sealed record BenchmarkCell(TypePairScenario Scenario, string TableName, int RowCount, bool LegacyCardinalityEstimation, bool Matched, QuerySelectivity Selectivity);
 
-    // A local `DECLARE @p ... = value` is never sniffed - the optimizer treats it as an
-    // unknown-at-compile-time value and falls back to a density-vector estimate regardless of
-    // CE mode, so the legacy-vs-modern CE dimension of the benchmark matrix measured almost
-    // nothing. Routing through sp_executesql with parameters passed as genuine parameters
-    // compiles the inner statement with a real, sniffable parameterized plan - the same shape
-    // the study's ORM-generated-query motivation is actually about.
     private static string BuildSingleRowQuery(TypePairScenario scenario, string tableName, int rowCount, bool matched, string paramTypeDdl)
     {
         var probeRow = rowCount / 2;
@@ -140,15 +115,7 @@ public sealed class BenchmarkRunner(SqlServerOptions options)
             $"N'@p {paramTypeDdl}', @p = {paramValue};";
     }
 
-    /// <summary>
-    /// A contiguous band of rows centered on the table's midpoint, covering
-    /// <paramref name="fraction"/> of <paramref name="rowCount"/> - reuses the scenario's own
-    /// per-row value functions for the bounds (the same functions that produce the seed data
-    /// and the single-row probe value), so a range bound is guaranteed to be a value that
-    /// actually exists in the seeded table, in the exact same type representation the
-    /// single-row case already uses.
-    /// </summary>
-    private static string BuildRangeQuery(TypePairScenario scenario, string tableName, int rowCount, bool matched, string paramTypeDdl, double fraction)
+private static string BuildRangeQuery(TypePairScenario scenario, string tableName, int rowCount, bool matched, string paramTypeDdl, double fraction)
     {
         var bandSize = Math.Max(1, (int)(rowCount * fraction));
         var startRow = Math.Max(0, (rowCount - bandSize) / 2);

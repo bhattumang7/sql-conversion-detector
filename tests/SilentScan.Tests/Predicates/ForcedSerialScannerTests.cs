@@ -3,13 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Forced-serial construct inventory" - Structural/AST tests
-/// for the extraction logic; the general forced-serial mechanism for each
-/// <see cref="ForcedSerialFindingKind"/> is oracle-confirmed separately via real execution in
-/// <see cref="TableVariableModificationOracleTests"/>, <see cref="FastForwardCursorOracleTests"/>,
-/// and <see cref="NonParallelizableIntrinsicOracleTests"/>.
-/// </summary>
 public sealed class ForcedSerialScannerTests
 {
     private static IReadOnlyList<ForcedSerialFinding> Scan(string sql)
@@ -18,8 +11,6 @@ public sealed class ForcedSerialScannerTests
         var result = SqlScriptParser.ParseText("test.sql", $"{ddl}\nGO\n{sql}");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
 
-        // The DDL batch and the probe batch are parsed as one script - only the probe batch's own
-        // findings matter, but the scanner naturally never fires on a plain CREATE TABLE anyway.
         return ForcedSerialScanner.Scan(result);
     }
 
@@ -72,7 +63,6 @@ public sealed class ForcedSerialScannerTests
     {
         var findings = Scan("DECLARE @t TABLE (Id INT); INSERT INTO @t (Id) VALUES (1); SELECT Id FROM @t JOIN dbo.T ON @t.Id = dbo.T.Id;");
 
-        // Only the INSERT fires - the later read-only JOIN reference must not add a second finding.
         Assert.Single(findings);
     }
 
@@ -88,8 +78,6 @@ public sealed class ForcedSerialScannerTests
             SELECT Id FROM @t;
             """);
 
-        // Second batch never modifies its own (freshly re-declared) @t - must not inherit the
-        // first batch's modification.
         Assert.Single(findings);
     }
 
@@ -183,8 +171,6 @@ public sealed class ForcedSerialScannerTests
     [Fact]
     public void Intrinsic_RowCount_NeverFires()
     {
-        // @@ROWCOUNT was oracle-checked and does NOT force serial execution - a naive "any global
-        // variable" heuristic would wrongly include it.
         var findings = Scan("SELECT Id FROM dbo.T WHERE @@ROWCOUNT > 0;");
 
         Assert.Empty(findings);

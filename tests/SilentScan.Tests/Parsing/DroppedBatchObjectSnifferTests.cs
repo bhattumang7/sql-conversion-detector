@@ -62,7 +62,6 @@ public sealed class DroppedBatchObjectSnifferTests
     [Fact]
     public void Sniff_CreateWithNoNameFollowing_DegradesToUnidentified()
     {
-        // Pathological, but the header must not partially match and hand back a wrong/empty name.
         var (kind, name) = DroppedBatchObjectSniffer.Sniff("CREATE PROCEDURE");
 
         Assert.Equal(UnanalyzedObjectKind.Unidentified, kind);

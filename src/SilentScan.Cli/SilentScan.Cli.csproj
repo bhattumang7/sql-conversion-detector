@@ -10,6 +10,7 @@
     <PackageReference Include="System.CommandLine" />
     <ProjectReference Include="../SilentScan.Core/SilentScan.Core.csproj" />
     <ProjectReference Include="../SilentScan.Live/SilentScan.Live.csproj" />
+    <ProjectReference Include="../SilentScan.NoCommentsAnalyzer/SilentScan.NoCommentsAnalyzer.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

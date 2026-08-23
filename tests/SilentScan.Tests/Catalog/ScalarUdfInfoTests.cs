@@ -3,11 +3,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Tests.Catalog;
 
-/// <summary>
-/// The scalar-UDF stream's own catalog registry (docs/detection-checklist.md Tier 1 #1) -
-/// schemabinding, CLR-vs-T-SQL classification, and the Appendix-3 inlineability blocker scan,
-/// all populated at CREATE/ALTER FUNCTION time exactly like the existing return-type registry.
-/// </summary>
 public sealed class ScalarUdfInfoTests
 {
     private static DatabaseCatalog BuildFrom(string sql)
@@ -108,10 +103,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionUsingGoto_RecordsInlineabilityBlocker()
     {
-        // Oracle-confirmed 2026-08-17 (LiveCatalogReaderScalarUdfTests.
-        // ReadAsync_FunctionUsingGoto_EngineReportsNotInlineable): a real GOTO/label defeats
-        // sys.sql_modules.is_inlineable - a genuine blocker this closed list did not previously
-        // recognize, found while parity-checking it against real corpus functions.
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_Goto (@x INT)
             RETURNS INT
@@ -135,8 +126,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithIfElseAndSetOnly_NoGotoNoBlocker()
     {
-        // GOTO-free control: same IF/SET shape as fn_Goto, no GOTO/label - isolates GOTO itself
-        // as the blocker rather than the surrounding IF.
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_NoGoto (@x INT)
             RETURNS INT
@@ -159,9 +148,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionUsingCte_RecordsInlineabilityBlocker()
     {
-        // Oracle-confirmed 2026-08-20 (LiveCatalogReaderScalarUdfTests.
-        // ReadAsync_FunctionUsingCte_EngineReportsNotInlineable): a CTE anywhere in the body
-        // defeats sys.sql_modules.is_inlineable.
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_Cte (@x INT)
             RETURNS INT
@@ -181,8 +167,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithNoCte_NoBlocker()
     {
-        // No-CTE control, otherwise identical shape to fn_Cte - isolates the CTE itself as the
-        // blocker rather than the surrounding accumulator-assignment pattern.
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_NoCte (@x INT)
             RETURNS INT
@@ -199,10 +183,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithTableValuedParameter_RecordsInlineabilityBlocker()
     {
-        // Oracle-confirmed 2026-08-20 (LiveCatalogReaderScalarUdfTests.
-        // ReadAsync_FunctionWithTableValuedParameter_EngineReportsNotInlineable): a scalar UDF
-        // taking a table-valued (READONLY) parameter reports is_inlineable = 0 regardless of what
-        // the body itself does with it - checked from the parameter list, not the body scan.
         var catalog = BuildFrom("""
             CREATE TYPE dbo.IntList AS TABLE (v INT);
             GO
@@ -223,10 +203,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithOrderByAndNoTop_RecordsInlineabilityBlocker()
     {
-        // Oracle-confirmed 2026-08-20 (LiveCatalogReaderScalarUdfTests.
-        // ReadAsync_FunctionWithOrderByNoTop_EngineReportsNotInlineable): ORDER BY with no TOP
-        // defeats sys.sql_modules.is_inlineable, matching the documented "OrderByWithoutTop"
-        // reason.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.OrderSource (v INT NOT NULL);
             GO
@@ -247,8 +223,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithOrderByAndTop_NoBlocker()
     {
-        // TOP control, otherwise identical shape - isolates ORDER-BY-without-TOP as the blocker
-        // rather than ORDER BY itself.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.OrderSource (v INT NOT NULL);
             GO
@@ -272,10 +246,6 @@ public sealed class ScalarUdfInfoTests
     [InlineData("DECLARE @c BIT = @doc.exist('/a');", "exist")]
     public void Build_FunctionUsingXmlInstanceMethod_RecordsInlineabilityBlocker(string statement, string methodName)
     {
-        // Oracle-confirmed 2026-08-20 (all three tested individually against the real engine,
-        // plus .nodes()/.modify() below - LiveCatalogReaderScalarUdfTests): an XML data-type
-        // instance method call blocks inlining; declaring an XML-typed variable alone does not
-        // (see Build_FunctionDeclaringXmlVariableWithNoMethodCall_NoBlocker).
         var catalog = BuildFrom($$"""
             CREATE FUNCTION dbo.fn_XmlMethod (@x INT)
             RETURNS INT
@@ -331,8 +301,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionDeclaringXmlVariableWithNoMethodCall_NoBlocker()
     {
-        // No-method-call control, otherwise identical: isolates the XML METHOD CALL as the
-        // blocker, not the XML data type itself (oracle-confirmed 2026-08-20).
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_XmlNoMethod (@x INT)
             RETURNS INT
@@ -350,10 +318,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionQueryingSystemCatalog_RecordsInlineabilityBlocker()
     {
-        // Oracle-confirmed 2026-08-20 (LiveCatalogReaderScalarUdfTests.
-        // ReadAsync_FunctionQueryingSystemCatalog_EngineReportsNotInlineable): querying sys.objects
-        // defeats sys.sql_modules.is_inlineable, matching the documented "SystemDataAccess" reason.
-        // Calling a system FUNCTION alone (SUSER_SNAME()) does not - isolated below.
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_SysAccess (@x INT)
             RETURNS INT
@@ -372,8 +336,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionCallingSystemFunctionOnly_NoBlocker()
     {
-        // Isolates system CATALOG TABLE access as the blocker - a system FUNCTION call alone is a
-        // different, unblocked shape.
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_SuserName (@x INT)
             RETURNS INT
@@ -391,11 +353,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionUsingStringAgg_RecordsInlineabilityBlocker()
     {
-        // Oracle-confirmed 2026-08-20 (LiveCatalogReaderScalarUdfTests.
-        // ReadAsync_FunctionUsingStringAgg_EngineReportsNotInlineable): a plain, non-accumulating
-        // SELECT @r = STRING_AGG(...) FROM t (does not read @r's own prior value, so it is NOT the
-        // separate AggregatingAssignment shape) still blocks inlining, matching the documented
-        // "StringAggFunc" reason.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.AggSource (grp INT NOT NULL, s VARCHAR(50) NOT NULL);
             GO
@@ -416,11 +373,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithSelectAccumulatorAssignment_RecordsInlineabilityBlocker()
     {
-        // Oracle-confirmed 2026-08-17 (LiveCatalogReaderScalarUdfTests.
-        // ReadAsync_FunctionWithSelectAccumulatorAssignment_EngineReportsNotInlineable): a
-        // `SELECT @v = expr(@v) FROM t` running-concatenation aggregate - the real idiom this
-        // codebase's own corpus uses in place of STRING_AGG/FOR XML PATH - defeats
-        // is_inlineable, a genuine blocker this closed list did not previously recognize.
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_Accum (@x INT)
             RETURNS VARCHAR(200)
@@ -441,9 +393,6 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithPlainSelectAssignmentFromTable_NoAccumulatorBlocker()
     {
-        // Same FROM-clause SELECT-assignment shape as fn_Accum, but the assigned expression does
-        // not read the target variable's own prior value - isolates the self-reference, not the
-        // FROM clause itself, as the blocker.
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_PlainSelect (@x INT)
             RETURNS INT

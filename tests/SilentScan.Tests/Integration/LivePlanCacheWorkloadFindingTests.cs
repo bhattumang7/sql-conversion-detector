@@ -5,14 +5,6 @@ using SilentScan.Verify.Deployment;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Roadmap Phase D: proves the actual product pivot, not just the ranking bonus
-/// <see cref="LivePlanCacheRankingTests"/> covers - an ad-hoc, parameterized query that was
-/// NEVER a stored procedure body at all (the dominant real-world source of implicit conversions:
-/// application code, an ORM, a hand-written data-access layer) must still surface as its own
-/// finding once the plan cache shows it converting, even though no module-body scan could ever
-/// have produced it.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LivePlanCacheWorkloadFindingTests : OracleTestFixture
 {
@@ -28,8 +20,6 @@ public sealed class LivePlanCacheWorkloadFindingTests : OracleTestFixture
     [Fact]
     public async Task RunAsync_AdHocParameterizedQueryNeverInAModule_SurfacesAsWorkloadFinding()
     {
-        // Self-authored, executed directly against our own disposable database - never a stored
-        // procedure, exactly the shape this scan has no module body to find on its own.
         const string adHocQueries = """
             DECLARE @p1 NVARCHAR(30) = N'ABC123';
             SELECT AccountId FROM dbo.Accounts WHERE Code = @p1;
@@ -41,9 +31,6 @@ public sealed class LivePlanCacheWorkloadFindingTests : OracleTestFixture
 
         var result = await LiveScanRunner.RunAsync(Options.BuildConnectionString(DatabaseName), includePlanCacheEvidence: true);
 
-        // No module body exists for this query at all, so the ordinary static pipeline must
-        // have found nothing on dbo.Accounts.Code - proving the workload finding below isn't
-        // just duplicating something the module-body pass already caught.
         Assert.DoesNotContain(result.Report.TypedFindings, f => f.Column.ColumnName == "Code");
 
         var workloadFinding = Assert.Single(result.WorkloadFindings, f => f.ColumnName == "Code");
@@ -62,16 +49,6 @@ public sealed class LivePlanCacheWorkloadFindingTests : OracleTestFixture
     }
 }
 
-/// <summary>
-/// Corrections-to-shipped-work item: a single cached plan carrying two independent implicit
-/// conversions - one genuinely range-seeking (Windows collation), one genuinely scan-forced
-/// (SQL_* collation) - must not let the range-seek marker "rescue" the scan-forced column's
-/// verdict just because both conversions happen to live in the same plan XML. Oracle-verified
-/// against the real Docker instance: a two-branch UNION ALL produces one Concatenation plan whose
-/// Windows-collation branch shows GetRangeThroughConvert scoped to its own RelOp's SeekPredicates,
-/// while the SQL_*-collation branch's RelOp has no SeekPredicates entry for its column at all.
-/// Before the fix, LivePlanCacheReader read the marker plan-wide and marked both RangeSeek.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LivePlanCacheReaderPerConversionAttributionOracleTests : OracleTestFixture
 {
@@ -89,11 +66,6 @@ public sealed class LivePlanCacheReaderPerConversionAttributionOracleTests : Ora
     [Fact]
     public async Task RunAsync_OnePlanWithBothRangeSeekAndScanForcedConversions_AttributesEachColumnIndependently()
     {
-        // A range seek is a cost-based choice - on a table with no rows the optimizer never
-        // considers one regardless of whether GetRangeThroughConvert could apply, so both
-        // branches would trivially scan and this test would pass for the wrong reason. Real
-        // row volume (oracle-verified: 2 rows was not enough, 2000 was) is what makes the
-        // optimizer actually pick "Index Seek" for the Windows-collation branch.
         const string seedRows = """
             INSERT INTO dbo.Probe (Id, WindowsColCol, SqlColCol)
             SELECT TOP (2000) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)),

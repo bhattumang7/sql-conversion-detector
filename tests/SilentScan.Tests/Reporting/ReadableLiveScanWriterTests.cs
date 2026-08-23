@@ -8,13 +8,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Reporting;
 
-/// <summary>
-/// Live mode's readable report. The findings are laid out exactly as a file scan's are; what
-/// this covers is the part only live mode has - the trust signals. A lineage parity mismatch
-/// means this tool inferred a view column's type wrongly against the server's own metadata
-/// (CLAUDE.md calls that a P0), so it cannot be a line buried under the findings it undermines,
-/// and the connection string must never reach a report that gets written to a file and shared.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ReadableLiveScanWriterTests
 {
@@ -54,9 +47,6 @@ public sealed class ReadableLiveScanWriterTests
         Assert.Contains("dbo.vw_Orders.OrderCode", rendered, StringComparison.Ordinal);
         Assert.Contains("a genuine inference bug in this tool", rendered, StringComparison.Ordinal);
 
-        // "Summary" alone is too generic an anchor - anchor on the rendered heading itself (the
-        // text immediately followed by its underline rule), which only the findings-summary
-        // section's own heading produces, rather than a bare word that could recur in prose.
         var summaryHeading = "Summary\n" + new string('-', "Summary".Length);
         Assert.True(
             rendered.IndexOf("Column types this tool got wrong", StringComparison.Ordinal) <
@@ -106,8 +96,6 @@ public sealed class ReadableLiveScanWriterTests
             "srv/shop",
             ReadableStyle.Text);
 
-        // A genuine inference bug in THIS tool, not a coverage caveat about the scanned
-        // database - never gated by verbosity, in either mode.
         Assert.Contains("Column types this tool got wrong (1)", rendered, StringComparison.Ordinal);
         Assert.Contains("dbo.vw_Orders.OrderCode", rendered, StringComparison.Ordinal);
     }

@@ -3,12 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second OSS/commercial sweep": "Output parameter not populated on
-/// every code path". A real reachability walk, not a heuristic - see
-/// <see cref="OutputParameterOracleTests"/> for the real-execution confirmation of the underlying
-/// caller-variable-left-unchanged mechanism.
-/// </summary>
 public sealed class OutputParameterScannerTests
 {
     private static IReadOnlyList<OutputParameterFinding> Scan(
@@ -108,8 +102,6 @@ public sealed class OutputParameterScannerTests
     [Fact]
     public void UnconditionalThrow_NeverFires_EvenThoughNeverAssigned()
     {
-        // THROW is a real, loud engine error - not the silent defect this rule targets - so it is
-        // deliberately never a finding site (see OutputParameterScanner's own doc comment).
         var findings = Scan("THROW 50000, 'boom', 1;");
 
         Assert.Empty(findings);
@@ -150,9 +142,6 @@ public sealed class OutputParameterScannerTests
             END CATCH
             """);
 
-        // CATCH is analyzed entering with the state as of the TRY/CATCH construct's own start -
-        // unassigned, since the SET follows a statement that could itself fail - and CATCH never
-        // assigns it either.
         Assert.Single(findings);
     }
 

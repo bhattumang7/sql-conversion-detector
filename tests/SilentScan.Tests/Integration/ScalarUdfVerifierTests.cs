@@ -7,19 +7,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Exercises <see cref="ScalarUdfVerifier"/> end-to-end against the real oracle
-/// (docs/detection-checklist.md Tier 1 #1). Both plan-XML markers this stream depends on -
-/// <c>&lt;UserDefinedFunction&gt;</c> for a call the engine does not fold away, and
-/// <c>ContainsInlineScalarTsqlUdfs="1"</c> for one it inlines away entirely (SQL 2019+ FROID) -
-/// were hand-verified directly against this same Docker instance before being hardcoded into
-/// <see cref="ScalarUdfVerifier"/>, including the surprising case the two-probe design exists to
-/// route around: a scalar UDF called INSIDE a view still gets folded away under
-/// <c>OPTION (USE HINT('DISABLE_TSQL_SCALAR_UDF_INLINING'))</c>, even though the identical call
-/// made directly at the top level does not (the hint doesn't propagate into a view's own
-/// algebrized definition) - which is exactly why <see cref="ScalarUdfProbeBuilder"/> always
-/// probes the underlying function directly, never through the view.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ScalarUdfVerifierTests : IAsyncLifetime
 {
@@ -112,10 +99,6 @@ public sealed class ScalarUdfVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_InlineableFunctionMislabeledNotInlineable_IsNotConfirmed()
     {
-        // Negative control: the engine actually inlines dbo.fn_Inlineable away (ContainsInline
-        // ScalarTsqlUdfs) - a finding wrongly claiming NotInlineable must not be confirmed, proving
-        // the natural-probe cross-check actually discriminates rather than rubber-stamping any
-        // Inlineability value.
         var finding = Finding("dbo.fn_Inlineable", ScalarUdfInlineability.NotInlineable);
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
@@ -126,9 +109,6 @@ public sealed class ScalarUdfVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_NotInlineableFunctionMislabeledInlineable_IsNotConfirmed()
     {
-        // Negative control in the other direction: dbo.fn_NotInlineable's GETDATE() call means
-        // the engine never inlines it away, even naturally - a finding wrongly claiming Inlineable
-        // must not be confirmed either.
         var finding = Finding("dbo.fn_NotInlineable", ScalarUdfInlineability.Inlineable);
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);

@@ -3,520 +3,59 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §B "Query anti-patterns
-/// still unbuilt" - the batch of items that survived precision scrutiny. One finding type, one
-/// <c>Kind</c> discriminator, matching this codebase's established shared-plumbing shape (<see
-/// cref="ControlFlowRiskFinding"/>/<see cref="IndexDesignFinding"/>).
-/// </summary>
 public enum QueryAntiPatternFindingKind
 {
     TableVariablePspSkip,
 
-    /// <summary>A table variable (<c>DECLARE @t TABLE(...)</c> or a table-valued parameter) used
-    /// as a query source in a <c>FROM</c>/<c>JOIN</c>, in a database connected at compatibility
-    /// level BELOW 150 (SQL Server 2019's deferred-compilation fix for table variables never
-    /// applies below that level, regardless of engine build). Oracle-confirmed directly (Docker
-    /// instance, SQL Server 2022 engine, three compatibility levels): below level 150 the
-    /// optimizer's cardinality estimate for a table variable is fixed at exactly 1 row no matter
-    /// how many rows were actually loaded into it - confirmed with a 10,000-row population against
-    /// a 50,000-row join partner, `EstimateRows="1"` in the real plan XML every time. Live-mode
-    /// only - a file-mode scan has no live database to ask for its compatibility level (<see
-    /// cref="Catalog.DatabaseCatalog.CompatibilityLevel"/>). <see cref="FindingConfidence.High"/>:
-    /// this is a mechanical fact about the connected engine's own optimizer, not a magnitude
-    /// estimate - it fires only when the level is provably below 150, never guessed when the level
-    /// is unknown.</summary>
-    TableVariableLowCompatEstimate,
+TableVariableLowCompatEstimate,
 
-    /// <summary>A table variable used as a query source (<c>FROM</c>/<c>JOIN</c>) inside the body
-    /// of a <c>WHILE</c> loop that ALSO writes to the same table variable (INSERT/UPDATE/DELETE)
-    /// somewhere in that same loop body - the variable grows/changes across iterations while being
-    /// read on every iteration. Oracle-confirmed directly (Docker instance, compatibility level
-    /// 160, deferred compilation active): the read statement's cardinality estimate is fixed at
-    /// whatever the table variable's real row count was on the FIRST iteration that executed it,
-    /// and never re-adjusts for later iterations even as the variable keeps growing - confirmed
-    /// with a 5-iteration loop where each iteration added ~2,000 rows: every iteration's plan
-    /// reported the SAME `EstimateRows="2000"` (the size after iteration 1), not the true,
-    /// growing row count. Deferred compilation genuinely fixes the "populate once, read once"
-    /// shape (see the sibling, now-closed checklist note on <see
-    /// cref="TableVariableLowCompatEstimate"/>'s own doc comment) - this is the real, narrower
-    /// case deferred compilation does NOT fix, and it is the one this project's original "does not
-    /// fix it inside a multi-statement loop" assumption actually meant. Engine-version sensitive:
-    /// this is specifically a SQL Server 2019+/compat-150+ nuance - below that level, <see
-    /// cref="TableVariableLowCompatEstimate"/> already reports the even-worse always-1-row story
-    /// for the same site, so this kind only fires when the connected compatibility level is
-    /// unknown (file-mode) or provably 150+, to avoid a redundant, less-precise second finding on
-    /// the same site a live scan already covers more sharply. <see cref="FindingConfidence.Medium"/>
-    /// - a real, oracle-confirmed mechanism, but whether the loop's later iterations grow the
-    /// table variable enough to matter is data-dependent and this pass cannot see it.</summary>
-    TableVariableStaleEstimateInLoop,
+TableVariableStaleEstimateInLoop,
 
-    /// <summary>A <c>WHILE</c> loop body containing an UPDATE or DELETE whose <c>WHERE</c> clause
-    /// is a single top-level equality comparison between a column and a local variable
-    /// (<c>@v</c>), where that same variable is itself assigned somewhere else in the SAME loop
-    /// body (a <c>SET</c>/<c>SELECT</c> assignment, or a cursor <c>FETCH ... INTO</c>) - the
-    /// textbook row-by-row-processing (RBAR) shape: a loop that advances one tracked value per
-    /// iteration and issues a single-row write keyed to exactly that value, where a single
-    /// set-based statement over the whole matching set would do the same work without the
-    /// per-iteration round-trip and (for a non-cursor loop) plan-compilation overhead. Only a
-    /// single, top-level <c>column = @v</c>/<c>@v = column</c> equality is matched (AND-flattened,
-    /// never through OR) - a composite or non-equality predicate is a materially different,
-    /// unanalyzed shape, not a silently-missed case. <see cref="FindingConfidence.Medium"/>: a
-    /// real, well-documented anti-pattern, but this pass cannot see how many rows the loop
-    /// actually processes - a loop bounded to a genuinely tiny, known-small set is a real,
-    /// sometimes-reasonable exception.</summary>
-    RbarSingleRowLoopDml,
+RbarSingleRowLoopDml,
 
-    /// <summary>A cursor declared without the <c>LOCAL</c> keyword - <c>DECLARE cur CURSOR FOR
-    /// ...</c> or <c>DECLARE cur CURSOR GLOBAL FOR ...</c> (an explicit <c>GLOBAL</c> is the same
-    /// risk, stated outright rather than left to the default) - defaults to <c>GLOBAL</c> per
-    /// engine documentation, meaning the cursor stays alive and visible for the whole
-    /// CONNECTION/batch scope, not just the declaring procedure - a resource that outlives its own
-    /// declaring scope unless explicitly deallocated, and a naming collision risk if a caller and
-    /// a called proc each declare a cursor with the same name (the inner declaration silently
-    /// shadows/conflicts with the outer one's visibility, well-documented engine behavior, not
-    /// this project's own inference). Distinct from the already-shipped <see
-    /// cref="ForcedSerialFindingKind.FastForwardCursor"/>, which is about a different mechanism
-    /// entirely (forced-serial query plans) and does not inspect <c>LOCAL</c>/<c>GLOBAL</c> at
-    /// all. <see cref="FindingConfidence.Low"/>: `sp_configure 'default cursor
-    /// option'` can flip the connection-level default to LOCAL, and many real procs rely on
-    /// GLOBAL scope deliberately (rare but real) - purely informational, matching this codebase's
-    /// own <see cref="ControlFlowRiskFindingKind.DirtyReadIsolationHint"/> precedent for a
-    /// sometimes-deliberate default.</summary>
-    GlobalCursorDeclaration,
+GlobalCursorDeclaration,
 
-    /// <summary>A local variable assigned <c>COUNT(*)</c> (or <c>COUNT(1)</c>/
-    /// <c>COUNT_BIG(*)</c>) from a table (<c>SELECT @v = COUNT(*) FROM T [WHERE ...]</c>),
-    /// immediately followed (ignoring intervening whitespace/comments - the very next statement in
-    /// the same block) by an <c>IF</c>/<c>WHERE</c> test comparing that SAME variable only to zero
-    /// (<c>@v &gt; 0</c>, <c>@v &gt;= 1</c>, <c>@v = 0</c>, <c>@v &lt;&gt; 0</c>), with no other use
-    /// of the variable anywhere in between. Oracle-confirmed directly (Docker instance, 200,000-row
-    /// seeded table, compat 160) that this SPECIFIC two-statement shape genuinely does a full
-    /// `Stream Aggregate` over an `Index Seek` estimated at all 200,000 matching rows - a real,
-    /// unavoidable full-set count. This is the deliberately narrow, oracle-verified-risky half of
-    /// the "COUNT(*) as an existence test" idea: the SAME oracle run also confirmed the optimizer
-    /// automatically rewrites the more commonly assumed shape - <c>IF (SELECT COUNT(*) FROM T
-    /// WHERE ...) &gt; 0</c> with the aggregate written INLINE as a scalar subquery directly in the
-    /// boolean comparison, never touching a variable - into a `Left Semi Join`/`Left Anti Semi
-    /// Join` plan that short-circuits exactly like <c>EXISTS</c> (`EstimateRows="1"`, not
-    /// 200,000), for every inline form tested (<c>&gt; 0</c>, <c>&gt;= 1</c>, and <c>WHERE (SELECT
-    /// COUNT(*) ...) = 0</c> in an outer query). This project does NOT flag the inline scalar-
-    /// subquery form at all - doing so would be a false claim this oracle run directly disproved,
-    /// exactly the "commonly assumed" trap CLAUDE.md warns against publishing unverified. Only the
-    /// variable-assignment form, which the SAME oracle run confirmed does NOT get the optimizer's
-    /// rewrite, is reported. <see cref="FindingConfidence.High"/>: a mechanically confirmed,
-    /// always-true-for-this-shape cost claim, not a maybe.</summary>
-    CountStarVariableExistenceCheck,
+CountStarVariableExistenceCheck,
 
-    /// <summary>A <c>HAVING</c> clause condition whose own referenced columns are ALL either
-    /// GROUP BY key columns or literals, and which does not reference any aggregate function
-    /// result - a condition that could be moved to <c>WHERE</c> verbatim with an identical result,
-    /// but as written filters rows AFTER the (potentially expensive) aggregation instead of
-    /// before it. Deliberately conservative: a condition touching an aggregate result, or a
-    /// column that is not a GROUP BY key and not a plain literal, is left unanalyzed rather than
-    /// guessed at - this pass never reasons about whether a non-key column happens to be
-    /// functionally dependent on the group. Only a single, top-level <c>QuerySpecification</c>'s
-    /// own <c>HAVING</c>/<c>GROUP BY</c> pair is examined (AND-flattened, never through OR, same
-    /// discipline as <see cref="NonUniqueUpdateSourceScanner"/>'s own join-condition flattening -
-    /// a condition reachable only through an OR branch does not unconditionally qualify). A
-    /// finding fires per AND-flattened branch, not once per whole HAVING clause: a mixed
-    /// <c>HAVING Col = 'x' AND COUNT(*) &gt; 1</c> still fires for the <c>Col = 'x'</c> branch
-    /// alone, since splitting a conjunctive HAVING at its own AND boundary and moving only the
-    /// non-aggregate half to WHERE is itself a correct, independent rewrite regardless of what
-    /// the sibling branch requires.
-    /// <see cref="FindingConfidence.High"/>: correctness-preserving by construction - moving a
-    /// GROUP-BY-key-only, non-aggregate condition to WHERE cannot change the result set, so this
-    /// is a structural fact, not an estimate.</summary>
-    NonAggregateHavingPredicate,
+NonAggregateHavingPredicate,
 
-    /// <summary>A <c>UNION</c> (not <c>UNION ALL</c>) combining branches that are each a plain,
-    /// single-base-table <c>SELECT</c> whose own <c>WHERE</c> clause is nothing but a single
-    /// top-level equality comparison of the SAME column (on the SAME base table, resolved through
-    /// the catalog) against a literal, where every branch's literal is provably distinct from
-    /// every other branch's - since a row cannot equal two different literal values on the same
-    /// column at once, the branches are provably mutually exclusive, so <c>UNION</c>'s own
-    /// duplicate-elimination pass over the combined set can never actually remove a row, and
-    /// <c>UNION ALL</c> would produce an identical result while skipping that pass. Deliberately
-    /// the ONLY disjointness shape this project ships - CLAUDE.md's own explicit warning is not to
-    /// ship a bare "you used UNION" shape match, and this is the one case genuinely provable
-    /// without runtime information: a branch with a join, an OR, a non-equality comparison, or a
-    /// non-literal comparand is left unanalyzed rather than guessed at. <see
-    /// cref="FindingConfidence.Medium"/>: the claim itself is exact, but whether the extra
-    /// duplicate-elimination pass actually costs anything measurable depends on the combined row
-    /// count, which this pass cannot see.</summary>
-    UnionOfProvablyDisjointBranches,
+UnionOfProvablyDisjointBranches,
 
-    /// <summary>A <c>SELECT DISTINCT</c> query with a <c>JOIN</c> whose second (joined-to)
-    /// table's own join-equated columns are NOT backed by a unique, non-filtered, non-disabled
-    /// catalog index - reuses <see cref="NonUniqueUpdateSourceScanner"/>'s own composite-
-    /// uniqueness catalog check verbatim (a real unique index whose FULL key column set is a
-    /// subset of the columns the <c>ON</c> clause equates to the joined table's own alias). A join
-    /// that can genuinely multiply rows (no such uniqueness guarantee) combined with
-    /// <c>DISTINCT</c> in the same query is a well-documented smell: <c>DISTINCT</c> may be
-    /// silently papering over the join's own row duplication rather than expressing a deliberate
-    /// business-logic requirement - if so, the join itself is doing more work than the query
-    /// needs, and the fan-out is invisible to anyone reading the query without checking the
-    /// catalog by hand. Only a join two hops from a <c>DISTINCT</c> top-level
-    /// <c>QuerySpecification</c>'s own FROM tree is examined, and only equality join predicates
-    /// are matched (AND-flattened) - the same v1 scope discipline <see
-    /// cref="NonUniqueUpdateSourceScanner"/> already established for its own analogous claim.
-    /// <see cref="FindingConfidence.Medium"/>: a real, catalog-provable fan-out risk, but
-    /// <c>DISTINCT</c> can also be a genuine, deliberate requirement independent of the join
-    /// (e.g. a report intentionally collapsing legitimate duplicates from the join's OTHER,
-    /// unique-backed side) - this pass cannot tell those two intents apart from the query text
-    /// alone.</summary>
-    DistinctMaskingJoinFanout,
+DistinctMaskingJoinFanout,
 
-    /// <summary>A bare table reference with no schema qualifier (<c>FROM Orders</c>, not
-    /// <c>FROM dbo.Orders</c>) at a real query site - a <c>FROM</c>/<c>JOIN</c> table source, or an
-    /// <c>INSERT</c>/<c>UPDATE</c>/<c>DELETE</c>/<c>MERGE</c> target/source - that genuinely
-    /// resolves to a real base table via the catalog (default-schema resolution, the same
-    /// <see cref="Common.SchemaObjectNameHelper.Qualify"/> every other catalog-aware scanner in
-    /// this codebase already uses). Distinct from the already-shipped <see
-    /// cref="NamingFindingKind.UnqualifiedCreate"/>, which is about the DEFINING statement
-    /// (<c>CREATE PROCEDURE Foo</c>) picking an owning schema, not a query site referencing an
-    /// existing object - the cost here is different too: SQL Server's own plan-cache key for an
-    /// unqualified reference includes the resolving principal's default schema (a schema-resolution
-    /// "bind context"), so two callers with different default schemas referencing the identical
-    /// unqualified name each get their OWN cache entry even when both actually resolve to the same
-    /// <c>dbo</c> table, and compiling either one takes an extra schema-stability lock the qualified
-    /// form does not need (Microsoft's own documented "deferred name resolution" cost). A CTE name,
-    /// temp table (<c>#t</c>), table variable (<c>@t</c>), or derived-table alias is never a schema-
-    /// object reference in the first place and is structurally excluded by construction (this kind
-    /// only ever inspects a bare table reference, and only when its base
-    /// identifier is not itself a CTE name declared anywhere in the same batch - checked
-    /// conservatively, so a same-named real table shadowed by a CTE never false-fires). <see
-    /// cref="FindingConfidence.Medium"/>: the "resolves to a real table" half is a mechanical catalog
-    /// fact, but this pass cannot see the connecting principal's own actual default schema, so it
-    /// cannot prove the reference would resolve differently for a DIFFERENT caller - only that it
-    /// COULD, which is the real risk this finding names.</summary>
-    UnqualifiedTableReference,
+UnqualifiedTableReference,
 
-    /// <summary>A <c>MERGE</c> statement whose target table reference carries no <c>HOLDLOCK</c>/
-    /// <c>SERIALIZABLE</c> table hint - the documented Microsoft/community guidance for avoiding the
-    /// well-known MERGE race condition: two sessions running the identical MERGE concurrently against
-    /// the same target can both evaluate their own <c>WHEN NOT MATCHED</c> branch as true (neither
-    /// sees the other's not-yet-committed insert under the engine's default READ COMMITTED
-    /// isolation), so both attempt the INSERT and the second one fails with a primary-key/unique-
-    /// constraint violation instead of correctly taking the UPDATE branch. <c>WITH (HOLDLOCK)</c> on
-    /// the target (or an ambient <c>SERIALIZABLE</c> isolation level) closes the window by holding a
-    /// range lock across the whole statement. Purely a table-hint/isolation-level AST check - this
-    /// pass cannot see whether the caller sets session-level <c>SERIALIZABLE</c> isolation from a
-    /// different statement it can't trace (a stored procedure called under a caller-controlled
-    /// isolation level, for instance), so <see cref="FindingConfidence.Medium"/>, matching this
-    /// codebase's own <see cref="ControlFlowRiskFindingKind.DirtyReadIsolationHint"/> precedent for a
-    /// real risk that is sometimes already mitigated by session state this pass cannot observe.</summary>
-    MergeMissingHoldlock,
+MergeMissingHoldlock,
 
-    /// <summary>A <c>MERGE ... USING</c> source that is a real base table (resolved via the catalog,
-    /// matching the same base-table-only, direct-reference v1 scope <see
-    /// cref="NonUniqueUpdateSourceScanner"/> already established) not provably unique on its own
-    /// <c>ON</c>-clause join columns - reuses that scanner's exact composite-uniqueness catalog
-    /// check verbatim, since <c>MERGE</c>'s <c>USING</c> clause asks the structurally identical
-    /// question ("does this source have at most one row per target row"). Unlike an <c>UPDATE ...
-    /// FROM</c> without source uniqueness, the engine does NOT silently pick an arbitrary winning
-    /// row here - <c>MERGE</c> raises a genuine, documented error ("The MERGE statement attempted to
-    /// UPDATE or DELETE the same row more than once...") the moment a target row matches more than
-    /// one source row, confirmed directly against the standing Docker oracle (see <see
-    /// cref="NonUniqueUpdateSourceFinding"/>'s own doc comment, which already made and verified this
-    /// exact claim). So this is a "fails in prod on real data" finding, not a silently-wrong-answer
-    /// one - a real, catalog-provable risk that a MERGE statement working fine against today's data
-    /// will start hard-erroring the moment a future duplicate join-key value appears on the source
-    /// side, zero code change required on the statement itself. <see cref="FindingConfidence.High"/>:
-    /// the missing-uniqueness fact is mechanical and the failure mode is engine-guaranteed, not a
-    /// maybe.</summary>
-    MergeNonUniqueUsingSource,
+MergeNonUniqueUsingSource,
 
-    /// <summary>A <c>MERGE</c>'s <c>WHEN MATCHED THEN DELETE</c> or <c>WHEN NOT MATCHED BY SOURCE
-    /// THEN DELETE</c> action clause carries no additional <c>AND</c>-qualifying condition beyond
-    /// its own match kind - a real, well-documented MERGE gotcha: <c>WHEN NOT MATCHED BY SOURCE THEN
-    /// DELETE</c> in particular deletes every target row that is absent from the <c>USING</c>
-    /// source's result set, so a <c>USING</c> query that is accidentally too narrow (a missing join,
-    /// an over-restrictive filter, a source query that silently returns fewer rows than intended)
-    /// turns an intended incremental sync into a mass, unrecoverable delete of "everything I didn't
-    /// happen to see this time" - the single most-cited real-world MERGE incident shape in the field
-    /// literature. An unconditional <c>WHEN MATCHED THEN DELETE</c> carries the analogous risk one
-    /// level up: it deletes every row the join matched at all, with no independent narrowing
-    /// condition of its own. A clause that DOES carry its own <c>AND</c> condition (<c>WHEN MATCHED
-    /// AND s.IsDeleted = 1 THEN DELETE</c>) is a materially different, self-documenting shape and is
-    /// never flagged. <see cref="FindingConfidence.Medium"/>: a real, well-documented risk pattern,
-    /// but an unconditional delete branch is also sometimes exactly the intended, correct semantics
-    /// of a full sync/replace operation - this pass cannot see intent, only shape.</summary>
-    MergeUnconditionalDelete,
+MergeUnconditionalDelete,
 
-    /// <summary>A recursive CTE (a CTE whose own defining query references its own name - reuses
-    /// <see cref="Lineage.CteResolver.ReferencesSelf"/> verbatim, the exact same recursion-detection
-    /// primitive <see cref="Lineage.CteResolver"/> itself already relies on to resolve a recursive
-    /// anchor) whose containing statement carries no <c>OPTION (MAXRECURSION n)</c> clause anywhere.
-    /// T-SQL's own engine-enforced default recursion limit is 100 levels - confirmed directly
-    /// against the standing Docker oracle (SQL Server 2022): a recursive CTE with no MAXRECURSION
-    /// option and a real recursion depth of 1,000 fails outright with <c>Msg 530, "The statement
-    /// terminated. The maximum recursion 100 has been exhausted before statement completion,"</c>
-    /// while the identical query with <c>OPTION (MAXRECURSION 0)</c> (unlimited) completes and
-    /// returns all 1,000 rows. So this is a "fails in prod on real depth" finding, not a wrong-answer
-    /// risk - a recursive CTE that works fine against today's shallow data (an org chart, a bill-of-
-    /// materials tree, a threaded-comment walk) hard-errors the moment a real hierarchy exceeds 100
-    /// levels, with no code change required on the statement itself. Scoped to <c>SELECT</c>
-    /// statements only in v1, matching <see cref="MultiReferencedCteFinding"/>'s own established
-    /// scope limit for the identical reason (an <c>UPDATE</c>/<c>DELETE</c>/<c>MERGE</c> statement's
-    /// own WITH-clause recursive CTE is a real but comparatively rare shape, left unanalyzed rather
-    /// than guessed at). <see cref="FindingConfidence.High"/>: the 100-level default and its Msg 530
-    /// failure mode are mechanical engine facts, oracle-confirmed, not a magnitude estimate -
-    /// whether a GIVEN recursive CTE will ever actually reach depth 100 is the one thing this pass
-    /// cannot see, which is exactly why this is reported as a real, always-true structural risk
-    /// rather than a certainty.</summary>
-    RecursiveCteMissingMaxRecursion,
+RecursiveCteMissingMaxRecursion,
 
-    /// <summary>An <c>UPDATE</c> or <c>DELETE</c> statement with no <c>WHERE</c> clause AND no
-    /// <c>TOP</c> row-limiting clause at all - a whole-table write with zero row-limiting mechanism
-    /// of any kind. A deliberate full-table maintenance statement (a migration/deployment script
-    /// resetting a staging table, a scheduled full-refresh job) is a real, legitimate reason this
-    /// shape appears - this pass has no source-context classification mechanism (migration script
-    /// vs. hot-path module) to tell the two apart, so this is reported as a real but explicitly
-    /// advisory finding rather than a hard warning, its own detail text stating outright that a
-    /// deliberate full-table operation is a legitimate reason it fired. <see
-    /// cref="FindingConfidence.Medium"/>: the "no row-limiting clause at all" fact is exact and
-    /// mechanical, but whether it is a genuine mistake (a missing WHERE that was meant to narrow the
-    /// statement) or a deliberate whole-table operation is intent this pass cannot see from the
-    /// query text alone - the same tier this codebase already uses for other "structurally risky,
-    /// sometimes deliberate" shapes (<see cref="DistinctMaskingJoinFanout"/>).</summary>
-    UnboundedTableWrite,
+UnboundedTableWrite,
 
-    /// <summary>A table reference that names a remote server explicitly (a 4-part <c>Server.
-    /// Database.Schema.Object</c> name - a linked-server reference by construction, regardless of
-    /// live/file mode), or a 3-part <c>Database.Schema.Object</c> name whose database part is
-    /// live-confirmed to differ from the CURRENTLY connected database (<see
-    /// cref="Catalog.DatabaseCatalog.CurrentDatabaseName"/> - live-mode only; a file-mode scan has
-    /// no "current database" to compare against and this kind never guesses, matching <see
-    /// cref="Catalog.DatabaseCatalog.Find(string)"/>'s own "only an exact, known match ever gets
-    /// stripped" discipline for the mirror-image case). A 3-part reference into <c>master</c>/
-    /// <c>tempdb</c>/<c>msdb</c>/<c>model</c> is deliberately excluded - real-corpus-measured
-    /// against the local test database, this shape is overwhelmingly a metadata/catalog-view read
-    /// (<c>tempdb.sys.objects</c>, <c>master.dbo.syslockinfo</c>), not a real cross-database
-    /// business predicate with a meaningful remote-statistics story, so flagging it would dilute
-    /// the real signal without being technically false - declined on purpose, not missed. A query
-    /// touching a linked server or a
-    /// genuinely different database is a serial-execution zone (the engine cannot parallelize a
-    /// remote rowset), and the optimizer usually has no real statistics for the remote object at
-    /// all - any cardinality estimate involving one is close to a guess, a real, well-documented
-    /// cost class distinct from anything schema-local. Previously scoped out of this project as
-    /// "rare in corpus" - re-measured directly against the local test database before shipping (see
-    /// docs/detection-checklist.md for the real count). <see cref="FindingConfidence.High"/> for the
-    /// 4-part/linked-server case (naming a remote server is an unconditional syntactic fact); <see
-    /// cref="FindingConfidence.Medium"/> for the live-confirmed cross-database case (real, but this
-    /// pass cannot see whether the OTHER database happens to sit on the same physical instance,
-    /// which is cheaper than a genuine linked server even though it is still a separate database
-    /// context for stats/plan-cache purposes).</summary>
-    LinkedServerOrCrossDatabaseReference,
+LinkedServerOrCrossDatabaseReference,
 
-    /// <summary>A multi-row <c>INSERT ... VALUES (...), (...), ...</c> (a syntactically provable
-    /// row constructor list with more than one row - ScriptDom's own <c>ValuesInsertSource.RowValues</c>
-    /// exposes this directly, no row-count inference needed) targets a table carrying at least one
-    /// UNIQUE index built <c>WITH (IGNORE_DUP_KEY = ON)</c> (<see cref="Catalog.CatalogIndex.IgnoreDupKey"/>,
-    /// <c>sys.indexes.ignore_dup_key</c>). Oracle-confirmed directly (Docker instance, 2026-08-21):
-    /// when one of the inserted rows collides with an existing (or an earlier row in the SAME
-    /// batch's) unique key value, the engine does not raise an error - it silently skips that one
-    /// row ("Duplicate key was ignored", a message only, never an exception) and commits every
-    /// other row in the batch, so <c>@@ROWCOUNT</c> after the statement is smaller than the number
-    /// of rows the statement text names, with no signal at all to a caller that only checks for an
-    /// error. Deliberately narrower than "any write against this table": the SAME oracle run
-    /// confirmed an <c>UPDATE</c> that would create the identical duplicate key still raises a
-    /// genuine, uncaught-by-default error ("Cannot insert duplicate key row...") regardless of this
-    /// option, so this kind only ever inspects <c>INSERT</c>, never <c>UPDATE</c> - flagging the
-    /// UPDATE case would be a false claim this same oracle run directly disproved. A single-row
-    /// <c>INSERT ... VALUES (...)</c> is left unanalyzed rather than guessed at: it cannot collide
-    /// with itself, and whether it collides with an EXISTING row is a data question this pass
-    /// cannot see - the multi-row shape is the one place "at least one row in THIS statement can
-    /// collide with another row in THIS SAME statement" becomes a provable structural fact
-    /// independent of what already sits in the table. <c>INSERT ... SELECT</c> is also left
-    /// unanalyzed - this pass cannot prove the SELECT returns more than one row, and guessing
-    /// would violate the same precision discipline. Live-only (<see cref="Catalog.CatalogIndex.IgnoreDupKey"/>
-    /// is never set by a file-mode scan). <see cref="FindingConfidence.High"/>: both preconditions
-    /// (a syntactically multi-row VALUES list; a real unique index on the target table carrying
-    /// this exact catalog flag) are mechanical, provable facts, and the silent-skip behavior itself
-    /// is oracle-confirmed, not inferred from documentation alone.</summary>
-    MultiRowInsertIgnoreDupKeyDrop,
+MultiRowInsertIgnoreDupKeyDrop,
 
-    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement whose source and
-    /// target tables both resolve in the catalog (<see cref="Catalog.CatalogTableKind.Table"/> on
-    /// both sides) but have a structural column mismatch that SQL Server rejects unconditionally,
-    /// before any data-dependent check (partition emptiness, row ranges) ever runs. Oracle-confirmed
-    /// directly (Docker instance, 2026-08-21) against four distinct shapes, each raising a real,
-    /// specific engine error every time, independent of table content: a different column count
-    /// (error 4943), a column whose name differs from its counterpart at the same ordinal (error
-    /// 4942), a column that is computed in one table but not the other (error 4965), and a column
-    /// whose declared type/length/precision/scale differs between the two tables (error 4944). This
-    /// finding reports whichever ONE of these four is the first true mismatch found scanning
-    /// column-by-column in declaration order (count first, since a count mismatch makes any further
-    /// positional comparison meaningless) - not an exhaustive list of every mismatch in one
-    /// statement, matching how the engine itself raises on the first violation it finds. A
-    /// column-name-only difference (case) is not flagged as a mismatch here since T-SQL identifier
-    /// comparison is case-insensitive and the engine's own 4942 check is too. Type comparison
-    /// deliberately ignores collation (<see cref="TypeInference.SqlType.Collation"/>) - collation
-    /// drift between the two tables is a real, separate engine check (error 4945) this finding does
-    /// not claim to cover, and this codebase's own collation resolution is not reliable enough
-    /// end-to-end to assert that specific claim without risking a false positive. A column whose
-    /// type could not be resolved at all (<see cref="Catalog.CatalogColumn.Type"/> null on either
-    /// side) is skipped for the type comparison rather than guessed at, though name/computed/
-    /// nullability comparisons for that same column still apply since they don't depend on the
-    /// type being known. This is a purely schema-shape check: it says nothing about partition
-    /// alignment (already covered separately by <see cref="IndexDesignFindingKind.NonAlignedPartitionedIndex"/>)
-    /// or any of the many other independent SWITCH prerequisites (indexes, constraints, filegroup
-    /// placement, indexed views, temporal/CDC/replication settings) - those are out of scope for
-    /// this finding. <see cref="FindingConfidence.High"/>: both tables' column shapes are ordinary,
-    /// always-available schema facts (file mode and live mode alike), and every reported mismatch
-    /// shape was reproduced against the real engine, not inferred from documentation alone.</summary>
-    AlterTableSwitchColumnMismatch,
+AlterTableSwitchColumnMismatch,
 
-    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement whose source and
-    /// target tables both resolve in the catalog (<see cref="Catalog.CatalogTableKind.Table"/> on
-    /// both sides) but disagree on clustered-index presence, or where the target carries a
-    /// non-clustered index with no identical counterpart on the source. Oracle-confirmed directly
-    /// (Docker instance, 2026-08-21) against three distinct shapes: a clustered index present on
-    /// one table but not the other raises error 4913/4914 regardless of any other index; a target
-    /// index whose key columns, key-column sort direction, or INCLUDE column set differs from
-    /// every source index (uniqueness must also match) raises error 4947 - all three facets were
-    /// verified independently to matter, not assumed from documentation. Confirmed the reverse
-    /// direction does NOT matter: a source-only index with no target counterpart raises nothing at
-    /// all, so this finding only ever walks the target table's own index list looking for a
-    /// missing source match, never the other way around. Clustered-index-presence comparison is
-    /// live-only (<see cref="Catalog.CatalogIndex.IsClustered"/> defaults false in file mode, so
-    /// this half never fires on a file-mode scan - same discipline as every other
-    /// <see cref="Catalog.CatalogIndex.IsClustered"/> consumer in this codebase). The matching-
-    /// index-set comparison degrades gracefully rather than misfiring in file mode: INCLUDE columns
-    /// (<see cref="Catalog.CatalogIndex.IncludedColumns"/>) and key sort direction
-    /// (<see cref="Catalog.CatalogIndex.KeyColumnIsDescending"/>) are both live-only fields that
-    /// read as empty on every file-mode index, so an empty-vs-empty comparison trivially matches -
-    /// weaker in file mode, never a false positive. A filtered, columnstore, disabled, or
-    /// hypothetical index is excluded from comparison on both sides - none of those participate in
-    /// the engine's own "identical index" check the same way an ordinary rowstore index does, and
-    /// this codebase's own precision discipline declines rather than guesses at their equivalence
-    /// rules. <see cref="FindingConfidence.High"/>: both tables' index shapes are ordinary schema
-    /// facts (clustered-presence live-only, the rest available in both modes), and every reported
-    /// mismatch shape was reproduced against the real engine.</summary>
-    AlterTableSwitchIndexMismatch,
+AlterTableSwitchIndexMismatch,
 
-    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement whose source and
-    /// target tables both resolve in the catalog (<see cref="Catalog.CatalogTableKind.Table"/> on
-    /// both sides) but disagree on CHECK or FOREIGN KEY constraints. Oracle-confirmed directly
-    /// (Docker instance, 2026-08-21) against four distinct shapes: a target CHECK constraint with
-    /// no source counterpart (error 4970/4971), a matching CHECK constraint pair (matched by
-    /// <see cref="Catalog.CatalogCheckConstraint.DefinitionText"/> - confirmed the engine matches
-    /// by definition text, NOT by constraint name, so two identically-defined constraints with
-    /// different names still count as corresponding) that disagrees on NOCHECK/CHECK state (error
-    /// 4960), a target foreign key with no source counterpart (matched by referenced table plus
-    /// referencing/referenced column pairs, again confirmed name-independent - error 4968), and a
-    /// matching foreign key pair that disagrees on enabled/disabled state (error 4969) or
-    /// NOCHECK/CHECK trust state (error 4974). Confirmed the same asymmetric direction as
-    /// <see cref="AlterTableSwitchIndexMismatch"/>: a source-only extra CHECK constraint with no
-    /// target counterpart raises nothing at all - only a TARGET constraint missing from the source
-    /// matters. Deliberately does not attempt RULE-constraint detection (error 4964) - this
-    /// codebase's catalog does not track legacy <c>CREATE RULE</c>/<c>sp_bindrule</c> bindings at
-    /// all, and the feature is effectively extinct in modern T-SQL. Live-only end to end
-    /// (<see cref="Catalog.DatabaseCatalog.CheckConstraints"/>/<see cref="Catalog.DatabaseCatalog.ForeignKeys"/>
-    /// are read live from <c>sys.check_constraints</c>/<c>sys.foreign_keys</c> only, engine-
-    /// authoritative by construction the same way <see cref="Catalog.ForeignKeyRelationship"/>'s
-    /// own doc comment explains - never populated by a file-mode scan, matching this codebase's
-    /// existing DDL-fidelity discipline). <see cref="FindingConfidence.High"/>: every reported
-    /// mismatch shape was reproduced against the real engine, not inferred from documentation
-    /// alone.</summary>
-    AlterTableSwitchConstraintMismatch,
+AlterTableSwitchConstraintMismatch,
 
-    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement's target table
-    /// carries an XML or spatial index (<see cref="Catalog.CatalogIndex.IsXmlIndex"/>/
-    /// <see cref="Catalog.CatalogIndex.IsSpatialIndex"/>). Oracle-confirmed directly (Docker
-    /// instance, 2026-08-21): unlike every other index/constraint check in this family, this one
-    /// is NOT a "must match between source and target" claim - it is unconditional and one-
-    /// directional: an XML or spatial index on the TARGET table always fails the statement (error
-    /// 4983), while the identical index on the SOURCE table is explicitly fine (confirmed by
-    /// reproducing both directions independently). Live-only, same discipline as
-    /// <see cref="Catalog.CatalogIndex.IsClustered"/>. <see cref="FindingConfidence.High"/>: the
-    /// index-type facts are ordinary live catalog data, and the restriction was reproduced against
-    /// the real engine, not inferred from documentation alone.</summary>
-    AlterTableSwitchTargetOnlyIndexRestriction,
+AlterTableSwitchTargetOnlyIndexRestriction,
 
-    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement's source and
-    /// target tables reside in different filegroups, or either resides in a filegroup currently
-    /// marked read-only. Oracle-confirmed directly (Docker instance, 2026-08-21): a plain
-    /// filegroup-name mismatch between the two (non-partitioned) tables raises error 4940
-    /// unconditionally; a table whose filegroup was marked <c>READ_ONLY</c> after the table was
-    /// created raises error 4979 regardless of whether the other table's filegroup matches (a
-    /// table cannot be <c>CREATE</c>d directly into an already-read-only filegroup, so this only
-    /// ever matters for a table that predates the filegroup being marked read-only - reproduced by
-    /// creating both tables while the filegroup was still read-write, then marking it read-only
-    /// afterward). Only ever populated for a non-partitioned table
-    /// (<see cref="Catalog.CatalogTable.FilegroupName"/>'s own doc comment) - a partitioned table
-    /// declines rather than guesses at a per-partition filegroup claim (errors 4938/4939/4959,
-    /// deliberately out of scope - a materially more granular claim this finding does not
-    /// attempt). Live-only end to end. <see cref="FindingConfidence.High"/>: both shapes were
-    /// reproduced against the real engine.</summary>
-    AlterTableSwitchFilegroupMismatch,
+AlterTableSwitchFilegroupMismatch,
 
-    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement's source and
-    /// target tables disagree on system-versioning: one has a <c>PERIOD FOR SYSTEM_TIME</c>
-    /// (found via presence in <see cref="Catalog.DatabaseCatalog.TemporalTablePairs"/> as a
-    /// current, non-history table) while the other does not. Oracle-confirmed directly (Docker
-    /// instance, 2026-08-21) that this raises error 13577 unconditionally, independent of any
-    /// other structural fact about either table. Deliberately narrower than the full temporal/CDC/
-    /// replication SWITCH restriction family (errors 13546/13547/13578/13736, 21867/21868,
-    /// 22750-22857) - those need catalog facts this codebase does not yet track (CDC enablement
-    /// plus the specific <c>@allow_partition_switch</c> setting, which a quick oracle probe showed
-    /// does NOT block a plain non-partitioned SWITCH with default settings, meaning the real
-    /// condition needs partition-number awareness this finding family does not yet model;
-    /// replication topology, not configurable on the standing Docker instance) - left unbuilt
-    /// rather than guessed at. Live-only, reusing the exact same catalog population
-    /// <see cref="Catalog.DatabaseCatalog.AddTemporalTablePair"/> already provides for other
-    /// consumers - no new plumbing needed for this one fact.
-    /// <see cref="FindingConfidence.High"/>: reproduced directly against the real engine.</summary>
-    AlterTableSwitchTemporalMismatch,
+AlterTableSwitchTemporalMismatch,
 
-    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement's source or
-    /// target table carries a legacy <c>CREATE RULE</c>/<c>sp_bindrule</c> column binding
-    /// (<see cref="Catalog.CatalogTable.HasRuleConstraint"/>, distinct from a modern CHECK
-    /// constraint). Oracle-confirmed directly (Docker instance, 2026-08-21) to raise error 4964
-    /// unconditionally, symmetric on both sides - reproduced with the RULE bound to either the
-    /// source or the target table independently. Live-only (<c>sys.columns.rule_object_id</c>
-    /// is never replayed from parsed DDL in file mode - RULE/<c>sp_bindrule</c> is a legacy,
-    /// effectively extinct T-SQL feature, the same "engine-authoritative, never DDL-inferred"
-    /// reasoning <see cref="Catalog.CatalogCheckConstraint"/>'s own doc comment gives for a modern
-    /// check constraint). <see cref="FindingConfidence.High"/>: reproduced directly against the
-    /// real engine.</summary>
-    AlterTableSwitchRuleConstraint,
+AlterTableSwitchRuleConstraint,
 
-    /// <summary>An <c>ALTER TABLE ... SWITCH PARTITION ...</c> statement (a real partition-
-    /// number-targeted SWITCH, not a whole-table one - <see cref="Microsoft.SqlServer.TransactSql.ScriptDom.AlterTableSwitchStatement.SourcePartitionNumber"/>/
-    /// <c>TargetPartitionNumber</c> not both null) where the source or target table is enabled
-    /// for Change Data Capture with a capture instance whose own <c>@allow_partition_switch</c>
-    /// was explicitly set to 0 at <c>sp_cdc_enable_table</c> time
-    /// (<see cref="Catalog.CatalogTable.CdcPartitionSwitchDisallowed"/>). Oracle-confirmed
-    /// directly (Docker instance, 2026-08-21): the DEFAULT (<c>@allow_partition_switch = 1</c>,
-    /// or CDC not enabled at all) does NOT block the statement - only the explicit opt-out does,
-    /// raising error 22842 (target) or 22843 (source). Also confirmed the engine silently forces
-    /// this flag back to 1 for a table that isn't partitioned, which is why this finding declines
-    /// (rather than guesses) for any SWITCH with no partition number at all - it cannot be the
-    /// hazard this specific error models. Live-only end to end
-    /// (<see cref="Catalog.DatabaseCatalog"/> never queries the <c>cdc</c> schema in file mode,
-    /// and the schema itself only exists once <c>sp_cdc_enable_db</c> has run).
-    /// <see cref="FindingConfidence.High"/>: reproduced directly against the real engine, both
-    /// the firing condition and its negative (default settings don't block).</summary>
-    AlterTableSwitchCdcPartitionSwitch,
+AlterTableSwitchCdcPartitionSwitch,
 
-    /// <summary>An <c>ALTER TABLE ... SWITCH PARTITION ...</c> statement where the source and
-    /// target sides resolve to different filegroups at the SPECIFIC partition number named (or,
-    /// for a non-partitioned side, the whole table's own filegroup) - a materially more granular
-    /// claim than <see cref="AlterTableSwitchFilegroupMismatch"/>'s whole-table check (error
-    /// 4940), which only ever applies when NEITHER side names a partition number.
-    /// Oracle-confirmed directly (Docker instance, 2026-08-21) against two shapes: two
-    /// partitioned tables using different partition schemes whose same-numbered partition maps to
-    /// a different filegroup on each side (error 4938), and a non-partitioned source/target
-    /// resolving to a different filegroup than the other side's specific partition number (error
-    /// 4939). A partition number that isn't a literal integer (a variable or expression) declines
-    /// rather than guesses, matching this codebase's usual literal-only resolution discipline.
-    /// Live-only end to end (<see cref="Catalog.CatalogTable.PartitionSchemeName"/>/
-    /// <see cref="Catalog.DatabaseCatalog.FindPartitionFilegroup"/>'s own doc comments).
-    /// <see cref="FindingConfidence.High"/>: both shapes were reproduced against the real
-    /// engine.</summary>
-    AlterTableSwitchPartitionFilegroupMismatch,
+AlterTableSwitchPartitionFilegroupMismatch,
 
     AlterTableSwitchFullTextIndexRestriction,
 }

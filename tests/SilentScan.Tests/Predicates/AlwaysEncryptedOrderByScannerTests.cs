@@ -4,11 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// See <see cref="AlwaysEncryptedOrderByFinding"/> for the full scope/precision story, including
-/// this scanner's own known v1 scope limit (top-level SELECT ORDER BY only, no window-function
-/// OVER/view/CTE resolution).
-/// </summary>
 public sealed class AlwaysEncryptedOrderByScannerTests
 {
     private const string BaseDdl = """

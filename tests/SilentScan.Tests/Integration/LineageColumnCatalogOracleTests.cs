@@ -8,13 +8,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// The Phase 2 exit criterion (plan.md): "lineage inference is oracle-clean on all fixtures,
-/// including a 5-deep view chain and a mixed-collation UNION." Deploys the fixture (DDL
-/// only, tables stay empty) to the Docker SQL Server oracle and diffs our static
-/// LineageResolver output against sys.columns - the free ground-truth oracle CLAUDE.md's
-/// Verify workflow calls for ("ANY mismatch is a P0 bug").
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LineageColumnCatalogOracleTests : IAsyncLifetime
 {
@@ -77,15 +70,12 @@ public sealed class LineageColumnCatalogOracleTests : IAsyncLifetime
         var orderCodeUnion = Assert.IsType<ColumnProvenance.Union>(view.FindColumn("OrderCode")!.Provenance);
         var orderIdUnion = Assert.IsType<ColumnProvenance.Union>(view.FindColumn("OrderId")!.Provenance);
 
-        // CLAUDE.md: "record ALL branch types" - both must be present, distinct, and each a
-        // real base-column reference (not collapsed into one merged guess).
         Assert.Equal(2, orderCodeUnion.Branches.Count);
         var codeBranch1 = Assert.IsType<ColumnProvenance.BaseColumn>(orderCodeUnion.Branches[0]);
         var codeBranch2 = Assert.IsType<ColumnProvenance.BaseColumn>(orderCodeUnion.Branches[1]);
         Assert.Equal(20, codeBranch1.Type!.Length);
         Assert.Equal(30, codeBranch2.Type!.Length);
 
-        // The server itself resolves the UNION to the wider of the two recorded branch types.
         Assert.Equal("varchar", oracleOrderCode.TypeName);
         Assert.Equal(Math.Max(codeBranch1.Type.Length!.Value, codeBranch2.Type.Length!.Value), (int)oracleOrderCode.MaxLength);
 
@@ -94,7 +84,6 @@ public sealed class LineageColumnCatalogOracleTests : IAsyncLifetime
         Assert.Equal(SqlTypeCategory.Int, idBranch1.Type!.Category);
         Assert.Equal(SqlTypeCategory.BigInt, idBranch2.Type!.Category);
 
-        // The server resolves to the higher-precedence branch type (bigint > int).
         Assert.Equal("bigint", oracleOrderId.TypeName);
     }
 }

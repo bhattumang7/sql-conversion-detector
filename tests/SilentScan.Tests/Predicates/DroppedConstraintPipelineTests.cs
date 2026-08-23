@@ -4,14 +4,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Regression coverage for the dropped-constraint precision bug (formerly pinned in
-/// KnownGapCharacterizationTests.DroppedPrimaryKeyConstraint_BackingIndexIsStillReported):
-/// dropping a named PK/UNIQUE constraint must remove its backing index from the catalog, since
-/// the index the constraint created no longer exists on the real table. Runs through
-/// <see cref="ScanReportBuilder"/>, the same entry point production uses, and the verdict-
-/// bearing cases are confirmed against the real oracle (CLAUDE.md: verify the real thing).
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class DroppedConstraintPipelineTests : OracleTestFixture
 {
@@ -82,11 +74,6 @@ public sealed class DroppedConstraintPipelineTests : OracleTestFixture
     [Fact]
     public async Task DroppingOneConstraint_LeavesUnrelatedIndexesIntact()
     {
-        // A named constraint drop must remove ONLY its own backing index, not every index on
-        // the table - the fix matches by name, not by clearing the whole index list. This is a
-        // catalog-bookkeeping assertion (Indexed flag), not a verdict claim, so there is
-        // nothing for the plan-XML oracle to confirm beyond what the two tests above already
-        // established for the underlying mechanism.
         var report = await EngineAuthoritativeScan.ScanAsync(DroppedOneOfTwoSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var orderCodeFinding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "OrderCode");

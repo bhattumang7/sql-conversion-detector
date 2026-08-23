@@ -5,17 +5,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Regression coverage for dynamic SQL scope propagation (formerly pinned in
-/// KnownGapCharacterizationTests.DynamicSql_TempTableFromEnclosingProcScope_DoesNotResolveInsideReparsedText):
-/// a reparsed EXEC/sp_executesql fragment has no CREATE PROCEDURE wrapper of its own, so a
-/// #temp table or trigger inserted/deleted pseudo-table that resolves fine in the surrounding
-/// STATIC body previously failed to resolve inside the dynamic text, even though it's the exact
-/// same object. The dynamic SQL engine now records the enclosing scope
-/// (<see cref="Core.Predicates.DynamicSqlScope"/>) and DynamicSqlPipeline threads it into both
-/// NonSargablePredicateScanner and TypedPredicateExtractor. Runs through
-/// <see cref="ScanReportBuilder"/>, the same entry point production uses.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class DynamicSqlScopePropagationTests
 {
@@ -51,7 +40,6 @@ public sealed class DynamicSqlScopePropagationTests
         Assert.Equal(2, scanForcedFindings.Count);
         Assert.All(scanForcedFindings, f => Assert.True(f.Column.Indexed));
 
-        // The dynamic occurrence keeps its call-site provenance; the static one has none.
         Assert.Contains(scanForcedFindings, f => f.DynamicSqlCallSite is not null);
         Assert.Contains(scanForcedFindings, f => f.DynamicSqlCallSite is null);
     }
@@ -78,9 +66,6 @@ public sealed class DynamicSqlScopePropagationTests
     [Fact]
     public async Task TempTableDeclaredStatically_ResolvesTwoLevelsDeepInNestedDynamicSql()
     {
-        // The outer EXEC's own text contains a further EXEC - scope must survive the recursive
-        // re-scan (DynamicSqlPipeline.AnalyzeNested passes the outer script's own Scope into
-        // the nested DynamicSqlScannerV2.Scan call), not just the first level of reparsing.
         var report = await Scan("""
             CREATE TABLE dbo.Widgets (WidgetCode varchar(25) NOT NULL, INDEX IX_WidgetCode (WidgetCode));
             GO
@@ -99,9 +84,6 @@ public sealed class DynamicSqlScopePropagationTests
     [Fact]
     public async Task TriggerInsertedPseudoTable_ResolvesInsideExecStringLiteral()
     {
-        // A distinct mechanism from the #temp case: TypedPredicateExtractor seeds the CTE
-        // stack with the trigger's own inserted/deleted pseudo-tables before walking the
-        // reparsed fragment, mirroring what VisitTriggerBody does for static SQL.
         var report = await Scan("""
             CREATE TABLE dbo.Orders (OrderCode varchar(20) NOT NULL, INDEX IX_OrderCode (OrderCode));
             GO
@@ -114,8 +96,6 @@ public sealed class DynamicSqlScopePropagationTests
         var finding = Assert.Single(report.TypedFindings, f => f.Verdict == Verdict.ScanForced);
         Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
 
-        // inserted/deleted are a version-store rowset with no index of their own - the type is
-        // real and usable for a verdict, but Indexed must never be claimed true for it.
         Assert.False(finding.Column.Indexed);
     }
 }

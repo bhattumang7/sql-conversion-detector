@@ -3,26 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Catch-all / kitchen-sink predicates" - oracle-confirms
-/// the general mechanism once (not per finding, per this session's own precedent): the
-/// "(Col = @p OR @p IS NULL)" idiom forces a scan where a bare equality seeks, and
-/// <c>OPTION (RECOMPILE)</c> genuinely restores the seek.
-///
-/// <b>Load-bearing correction to the plan's own flagged uncertainty:</b> <c>SET SHOWPLAN_XML</c>
-/// (compile-only, used by every other oracle test in this codebase) CANNOT observe
-/// <c>OPTION (RECOMPILE)</c>'s benefit at all - probed directly, a compile-only plan for the
-/// catch-all shape WITH <c>OPTION (RECOMPILE)</c> still showed a Table Scan, identical to the
-/// un-guarded shape, because <c>SHOWPLAN_XML</c> never actually reaches the execution-time moment
-/// RECOMPILE's real value-embedding happens - it produces an ESTIMATED plan the same way a
-/// normal compile would, regardless of the hint. Only a REAL EXECUTION (<c>SET STATISTICS XML
-/// ON</c>, an actual run of a self-authored probe against the disposable Docker instance -
-/// CLAUDE.md permits this exact case, never scanned-target code) shows RECOMPILE's real effect:
-/// re-probed the identical query this way and the plan correctly showed an Index Seek.
-/// This is why these tests execute a self-authored probe rather than using the compile-only
-/// <c>PlanXmlCapture</c> every other Tier-1 sargability oracle test in this codebase uses -
-/// deliberate and necessary here, not an inconsistency.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class CatchAllPredicateOracleTests : OracleTestFixture
 {
@@ -67,9 +47,6 @@ public sealed class CatchAllPredicateOracleTests : OracleTestFixture
         await using (var probeCommand = new SqlCommand(probe, connection))
         await using (var reader = await probeCommand.ExecuteReaderAsync())
         {
-            // The plan XML arrives as its own result set alongside the row results - order
-            // between them isn't guaranteed by the API, so scan every result set for the one
-            // whose single column actually contains the ShowPlanXML document.
             planXml = string.Empty;
             do
             {

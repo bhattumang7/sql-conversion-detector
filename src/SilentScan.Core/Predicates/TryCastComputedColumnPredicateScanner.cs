@@ -5,26 +5,11 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second full-archive practitioner sweep" §G: "<c>TRY_CAST</c> in a
-/// non-persisted computed column used in a predicate" - see
-/// <see cref="TryCastComputedColumnPredicateFinding"/> for the full precision story and oracle
-/// evidence. Two-step, the same "build a small side-map once, then scan per-file against it" shape
-/// <see cref="SelectStarViewScanner"/> already uses: <see cref="BuildCandidates"/> finds every
-/// non-persisted, <c>TRY_CAST</c>-defined computed column once from the catalog; <see cref="Scan"/>
-/// then walks each file's own AST for a genuine filter-context reference to one of them.
-/// </summary>
 public static class TryCastComputedColumnPredicateScanner
 {
     public readonly record struct Candidate(string DefinitionText, string SourcePath, int Line);
 
-    /// <summary>
-    /// Every (table, column) whose own computed-column definition text uses <c>TRY_CAST</c> and
-    /// whose catalog <see cref="CatalogColumn.IsPersisted"/> is false - the latter is a defensive,
-    /// belt-and-suspenders re-check (the oracle already proves a genuine <c>TRY_CAST</c> computed
-    /// column can never legally be PERSISTED), not a scope narrowing.
-    /// </summary>
-    public static IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> BuildCandidates(DatabaseCatalog catalog)
+public static IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> BuildCandidates(DatabaseCatalog catalog)
     {
         var candidates = new Dictionary<(string, string), Candidate>();
 
@@ -53,17 +38,7 @@ public static class TryCastComputedColumnPredicateScanner
         return candidates;
     }
 
-    /// <summary>
-    /// Reparses the computed column's own definition text (the same throwaway-wrapper-statement
-    /// trick <see cref="ComputedColumnMatcher"/> uses) and looks for a real <see cref="TryCastCall"/>
-    /// node anywhere in the tree - not a text match. A regex on the raw definition text would also
-    /// match a <c>TRY_CAST</c> substring occurring inside a string literal or bracketed identifier
-    /// within an unrelated expression (e.g. a column literally named <c>[TRY_CAST]</c>), which is
-    /// never a real <c>TRY_CAST</c> call. A parse failure declines the candidate rather than
-    /// guessing - the safe direction, since <see cref="BuildCandidates"/> only narrows findings,
-    /// never widens them.
-    /// </summary>
-    private static bool DefinesTryCast(string definitionText)
+private static bool DefinesTryCast(string definitionText)
     {
         var result = SqlScriptParser.ParseText("schema-expression.sql", $"SELECT {definitionText};");
         if (result.HasErrors || result.Fragment is not TSqlScript script)
@@ -108,17 +83,7 @@ public static class TryCastComputedColumnPredicateScanner
         ];
     }
 
-    /// <summary>
-    /// Deliberately base-table-only (mirrors <see cref="CatchAllPredicateScanner"/>'s own
-    /// documented v1 scope limit): no VIEW/temp-table scoping, each statement's own FROM clause
-    /// resolved fresh via <see cref="FromScopeResolver"/> with an empty resolved-views map. A CTE
-    /// is a narrower case than "no scoping" implies, though: it is never schema-qualified, so it
-    /// always shadows a same-named real base table for its statement's own lifetime regardless of
-    /// whether this scanner otherwise looks inside it - resolving against the catalog instead
-    /// (cteRelations always null, pre-fix) silently matched a CTE-shadowed reference against an
-    /// unrelated real table sharing its name (2026-08 audit).
-    /// </summary>
-    private sealed class Visitor(
+private sealed class Visitor(
         string sourcePath, DatabaseCatalog catalog,
         IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> candidates) : TSqlFragmentVisitor
     {
@@ -224,8 +189,7 @@ public static class TryCastComputedColumnPredicateScanner
             }
         }
 
-        /// <summary>Collects every column reference reachable within a search condition subtree, regardless of how deeply it's wrapped (a further function/CAST wrap around the already-non-seekable computed column doesn't change this finding at all) - but never descends into a nested subquery's own scope (<see cref="ExplicitVisit(QuerySpecification)"/> visits that separately, under its own resolved FROM scope).</summary>
-        private sealed class ColumnReferenceCollector : TSqlFragmentVisitor
+private sealed class ColumnReferenceCollector : TSqlFragmentVisitor
         {
             public List<ColumnReferenceExpression> References { get; } = [];
 
@@ -233,13 +197,10 @@ public static class TryCastComputedColumnPredicateScanner
 
             public override void ExplicitVisit(QuerySpecification node)
             {
-                // Stop here - a nested subquery (EXISTS/IN/scalar) has its own FROM scope, which
-                // this base-table-only v1 walk does not attempt to resolve inline.
             }
 
             public override void ExplicitVisit(ScalarSubquery node)
             {
-                // Same reasoning as QuerySpecification above.
             }
         }
     }

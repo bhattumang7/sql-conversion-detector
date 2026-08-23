@@ -5,19 +5,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md full-archive practitioner sweep §E, "Columnstore index present on a
-/// table that is also a live DML target of transactional code" - computes the one small, reusable
-/// fact <see cref="IndexDesignScanner.Scan"/>'s <c>dmlTargetTables</c> parameter needs: which base
-/// tables are a direct INSERT/UPDATE/DELETE/MERGE target somewhere in the scanned corpus. The same
-/// direct-target-only scope <see cref="CrossModuleLockOrderScanner"/>'s own write-target visitor
-/// already uses (see that scanner's own doc comment) - never through a view, never through dynamic
-/// SQL this pass can't see inside, and deliberately NOT gated on an open explicit transaction the
-/// way that scanner's write-order tracking is: <see cref="IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable"/>
-/// cares about ANY write reaching the table, transacted or not, since a single-row DELETE outside
-/// an explicit transaction still takes (and releases) the same rowgroup-granularity lock for the
-/// duration of that one statement.
-/// </summary>
 public static class DmlTargetTableScanner
 {
     public static IReadOnlySet<string> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog)
@@ -58,18 +45,7 @@ public static class DmlTargetTableScanner
             base.ExplicitVisit(node);
         }
 
-        /// <summary>
-        /// Only a direct <see cref="NamedTableReference"/> target resolving to a real base table
-        /// counts - see this type's own doc comment. An unqualified target sharing its name with
-        /// one of the statement's own CTEs (legal for UPDATE/DELETE/MERGE against a simple,
-        /// updatable CTE) is declined rather than resolved against the catalog - a CTE is never
-        /// schema-qualified, so it always shadows a same-named real base table for this
-        /// statement's own lifetime, and resolving anyway would misattribute the write to an
-        /// unrelated real table (the same bug class fixed across the Predicates layer's FROM-
-        /// clause resolvers - this scanner has its own independent target-resolution path that
-        /// needed the identical fix).
-        /// </summary>
-        private void RecordWrite(TableReference? target, WithCtesAndXmlNamespaces? withCtes)
+private void RecordWrite(TableReference? target, WithCtesAndXmlNamespaces? withCtes)
         {
             if (target is not NamedTableReference named)
             {

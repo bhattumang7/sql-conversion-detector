@@ -77,10 +77,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CompositeIndex_OnlyLeadingKeyColumnCountsAsIndexed()
     {
-        // Regression: a non-leading key column of a composite index cannot drive an index
-        // seek on its own - IsIndexedColumn must match IndexDeploymentChecker's
-        // key_ordinal = 1 requirement (the oracle's own precondition for confirming a
-        // ScanForced/RangeSeek verdict), not just "is a key column somewhere in some index".
         var catalog = BuildFrom("""
             CREATE TABLE dbo.OrderLines
             (
@@ -175,10 +171,6 @@ public sealed class CatalogBuilderTests
         Assert.True(total.IsComputed);
         Assert.True(total.IsPersisted);
 
-        // Price(decimal) * Quantity(int): different categories, decimal has the higher
-        // precedence ordinal (SqlTypeCategory.Decimal > SqlTypeCategory.Int) so it wins -
-        // proves ComputedColumnTypeResolver.Combine picks the higher-precedence category
-        // rather than leaving a numeric computed column permanently untyped.
         Assert.Equal(SqlTypeCategory.Decimal, total.Type!.Category);
     }
 
@@ -202,9 +194,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnStringConcatenation_NvarcharSiblingWinsOverVarchar()
     {
-        // Data type precedence, not "whichever comes first": NVarChar has the higher ordinal,
-        // so a varchar + nvarchar concatenation must resolve NVarChar regardless of which side
-        // of the + it appears on.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.People
             (
@@ -238,9 +227,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnReferencingAnotherComputedColumn_ResolvesViaFixedPoint()
     {
-        // Total depends on Subtotal, itself computed - declared in an order T-SQL allows
-        // regardless of which is defined first. ResolveAll's fixed-point loop must resolve
-        // Subtotal before Total can use its type, not give up after a single pass.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.Orders
             (
@@ -259,10 +245,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnWithUnresolvableExpression_StaysUnknownAndLedgered()
     {
-        // A scalar UDF call inside a computed column expression is a deliberately unresolved
-        // case: the UDF return-type registry isn't built yet at this point in CatalogBuilder's
-        // pass ordering (unlike predicates/lineage, which run after the catalog is complete) - it
-        // must stay Unknown AND reach the skip ledger, never silently vanish with no trace.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.T
             (
@@ -280,10 +262,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnWithBuiltinFixedReturnTypeFunction_InfersType()
     {
-        // YEAR() is a curated fixed-return-type builtin (BuiltinFunctionTypeResolver) - a
-        // computed column built from it now types identically to the same call appearing in a
-        // predicate or a view's SELECT list, closing the asymmetry ComputedColumnTypeResolver
-        // previously had against ScalarExpressionResolver/TypedPredicateExtractor.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.T
             (
@@ -301,9 +279,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnWithBuiltinFirstArgumentTypeFunction_InfersSiblingColumnType()
     {
-        // ISNULL(Price, 0) takes its first argument's own type - proves the recursive Resolve
-        // call inside ComputedColumnTypeResolver.ResolveFunctionCall correctly re-enters the
-        // full expression-typing pipeline for the argument, not just a bare-leaf lookup.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.T
             (
@@ -493,9 +468,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterColumnAfterCreateTable_YieldsPostAlterType()
     {
-        // docs/audit-remediation-plan.md Phase 2.5: the exact pattern this tool exists to catch
-        // - a migration script widening a column's type. Before the fix, the ORIGINAL type
-        // stayed in the catalog forever, producing wrong-direction findings on precisely this.
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Users (DisplayName VARCHAR(40) NOT NULL);
@@ -539,8 +511,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ColumnDeclaredWithSysname_ResolvesToNVarChar128()
     {
-        // docs/audit-remediation-plan.md Phase 6.2: sysname is pervasive in admin-script repos
-        // for object/schema names.
         var catalog = BuildFrom("CREATE TABLE dbo.Objects (ObjectName sysname NOT NULL);");
 
         var column = catalog.Find("dbo.Objects")!.FindColumn("ObjectName")!;
@@ -565,9 +535,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_TypeAliasDeclaredInLaterFile_StillResolvesForEarlierFilesTable()
     {
-        // Same cross-file-ordering guarantee Build_AlterColumnAcrossFiles_
-        // AppliesRegardlessOfFileOrder locks in for ALTER COLUMN - a repo's type-alias file
-        // routinely sorts after the tables that use it.
         var catalog = CatalogBuilder.Build(
         [
             Parse("CREATE TABLE dbo.Orders (OrderId dbo.MyIntAlias NOT NULL);"),
@@ -616,11 +583,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterTableAddOnScopedTempTable_UpdatesTheScopedEntryNotAnUnscopedCopy()
     {
-        // The same "scoped entry, unscoped lookup" bug class as the predicate-side index lookup
-        // fix (coverage-remediation-plan.md Phase 3.2): ALTER TABLE ADD on a #temp table used an
-        // unscoped Find (silently missing the scoped entry, treating it as an unresolved target)
-        // and an unscoped AddOrReplace on write-back (which would have created a stray unscoped
-        // duplicate instead of updating the real scoped one).
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE PROCEDURE dbo.usp_Test
@@ -641,8 +603,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_TempTablesInsideDifferentProcedures_SameNameDifferentShape_DoNotClobberEachOther()
     {
-        // docs/audit-remediation-plan.md Phase 2.5 "Done when": two procedures with same-named
-        // temp tables of different shapes each resolve correctly.
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE PROCEDURE dbo.usp_First
@@ -668,9 +628,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CreateOrAlterTriggerBody_TempTableScopedToTrigger()
     {
-        // CreateOrAlterTriggerStatement is a distinct ScriptDOM node type from
-        // CreateTriggerStatement/AlterTriggerStatement - procedures and functions already got
-        // all three variants; triggers didn't (coverage-remediation-plan.md Phase 2.1).
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders (Id INT NOT NULL);
@@ -717,11 +674,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Find_TableVariable_ScopeMiss_NeverFallsBackToAnUnrelatedScopesDeclaration()
     {
-        // The gap this fix closes: DatabaseCatalog.Find(name, scope)'s unscoped fallback applied
-        // to table variables too, even though a table variable is strictly proc-local in real
-        // SQL Server (FromScopeResolver's own doc comment) - a scope MISS (querying from a proc
-        // that never declared its own @t) used to silently match a DIFFERENT proc's @t instead of
-        // staying unresolved.
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE PROCEDURE dbo.usp_Declares
@@ -743,9 +695,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_MultiStatementTvfReturnVariable_CatalogedUnderFunctionScope()
     {
-        // RETURNS @t TABLE(...) is a DeclareTableVariableBody hanging off the return type, not a
-        // DeclareTableVariableStatement, so this was never registered before (coverage-
-        // remediation-plan.md Phase 3.4) - unlike an ordinary body-declared table variable.
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE FUNCTION dbo.fn_GetCodes()
@@ -766,9 +715,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CreateTypeAsTable_RegistersColumnShapeIncludingInlineIndex()
     {
-        // CREATE TYPE ... AS TABLE has no visitor anywhere - WWI's manifest lists a User Defined
-        // Types path with four such files consumed as TVPs by four procs (coverage-remediation-
-        // plan.md Phase 3.2).
         var catalog = BuildFrom("""
             CREATE TYPE Website.OrderLineList AS TABLE
             (
@@ -812,8 +758,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ScalarParameter_NotRegisteredAsTableValued()
     {
-        // A parameter whose type isn't a registered table type (an ordinary scalar type) must
-        // not be mistaken for a TVP.
         var catalog = BuildFrom(
             """
             CREATE PROCEDURE dbo.usp_Ordinary @Id INT
@@ -829,11 +773,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ClrTableValuedFunction_NoVariableNameToRegister_DoesNotThrow()
     {
-        // A CLR TVF's RETURNS TABLE(...) has the same TableValuedFunctionReturnType shape as a
-        // multi-statement TVF's RETURNS @t TABLE(...), but no @variable name at all - reproduced
-        // as a real NullReferenceException while adding the MSTVF return-variable registration
-        // above (coverage-remediation-plan.md Phase 3.4), from body.VariableName.Value on a null
-        // VariableName.
         var catalog = CatalogBuilder.Build(
             [Parse("CREATE FUNCTION dbo.fn_Clr() RETURNS TABLE (Col INT NOT NULL) AS EXTERNAL NAME MyAssembly.[MyClass].[MyMethod];")]);
 
@@ -882,11 +821,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_TableLevelInlineIndexDefinition_CountsAsSeekable()
     {
-        // TableDefinition.Indexes (the INDEX (...) form written inside the column list, e.g.
-        // WWI's `INDEX [IX_...] ([Col])`) is a collection entirely separate from
-        // TableConstraints and a column's own inline .Index - found while wiring up table-valued
-        // parameters (coverage-remediation-plan.md Phase 3.2), but this was never read for an
-        // ordinary CREATE TABLE either, not just CREATE TYPE ... AS TABLE.
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders
@@ -915,11 +849,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_TableLevelInlineFilteredIndex_NotCountedAsSeekableForRanking()
     {
-        // The bug this closes: BuildInlineIndex used to drop FilterPredicate/IndexType entirely,
-        // so a table-level inline INDEX(...) WHERE ... reported Indexed=true - a false positive
-        // for the ranking claim this tool leads with (ScanForced + indexed + depth >= 1 first).
-        // The standalone CREATE INDEX ... WHERE ... path (Build_FilteredIndex_NotCountedAsSeekableForRanking
-        // above) already got this right; this is the same construct via table-level inline syntax.
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders
@@ -936,8 +865,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_TableLevelInlineColumnstoreIndex_NotCountedAsSeekableForRanking()
     {
-        // Same bug as the filtered case above, for the columnstore flag: a table-level inline
-        // `INDEX ix CLUSTERED COLUMNSTORE` used to report Indexed=true.
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders
@@ -954,9 +881,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ColumnLevelInlineFilteredIndex_NotCountedAsSeekableForRanking()
     {
-        // Same bug, for the column-level inline form (columnDefinition.Index), e.g.
-        // `Status VARCHAR(20) INDEX ix WHERE ...` - a distinct code path from the table-level
-        // TableDefinition.Indexes collection above (BuildColumn's own inlineIndex branch).
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders
@@ -972,8 +896,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ColumnLevelInlineOrdinaryIndex_StillCountsAsSeekable()
     {
-        // Near-miss for the two fixes above: a plain (non-filtered, non-columnstore) inline
-        // column-level index must keep counting as seekable - the fix must not overcorrect.
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders
@@ -1009,15 +931,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_SelectIntoFromCteSharingNameWithRealTable_TargetColumnHasNoGuessedType()
     {
-        // A CTE is never schema-qualified, so it always shadows a same-named real base table for
-        // its own statement's lifetime - resolving against the catalog instead (the previous
-        // behavior) would have silently attributed #snapshot.Id's type to the REAL dbo.Orders
-        // table's Id column, even though the CTE's own Id here is a different type entirely. The
-        // same bug class Phase 1.5 fixed across seven Predicates-layer scanners, present in
-        // SelectIntoColumnResolver (Catalog layer) too until this fix - correctly declined here
-        // rather than resolved against the wrong table, per CLAUDE.md's pass-ordering rule
-        // (catalog-building cannot depend on Lineage-level CTE resolution the way Predicates now
-        // does, so the fix here is a name-only decline, not a full resolution upgrade).
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerName VARCHAR(40) NOT NULL);
@@ -1038,11 +951,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_SelectIntoWithAmbiguousUnaliasedJoinTables_QualifiedReferenceHasNoGuessedType()
     {
-        // `FROM dbo.T JOIN audit.T ON ...` - two different tables sharing the same unqualified
-        // bare name T, neither aliased - exposes the identical alias ambiguity
-        // FromScopeResolver.cs's own poison rule already guards against at the Lineage layer.
-        // Silently last-wins (the previous behavior) would attribute Code's type to whichever of
-        // the two happened to be flattened last, regardless of which T.Code the query author meant.
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.T (Id INT NOT NULL, Code VARCHAR(10) NOT NULL);
@@ -1064,9 +972,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_SelectIntoWithDistinctAliases_StillResolvesQualifiedReference()
     {
-        // Control: the same two-table join, but with real, distinct aliases - proves the fix
-        // above is scoped to the genuine ambiguity (an unaliased bare-name collision), not to
-        // joins in general.
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.T (Id INT NOT NULL, Code VARCHAR(10) NOT NULL);
@@ -1124,10 +1029,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_SpatialColumn_TypeIsNullAndLedgered()
     {
-        // sys.geography/geometry are CLR UDTs with no local definition to resolve (coverage-
-        // remediation-plan.md Phase 0.2) - the column still enters the catalog (Type: null,
-        // which VerdictClassifier already treats as Unknown), but until this pass it was
-        // uncounted, indistinguishable from a genuine resolution success.
         var catalog = BuildFrom("CREATE TABLE dbo.Cities (Id INT NOT NULL, Location GEOGRAPHY NULL);");
 
         Assert.Null(catalog.Find("dbo.Cities")!.FindColumn("Location")!.Type);
@@ -1137,9 +1038,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnWithNoDeclaredType_NotLedgered()
     {
-        // A computed column's type comes from its expression, not a DataType node - this must
-        // not be confused with the spatial/CLR case above, which has a real declared type that
-        // failed to resolve.
         var catalog = BuildFrom("CREATE TABLE dbo.T (A INT NOT NULL, B AS (A + 1));");
 
         Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "column type");
@@ -1172,9 +1070,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CreateFullTextIndex_Ledgered()
     {
-        // ConstructCoverage.json carried this as "Ledgered" (verifiedBy: null) with no code
-        // anywhere actually recording it - a phantom claim, since "Ledgered" means every
-        // occurrence reaches a SkipLedger entry.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.Documents (Id INT NOT NULL PRIMARY KEY, Body NVARCHAR(MAX) NULL);
             GO
@@ -1187,8 +1082,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterFullTextIndex_Ledgered()
     {
-        // Found by the reflection backstop (StatementVariantParityTests) the moment
-        // CreateFullTextIndexStatement above got its own visitor.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.Documents2 (Id INT NOT NULL PRIMARY KEY, Body NVARCHAR(MAX) NULL);
             GO
@@ -1238,9 +1131,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterAssembly_Ledgered()
     {
-        // Found by StatementVariantParityTests' reflection backstop, not manual audit -
-        // ALTER ASSEMBLY was silently unhandled (no ledger entry at all) despite CREATE ASSEMBLY
-        // already being ledgered (coverage-remediation-plan.md Phase 2.1).
         var catalog = BuildFrom("ALTER ASSEMBLY MyAssembly FROM 0x4D5A;");
 
         Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CLR assembly" && e.Reason.Contains("MyAssembly", StringComparison.Ordinal) && e.Reason.Contains("ALTER ASSEMBLY", StringComparison.Ordinal));
@@ -1249,9 +1139,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterIndexDisable_ColumnNoLongerReportsIndexed()
     {
-        // Found by the same reflection backstop, later fixed: DISABLE now flips
-        // CatalogIndex.IsDisabled by name, so a disabled index genuinely stops counting as
-        // seekable rather than silently reporting a disabled index as still seekable.
         var catalog = BuildFrom(
             """
             CREATE TABLE dbo.T (Col INT NOT NULL);
@@ -1297,8 +1184,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterIndexReorganize_StillLedgeredAsNotAffectingSeekability()
     {
-        // REORGANIZE never changes whether an index is usable, so it's ledgered rather than
-        // modeled - the real risk this pass guards against is limited to DISABLE/REBUILD.
         var catalog = BuildFrom(
             """
             CREATE TABLE dbo.T (Col INT NOT NULL);
@@ -1315,8 +1200,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CreateAssembly_DoesNotTripleCountAcrossThreeBuildPhases()
     {
-        // CatalogBuilder walks every file three times (CollectTypeAliases/CollectTables/
-        // ApplyEverythingElse) - the CLR visitors must be gated to exactly one phase.
         var catalog = BuildFrom("CREATE ASSEMBLY MyAssembly FROM 0x4D5A;");
 
         Assert.Single(catalog.Skipped.Entries, e => e.ConstructKind == "CLR assembly");
@@ -1336,9 +1219,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_DropTableThenRecreateWithDifferentShape_KeepsTheRecreatedShape()
     {
-        // The false-positive class this pass exists to close: a migration script that drops
-        // and rebuilds a table with a DIFFERENT column type must resolve predicates against
-        // the recreated shape, never the stale original.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
             DROP TABLE dbo.Orders;
@@ -1397,9 +1277,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CreateTableWithNoInlineDefinition_LedgersRatherThanSilentlyDropping()
     {
-        // CREATE TABLE ... AS EDGE (a SQL Server graph edge table) has no inline column list -
-        // its columns are implicit - the same "no Definition" shape a CTAS-only form would
-        // have. Ledgered rather than silently skipped.
         var catalog = BuildFrom("CREATE TABLE dbo.Likes AS EDGE;");
 
         Assert.Null(catalog.Find("dbo.Likes"));
@@ -1409,9 +1286,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_DropProcedure_DoesNotThrowAndLeavesUnrelatedCatalogDataIntact()
     {
-        // Procedures are never registered by name in any catalog structure other passes
-        // consult, so DROP PROCEDURE has nothing to remove - this just confirms the statement
-        // is walked without throwing and without side effects on real catalog data.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
             GO
@@ -1495,9 +1369,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_UseStatement_IsLedgeredNotSilentlySwallowed()
     {
-        // Genuine cross-database switching is not modeled (no real corpus repo exercises it -
-        // see KnownGapCharacterizationTests.CrossDatabaseReference_GetsAKeyNothingPopulates),
-        // but USE itself should never be a construct with zero trace.
         var catalog = BuildFrom("""
             USE OtherDb;
             CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
@@ -1505,8 +1376,6 @@ public sealed class CatalogBuilderTests
 
         Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "USE" && e.Reason.Contains("OtherDb", StringComparison.Ordinal));
 
-        // Objects still register against the single implicit target database, unaffected by
-        // whatever database name USE happens to name - unchanged from today's behavior.
         Assert.NotNull(catalog.Find("dbo.Orders"));
     }
 
@@ -1547,9 +1416,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ProcedureWithTableValuedParameter_RegistersItWithNullTypeAtItsRealPosition()
     {
-        // A TVP still occupies a real positional slot in the parameter list (the procedure call
-        // graph's positional-argument matching depends on this) even though it has no SqlType of
-        // its own to report - recorded as null, not omitted.
         var catalog = BuildFrom("""
             CREATE TYPE dbo.CodeList AS TABLE (Code varchar(20) NOT NULL);
             GO
@@ -1567,16 +1433,6 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterTableAddFromInsideProcOnBatchLevelTempTable_UpdatesTheOneTrueUnscopedEntry()
     {
-        // A #temp table created at BATCH level (outside any procedure) is visible to a
-        // subsequently-called procedure in the same session - a real, common pattern (a script
-        // builds #t, then calls a proc that further alters/populates it). ALTER TABLE ADD from
-        // inside that proc's body finds #t via Find's own scoped-then-unscoped-fallback (there is
-        // no "dbo.usp_Test"-scoped entry, only the bare batch-level one), but the write-back scope
-        // was computed from the ALTER statement's OWN current scope ("dbo.usp_Test") rather than
-        // the scope the entry was actually found under (none) - creating a stray
-        // "dbo.usp_Test"::#t duplicate carrying the ALTER's new column, while the real, bare #t
-        // entry every OTHER scope (including plain batch-level code, or another unrelated
-        // procedure's own fallback lookup) resolves through stayed stale, missing Col2 entirely.
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE #t (Col1 INT NOT NULL);
@@ -1595,10 +1451,6 @@ public sealed class CatalogBuilderTests
                 """)]);
 
         var batchLevel = catalog.Find("#t");
-        // dbo.usp_Unrelated never declares its own #t, so this resolves through the SAME
-        // scoped-then-unscoped-fallback path as the ALTER statement itself did - if the ALTER's
-        // write-back had gone to a stray "dbo.usp_Test"::#t key instead of the one true unscoped
-        // entry, this would see the pre-ALTER, Col2-less shape instead.
         var seenFromUnrelatedScope = catalog.Find("#t", "dbo.usp_Unrelated");
 
         Assert.NotNull(batchLevel);

@@ -3,22 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Schema-scan UDF and computed-column findings" #1 ("CHECK
-/// constraint whose definition references a scalar/CLR function") - this rule was found on
-/// re-planning to already be fully shipped as <c>SchemaDependencyScanner</c>'s
-/// <c>SchemaDependencyKind.CheckConstraint</c> case (part of the already-shipped scalar-UDF
-/// stream); this file oracle-confirms the runtime claim the checklist item's own text makes
-/// ("forces serialized execution") once, at the mechanism level, the same discipline
-/// <c>NonParallelizableIntrinsicOracleTests</c> uses. **Correction to the checklist item's own
-/// premise, oracle-confirmed:** the claim as originally written ("forces serialized execution of
-/// every query and maintenance operation against the table") is overstated - a CHECK constraint
-/// only evaluates on a write that could violate it (INSERT/UPDATE), never on a plain SELECT, so a
-/// read-only query against the table is unaffected. <c>NonParallelPlanReason=
-/// "TSQLUserDefinedFunctionsNotParallelizable"</c> appears on an UPDATE that evaluates the
-/// constraint; a plain SELECT with no WHERE/JOIN touching the constrained column shows no such
-/// marker.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class SchemaDependencyCheckConstraintSerialOracleTests : OracleTestFixture
 {

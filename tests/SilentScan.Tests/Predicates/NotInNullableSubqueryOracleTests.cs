@@ -3,19 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "NOT IN over a nullable subquery column" - oracle-confirms
-/// the general mechanism once (not per finding, per this session's own precedent): a real
-/// executed <c>NOT IN (SELECT ...)</c> against a nullable subquery column returns an entirely
-/// different (wrong) result set than the same query against a NOT NULL column, given the exact
-/// same underlying "which rows should logically match" intent.
-///
-/// This is a genuine data-correctness bug, not a plan-shape one - the assertion is on the
-/// returned ROWS, via real execution, never on plan XML (there is no plan-XML marker for "this
-/// predicate silently evaluates to UNKNOWN" - it's a result-set-shape claim, matching how
-/// <c>AnsiPaddingMismatchOracleTests</c>/<c>TemporalBoundaryPrecisionOracleTests</c> already
-/// verify this class of finding in this codebase).
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class NotInNullableSubqueryOracleTests : OracleTestFixture
 {
@@ -68,8 +55,6 @@ public sealed class NotInNullableSubqueryOracleTests : OracleTestFixture
     {
         var rows = await RunAsync("SELECT Id FROM dbo.Parent WHERE Id NOT IN (SELECT RefId FROM dbo.ChildNullable) ORDER BY Id;");
 
-        // Ids 2 and 3 never appear in ChildNullable, so an ordinary anti-join would return them -
-        // the NULL in ChildNullable poisons the whole predicate to UNKNOWN for every row instead.
         Assert.Empty(rows);
     }
 

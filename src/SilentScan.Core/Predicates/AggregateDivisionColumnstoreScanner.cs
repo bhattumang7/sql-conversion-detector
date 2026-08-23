@@ -5,13 +5,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second full-archive practitioner sweep" §G: "Aggregate argument
-/// containing a division ... that relies on short-circuit elimination, on a table with a
-/// columnstore or batch-mode-eligible index" - see <see cref="AggregateDivisionColumnstoreFinding"/>
-/// for the full scope/precision story, including the honest live-reproduction attempt and why this
-/// ships as a structural risk flag only.
-/// </summary>
 public static class AggregateDivisionColumnstoreScanner
 {
     private static readonly HashSet<string> AggregateFunctionNames = new(StringComparer.OrdinalIgnoreCase)
@@ -36,12 +29,6 @@ public static class AggregateDivisionColumnstoreScanner
     {
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-        // Real per-statement CTE scope (Phase 1.5 "one binder"): a QuerySpecification has no
-        // direct access to its enclosing SelectStatement's WithCtesAndXmlNamespaces, so this is
-        // captured on the way down and consulted from ExplicitVisit(QuerySpecification) - matching
-        // ConstrainedColumnStatementVisitor's own precedent. Replaces the previous file-wide
-        // CteNameCollector decline-set, which only ever caused an extra decline rather than a
-        // false positive but is no longer needed once real FromScopeResolver resolution is here.
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public List<AggregateDivisionColumnstoreFinding> Findings { get; } = [];
@@ -84,12 +71,7 @@ public static class AggregateDivisionColumnstoreScanner
             base.ExplicitVisit(node);
         }
 
-        /// <summary>
-        /// Finds every aggregate function call reachable from <paramref name="root"/> WITHOUT
-        /// descending into a nested <see cref="QuerySpecification"/> (own FROM scope, reached
-        /// separately), matching <see cref="FloatEqualityPredicateScanner"/>'s own precedent.
-        /// </summary>
-        private void InspectTopLevel(TSqlFragment root, CatalogTable columnstoreTable)
+private void InspectTopLevel(TSqlFragment root, CatalogTable columnstoreTable)
         {
             var collector = new AggregateCallCollector();
             root.Accept(collector);
@@ -114,14 +96,7 @@ public static class AggregateDivisionColumnstoreScanner
             }
         }
 
-        /// <summary>
-        /// True when any THEN/ELSE result expression of <paramref name="caseExpression"/> contains
-        /// a division whose divisor is not a literal constant (a literal divisor can never be zero,
-        /// so is not error-prone regardless of execution mode). Does not descend into a NESTED CASE
-        /// expression's own guard/result expressions differently - a division anywhere inside a
-        /// result expression counts, including one reached through further nesting.
-        /// </summary>
-        private static bool ContainsErrorProneDivision(CaseExpression caseExpression)
+private static bool ContainsErrorProneDivision(CaseExpression caseExpression)
         {
             var resultExpressions = caseExpression switch
             {
@@ -166,9 +141,6 @@ public static class AggregateDivisionColumnstoreScanner
 
             public override void ExplicitVisit(QuerySpecification node)
             {
-                // Deliberately does not call base.ExplicitVisit(node) - a nested subquery's own
-                // aggregate is reached separately, with its own correct FROM scope, by the outer
-                // visitor's own QuerySpecification traversal.
             }
         }
 

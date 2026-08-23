@@ -4,12 +4,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Tests.Lineage;
 
-/// <summary>
-/// <see cref="ScalarUdfMap"/> is the depth/origin machinery the scalar-UDF finding stream will
-/// lean on for the "reached through view/iTVF expansion" case (docs/detection-checklist.md Tier
-/// 1 #1) - the 603-iTVF headline detection, mirroring <see cref="TvfFenceMapTests"/>'s coverage
-/// of the analogous MSTVF-as-fence machinery.
-/// </summary>
 public sealed class ScalarUdfMapTests
 {
     private static (DatabaseCatalog Catalog, IReadOnlyList<ViewDefinition> Views) Build(string sql)
@@ -145,10 +139,6 @@ public sealed class ScalarUdfMapTests
     [Fact]
     public void MultiStatementTvfBody_IsNeverACarrier()
     {
-        // MSTVFs are deliberately excluded from ViewDefinitionExtractor's own Views set (they
-        // have no expandable body an optimizer sees) - this just locks in that a scalar UDF
-        // called inside one never produces a ScalarUdfMap entry for it, matching the MSTVF-as-
-        // fence stream's own opacity boundary.
         var (catalog, views) = Build("""
             CREATE FUNCTION dbo.fn_Compute(@x INT)
             RETURNS INT
@@ -203,10 +193,6 @@ public sealed class ScalarUdfMapTests
     [Fact]
     public void ViewSelectingFromInlineTvfThatCallsScalarUdf_InheritsTheCarrierFlag()
     {
-        // The gap this fix closes: ScalarUdfMap discarded TvfReferenceWalker's own functionRefs
-        // entirely, so a view selecting from an inline TVF (FROM dbo.itvf(1)) never inherited the
-        // carrier flag even when the TVF's own body called a scalar UDF - TvfFenceMap already
-        // recurses through exactly this shape.
         var (catalog, views) = Build("""
             CREATE FUNCTION dbo.fn_Compute(@x INT)
             RETURNS INT

@@ -8,18 +8,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Verify.Catalog;
 
-/// <summary>
-/// Builds a <see cref="DatabaseCatalog"/> directly from a live database's own system metadata
-/// (<c>sys.tables</c>/<c>sys.columns</c>/<c>sys.types</c>/<c>sys.indexes</c>) instead of
-/// inferring it from parsed DDL text the way <c>SilentScan.Core.Catalog.CatalogBuilder</c> does
-/// for file-mode scans. Types, per-column collations, and index shape all come straight from
-/// the engine, so this is strictly more precise than DDL inference: there is no COLLATE clause
-/// to have been omitted or a database-default collation to guess at, and a computed column's
-/// type is whatever the engine itself already resolved it to (<c>sys.columns</c> reports a real
-/// type for a computed column exactly like an ordinary one - unlike file mode, no expression
-/// re-derivation is needed here at all).
-/// Issues metadata <c>SELECT</c>s only - never any DDL or DML against the connected database.
-/// </summary>
 public sealed class LiveCatalogReader
 {
     private readonly string _connectionString;
@@ -161,18 +149,7 @@ public sealed class LiveCatalogReader
         return catalog;
     }
 
-    /// <summary>
-    /// T-SQL scalar UDFs (<c>sys.objects.type = 'FN'</c>): <c>is_schema_bound</c> and (2019+ only)
-    /// <c>is_inlineable</c>, both straight from <c>sys.sql_modules</c> - the engine's own
-    /// authoritative answer, always preferred over the static blocker scan
-    /// (<see cref="Core.Catalog.ScalarUdfInlineabilityScanner"/>) that runs later, in file mode,
-    /// over this same function's reparsed body text (<c>LiveModuleReader</c> already fetches an
-    /// 'FN' object's <c>sys.sql_modules.definition</c>). <c>is_inlineable</c> doesn't exist on
-    /// pre-2019 engines - queried first WITH it, falling back to a query WITHOUT it on "invalid
-    /// column name" (error 207) rather than a version-number check, so this stays correct against
-    /// whatever the connected engine actually exposes rather than an assumption about it.
-    /// </summary>
-    private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> ReadScalarUdfInfoAsync(
+private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> ReadScalarUdfInfoAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const int InvalidColumnNameErrorNumber = 207;
@@ -225,22 +202,7 @@ public sealed class LiveCatalogReader
         return [.. tSqlUdfs, .. clrUdfs];
     }
 
-    /// <summary>
-    /// CLR scalar UDFs (<c>sys.objects.type = 'FS'</c>): never inlined, so what matters is
-    /// whether the assembly method touches data - <c>OBJECTPROPERTYEX(..., 'UserDataAccess')</c>/
-    /// <c>'SystemDataAccess'</c> report the <c>DataAccessKind</c> the method was registered with
-    /// (either true forces the same serial-plan consequence a T-SQL UDF's non-inlineability does).
-    /// Queried ONE FUNCTION AT A TIME rather than in the single bulk SELECT every other reader in
-    /// this file uses - oracle-verified against the local production copy's real EXTERNAL_ACCESS
-    /// assemblies (CLAUDE.md never waits for permission to run this check): calling
-    /// <c>OBJECTPROPERTYEX</c> on a function whose assembly cannot currently be loaded (blocked
-    /// permission set, missing/changed assembly, etc.) throws SqlException 10342 and aborts the
-    /// WHOLE batch, not just that one row - a single such function in a real corpus would
-    /// otherwise blank out every OTHER CLR scalar UDF's data-access info too. A per-function
-    /// failure is recorded as ClrDataAccess = null (unknown), never guessed, and never allowed to
-    /// take down the rest of the read.
-    /// </summary>
-    private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> ReadClrScalarUdfInfoAsync(
+private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> ReadClrScalarUdfInfoAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string namesSql = """
@@ -300,15 +262,7 @@ public sealed class LiveCatalogReader
         }
     }
 
-    /// <summary>
-    /// Which flavour each user table-valued function is, straight from <c>sys.objects.type</c>.
-    /// This is the engine's own classification and the only authoritative source for it: a call
-    /// site (<c>FROM dbo.fn(@x)</c>) is textually identical for an inline TVF and a
-    /// multi-statement one, and the MSTVF-as-fence stream depends entirely on telling them
-    /// apart. A type code this method does not recognise is skipped rather than defaulted, so
-    /// an unmapped future object type can never be reported as either flavour.
-    /// </summary>
-    private static async Task<List<(string QualifiedName, TableValuedFunctionKind Kind)>> ReadTableValuedFunctionKindsAsync(
+private static async Task<List<(string QualifiedName, TableValuedFunctionKind Kind)>> ReadTableValuedFunctionKindsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -342,18 +296,7 @@ public sealed class LiveCatalogReader
         return kinds;
     }
 
-    /// <summary>
-    /// A real table's own computed-column/DEFAULT/CHECK definitions, straight from
-    /// <c>sys.computed_columns</c>/<c>sys.default_constraints</c>/<c>sys.check_constraints</c> -
-    /// the live-authoritative source for the scalar-UDF SchemaDependency stream
-    /// (<see cref="SilentScan.Core.Predicates.SchemaDependencyScanner"/>), which reparses each
-    /// definition's own text the same way regardless of whether it arrived from here or from
-    /// <see cref="SchemaExpressionCollector"/>'s file-mode capture. Table-level CHECK
-    /// constraints (no single owning column) are queried separately from column-level ones, since
-    /// <c>sys.check_constraints.parent_column_id</c> is 0 for a table-level constraint and this
-    /// reader reports that case with a null column name rather than a meaningless "column 0".
-    /// </summary>
-    private static async Task<List<SchemaExpressionReference>> ReadSchemaExpressionsAsync(
+private static async Task<List<SchemaExpressionReference>> ReadSchemaExpressionsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -408,15 +351,7 @@ public sealed class LiveCatalogReader
         return references;
     }
 
-    /// <summary>
-    /// Every foreign-key column pair, engine-authoritative (docs/detection-checklist.md Tier 1
-    /// "Join-key and cross-object type/collation mismatch": FK-linked pairs for the cross-table
-    /// type-drift report). A composite FK produces one row per column pair here, all sharing the
-    /// same constraint name - <see cref="SilentScan.Core.Catalog.ForeignKeyRelationship"/> keeps
-    /// them as separate entries rather than grouping, matching how <c>sys.foreign_key_columns</c>
-    /// itself represents a composite key: one row per (parent column, referenced column) pair.
-    /// </summary>
-    private static async Task<List<ForeignKeyRelationship>> ReadForeignKeysAsync(
+private static async Task<List<ForeignKeyRelationship>> ReadForeignKeysAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -485,19 +420,7 @@ public sealed class LiveCatalogReader
         return constraints;
     }
 
-    /// <summary>
-    /// Every AFTER trigger's own firing-order pin state, one row per (trigger, event) pair - the
-    /// live-only precondition <see cref="SilentScan.Core.Predicates.TriggerOrderScanner"/> needs.
-    /// <c>sys.trigger_events.is_first</c>/<c>is_last</c> report <c>sp_settriggerorder</c>'s current
-    /// pin state directly (oracle-confirmed: see <see cref="SilentScan.Core.Catalog.CatalogTriggerEvent"/>'s
-    /// own doc comment) - no OBJECTPROPERTY call needed, and no per-trigger round trip either,
-    /// unlike <see cref="ReadClrScalarUdfInfoAsync"/>'s own one-at-a-time discipline for a
-    /// different, genuinely per-object-failure-prone catalog fact. INSTEAD OF triggers are still
-    /// read (<see cref="SilentScan.Core.Catalog.CatalogTriggerEvent.IsInsteadOf"/> preserved) so
-    /// the scanner can exclude them explicitly rather than this reader silently deciding that
-    /// scope question.
-    /// </summary>
-    private static async Task<List<CatalogTriggerEvent>> ReadTriggerEventsAsync(
+private static async Task<List<CatalogTriggerEvent>> ReadTriggerEventsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -533,20 +456,7 @@ public sealed class LiveCatalogReader
         return triggerEvents;
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md practitioner-sweep item "Row-Level Security predicate function
-    /// with no supporting index on its own filtered columns" - see <see
-    /// cref="SilentScan.Core.Catalog.CatalogSecurityPredicate"/>'s own doc comment for why
-    /// <c>predicate_definition</c> (not a dedicated function-id column - there isn't one) is the
-    /// only catalog-level way to recover the predicate function's own bound columns, and <see
-    /// cref="SilentScan.Core.Predicates.SecurityPredicateIndexFinding"/> for the full scope/oracle
-    /// story.
-    /// <c>sys.security_policies.is_ms_shipped</c> does not exist (confirmed directly against the
-    /// standing Docker oracle - unlike <c>sys.tables</c>, a security policy has no shipped/system
-    /// variant to exclude), so only the secured TABLE side is filtered on
-    /// <c>is_ms_shipped = 0</c>, matching every other reader in this file.
-    /// </summary>
-    private static async Task<List<CatalogSecurityPredicate>> ReadSecurityPredicatesAsync(
+private static async Task<List<CatalogSecurityPredicate>> ReadSecurityPredicatesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -578,16 +488,7 @@ public sealed class LiveCatalogReader
         return predicates;
     }
 
-    /// <summary>
-    /// Every system-versioned temporal table's own current/history pairing, read from
-    /// <c>sys.tables.temporal_type = 2</c> (<c>SYSTEM_VERSIONED_TEMPORAL_TABLE</c>) joined to its
-    /// own <c>history_table_id</c>. Both sides are ALSO ordinary rows in <see cref="ReadTablesAsync"/>/
-    /// <see cref="ReadIndexesAsync"/> already - a history table has no distinct
-    /// <c>sys.objects.type</c>, it's a plain user table with <c>temporal_type = 1</c> - so this
-    /// query supplies only the pairing fact, not table/index shape (docs/detection-checklist.md
-    /// "Temporal table history-side index gap").
-    /// </summary>
-    private static async Task<List<TemporalTablePair>> ReadTemporalTablePairsAsync(
+private static async Task<List<TemporalTablePair>> ReadTemporalTablePairsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -614,15 +515,7 @@ public sealed class LiveCatalogReader
         return pairs;
     }
 
-    /// <summary>
-    /// A SQLCLR table-valued function's return-table columns, read from <c>sys.columns</c>
-    /// keyed off <c>sys.objects.type = 'FT'</c> (assembly TVF) rather than the ordinary
-    /// <c>sys.tables</c> join <see cref="ReadColumnsAsync"/> uses - there is no
-    /// <c>sys.sql_modules</c> body to parse for one of these, but the engine still exposes its
-    /// return shape as real column metadata, so a caller referencing it in a FROM clause can be
-    /// typed exactly like a real table even though the function body itself stays unanalyzable.
-    /// </summary>
-    private static async Task<List<(string SchemaName, string FunctionName, List<CatalogColumn> Columns)>> ReadClrTableValuedFunctionShapesAsync(
+private static async Task<List<(string SchemaName, string FunctionName, List<CatalogColumn> Columns)>> ReadClrTableValuedFunctionShapesAsync(
         SqlConnection connection, SkipLedger skipLedger, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -674,22 +567,7 @@ public sealed class LiveCatalogReader
         return [.. byFunction.Values];
     }
 
-    /// <summary>
-    /// A SQLCLR scalar function's return type, read from <c>sys.parameters</c> at
-    /// <c>parameter_id = 0</c> (the standard way the engine exposes any function's own return
-    /// type, CLR or T-SQL) keyed off <c>sys.objects.type = 'FS'</c> - the ordinary scalar-UDF
-    /// return-type table (<see cref="DatabaseCatalog.AddScalarFunctionReturnType"/>) is otherwise
-    /// populated only from a parsed <c>CREATE FUNCTION</c> body, which a CLR function has none of.
-    /// Unlike <c>sys.columns</c>, <c>sys.parameters</c> carries no <c>collation_name</c> column
-    /// at all (verified against the real engine - querying one throws "Invalid column name"), so
-    /// <paramref name="databaseDefaultCollationName"/> is used for any string-family return type
-    /// instead. This is not a guess: a SQLCLR scalar function has no way to declare a COLLATE on
-    /// its own return value, so its string output collation is always the connected database's
-    /// default - oracle-verified directly (<c>sys.dm_exec_describe_first_result_set</c> against a
-    /// real deployed CLR scalar function returning nvarchar reported exactly the database's own
-    /// default collation, nothing else).
-    /// </summary>
-    private static async Task<List<(string QualifiedName, SqlType? ReturnType)>> ReadClrScalarFunctionReturnTypesAsync(
+private static async Task<List<(string QualifiedName, SqlType? ReturnType)>> ReadClrScalarFunctionReturnTypesAsync(
         SqlConnection connection, string? databaseDefaultCollationName, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -749,15 +627,7 @@ public sealed class LiveCatalogReader
         return result is bool isOn ? isOn : null;
     }
 
-    /// <summary>
-    /// Server-level <c>sys.configurations</c> option, distinct from the database-level
-    /// <c>RECURSIVE_TRIGGERS</c> option read by <see cref="ReadIsRecursiveTriggersEnabledAsync"/> -
-    /// see <see cref="DatabaseCatalog.IsNestedTriggersEnabled"/> for the oracle-confirmed
-    /// distinction. <c>value_in_use</c> (not <c>value</c>) is the running value - a changed
-    /// <c>value</c> only takes effect after <c>RECONFIGURE</c>, which <c>value_in_use</c> already
-    /// reflects.
-    /// </summary>
-    private static async Task<bool?> ReadIsNestedTriggersEnabledAsync(SqlConnection connection, CancellationToken cancellationToken)
+private static async Task<bool?> ReadIsNestedTriggersEnabledAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateReadOnlyCommand(
             "SELECT value_in_use FROM sys.configurations WHERE name = 'nested triggers';");
@@ -806,16 +676,7 @@ public sealed class LiveCatalogReader
         return aliases;
     }
 
-    /// <summary>
-    /// Roadmap Phase C2: <c>CREATE SYNONYM</c> is DDL a live scan never parses text for (a
-    /// synonym is metadata only, never a <c>sys.sql_modules</c> body <see cref="LiveModuleReader"/>
-    /// reads), so without this a synonym-qualified FROM-clause reference in a live-scanned
-    /// module always resolved "no known DDL", identically to a file-mode scan that happened to
-    /// omit the synonym's own script. <c>base_object_name</c> is the exact text as declared
-    /// (bracket-quoted or not, 1-4 parts) - parsed the same way any other schema object name in
-    /// this codebase is, rather than hand-rolling a second bracket-stripping normalizer.
-    /// </summary>
-    private static async Task<List<(string QualifiedName, string TargetQualifiedName)>> ReadSynonymsAsync(
+private static async Task<List<(string QualifiedName, string TargetQualifiedName)>> ReadSynonymsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -842,8 +703,7 @@ public sealed class LiveCatalogReader
         return synonyms;
     }
 
-    /// <summary>Parses a raw schema-object-name string (as `sys.synonyms.base_object_name` reports it) into the same qualified form <see cref="SchemaObjectNameHelper.Qualify"/> produces elsewhere, via a throwaway wrapper statement rather than a second hand-rolled bracket/part parser.</summary>
-    private static string? TryParseSchemaObjectName(string rawName)
+private static string? TryParseSchemaObjectName(string rawName)
     {
         var result = SqlScriptParser.ParseText("synonym-target", $"SELECT * FROM {rawName};");
         if (result.HasErrors || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { FromClause.TableReferences: [NamedTableReference namedTable] } }] }] })
@@ -968,23 +828,6 @@ public sealed class LiveCatalogReader
     private static async Task<Dictionary<int, List<CatalogIndex>>> ReadIndexesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
-        // LEFT JOINs to sys.index_columns/sys.columns, not the INNER JOINs every other reader in
-        // this file uses - a clustered COLUMNSTORE index (type_desc = 'CLUSTERED COLUMNSTORE')
-        // owns every column implicitly and has NO sys.index_columns rows of its own, so an INNER
-        // JOIN here would silently drop the whole index row. That would have been invisible
-        // before CatalogIndex.IsClustered existed (nothing looked for a clustered index's
-        // presence at all), but IndexDesignScanner's heap findings depend on it: a table whose
-        // only clustering is a CCI must never be misread as a heap because its one clustered
-        // index vanished from this list. ic.index_column_id/c.name are null for such a row - the
-        // loop below guards both.
-        // ds/pc join for docs/detection-checklist.md "Non-aligned index on a partitioned table" -
-        // ds.name only counts as a partition scheme when ds.type = 'PS' (a plain single-filegroup
-        // index's own data_space_id points at an 'FG' row instead, deliberately read as no scheme
-        // name at all rather than the filegroup's own name - see CatalogIndex.PartitionSchemeName's
-        // own doc comment); pc.name is the column at partition_ordinal = 1 for THIS index's own
-        // sys.index_columns rows, confirmed directly against the standing Docker instance
-        // (2026-08-20) to differ from the table's own partitioning column even when two indexes
-        // share the identical partition scheme object.
         const string sql = """
             SELECT i.object_id, i.index_id, i.name AS index_name, i.type_desc, i.is_unique,
                    i.is_primary_key, i.is_unique_constraint, i.has_filter, i.is_disabled,
@@ -1052,8 +895,6 @@ public sealed class LiveCatalogReader
 
         if (await reader.IsDBNullAsync(15, cancellationToken))
         {
-            // No sys.index_columns row at all (clustered columnstore) - the index row above
-            // was already recorded with empty key/included lists; nothing more to add.
             return;
         }
 
@@ -1065,9 +906,6 @@ public sealed class LiveCatalogReader
         }
         else
         {
-            // is_descending_key is meaningless (but non-null, always false) for an included
-            // column - only read it on the key-column branch, matching the shape KeyColumns
-            // itself already takes.
             var isDescending = reader.GetBoolean(16);
             row.KeyColumns.Add((reader.GetByte(12), columnName, isDescending));
         }
@@ -1117,16 +955,7 @@ public sealed class LiveCatalogReader
         return indexesByTable;
     }
 
-    /// <summary>
-    /// <c>sys.stats</c> - a distinct catalog view from <c>sys.indexes</c>: every index owns a
-    /// matching stats object implicitly, but the engine also auto-creates single-column stats
-    /// with no backing index at all, and <c>sys.stats</c> is the only place either kind's own
-    /// <c>no_recompute</c> flag lives. <c>docs/detection-checklist.md</c> "DBA-script family
-    /// sweep" §A "Statistics-object flags" - a stats object explicitly marked
-    /// <c>NORECOMPUTE</c> never gets its cardinality estimate refreshed by the engine's own
-    /// automatic maintenance, silently drifting stale as the table's data changes.
-    /// </summary>
-    private static async Task<Dictionary<int, List<CatalogStatisticsInfo>>> ReadStatisticsAsync(
+private static async Task<Dictionary<int, List<CatalogStatisticsInfo>>> ReadStatisticsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1179,19 +1008,7 @@ public sealed class LiveCatalogReader
         return statisticsByTable;
     }
 
-    /// <summary>
-    /// A table's own storage filegroup (name plus current read-only state), joined off its heap/
-    /// clustered-index row (<c>sys.indexes.index_id IN (0, 1)</c> - 0 is a heap, 1 is the clustered
-    /// index; a table has exactly one such row). Deliberately an INNER JOIN to
-    /// <c>sys.filegroups</c>, not a LEFT JOIN to <c>sys.data_spaces</c> the way
-    /// <see cref="ReadIndexesAsync"/>'s partition-scheme columns are: a PARTITIONED table's
-    /// heap/clustered-index row points at a partition SCHEME's own <c>data_space_id</c>, which
-    /// never appears in <c>sys.filegroups</c> at all, so the INNER JOIN naturally excludes
-    /// partitioned tables from this result rather than misreporting a partition scheme as a
-    /// filegroup name - see <see cref="CatalogTable.FilegroupName"/>'s own doc comment for why
-    /// that's the correct, deliberate scope limit.
-    /// </summary>
-    private static async Task<Dictionary<int, (string Name, bool IsReadOnly)>> ReadTableFilegroupsAsync(
+private static async Task<Dictionary<int, (string Name, bool IsReadOnly)>> ReadTableFilegroupsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1214,16 +1031,7 @@ public sealed class LiveCatalogReader
         return filegroupByTable;
     }
 
-    /// <summary>
-    /// The partition scheme a table's own heap/clustered-index row (<c>sys.indexes.index_id IN
-    /// (0, 1)</c>) belongs to - the partitioned-table counterpart to
-    /// <see cref="ReadTableFilegroupsAsync"/>'s non-partitioned case, joined against
-    /// <c>sys.partition_schemes</c> instead of <c>sys.filegroups</c> so the two queries never both
-    /// match the same table (a table's storage <c>data_space_id</c> is either a scheme or a
-    /// filegroup, never both). See <see cref="CatalogTable.PartitionSchemeName"/>'s own doc
-    /// comment.
-    /// </summary>
-    private static async Task<Dictionary<int, string>> ReadTablePartitionSchemesAsync(
+private static async Task<Dictionary<int, string>> ReadTablePartitionSchemesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1246,12 +1054,7 @@ public sealed class LiveCatalogReader
         return schemeByTable;
     }
 
-    /// <summary>
-    /// A partition scheme's static per-partition-number filegroup assignment
-    /// (<c>sys.destination_data_spaces</c>) - see <see cref="SilentScan.Core.Catalog.DatabaseCatalog.AddPartitionFilegroup"/>'s
-    /// own doc comment.
-    /// </summary>
-    private static async Task<List<(string SchemeName, int PartitionNumber, string FilegroupName)>> ReadPartitionFilegroupsAsync(
+private static async Task<List<(string SchemeName, int PartitionNumber, string FilegroupName)>> ReadPartitionFilegroupsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1273,14 +1076,7 @@ public sealed class LiveCatalogReader
         return results;
     }
 
-    /// <summary>
-    /// Tables carrying at least one legacy <c>CREATE RULE</c>/<c>sp_bindrule</c> column binding
-    /// (<c>sys.columns.rule_object_id &lt;&gt; 0</c>) - distinct from a modern CHECK constraint,
-    /// which is <see cref="CatalogCheckConstraint"/>'s own concern. Oracle-confirmed (2026-08-21)
-    /// as an <c>ALTER TABLE ... SWITCH</c> blocker - see <see cref="CatalogTable.HasRuleConstraint"/>'s
-    /// own doc comment.
-    /// </summary>
-    private static async Task<HashSet<int>> ReadRuleConstraintTablesAsync(
+private static async Task<HashSet<int>> ReadRuleConstraintTablesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1319,18 +1115,7 @@ public sealed class LiveCatalogReader
         return tables;
     }
 
-    /// <summary>
-    /// Tables carrying at least one CDC capture instance whose own <c>@allow_partition_switch</c>
-    /// was explicitly set to 0 (<c>cdc.change_tables.partition_switch = 0</c>) - oracle-confirmed
-    /// as an <c>ALTER TABLE ... SWITCH PARTITION</c> blocker for a genuinely partitioned table,
-    /// see <see cref="CatalogTable.CdcPartitionSwitchDisallowed"/>'s own doc comment. The
-    /// <c>cdc</c> schema only exists once CDC has been enabled for the current database at all
-    /// (<c>sp_cdc_enable_db</c>) - querying <c>cdc.change_tables</c> on a database that never
-    /// enabled CDC would fail outright, so this checks <c>sys.databases.is_cdc_enabled</c> first
-    /// and returns an empty set without querying further when it's off (the overwhelming common
-    /// case).
-    /// </summary>
-    private static async Task<HashSet<int>> ReadCdcPartitionSwitchDisallowedTablesAsync(
+private static async Task<HashSet<int>> ReadCdcPartitionSwitchDisallowedTablesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string isCdcEnabledSql = "SELECT is_cdc_enabled FROM sys.databases WHERE database_id = DB_ID();";
@@ -1381,35 +1166,14 @@ public sealed class LiveCatalogReader
         bool IsDisabled,
         List<(int Ordinal, string Name, bool IsDescending)> KeyColumns,
         List<string> IncludedColumns,
-        // Only ReadIndexesAsync's own query reads is_hypothetical - ReadIndexedViewsAsync shares
-        // this same row shape but never sets it (an indexed view's own index is never a DTA/
-        // missing-index-wizard hypothetical row), so it defaults to false rather than every other
-        // caller needing to pass it explicitly.
         bool IsHypothetical = false,
-        // Same reasoning as IsHypothetical above - only ReadIndexesAsync's own query reads
-        // filter_definition; ReadIndexedViewsAsync never sets it.
         string? FilterDefinition = null,
-        // Same reasoning again - only ReadIndexesAsync's own query reads
-        // optimize_for_sequential_key; ReadIndexedViewsAsync never sets it (an indexed view's own
-        // clustered index is never the "monotonic clustered key" shape this field exists for).
         bool OptimizeForSequentialKey = false,
-        // Same reasoning again - only ReadIndexesAsync's own query reads the partition-scheme/
-        // partitioning-column pair; ReadIndexedViewsAsync never sets either (an indexed view is
-        // never itself a partitioned base table).
         string? PartitionSchemeName = null,
         string? PartitioningColumnName = null,
         bool IgnoreDupKey = false);
 
-    /// <summary>
-    /// The same shape as <see cref="ReadIndexesAsync"/>, joined against <c>sys.views</c> instead
-    /// of <c>sys.tables</c> (docs/detection-checklist.md Tier 1 "SET options that silently
-    /// disable plan features" - both the QUOTED_IDENTIFIER/NUMERIC_ROUNDABORT and ARITHABORT
-    /// sub-rules need to know whether a query touches an indexed view). A view's own real
-    /// clustered index (created via <c>CREATE UNIQUE CLUSTERED INDEX ... ON dbo.SomeView</c>) is
-    /// the one thing that makes it "indexed" at all - an ordinary view has no
-    /// <c>sys.indexes</c> row of its own.
-    /// </summary>
-    private static async Task<Dictionary<string, IReadOnlyList<CatalogIndex>>> ReadIndexedViewsAsync(
+private static async Task<Dictionary<string, IReadOnlyList<CatalogIndex>>> ReadIndexedViewsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1459,9 +1223,6 @@ public sealed class LiveCatalogReader
             }
             else
             {
-                // This query never reads is_descending_key - indexed views don't participate in
-                // the merge-candidate check that field exists for, so IsDescending is always false
-                // here rather than a real value.
                 row.KeyColumns.Add((reader.GetByte(10), columnName, false));
             }
         }
@@ -1483,19 +1244,7 @@ public sealed class LiveCatalogReader
         return indexesByView;
     }
 
-    /// <summary>
-    /// Every user view's own <c>sys.columns</c> row set, in <c>column_id</c> order - the engine's
-    /// real, currently-cached column list for the view object (docs/detection-checklist.md
-    /// "Second full-archive practitioner sweep" §G: "View defined with SELECT * whose compiled
-    /// column list has gone stale against the base table's current shape"). A view has its own
-    /// real <c>sys.columns</c> rows exactly like a table does - this is a separate query from
-    /// <see cref="ReadColumnsAsync"/> (which joins <c>sys.tables</c>, not <c>sys.views</c>) rather
-    /// than folding views into that same read, since a view's columns are never attached to a
-    /// <see cref="CatalogTable"/> in this codebase's model (mirrors <see cref="ReadIndexedViewsAsync"/>'s
-    /// own reasoning for keeping an indexed view's index shape as a side-registry rather than a
-    /// <see cref="CatalogTable"/> row).
-    /// </summary>
-    private static async Task<List<(string QualifiedName, List<string> ColumnNames)>> ReadViewCompiledColumnsAsync(
+private static async Task<List<(string QualifiedName, List<string> ColumnNames)>> ReadViewCompiledColumnsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """

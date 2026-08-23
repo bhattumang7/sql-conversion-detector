@@ -52,11 +52,6 @@ public sealed class DynamicSqlSummaryTests
     [Fact]
     public void From_MultipleAssembliesFromSameCallSite_CountsOneCallSiteNotOnePerAssembly()
     {
-        // Branch-fold coverage (roadmap "trace dynamic SQL across IF/ELSE branches") reports one
-        // AnalyzedLiteral finding per possible constant assembly - all sharing the same
-        // (SourcePath, Line, Column) call site. The summary must count distinct call sites, not
-        // raw findings, or "% of call sites analyzed" would be inflated by however many
-        // assemblies a single site happened to fold to.
         var findings = new[]
         {
             new DynamicSqlFinding("a.sql", 10, 5, DynamicSqlOutcome.AnalyzedLiteral, null),
@@ -77,8 +72,6 @@ public sealed class DynamicSqlSummaryTests
     [Fact]
     public void From_RepeatedUnanalyzableAtSameCallSite_ReasonCountedOncePerSite()
     {
-        // Guards the reason-count grouping specifically: even if the same call site somehow
-        // reports Unanalyzable more than once, its reason must not be double-counted.
         var findings = new[]
         {
             new DynamicSqlFinding("a.sql", 10, 5, DynamicSqlOutcome.Unanalyzable, "goto-or-label-in-scope"),

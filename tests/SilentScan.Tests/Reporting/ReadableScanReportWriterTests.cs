@@ -10,23 +10,10 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Reporting;
 
-/// <summary>
-/// The readable report is the output most readers will ever see, so what it must not do is lose
-/// or soften anything the JSON carries: a scan-forced finding has to arrive with its location,
-/// its base column, whether that column is indexed and which view layer introduced the mismatch;
-/// a seek-preserving comparison must stay out of the findings entirely; and the sections that
-/// state what the scan could NOT establish have to survive into it rather than being trimmed as
-/// noise.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ReadableScanReportWriterTests
 {
-    /// <summary>
-    /// A varchar column reached through two view layers and compared with an nvarchar parameter
-    /// (the column converts, the seek is lost), a seek-preserving comparison in the other
-    /// direction, and an unrelated clean predicate to keep the base rate honest.
-    /// </summary>
-    private const string LayeredSql = """
+private const string LayeredSql = """
         CREATE TABLE dbo.Orders (
             OrderId INT NOT NULL PRIMARY KEY,
             OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
@@ -77,7 +64,6 @@ public sealed class ReadableScanReportWriterTests
         var report = await Build(LayeredSql);
         var rendered = Render(report);
 
-        // The nvarchar-column-vs-varchar-value comparison converts the value, not the column.
         Assert.Equal(1, report.TypedPredicateSummary.SeekPreservedCount);
         Assert.DoesNotContain("dbo.Orders.Notes", rendered, StringComparison.Ordinal);
         Assert.Contains("of which 1 keep their seek", rendered, StringComparison.Ordinal);
@@ -115,8 +101,6 @@ public sealed class ReadableScanReportWriterTests
     {
         var report = await Build(LayeredSql);
 
-        // No verbosity argument - the real default. A ScanForced finding is the entire point of
-        // this tool, so brief mode must never touch it, unlike the coverage/caveat sections.
         var rendered = ReadableScanReportWriter.Write(report, "SilentScan - test", ReadableStyle.Text)
             .ReplaceLineEndings("\n");
 
@@ -135,8 +119,6 @@ public sealed class ReadableScanReportWriterTests
         Assert.True(parsed.HasErrors);
         var report = ScanReportBuilder.BuildFromParseResults([parsed], new DatabaseCatalog());
 
-        // No verbosity argument at all - exercises the real default a caller who never heard of
-        // the flag gets, not an explicit Brief request.
         var rendered = ReadableScanReportWriter.Write(report, "SilentScan - test", ReadableStyle.Text)
             .ReplaceLineEndings("\n");
 
@@ -245,8 +227,6 @@ public sealed class ReadableScanReportWriterTests
 
         var rendered = ReadableScanReportWriter.Write(report, "t", ReadableStyle.Text, "/src/app");
 
-        // The whole path survives - trimming a prefix that stops mid-segment would leave
-        // "lication/shop.sql", a path that points at nothing.
         Assert.Contains("/src/application/shop.sql:", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("  lication/shop.sql", rendered, StringComparison.Ordinal);
     }
@@ -254,10 +234,6 @@ public sealed class ReadableScanReportWriterTests
     [Fact]
     public void ExpressionDerivedFindings_TheOnesWithARealIndexUnderneathComeFirst()
     {
-        // The indexed finding's path sorts AFTER the non-indexed one alphabetically - if the
-        // section were still just SourcePath/Line ordered, "a_notindexed.sql" would print first.
-        // Indexed-first must override that path ordering for the test to actually prove the sort
-        // is indexed-first rather than merely reproducing alphabetical path order.
         var indexed = new ExpressionDerivedFinding(
             "Col", "z_indexed.sql", 10, 1, [], [new UnderlyingBaseColumn("dbo.T1", "Col1", Indexed: true)]);
         var notIndexed = new ExpressionDerivedFinding(
@@ -284,16 +260,7 @@ public sealed class ReadableScanReportWriterTests
             "the finding with a real index underneath its expression must print before the one with none, regardless of source path order");
     }
 
-    /// <summary>
-    /// A minimal, hand-built report carrying one ScanForced finding at <paramref name="sourcePath"/>
-    /// - the path-trimming behavior under test lives entirely in
-    /// <see cref="ReadableScanReportWriter"/>'s own presentation logic over whatever SourcePath a
-    /// finding carries, not in how that finding's type was inferred, so there is nothing gained by
-    /// routing it through a real deployment (whose live-mode source paths are module qualified
-    /// names, not file paths, and could never carry an arbitrary path like "/repo/sql/shop.sql" in
-    /// the first place).
-    /// </summary>
-    private static ScanReport ReportWithFindingAt(string sourcePath) => new(
+private static ScanReport ReportWithFindingAt(string sourcePath) => new(
         new ParseHealthReport([]),
             [],
         [new TypedPredicateFinding(

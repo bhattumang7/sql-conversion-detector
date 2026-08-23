@@ -3,12 +3,6 @@ using SilentScan.Verify;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// docs/audit-remediation-plan.md Phase 5.3, audit finding C4: "Confirm each against the
-/// oracle before encoding." Locks in the exact facts <see cref="TypeInference.LiteralTypeResolver"/>
-/// relies on, queried via sys.dm_exec_describe_first_result_set (no deployed schema needed -
-/// it type-checks a literal SELECT without executing it against any table).
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LiteralTypingOracleTests
 {
@@ -41,8 +35,6 @@ public sealed class LiteralTypingOracleTests
     [Fact]
     public async Task IntMaxValuePlusOneIntegerValuedLiteral_TypesAsDecimalNotBigInt()
     {
-        // Contrary to the commonly-cited "int -> bigint -> decimal" precedence folklore the
-        // original audit finding assumed.
         var (type, precision, scale) = await DescribeLiteralType("2147483648");
 
         Assert.Equal("numeric", type);
@@ -68,10 +60,6 @@ public sealed class LiteralTypingOracleTests
         Assert.Equal("int", type);
     }
 
-    // sys.dm_exec_describe_first_result_set can't describe a bare empty-string literal (its
-    // system_type_name/precision/scale columns come back NULL for it), so this uses
-    // SQL_VARIANT_PROPERTY instead - CAST(x AS sql_variant) preserves the literal's own
-    // inferred type, which SQL_VARIANT_PROPERTY('MaxLength') then reports in bytes.
     private async Task<int> EmptyStringLiteralMaxLengthBytes(string literalExpression)
     {
         await using var connection = new SqlConnection(_options.BuildConnectionString());
@@ -85,14 +73,12 @@ public sealed class LiteralTypingOracleTests
     [Fact]
     public async Task EmptyStringLiteral_TypesWithLengthOneNotZero()
     {
-        // varchar(1): 1 byte per character.
         Assert.Equal(1, await EmptyStringLiteralMaxLengthBytes("''"));
     }
 
     [Fact]
     public async Task EmptyNationalStringLiteral_TypesWithLengthOneNotZero()
     {
-        // nvarchar(1): 2 bytes per character.
         Assert.Equal(2, await EmptyStringLiteralMaxLengthBytes("N''"));
     }
 }

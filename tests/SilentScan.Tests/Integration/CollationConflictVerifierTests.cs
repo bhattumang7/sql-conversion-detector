@@ -5,12 +5,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Roadmap Phase E3: exercises <see cref="CollationConflictVerifier"/> end-to-end against the
-/// real oracle - closes the gap where CollationConflictFinding had zero presence in the corpus
-/// verify pipeline (only ad-hoc unit-level typing tests confirmed the classifier's own logic,
-/// never that the resulting comparison genuinely fails to compile against a real engine).
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class CollationConflictVerifierTests : IAsyncLifetime
 {
@@ -60,8 +54,6 @@ public sealed class CollationConflictVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_SameCollationOnBothColumns_IsNotConfirmed()
     {
-        // A negative control: two columns sharing the same collation compile fine - proves the
-        // probe itself isn't just always failing for some unrelated reason.
         var finding = new CollationConflictFinding(
             "dbo.CC1", "Code", "SQL_Latin1_General_CP1_CI_AS",
             "dbo.CC3", "Code", "SQL_Latin1_General_CP1_CI_AS",

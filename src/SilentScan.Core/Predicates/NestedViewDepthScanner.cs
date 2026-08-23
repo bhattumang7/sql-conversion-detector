@@ -2,7 +2,6 @@ using SilentScan.Core.Lineage;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>Catalog/lineage-only pass over an already-built <see cref="ViewExpansionMap"/> - no AST walking of its own, mirrors <see cref="MaxTypedColumnScanner"/>'s own "walk a precomputed map, no per-file scan" shape.</summary>
 public static class NestedViewDepthScanner
 {
     public const int DepthThreshold = 2;

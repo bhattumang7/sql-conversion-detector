@@ -6,11 +6,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Roadmap Phase E3: exercises <see cref="ExpressionDerivedVerifier"/> end-to-end against the
-/// real oracle - closes the gap where <see cref="ExpressionDerivedFinding"/> had zero oracle
-/// presence at all.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ExpressionDerivedVerifierTests : IAsyncLifetime
 {
@@ -71,9 +66,6 @@ public sealed class ExpressionDerivedVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_BareUnderlyingColumnQueriedDirectly_IsNotConfirmed()
     {
-        // Negative control: querying the real base table's own column directly (bypassing the
-        // CAST) DOES seek through its index - proves the plan-shape signal actually distinguishes
-        // the expression-derived case from an ordinary indexed comparison.
         var finding = Finding(
             "CustomerId",
             [new UnderlyingBaseColumn("dbo.Orders", "CustomerId", Indexed: true)],
@@ -116,8 +108,6 @@ public sealed class ExpressionDerivedVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_NoImmediateRelation_ReturnsNotProbeable()
     {
-        // Mirrors an inline derived table/CTE - no real, independently queryable object to
-        // target, so this must not guess a fallback.
         var finding = Finding(
             "CustomerIdStr",
             [new UnderlyingBaseColumn("dbo.Orders", "CustomerId", Indexed: true)],

@@ -4,26 +4,9 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Verify.Oracle;
 
-/// <summary>
-/// Builds a self-authored, compile-only probe for a <see cref="TvfFenceFinding"/>
-/// (docs/detection-checklist.md Tier 1 #2). Never reproduces the source predicate's own
-/// arguments (a correlated APPLY's argument references an outer row the probe has no scope for)
-/// - every function-call kind gets a fresh, dummy <c>CAST(NULL AS type)</c> argument list instead
-/// (mirroring <see cref="CorpusFindingProbeBuilder"/>'s identical reasoning: a dummy value is
-/// never itself compared against anything, only its ability to compile matters), which also
-/// means the probe checks the underlying function's OWN fence-ness independent of how any one
-/// call site happens to invoke it - exactly the property the finding claims.
-/// </summary>
 public static class TvfFenceProbeBuilder
 {
-    /// <summary>
-    /// Builds <c>SELECT * FROM [schema].[fn](args...);</c> for every kind except
-    /// <see cref="TvfFenceFindingKind.InsertExec"/> (see <see cref="BuildInsertExecProbe"/>) -
-    /// <paramref name="parameterTypes"/> is the function's own resolved parameter list
-    /// (<see cref="FunctionParameterReader"/>), null when it couldn't be resolved at all (an
-    /// unrenderable parameter type, or the function no longer exists under this exact name).
-    /// </summary>
-    public static string? BuildFunctionProbe(TvfFenceFinding finding, IReadOnlyList<SqlType>? parameterTypes)
+public static string? BuildFunctionProbe(TvfFenceFinding finding, IReadOnlyList<SqlType>? parameterTypes)
     {
         if (finding.Kind == TvfFenceFindingKind.InsertExec || finding.FunctionQualifiedName is not { } qualifiedName || parameterTypes is null)
         {
@@ -45,17 +28,7 @@ public static class TvfFenceProbeBuilder
         return $"SELECT * FROM {BracketQualifiedName(qualifiedName)}({string.Join(", ", arguments)});";
     }
 
-    /// <summary>
-    /// Builds <c>DECLARE @t TABLE(...); INSERT INTO @t EXEC [schema].[proc](args...);</c> for
-    /// <see cref="TvfFenceFindingKind.InsertExec"/> - <paramref name="resultColumns"/> is the
-    /// procedure's own described first result set (<see cref="ProcedureResultColumnReader"/>),
-    /// which the receiving table variable's column COUNT must match at compile time regardless of
-    /// what values ever flow through it; <paramref name="parameterTypes"/> is the procedure's own
-    /// resolved parameter list (<see cref="ProcedureParameterReader"/>), same dummy-argument
-    /// reasoning as <see cref="BuildFunctionProbe"/>. Either being null (unrenderable/undescribable)
-    /// makes this unprobeable.
-    /// </summary>
-    public static string? BuildInsertExecProbe(TvfFenceFinding finding, IReadOnlyList<SqlType>? resultColumns, IReadOnlyList<SqlType>? parameterTypes)
+public static string? BuildInsertExecProbe(TvfFenceFinding finding, IReadOnlyList<SqlType>? resultColumns, IReadOnlyList<SqlType>? parameterTypes)
     {
         if (finding.Kind != TvfFenceFindingKind.InsertExec
             || finding.ReferencedObjectQualifiedName is not { } procedureQualifiedName
@@ -96,13 +69,7 @@ public static class TvfFenceProbeBuilder
             """;
     }
 
-    /// <summary>
-    /// The dummy, parameterless probe text <see cref="ProcedureResultColumnReader"/> describes -
-    /// <c>EXEC [schema].[proc](args...);</c>, built once from the SAME resolved parameter types
-    /// the real probe uses, so the described shape and the probe's own compiled shape can never
-    /// disagree about how many arguments the procedure takes.
-    /// </summary>
-    public static string? BuildExecDescribeProbe(string procedureQualifiedName, IReadOnlyList<SqlType> parameterTypes)
+public static string? BuildExecDescribeProbe(string procedureQualifiedName, IReadOnlyList<SqlType> parameterTypes)
     {
         var arguments = new List<string>(parameterTypes.Count);
         foreach (var type in parameterTypes)

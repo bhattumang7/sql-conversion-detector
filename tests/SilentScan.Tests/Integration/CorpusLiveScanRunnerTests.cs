@@ -5,18 +5,6 @@ using SilentScan.Verify;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// End-to-end proof of the roadmap item "make the corpus catalog engine-authoritative: deploy
-/// DDL to Docker, read schema back" - <see cref="CorpusLiveScanRunner"/> deploys a small
-/// synthetic repo's own files (not a manifest fixture string, real files on disk, matching how
-/// a real corpus repo's clone looks) to a disposable database, reads the catalog and module text
-/// back from the engine, and reports findings that map back to those same real files. Unlike
-/// <see cref="LiveScanRunnerTests"/> (a pre-existing live database, no deployment step at all),
-/// this specifically exercises the deployment side: the stub-then-ALTER pattern real corpora
-/// use (First Responder Kit's every sp_Blitz*.sql file) and the CREATE-OR-ALTER rewrite
-/// (<c>ScriptDeployer.RewriteAlterToCreateOrAlter</c>) that makes it deployable without ever
-/// running the stub's own dynamic SQL.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class CorpusLiveScanRunnerTests : IDisposable
 {
@@ -51,10 +39,6 @@ public sealed class CorpusLiveScanRunnerTests : IDisposable
                 INDEX IX_OrderCode (OrderCode));
             """);
 
-        // The real-world stub-then-ALTER pattern (First Responder Kit's every sp_Blitz*.sql
-        // file): the stub's own EXEC(...) is never executed (whitelist), so without the
-        // CREATE-OR-ALTER rewrite this ALTER would fail with "Invalid object name" - the object
-        // genuinely never got created.
         WriteFile("Procedures/usp_FindOrder.sql", """
             IF OBJECT_ID('dbo.usp_FindOrder') IS NULL EXEC('CREATE PROCEDURE dbo.usp_FindOrder AS RETURN 0');
             GO
@@ -76,18 +60,12 @@ public sealed class CorpusLiveScanRunnerTests : IDisposable
         Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
         Assert.True(finding.Column.Indexed);
 
-        // The whole point of this roadmap item: the finding's source path is the REAL repo
-        // file, not a synthetic "database:object" placeholder - CLAUDE.md: "Corpus findings
-        // still map back to the defining repo file, since the study cites repos."
         Assert.Equal(Path.Combine(_repoRoot, "Procedures", "usp_FindOrder.sql"), finding.SourcePath);
     }
 
     [Fact]
     public async Task RunAsync_TempTableInsideProcedureBody_ResolvedAsCatalogExtra()
     {
-        // Engine metadata alone knows nothing about a temp table declared inside a proc body -
-        // only MergeFileModeExtras (built from the POST-DEPLOYMENT module text, exactly like
-        // LiveScanRunner's own pattern) can resolve it.
         WriteFile("Procedures/usp_BuildReport.sql", """
             CREATE PROCEDURE dbo.usp_BuildReport AS
             BEGIN
@@ -106,14 +84,7 @@ public sealed class CorpusLiveScanRunnerTests : IDisposable
         Assert.Equal("#Report", finding.Column.TableQualifiedName);
     }
 
-    /// <summary>
-    /// ModuleParseHealth (the POST-DEPLOYMENT reparse of every module this scan actually
-    /// analyzed) must survive independently of Report.ParseHealth (the PRE-DEPLOYMENT file-level
-    /// dialect-sniffing signal) - previously the module-derived health was silently overwritten
-    /// by the file-level one, so a module that deployed but failed to reparse from
-    /// sys.sql_modules would vanish from every report section with no trace.
-    /// </summary>
-    [Fact]
+[Fact]
     public async Task RunAsync_ModuleParseHealth_IsIndependentOfFileLevelHealth()
     {
         WriteFile("Tables/Orders.sql", "CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY);");
@@ -127,8 +98,6 @@ public sealed class CorpusLiveScanRunnerTests : IDisposable
         var repo = BuildRepo(nameof(RunAsync_ModuleParseHealth_IsIndependentOfFileLevelHealth));
         var result = await CorpusLiveScanRunner.RunAsync(repo, _repoRoot, SqlServerOptions.LocalDocker);
 
-        // One deployed module (usp_GetOrder) reparsed cleanly from sys.sql_modules; two source
-        // files (Orders.sql, usp_GetOrder.sql) reflected in the separate file-level signal.
         Assert.Single(result.ModuleParseHealth.Files);
         Assert.Empty(result.ModuleParseHealth.Files[0].Errors);
         Assert.True(result.ModuleParseHealth.PassesDialectSniffing);

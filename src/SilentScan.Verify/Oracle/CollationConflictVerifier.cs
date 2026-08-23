@@ -3,14 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Verify.Oracle;
 
-/// <summary>
-/// Roadmap Phase E3: oracle-confirms a <see cref="CollationConflictFinding"/> the same way
-/// every other finding stream is confirmed - a self-authored probe compiled against the corpus
-/// repo's own deployed DDL - but the signal here is different in kind: the finding's whole claim
-/// is that the probe does NOT compile at all (SQL Server error 468), not a plan-shape fact about
-/// one that does. Compile-only (SET SHOWPLAN_XML ON): the collation-conflict compile error fires
-/// during compilation itself, before any plan would be produced, so nothing ever executes.
-/// </summary>
 public sealed class CollationConflictVerifier
 {
     private const int CollationConflictErrorNumber = 468;

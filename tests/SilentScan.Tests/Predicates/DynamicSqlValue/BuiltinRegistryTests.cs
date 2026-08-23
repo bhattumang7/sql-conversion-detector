@@ -5,12 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates.DynamicSqlValue;
 
-/// <summary>
-/// Table-driven coverage of <see cref="BuiltinRegistry"/> - the replacement for the old scanner's
-/// ten <c>TryFold*</c> methods (docs/dynamic-sql-rebuild-plan.md Phase 2). Every guard and reason
-/// string ported from the old code is exercised here: one literal-args case proving the value
-/// fold, one case per decline guard, and one hole-transfer case proving the type carries through.
-/// </summary>
 public sealed class BuiltinRegistryTests
 {
     private static readonly SourceSpan Site = new("test.sql", 10, 5);
@@ -167,8 +161,6 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Replace_CollationSensitiveMatch_Declines()
     {
-        // 'AbcABC' replacing 'abc' differs between ordinal and ordinal-ignore-case - oracle-verified
-        // collation-sensitive case from the old scanner's own TryFoldReplace doc comment.
         var result = BuiltinRegistry.Fold(Call(
             "REPLACE", new BuiltinArgument.Text("AbcABC"), new BuiltinArgument.Text("abc"), new BuiltinArgument.Text("X")));
 
@@ -200,7 +192,6 @@ public sealed class BuiltinRegistryTests
             "REPLACE", new BuiltinArgument.Text("a-b-c"), new BuiltinArgument.Text("-"), new BuiltinArgument.Hole(NVarChar50, HoleKind.UntypedParameter)));
 
         var ok = Assert.IsType<BuiltinFoldResult.Ok>(result);
-        // "a" HOLE "b" HOLE "c" - three literal parts, two spliced holes.
         Assert.Equal(5, ok.Pieces.Count);
         Assert.Equal("a", ((TemplatePiece.Lit)ok.Pieces[0]).Text);
         Assert.IsType<TemplatePiece.Hole>(ok.Pieces[1]);
@@ -221,7 +212,6 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Replicate_AllLiteral_RepeatsInputCountTimes()
     {
-        // Oracle-verified: REPLICATE('ab', 3) = 'ababab'.
         var result = BuiltinRegistry.Fold(Call("REPLICATE", new BuiltinArgument.Text("ab"), new BuiltinArgument.Number(3)));
 
         Assert.Equal("ababab", OkText(result));
@@ -230,7 +220,6 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Replicate_ZeroCount_ProducesEmptyString()
     {
-        // Oracle-verified: REPLICATE('ab', 0) = '' (not NULL, not an error).
         var result = BuiltinRegistry.Fold(Call("REPLICATE", new BuiltinArgument.Text("ab"), new BuiltinArgument.Number(0)));
 
         Assert.Equal(string.Empty, OkText(result));
@@ -239,7 +228,6 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Replicate_NegativeCount_Declines()
     {
-        // Oracle-verified: REPLICATE('ab', -1) = SQL NULL, which this domain has no representation for.
         var result = BuiltinRegistry.Fold(Call("REPLICATE", new BuiltinArgument.Text("ab"), new BuiltinArgument.Number(-1)));
 
         Assert.Equal("non-literal-expression:replicate-negative-count", FailReason(result));
@@ -265,7 +253,6 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Reverse_AllLiteral_ReversesCharacterOrder()
     {
-        // Oracle-verified: REVERSE('abc') = 'cba'.
         var result = BuiltinRegistry.Fold(Call("REVERSE", new BuiltinArgument.Text("abc")));
 
         Assert.Equal("cba", OkText(result));
@@ -313,8 +300,7 @@ public sealed class BuiltinRegistryTests
         Assert.Equal(258, hole.Type.Length);
     }
 
-    /// <summary>Oracle-verified (SQL Server accepts parenthesis/angle-bracket/brace pairs as QUOTENAME delimiters beyond the bracket/quote pairs, and treats an empty-string delimiter the same as omitting it entirely - defaults to brackets).</summary>
-    [Theory]
+[Theory]
     [InlineData("(", "(abc)")]
     [InlineData("<", "<abc>")]
     [InlineData("{", "{abc}")]
@@ -326,8 +312,7 @@ public sealed class BuiltinRegistryTests
         Assert.Equal(expected, OkText(result));
     }
 
-    /// <summary>Oracle-verified: an occurrence of the delimiter's own CLOSING character inside the input doubles, for every delimiter pair - not just the default brackets.</summary>
-    [Theory]
+[Theory]
     [InlineData("(", "a)b", "(a))b)")]
     [InlineData("<", "a>b", "<a>>b>")]
     [InlineData("{", "a}b", "{a}}b}")]
@@ -382,9 +367,6 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Str_ConcreteFloatExpr_StillDeclines()
     {
-        // STR never models the actual numeric-rendering algorithm - even a concrete (non-hole)
-        // input has no fold, matching the old scanner's TryFoldStr always falling through to
-        // FailNonLiteralExpression when the source isn't a pure placeholder.
         var result = BuiltinRegistry.Fold(Call("STR", new BuiltinArgument.Text("3.14")));
 
         Assert.Equal("non-literal-expression:function-call", FailReason(result));
@@ -410,14 +392,7 @@ public sealed class BuiltinRegistryTests
         Assert.Equal(HoleKind.NonDeterministicTyped, hole.Kind);
     }
 
-    /// <summary>
-    /// SERVERPROPERTY's own return type (sql_variant) is a hard T-SQL guarantee regardless of
-    /// which property name is requested - only the VALUE depends on the server/session
-    /// environment, so this now degrades to a typed hole (EnvironmentDependent, not
-    /// NonDeterministicTyped: the SAME call on the SAME server always returns the SAME value,
-    /// unlike NEWID/GETDATE) instead of declining outright.
-    /// </summary>
-    [Fact]
+[Fact]
     public void ServerProperty_ProducesEnvironmentDependentTypedHole()
     {
         var withArg = OkHole(BuiltinRegistry.Fold(Call("SERVERPROPERTY", new BuiltinArgument.Text("ServerName"))));
@@ -429,14 +404,7 @@ public sealed class BuiltinRegistryTests
         Assert.Equal(HoleKind.EnvironmentDependent, withoutArg.Kind);
     }
 
-    /// <summary>
-    /// Oracle-verified (sys.dm_exec_describe_first_result_set, compat 160): every one of these
-    /// session/environment name-lookup builtins returns a fixed nvarchar(128) - ORIGINAL_LOGIN()
-    /// alone is nvarchar(4000) - regardless of arguments, since they read session/server state
-    /// this scanner could never have folded from source text. Same EnvironmentDependent treatment
-    /// as SERVERPROPERTY: a real T-SQL guarantee on the TYPE, never the VALUE.
-    /// </summary>
-    [Theory]
+[Theory]
     [InlineData("DB_NAME", 128)]
     [InlineData("USER_NAME", 128)]
     [InlineData("SUSER_SNAME", 128)]
@@ -485,7 +453,6 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void FoldCastOrConvert_CharTarget_ConcreteSource_ShorterThanLength_BlankPadsToTarget()
     {
-        // Oracle-verified: CAST('ab' AS CHAR(5)) = 'ab   ' (padded to exactly 5 with trailing spaces).
         var target = new SqlType(SqlTypeCategory.Char, Length: 5);
 
         var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Text("ab"), Site);
@@ -496,7 +463,6 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void FoldCastOrConvert_CharTarget_ConcreteSource_LongerThanLength_Truncates()
     {
-        // Oracle-verified: CAST('abcdef' AS CHAR(5)) = 'abcde' (truncated, no padding needed).
         var target = new SqlType(SqlTypeCategory.Char, Length: 5);
 
         var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Text("abcdef"), Site);
@@ -517,8 +483,6 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void FoldCastOrConvert_CharTarget_ConcreteSource_NoExplicitLength_DeclinesRatherThanGuessingDefault()
     {
-        // A bare CHAR (no explicit length) resolves with Length: null - this scanner does not
-        // independently pin T-SQL's own default length (30), so it declines rather than guess it.
         var target = new SqlType(SqlTypeCategory.Char);
 
         var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Text("ab"), Site);
@@ -541,14 +505,6 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void FoldCastOrConvert_VarCharTarget_UnresolvedSource_StillTransfersTargetTypeAnyway()
     {
-        // The source being totally unresolvable (a MIXED literal+hole template, a Choice, ...)
-        // only ever blocks computing the exact rendered VALUE - CAST/CONVERT's own RESULT TYPE is
-        // pinned by the call site's own syntax regardless, the same hard fact that already lets a
-        // clean Hole source transfer its type. Found auditing a real production database: this
-        // was previously the single largest contributor to "symbolic-value-in-function-argument"
-        // (CAST(@predicate AS VARCHAR(n)) where @predicate is built from mixed literal/parameter
-        // concatenation) - the whole containing dynamic-SQL statement declined outright even
-        // though the CAST's own type was never actually in question.
         var target = new SqlType(SqlTypeCategory.VarChar, Length: 200);
 
         var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Unresolved("symbolic-value-in-function-argument", Site), Site);

@@ -4,17 +4,9 @@ using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Reporting;
 
-/// <summary>
-/// One row per rule this tool can produce (docs/detection-checklist.md's "Machine-readable rule
-/// catalog" item) - single source of truth for id/rationale/fix-guidance/example, feeding both
-/// SARIF's `rules` block (SarifRuleCatalog projects this) and the generated docs/rules.html page.
-/// Confidence-suffixed SARIF rule id variants (medium-confidence/low-confidence) are generated
-/// mechanically from these base entries elsewhere (SarifRuleCatalog.RuleId) - not duplicated here.
-/// </summary>
 public sealed record RuleDefinition(string Id, string Rationale, string? FixGuidance = null, IReadOnlyList<string>? ExampleFixturePaths = null)
 {
-    /// <summary>The rule's own fixture paths, or an empty list for a rule the catalog carries no example for - never null, so a page renderer never has to null-check before iterating.</summary>
-    public IReadOnlyList<string> Examples => ExampleFixturePaths ?? [];
+public IReadOnlyList<string> Examples => ExampleFixturePaths ?? [];
 }
 
 public static class RuleCatalog

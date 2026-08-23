@@ -5,14 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates.DynamicSqlValue;
 
-/// <summary>
-/// Exercises the <see cref="SqlTextValue"/> lattice operations directly - the replacement for
-/// the old scanner's <c>FoldState</c>/<c>LiteralSegment</c> model (docs/dynamic-sql-rebuild-plan.md
-/// Phase 1). Each test targets one property the design depends on: <see cref="SqlTextValue.Concat"/>
-/// never distributes a Choice, <see cref="SqlTextValue.Join"/> only ever recovers a type from each
-/// side's own declared type, <see cref="SqlTextValue.Widen"/> is idempotent and only ever loses
-/// precision, and <see cref="SqlTextValue.Expand"/> produces the exact cartesian product.
-/// </summary>
 public sealed class SqlTextValueTests
 {
     private static readonly SourceSpan Origin = new("test.sql", 1, 1);
@@ -98,9 +90,6 @@ public sealed class SqlTextValueTests
     [Fact]
     public void Concat_TaintedOperandWithNoDeclaredType_StillAbsorbsWithoutBecomingAHole()
     {
-        // Same shape as Concat_TaintedRightOperandWithDeclaredType_* but no DeclaredType at all -
-        // there is nothing to attribute a typed Hole to, so this must keep today's behavior
-        // (whole-value absorption) rather than manufacturing a type.
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin);
 
         var result = SqlTextValue.Concat(Lit("WHERE (a.ID = 1) AND "), tainted);
@@ -111,10 +100,6 @@ public sealed class SqlTextValueTests
     [Fact]
     public void Concat_TaintedOperandAgainstAnEmptyStartingTemplate_StillAbsorbsWithoutBecomingAHole()
     {
-        // The shape a bare EXEC(@sql) Concats through internally (DynamicSqlTransfer.CompileStringList
-        // starts from an empty Template) - there is no real literal content on the Template side to
-        // preserve, so demoting to a whole-statement Hole here would recover nothing while turning a
-        // clean, specific Unanalyzable finding into indirection. Must keep today's behavior.
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin) { DeclaredType = NVarChar50 };
         var empty = new SqlTextValue.Template([]);
 
@@ -129,8 +114,6 @@ public sealed class SqlTextValueTests
 
         var result = (SqlTextValue.Template)SqlTextValue.Concat(choice, Lit("TAIL"));
 
-        // Two pieces: the Choice, kept whole, followed by the literal - never expanded to two
-        // separate "A TAIL" / "B TAIL" templates at this stage.
         Assert.Equal(2, result.Pieces.Count);
         Assert.IsType<TemplatePiece.Choice>(result.Pieces[0]);
     }
@@ -171,18 +154,9 @@ public sealed class SqlTextValueTests
 
         var template = (SqlTextValue.Template)secondJoin;
         var choice = Assert.IsType<TemplatePiece.Choice>(Assert.Single(template.Pieces));
-        Assert.Equal(3, choice.Alternatives.Count); // A, B, C - not [[A, B], C] nested
-    }
+        Assert.Equal(3, choice.Alternatives.Count);    }
 
-    /// <summary>
-    /// The generic <see cref="SqlTextValue.DivergesInControlFlowGraphReason"/> sentinel is a LAST
-    /// resort, never the default: whenever exactly one side is already <see cref="SqlTextValue.Tainted"/>
-    /// with its own specific reason, that reason survives unchanged (a real cause, more useful than
-    /// "diverges"), and the OTHER side's known value survives too, as a <see cref="GuardedAlternative"/>
-    /// under <c>guardText</c> - a later consumer that independently proves that branch is the one in
-    /// play can still recover real text instead of an unresolvable placeholder.
-    /// </summary>
-    [Fact]
+[Fact]
     public void Join_TemplateAndTainted_WithNoDeclaredType_PreservesReasonAndKeepsKnownSideAsAlternative()
     {
         var template = Lit("A");
@@ -245,8 +219,7 @@ public sealed class SqlTextValueTests
         Assert.True(SqlTextValue.StructurallyEqual(value, widened));
     }
 
-    /// <summary>Builds a single-piece Choice template with <paramref name="count"/> distinct-text alternatives directly (bypassing <see cref="SqlTextValue.Join"/>, which self-widens on every call) so a test can put an over-cap Choice in front of <see cref="SqlTextValue.Widen"/> without an earlier Join call already having collapsed it.</summary>
-    private static SqlTextValue.Template OverCapChoice(int count, SqlType? declaredType = null)
+private static SqlTextValue.Template OverCapChoice(int count, SqlType? declaredType = null)
     {
         var alternatives = Enumerable.Range(0, count).Select(i => Lit($"v{i}") with { DeclaredType = declaredType }).ToList();
         return new SqlTextValue.Template([new TemplatePiece.Choice("guard", alternatives)]) { DeclaredType = declaredType };
@@ -388,25 +361,12 @@ public sealed class SqlTextValueTests
         Assert.True(SqlTextValue.ContainsHole(assemblies[0]));
     }
 
-    // ------------------------------------------------------------------
-    // The guarded-alternatives depth invariant: a value stored AS an alternative never carries
-    // alternatives of its own (see WithoutOwnAlternatives' doc comment in SqlTextValue).
-    // Without it, concatenating two alternative-bearing Templates nests each side's
-    // alternatives inside the other's stored values, so depth grows by one per Concat and the
-    // recursive propagation costs MaxGuardedAlternatives^depth - a real accumulator-style proc
-    // (`SET @sql = @sql + @piece` over IF/ELSE-IF-built variables) measured 78M+ Concat calls
-    // in 60s with no convergence. These pin the invariant at every store site, so a future
-    // refactor that reintroduces nesting fails HERE in milliseconds instead of hanging a scan.
-    // ------------------------------------------------------------------
-
     private static SqlTextValue.Template WithAlternative(SqlTextValue.Template value, string guardText, SqlTextValue.Template alternative) =>
         value with { GuardedAlternatives = [new GuardedAlternative(guardText, alternative)] };
 
     [Fact]
     public void WithGuardedAlternative_BranchValueCarryingAlternatives_StoresItFlattened()
     {
-        // Built via `with` directly, NOT via WithGuardedAlternative itself - post-invariant,
-        // the funnel is exactly what strips this, so the nested shape must be hand-made.
         var nestedBranch = WithAlternative(Lit("outer"), "inner-guard", Lit("inner"));
 
         var result = SqlTextValue.WithGuardedAlternative(Lit("base"), "outer-guard", nestedBranch);
@@ -414,16 +374,12 @@ public sealed class SqlTextValueTests
         var stored = Assert.Single(result.GuardedAlternatives!);
         Assert.Equal("outer-guard", stored.GuardText);
         Assert.Null(stored.Value.GuardedAlternatives);
-        // Flattening drops only the side channel, never the value's own text.
         Assert.Equal("outer", ((TemplatePiece.Lit)Assert.Single(stored.Value.Pieces)).Text);
     }
 
     [Fact]
     public void Concat_TaintedLeftWithAlternatives_ExtendedStoredValuesStayFlat()
     {
-        // The one store that bypasses WithGuardedAlternative's funnel: Concat's tainted-left
-        // path extends each alternative's value with b directly. b itself carrying alternatives
-        // is exactly what used to nest.
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin)
         {
             GuardedAlternatives = [new GuardedAlternative("g1", Lit("SELECT "))],
@@ -440,8 +396,6 @@ public sealed class SqlTextValueTests
     [Fact]
     public void Concat_TwoTemplatesEachCarryingAlternatives_PropagatedStoredValuesStayFlat()
     {
-        // Template+Template is the accumulator path: each side's alternatives propagate onto
-        // the result with the OTHER side spliced in - both stored values must come out flat.
         var a = WithAlternative(Lit("SELECT "), "ga", Lit("SELECT TOP 1 "));
         var b = WithAlternative(Lit("* FROM T"), "gb", Lit("* FROM U"));
 

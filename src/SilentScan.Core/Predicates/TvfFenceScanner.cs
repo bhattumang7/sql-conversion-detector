@@ -7,14 +7,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// Pass 3 sibling: the MSTVF-as-fence stream (docs/detection-checklist.md Tier 1 #2). Every
-/// finding here needs the catalog's own <see cref="TableValuedFunctionKind"/> - the call site
-/// <c>FROM dbo.fn(@x)</c> is textually identical whether <c>fn</c> is an inline TVF (expanded
-/// like a view, no finding) or a multi-statement/CLR one (an optimization fence with a fixed
-/// cardinality estimate) - so an unresolvable function name never produces a finding here,
-/// rather than guessing either way.
-/// </summary>
 public static class TvfFenceScanner
 {
     public static IReadOnlyList<TvfFenceFinding> Scan(
@@ -91,12 +83,6 @@ public static class TvfFenceScanner
                 return;
             }
 
-            // An inline TVF is called with the exact same function-call syntax as a
-            // multi-statement/CLR one (FROM dbo.fn(@x)) - it is never itself a fence, but its
-            // own body can still (transitively) name one, exactly like a plain view referenced
-            // by name can. Without this, a fence hidden behind an inline TVF wrapper - the same
-            // "permissions function wrapped in a view" shape, just called via function syntax
-            // instead of a bare table name - never surfaced at all.
             if (kind is TableValuedFunctionKind.Inline)
             {
                 TryEmitNestedFinding(qualifiedName, function.StartLine, function.StartColumn, FragmentTextRenderer.Render(function));

@@ -4,7 +4,6 @@ using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Reporting.Sarif;
 
-/// <summary>Stable SARIF rule IDs/descriptions, one per finding kind this tool produces.</summary>
 public static class SarifRuleCatalog
 {
     public const string DynamicSqlAnalyzedRuleId = "silentscan/dynamic-sql/analyzed";
@@ -617,13 +616,7 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(verdict), verdict, "Unhandled Verdict."),
     };
 
-    /// <summary>
-    /// The three <see cref="DynamicSqlOutcome"/> rule IDs are deliberately excluded from
-    /// <see cref="RuleId"/> suffixing: <see cref="Predicates.DynamicSqlFinding"/> has no
-    /// <see cref="FindingConfidence"/> field of its own - it reports the classification of an
-    /// EXEC/sp_executesql call site, not a defect claim with confidence in the value of anything.
-    /// </summary>
-    private static readonly HashSet<string> DynamicSqlOutcomeRuleIds = new(StringComparer.Ordinal)
+private static readonly HashSet<string> DynamicSqlOutcomeRuleIds = new(StringComparer.Ordinal)
     {
         DynamicSqlAnalyzedRuleId,
         DynamicSqlUnanalyzableRuleId,
@@ -631,16 +624,7 @@ public static class SarifRuleCatalog
         DynamicSqlPartiallyAnalyzedRuleId,
     };
 
-    /// <summary>
-    /// The rule ID a finding reports under, given its own confidence - a High-confidence finding
-    /// keeps the plain rule ID; anything less appends a confidence suffix so it stays
-    /// independently filterable in CI (GitHub code scanning can allow/suppress by rule ID prefix)
-    /// without disturbing the established <c>silentscan/&lt;family&gt;/&lt;name&gt;</c> scheme
-    /// that <see cref="AllRules"/> and its golden test are built on. Never call this with
-    /// <paramref name="baseRuleId"/> one of the <see cref="DynamicSqlOutcomeRuleIds"/> - those
-    /// findings carry no confidence to suffix by.
-    /// </summary>
-    public static string RuleId(string baseRuleId, FindingConfidence confidence) => confidence switch
+public static string RuleId(string baseRuleId, FindingConfidence confidence) => confidence switch
     {
         FindingConfidence.High => baseRuleId,
         FindingConfidence.Medium => $"{baseRuleId}/medium-confidence",
@@ -654,16 +638,6 @@ public static class SarifRuleCatalog
     {
         var baseRules = RuleCatalog.BaseRules.Select(rule => Rule(rule.Id, rule.Rationale)).ToArray();
 
-        // A confidence-suffixed variant's HelpUri (via Rule -> RuleDocSite.Url) resolves back to
-        // its base rule's page - RuleDocSite.BaseRuleId strips the suffix before slugging, since
-        // the underlying rule is the same one and there is no separate page per confidence tier.
-
-        // Both confidence-suffixed variants are generated for every base rule (except the
-        // DynamicSqlOutcome family, which never carries a Confidence field at all) - a rule entry
-        // with no possible producer would itself be the kind of silent-until-someone-checks noise
-        // CLAUDE.md's "never silently counted as clean" warns against, but the reverse (a real
-        // producer whose rule ID is missing from this catalog) is the same class of gap, so both
-        // variants are pre-registered unconditionally rather than added reactively per producer.
         var mediumVariants = baseRules
             .Where(rule => !DynamicSqlOutcomeRuleIds.Contains(rule.Id))
             .Select(rule => Rule(RuleId(rule.Id, FindingConfidence.Medium), $"(Medium confidence) {rule.ShortDescription.Text}"));

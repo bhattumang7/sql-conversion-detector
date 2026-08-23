@@ -4,11 +4,6 @@ using SilentScan.Verify.Deployment;
 
 namespace SilentScan.Tests.Deployment;
 
-/// <summary>
-/// The code-level backstop for CLAUDE.md's "corpus DML is never executed, anywhere" hard scope -
-/// before this existed, that guarantee rested entirely on manifest curation. These tests don't
-/// need the Docker oracle: they only exercise classification against real parsed batches.
-/// </summary>
 public sealed class DdlStatementWhitelistTests
 {
     private static TSqlBatch ParseSingleBatch(string sql)
@@ -109,12 +104,6 @@ public sealed class DdlStatementWhitelistTests
         Assert.Empty(DdlStatementWhitelist.DisallowedStatementTypeNames(batch));
     }
 
-    // ------------------------------------------------------------------
-    // allowProcedureAndTriggerDefinitions (roadmap "make the corpus catalog engine-
-    // authoritative") - verify-corpus's own default (false) must stay exactly as strict as
-    // before; the engine-authoritative corpus path opts in explicitly.
-    // ------------------------------------------------------------------
-
     [Theory]
     [InlineData("CREATE PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END;", "CreateProcedureStatement")]
     [InlineData("ALTER PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END;", "AlterProcedureStatement")]
@@ -143,12 +132,6 @@ public sealed class DdlStatementWhitelistTests
     [Fact]
     public void DisallowedStatementTypeNames_ExecInsideProcedureBody_StillRejectedEvenWhenOptedIn()
     {
-        // Deploying a procedure's own DEFINITION never runs its body - but this whitelist's job
-        // is to keep an actual EXEC/DML statement from ever being the TOP-LEVEL statement of a
-        // batch that gets executed as-is. A statement INSIDE a proc body is opaque text to the
-        // deploying batch (never walked into), so this only proves the top-level classification
-        // itself is unaffected by what happens to be inside the body - not a claim that the body
-        // is inspected.
         var batch = ParseSingleBatch("EXEC('DROP DATABASE master');");
 
         Assert.Contains("ExecuteStatement", DdlStatementWhitelist.DisallowedStatementTypeNames(batch, allowProcedureAndTriggerDefinitions: true));

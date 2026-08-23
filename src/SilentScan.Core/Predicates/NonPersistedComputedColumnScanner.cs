@@ -2,17 +2,6 @@ using SilentScan.Core.Catalog;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// Catalog-only pass (docs/detection-checklist.md "Schema-scan UDF and computed-column findings"
-/// #2) - mirrors <see cref="MaxTypedColumnScanner"/>'s own shape: walk every table's columns once,
-/// no AST or query site involved. Cross-references <see cref="DatabaseCatalog.SchemaExpressions"/>
-/// (already populated for the shipped scalar-UDF schema-dependency stream) purely to recover each
-/// computed column's own definition text and precise declaration line for the finding message -
-/// every <c>IsComputed</c> column always has a matching <see cref="SchemaDependencyKind.ComputedColumn"/>
-/// entry (both are produced from the exact same DDL/catalog read), so a miss here would itself be a
-/// catalog-consistency bug, not a legitimate "unresolved" case - falls back to the table's own
-/// source location rather than guessing if that ever isn't true.
-/// </summary>
 public static class NonPersistedComputedColumnScanner
 {
     public static IReadOnlyList<NonPersistedComputedColumnFinding> Scan(DatabaseCatalog catalog)

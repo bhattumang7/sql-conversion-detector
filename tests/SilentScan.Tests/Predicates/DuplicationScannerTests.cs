@@ -4,14 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Dead and duplicated code" - the pattern-matching half.
-/// Fully syntax-only, no oracle needed - see <see cref="DuplicationFinding"/>'s own doc comment
-/// for the full scope/precision-guard rationale these tests exercise. No DDL appears in any of
-/// these bodies, so the catalog every call builds is always empty - the column-nullability gate
-/// added to IdenticalBinaryOperands (2026-08 audit) never resolves a column here, which is exactly
-/// what keeps every existing variable-vs-itself test below unaffected by that gate.
-/// </summary>
 public sealed class DuplicationScannerTests
 {
     private static IReadOnlyList<DuplicationFinding> Scan(string sql)
@@ -20,8 +12,6 @@ public sealed class DuplicationScannerTests
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return DuplicationScanner.Scan(result, CatalogBuilder.Build([result]));
     }
-
-    // --- Commented-out code -------------------------------------------------
 
     [Fact]
     public void CommentContainingRealStatement_FiresCommentedOutCode()
@@ -79,11 +69,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void TwoWordProseComment_NeverFiresCommentedOutCode()
     {
-        // Regression guard for a real false positive found against the local test database:
-        // T-SQL's grammar accepts EXEC being omitted the moment a bare identifier appears where a
-        // statement is expected, so "word1 word2" alone reparses cleanly as an implicit
-        // "EXECUTE word1 word2" - an ordinary two-word annotation comment like this one must never
-        // be mistaken for commented-out code just because it happens to satisfy that shorthand.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 SELECT SettingValue FROM dbo.Settings WHERE Id = 43 /* Distance Factor */;
@@ -92,8 +77,6 @@ public sealed class DuplicationScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.CommentedOutCode);
     }
-
-    // --- Duplicated string literal ------------------------------------------
 
     [Fact]
     public void StringLiteralRepeatedThreeTimes_FiresDuplicatedStringLiteral()
@@ -152,8 +135,6 @@ public sealed class DuplicationScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.DuplicatedStringLiteral);
     }
 
-    // --- Single-iteration loop -----------------------------------------------
-
     [Fact]
     public void WhileBodyAlwaysBreaks_FiresSingleIterationLoop()
     {
@@ -208,9 +189,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void NestedWhileOwnBreak_NeverCountsTowardOuterLoop()
     {
-        // The inner loop's own BREAK is conditional (so the inner loop itself correctly never
-        // fires either) - this isolates the one fact under test: an inner loop's BREAK must never
-        // be mistaken for the outer loop's own unconditional exit.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @i INT = 0;
@@ -249,8 +227,6 @@ public sealed class DuplicationScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.SingleIterationLoop);
     }
-
-    // --- Self-assignment -------------------------------------------------
 
     [Fact]
     public void SetVariableToItself_FiresSelfAssignment()
@@ -329,8 +305,6 @@ public sealed class DuplicationScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.SelfAssignment);
     }
-
-    // --- Identical binary operands -----------------------------------------
 
     [Fact]
     public void ComparisonWithIdenticalOperands_FiresIdenticalBinaryOperands()
@@ -429,8 +403,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void ColumnEqualsItself_ProvenNotNull_FiresIdenticalBinaryOperands()
     {
-        // 2026-08 audit: the tautology claim is only sound when Code can never be NULL - proven
-        // here via NOT NULL in the DDL, so the finding is safe to keep.
         var findings = Scan("""
             CREATE TABLE dbo.Orders (Code VARCHAR(20) NOT NULL);
             GO
@@ -444,9 +416,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void ColumnEqualsItself_Nullable_NeverFiresIdenticalBinaryOperands()
     {
-        // Code = Code is the idiomatic defensive NULL filter on a nullable column (NULL = NULL is
-        // UNKNOWN, not TRUE) - not a mistake, and "remove the redundant comparison" would change
-        // the result set. Must stay quiet rather than assert a false tautology.
         var findings = Scan("""
             CREATE TABLE dbo.Orders (Code VARCHAR(20) NULL);
             GO
@@ -459,9 +428,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void ColumnEqualsItself_UnresolvableAgainstAmbiguousScope_NeverFiresIdenticalBinaryOperands()
     {
-        // Two tables in scope, an unqualified reference - this shallow resolver never guesses
-        // which table Code binds to, so it must stay quiet exactly like the nullable case above,
-        // even though one of the two Code columns happens to be NOT NULL.
         var findings = Scan("""
             CREATE TABLE dbo.Orders (Code VARCHAR(20) NOT NULL);
             CREATE TABLE dbo.Archive (Code VARCHAR(20) NOT NULL);
@@ -471,8 +437,6 @@ public sealed class DuplicationScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
     }
-
-    // --- Repeated unary operator ---------------------------------------------
 
     [Fact]
     public void DoubleNegation_FiresRepeatedUnaryOperator()
@@ -513,8 +477,6 @@ public sealed class DuplicationScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.RepeatedUnaryOperator);
     }
-
-    // --- Negated comparison as opposite -------------------------------------
 
     [Fact]
     public void NotGreaterThan_FiresNegatedComparisonAsOpposite()
@@ -591,7 +553,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void NegatedAndExpression_NeverFiresNegatedComparisonAsOpposite()
     {
-        // NOT (a AND b) is De Morgan's, a different shape entirely - not this rule's territory.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 1;
@@ -602,8 +563,6 @@ public sealed class DuplicationScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.NegatedComparisonAsOpposite);
     }
-
-    // --- Duplicate sibling condition (IF/ELSE IF chain) -----------------------
 
     [Fact]
     public void RepeatedElseIfCondition_FiresDuplicateSiblingCondition()
@@ -649,8 +608,6 @@ public sealed class DuplicationScannerTests
         Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.DuplicateSiblingCondition);
     }
 
-    // --- Identical / all-identical branch bodies -------------------------------
-
     [Fact]
     public void TwoOfThreeIfBranchesIdentical_FiresIdenticalBranchBodies()
     {
@@ -688,7 +645,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void IfChainWithNoElse_NeverFiresAllBranchesIdentical()
     {
-        // No ELSE means an implicit "do nothing" branch - never guessed to be "identical" to real code.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 1;
@@ -728,8 +684,6 @@ public sealed class DuplicationScannerTests
 
         Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.AllBranchesIdentical);
     }
-
-    // --- Collapsible nested IF -------------------------------------------------
 
     [Fact]
     public void UnbracedNestedIfWithNoElseEither_FiresCollapsibleNestedIf()
@@ -784,7 +738,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void InnerNestedIfHasElse_NeverFiresCollapsibleNestedIf()
     {
-        // Collapsing would silently drop the inner ELSE's own behavior - not a safe rewrite.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 1;
@@ -815,8 +768,6 @@ public sealed class DuplicationScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.CollapsibleNestedIf);
     }
-
-    // --- Nested IIF --------------------------------------------------------
 
     [Fact]
     public void IIfNestedInThenBranch_FiresNestedConditionalExpression()
@@ -866,7 +817,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void CaseNestedInCase_NeverFiresNestedConditionalExpression()
     {
-        // Deliberately excluded - CASE-in-CASE is a common, legitimate T-SQL idiom, unlike IIF.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 1;
@@ -878,8 +828,6 @@ public sealed class DuplicationScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.NestedConditionalExpression);
     }
-
-    // --- Redundant / mutually-exclusive AND-combined numeric bounds -----------
 
     [Fact]
     public void LooserBoundAndedWithStricterBound_FiresRedundantAndCondition()
@@ -912,8 +860,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void AdjacentTouchingBoundsExclusiveAndInclusive_FiresMutuallyExclusiveAndCondition()
     {
-        // x > 5 AND x <= 5 - the boundary point itself is excluded by the first, included by the
-        // second, so the intersection is genuinely empty (not just a single shared point).
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 10;
@@ -927,8 +873,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void NarrowingBoundsAnded_NeverFireEither()
     {
-        // x > 3 AND x < 100 - genuinely narrows the range on both sides, neither redundant nor
-        // contradictory.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 10;
@@ -958,7 +902,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void OrCombinedBounds_NeverFireEither()
     {
-        // OR-combinations are deliberately out of scope - only the AND case is well-defined here.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 10;
@@ -985,8 +928,6 @@ public sealed class DuplicationScannerTests
 
         Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
     }
-
-    // --- Always-true / always-false literal comparison -------------------------
 
     [Fact]
     public void DifferentIntegerLiteralsAlwaysFalseEquality_FiresAlwaysTrueOrFalse()
@@ -1018,8 +959,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void IdenticalNumericLiteralsEquality_FiresAlwaysTrueOrFalseNotIdenticalOperands()
     {
-        // Literal-vs-literal identical text is this kind's own territory, not
-        // IdenticalBinaryOperands' (which excludes both-literal operands entirely).
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 IF 5 = 5 PRINT 'always';
@@ -1046,8 +985,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void DifferentStringLiteralsEquality_NeverFiresAlwaysTrueOrFalse()
     {
-        // Declined entirely - a case-insensitive collation could still make these compare equal
-        // at runtime, and this rule never guesses across a collation-dependent boundary.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 IF 'abc' = 'ABC' PRINT 'maybe';
@@ -1085,8 +1022,6 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void MixedTypeLiteralComparison_NeverFiresAlwaysTrueOrFalse()
     {
-        // Cross-type literal comparison (int vs string) is declined - implicit conversion nuances
-        // are out of scope for this pure structural rule.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 IF 5 = 'x' PRINT 'maybe';

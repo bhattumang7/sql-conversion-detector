@@ -3,6 +3,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" />
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />
+    <ProjectReference Include="../SilentScan.NoCommentsAnalyzer/SilentScan.NoCommentsAnalyzer.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

@@ -50,8 +50,6 @@ public sealed class CorpusManifestLoaderTests
     [Fact]
     public void Parse_TemplateSubstitutions_RoundTrips()
     {
-        // docs/audit-remediation-plan.md Phase 6.1: the substitution map lives in the manifest,
-        // not a hardcoded repo-name switch in CorpusTemplatePreprocessor.
         var json = """
             {
               "repos": [

@@ -3,17 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Small precise adds", "Transaction hygiene pair" (first half) -
-/// oracle-confirms the general mechanism once (not per finding, per this session's own
-/// precedent): a real executed procedure that opens a transaction and returns without resolving
-/// it on some path leaves the CALLING session's @@TRANCOUNT elevated by one, and SQL Server
-/// itself raises its own diagnostic (Msg 266, "Transaction count after EXECUTE indicates a
-/// mismatching number of BEGIN and COMMIT statements") the instant such a procedure returns -
-/// confirmed directly rather than assumed from documentation. Also confirms the classic
-/// real-world shape this rule targets: BEGIN TRANSACTION before a TRY/CATCH whose CATCH block
-/// never rolls back leaves the transaction open identically, even though an error occurred.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class TransactionHygieneOracleTests : OracleTestFixture
 {

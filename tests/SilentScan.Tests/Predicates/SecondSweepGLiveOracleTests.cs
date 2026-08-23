@@ -3,16 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second full-archive practitioner sweep" §G - end-to-end live-oracle
-/// tests (standing Docker instance, disposable database, dropped unconditionally afterward) proving
-/// the full wiring (catalog read -> ScanReportBuilder -> ScanReport) for the three newest streams:
-/// <see cref="BareTopNoOrderByFinding"/>, <see cref="StringConcatNullFinding"/>, and
-/// <see cref="AggregateDivisionColumnstoreFinding"/>. Each stream's own scanner-level fire/near-miss
-/// coverage lives in its own dedicated *ScannerTests class; these tests exist to prove the report
-/// plumbing (schema version bump, confidence filtering, live catalog agreement) rather than to
-/// re-cover the AST logic already covered there.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class SecondSweepGLiveOracleTests
 {

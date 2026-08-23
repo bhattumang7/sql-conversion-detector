@@ -7,11 +7,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Roadmap Phase E3: exercises <see cref="Tier1Verifier"/> end-to-end against the real oracle -
-/// closes the gap where <see cref="SargabilityFinding"/> (Tier-1 syntactic findings) had zero
-/// oracle presence at all, only the classifier's own pattern-matching fixture tests.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class Tier1VerifierTests : IAsyncLifetime
 {
@@ -66,9 +61,6 @@ public sealed class Tier1VerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_BareColumnOnIndexedColumn_IsNotConfirmed()
     {
-        // Negative control: an ordinary bare column comparison DOES seek through the index, so
-        // a (deliberately mislabeled) finding claiming otherwise must not be confirmed - proves
-        // the probe's plan-shape signal actually distinguishes the two cases.
         var finding = Finding(SargabilityFindingKind.FunctionWrappedColumn, "dbo.T1Indexed", "Code", indexed: true, "Code");
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding, _catalog);
@@ -119,10 +111,6 @@ public sealed class Tier1VerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_TableNoLongerInDeployedSchema_ReturnsProbeFailed()
     {
-        // LeadingWildcardLike's probe needs no catalog column-type lookup (the captured fragment
-        // is already a complete predicate), so Build() still produces a probe string here - the
-        // mismatch only surfaces once SQL Server itself tries to compile against a table that
-        // was never deployed.
         var finding = Finding(SargabilityFindingKind.LeadingWildcardLike, "dbo.DoesNotExist", "Code", indexed: true, "Code LIKE '%abc'");
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding, _catalog);

@@ -3,16 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Forced-serial construct inventory" - oracle-confirms the
-/// general mechanism once (not per finding): a cursor declared <c>FAST_FORWARD</c> (or the
-/// equivalent bare <c>FORWARD_ONLY READ_ONLY</c> lacking an explicit STATIC/KEYSET/DYNAMIC) forces
-/// its own defining query's plan serial
-/// (<c>NonParallelPlanReason="NoParallelFastForwardCursor"</c>) - the OPPOSITE of the "always use
-/// LOCAL FAST_FORWARD" fetch-overhead advice, confirmed directly rather than assumed from that
-/// same advice's own reputation. <c>STATIC</c>/<c>KEYSET</c>/<c>DYNAMIC</c> cursors do NOT trigger
-/// this mechanism, also confirmed directly.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class FastForwardCursorOracleTests : OracleTestFixture
 {
@@ -60,11 +50,6 @@ public sealed class FastForwardCursorOracleTests : OracleTestFixture
             DEALLOCATE c;
             """;
 
-        // The batch has several statements (DECLARE CURSOR, OPEN, FETCH, CLOSE, DEALLOCATE), each
-        // producing its own STATISTICS XML result set - the cursor's defining-query reason only
-        // ever appears on the DECLARE CURSOR statement's own plan, so every plan-bearing result
-        // set is concatenated rather than keeping only the last one (unlike the single-DML-
-        // statement probes elsewhere in this stream).
         var planXmlBuilder = new System.Text.StringBuilder();
         await using (var probeCommand = new SqlCommand(probe, connection))
         await using (var reader = await probeCommand.ExecuteReaderAsync())

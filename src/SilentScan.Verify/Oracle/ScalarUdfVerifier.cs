@@ -5,37 +5,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Verify.Oracle;
 
-/// <summary>
-/// Oracle-confirms a <see cref="ScalarUdfFinding"/> (docs/detection-checklist.md Tier 1 #1) with
-/// a two-probe design, both oracle-verified directly against the local Docker instance:
-/// <list type="number">
-/// <item>
-/// A PINNED probe (<c>OPTION (USE HINT('DISABLE_TSQL_SCALAR_UDF_INLINING'))</c>) confirms the
-/// core claim - "this is a real scalar UDF reference" - independent of whether SQL 2019+ FROID
-/// inlining would otherwise fold it away. Marker: a <c>&lt;UserDefinedFunction FunctionName="..."&gt;</c>
-/// plan element. Verified: even a trivially inlineable function (a single <c>RETURN expr</c>
-/// body) produces this element under the hint.
-/// </item>
-/// <item>
-/// A NATURAL probe (no hint) cross-checks the finding's own <see cref="ScalarUdfInlineability"/>
-/// read against what the engine actually does when left to decide: inlined away leaves
-/// <c>ContainsInlineScalarTsqlUdfs="1"</c> on the enclosing <c>StmtSimple</c> and no
-/// <c>UserDefinedFunction</c> element; not inlined leaves the element and no that attribute. A
-/// disagreement disciplines the blocker-scan/engine-flag plumbing itself, not just the reach
-/// claim - e.g. a finding claiming NotInlineable whose natural probe the engine visibly inlines
-/// anyway.
-/// </item>
-/// </list>
-/// Neither probe reuses <see cref="ScalarUdfFinding.ReferencedObjectQualifiedName"/> for a
-/// <see cref="ScalarUdfFindingKind.NestedUnderViewOrTvf"/> finding - see
-/// <see cref="ScalarUdfProbeBuilder"/>'s own doc comment for why probing through the view instead
-/// would silently give the wrong answer (the hint does not propagate into a view's own algebrized
-/// definition, oracle-verified). <see cref="ScalarUdfFindingKind.SchemaDependency"/> is never
-/// probed at all: the constraint/computed-column definition text this finding cites IS engine
-/// truth (<c>sys.default_constraints</c>/<c>sys.check_constraints</c>/<c>sys.computed_columns</c>
-/// <c>.definition</c>), so a plan probe would add no evidence beyond what the catalog already
-/// asserts.
-/// </summary>
 public sealed class ScalarUdfVerifier
 {
     private const string InlinedMarker = "ContainsInlineScalarTsqlUdfs=\"1\"";
@@ -85,9 +54,6 @@ public sealed class ScalarUdfVerifier
                 $"The pinned probe for '{finding.FunctionQualifiedName}' (scalar-UDF inlining disabled) shows no UserDefinedFunction plan element - contradicts the finding's own claim that this is a scalar UDF reference.");
         }
 
-        // Nothing left to cross-check for Unknown - it isn't a falsifiable claim about what the
-        // engine does, only "this scan's own blocker list found nothing," so the natural probe
-        // adds no signal either way.
         if (finding.Inlineability == ScalarUdfInlineability.Unknown)
         {
             return new ScalarUdfResult(finding, ScalarUdfOutcome.Confirmed, null);
@@ -129,9 +95,6 @@ public sealed class ScalarUdfVerifier
         return new ScalarUdfResult(finding, ScalarUdfOutcome.Confirmed, null);
     }
 
-    // Checking for a bare "<UserDefinedFunction" anywhere in the plan document would confirm off
-    // an entirely unrelated scalar UDF the same batch happens to reference - this parses the plan
-    // and requires the element's own FunctionName to name THIS finding's function.
     private static bool HasMatchingUserDefinedFunction(string planXml, string qualifiedName)
     {
         var doc = XDocument.Parse(planXml);
@@ -139,10 +102,6 @@ public sealed class ScalarUdfVerifier
             .Any(udf => NamesSameFunction((string?)udf.Attribute("FunctionName"), qualifiedName));
     }
 
-    // The plan's FunctionName can be database-qualified (three parts) while
-    // finding.FunctionQualifiedName never is (SchemaObjectNameHelper.QualifyFunctionCall always
-    // renders schema.name) - an exact match would false-negative on that, so this checks that the
-    // plan name's own trailing "schema.name" matches, database prefix or not.
     private static bool NamesSameFunction(string? planFunctionName, string qualifiedName)
     {
         if (planFunctionName is null)

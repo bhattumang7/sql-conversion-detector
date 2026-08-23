@@ -5,13 +5,6 @@ using SilentScan.Verify.Deployment;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Proves the plan-cache ranking signal reflects what the engine is ACTUALLY doing, not just
-/// what a static finding claims is possible: deploys a procedure with a real varchar/nvarchar
-/// mismatch, executes it several times (populating the real plan cache), then asks
-/// <see cref="LiveScanRunner"/> (with plan-cache evidence turned on) whether the resulting
-/// finding is observed converting live, with the right execution count.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LivePlanCacheRankingTests : OracleTestFixture
 {
@@ -33,8 +26,6 @@ public sealed class LivePlanCacheRankingTests : OracleTestFixture
     [Fact]
     public async Task RunAsync_WithPlanCacheEvidence_ObservesRealExecutionsOfAConvertingPredicate()
     {
-        // Self-authored setup executing our own deployed proc (never corpus code) to populate
-        // the real plan cache with a known execution count to assert against.
         const string executions = """
             EXEC dbo.usp_FindOrder @OrderCode = N'ABC123';
             EXEC dbo.usp_FindOrder @OrderCode = N'DEF456';

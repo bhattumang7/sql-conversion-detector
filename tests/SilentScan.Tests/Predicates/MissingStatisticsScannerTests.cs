@@ -78,9 +78,6 @@ public sealed class MissingStatisticsScannerTests
     [Fact]
     public void AutoCreateStatsOff_PredicateColumnIsNonLeadingKeyOfMultiColumnStatistic_StillFires()
     {
-        // Oracle-confirmed: the engine still auto-creates its own single-column statistic for a
-        // non-leading key column of an existing multi-column statistic when auto-create is on -
-        // proving a non-leading occurrence does not count as coverage.
         var statistics = new[] { new CatalogStatisticsInfo("IX_Region_Status", NoRecompute: false, IsAutoCreated: false, ["Region", "Status"]) };
         var findings = Scan("SELECT 1 FROM dbo.Orders WHERE Status = 5;", Catalog(isAutoCreateStatsOn: false, statistics));
 

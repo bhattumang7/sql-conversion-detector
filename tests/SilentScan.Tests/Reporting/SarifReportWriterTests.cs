@@ -44,12 +44,6 @@ public sealed class SarifReportWriterTests
             + report.BareTopNoOrderByFindings.Count
             + report.StringConcatNullFindings.Count
             + report.AggregateDivisionColumnstoreFindings.Count
-            // DatabaseConfigurationFindings is live-mode only, but EngineAuthoritativeScan
-            // genuinely runs the full LiveScanRunner pipeline (see its own doc comment) against a
-            // real disposable database - and every such database has Query Store deliberately
-            // turned back off by DatabaseProvisioner.CreateFreshAsync right after creation (real
-            // Docker error-log spam otherwise), so a real QueryStoreNotReadWrite finding fires
-            // here every time, not a bug in the new stream.
             + report.DatabaseConfigurationFindings.Count;
         Assert.Equal(expectedCount, results.GetArrayLength());
         Assert.True(expectedCount > 0);
@@ -169,9 +163,6 @@ public sealed class SarifReportWriterTests
     [Fact]
     public void Write_ScanForcedFindingOnUnindexedColumn_DowngradesToWarningLevel()
     {
-        // Every corpus finding this tool has actually produced against real-world repos has
-        // been on a column with no evidence it's indexed - reporting all of them at "error"
-        // regardless overstates the cost, since there was no seek to lose in the first place.
         var report = new ScanReport(
             new ParseHealthReport([]),
             [],

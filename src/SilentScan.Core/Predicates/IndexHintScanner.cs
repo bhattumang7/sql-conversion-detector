@@ -6,16 +6,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Hint and index-shape catalog checks": "Hint validity against the
-/// catalog" - see <see cref="IndexHintFinding"/>/<see cref="IndexHintFindingKind"/> for the
-/// mechanism behind each kind. Own standalone scanner: needs the same whole-statement predicate
-/// visibility <see cref="CompositeIndexLeadingColumnScanner"/> needs (is the hinted index's
-/// leading column bound ANYWHERE in the statement, not just locally on the hinted table
-/// reference itself), plus a direct per-table-reference AST walk neither
-/// <see cref="TypedPredicateExtractor"/> nor that scanner performs (table hints live on the
-/// <see cref="NamedTableReference"/> node itself, not inside a predicate).
-/// </summary>
 public static class IndexHintScanner
 {
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
@@ -38,14 +28,7 @@ public static class IndexHintScanner
     {
         public List<IndexHintFinding> Findings { get; } = [];
 
-        /// <summary>
-        /// The enclosing SELECT's own CTE scope - a QuerySpecification has no direct access to
-        /// its enclosing SelectStatement's WithCtesAndXmlNamespaces. A CTE is never schema-
-        /// qualified, so it always shadows a same-named real base table; resolving through the
-        /// catalog instead (cteRelations always null, pre-fix) silently matched a CTE-shadowed
-        /// hinted table against an unrelated real table sharing its name (2026-08 audit).
-        /// </summary>
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -117,16 +100,7 @@ public static class IndexHintScanner
             }
         }
 
-        /// <summary>
-        /// Resolved through the ALREADY CTE-aware <paramref name="byAlias"/> scope (built by
-        /// <see cref="FromScopeResolver"/>) rather than an independent
-        /// <c>SchemaObjectNameHelper.Qualify</c> + <c>catalog.Find</c> lookup of its own - the
-        /// independent lookup bypassed CTE shadowing entirely regardless of what cteRelations the
-        /// caller resolved, since a CTE is never schema-qualified and a raw re-qualify-and-
-        /// catalog-lookup can never see it (2026-08 audit, same shape as
-        /// PartialCompositeForeignKeyJoinScanner's own ResolveDirectBaseTable fix).
-        /// </summary>
-        private void InspectNamedTable(NamedTableReference namedTable, IReadOnlyDictionary<string, ScopeEntry> byAlias, HashSet<(string Table, string Column)> anyReferencedColumns)
+private void InspectNamedTable(NamedTableReference namedTable, IReadOnlyDictionary<string, ScopeEntry> byAlias, HashSet<(string Table, string Column)> anyReferencedColumns)
         {
             var indexHints = namedTable.TableHints.OfType<IndexTableHint>().ToList();
             if (indexHints.Count == 0)
@@ -156,8 +130,6 @@ public static class IndexHintScanner
         {
             foreach (var indexValue in hint.IndexValues)
             {
-                // Ordinal form (INDEX(0)/INDEX(1)) has no Identifier and no catalog name to
-                // validate - deliberately out of v1 scope, see the finding's own doc comment.
                 var hintedName = indexValue.Identifier?.Value;
                 if (hintedName is null)
                 {

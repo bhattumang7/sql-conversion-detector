@@ -8,28 +8,12 @@ using SilentScan.Verify.Deployment;
 
 namespace SilentScan.Live.Corpus;
 
-/// <summary>
-/// The engine-authoritative corpus path (CLAUDE.md hard scope: "Everything goes via the
-/// database — no file-parsed catalog, no file-only scan... corpus scanning deploys the repo's
-/// (whitelist-filtered) DDL to the disposable Docker instance, then reads the catalog
-/// (LiveCatalogReader) and module text (sys.sql_modules) back out"). Mirrors
-/// <see cref="LiveScanRunner"/>'s exact recipe (read catalog from engine metadata, read module
-/// text from sys.sql_modules, run the unchanged Lineage/Predicates/Rules pipeline against it),
-/// via the shared <see cref="LiveCorpusDeployer"/> - <c>SilentScan.Verify.Commands.VerifyCorpusCommand</c>
-/// (a different assembly, <see cref="SilentScan.Verify"/>) uses the exact same deploy-and-read
-/// recipe for its own oracle-probing pass, so a schema/collation edge case fixed here is fixed
-/// there too, and vice versa.
-/// </summary>
 public static class CorpusLiveScanRunner
 {
     public static async Task<CorpusLiveRepoResult> RunAsync(
         CorpusRepoEntry repo, string repoRoot, SqlServerOptions sqlOptions,
         FindingConfidence minimumConfidence = FindingConfidence.High, CancellationToken cancellationToken = default)
     {
-        // GUID-suffixed, matching the OracleTestFixture/TypeMatrixGenerator hygiene fix
-        // (docs/local-dev.md) - a fixed per-repo name would collide across two concurrent runs
-        // (another session, or scan-corpus-live invoked twice) on the same shared Docker
-        // instance exactly like those did before that fix.
         var databaseName = $"{SanitizeDatabaseName(repo.Name)}_{Guid.NewGuid():N}";
         var provisioner = new DatabaseProvisioner(sqlOptions);
 
@@ -39,16 +23,6 @@ public static class CorpusLiveScanRunner
             var source = await LiveCorpusDeployer.DeployAndReadAsync(repo, repoRoot, databaseName, sqlOptions, cancellationToken);
             var moduleScan = ScanReportBuilder.BuildFromParseResults(source.ModuleParseResults, catalog: source.Catalog, minimumConfidence: minimumConfidence);
 
-            // moduleScan.ParseHealth (built from the POST-DEPLOYMENT module text this scan
-            // actually analyzed) is preserved here, not discarded - a module that deployed
-            // successfully but failed to reparse from sys.sql_modules (170+ syntax, a QUOTED_
-            // IDENTIFIER edge case, a ScriptDOM bug) previously vanished from every report section
-            // with no trace once this field was overwritten. report.ParseHealth is instead the
-            // file-level dialect-sniffing signal LiveCorpusModuleSource.FileParseResults' own doc
-            // comment specifies (a file that never even deploys, which the module-derived health
-            // above can never see since it only knows about modules that DID reach sys.sql_modules)
-            // - both are real, distinct facts, so both survive as separate fields rather than one
-            // silently replacing the other.
             var report = moduleScan with { ParseHealth = ParseHealthReportBuilder.BuildFromParseResults(source.FileParseResults) };
 
             return new CorpusLiveRepoResult(
@@ -68,22 +42,6 @@ public static class CorpusLiveScanRunner
     }
 }
 
-/// <summary>
-/// One corpus repo's engine-authoritative scan: the same <see cref="ScanReport"/> shape every
-/// other scan mode produces, plus how many modules deployed/read successfully, every module the
-/// engine could not read a body for (CLR/encrypted - never silently dropped), every deployment
-/// message (a batch skipped by the whitelist, or one that failed even after retries), every
-/// live-read module this run could not map back to the repo file that declares it (should be
-/// empty in practice - ledgered rather than assumed), and whether the POST-DEPLOYMENT module text
-/// this scan actually analyzed (read back from <c>sys.sql_modules</c>) reparsed cleanly -
-/// <see cref="ModuleParseHealth"/>, distinct from <see cref="Report"/>'s own <c>ParseHealth</c>,
-/// which is the PRE-DEPLOYMENT file-level dialect-sniffing signal
-/// (<see cref="Verify.Corpus.LiveCorpusModuleSource.FileParseResults"/>'s own doc comment). A
-/// module can deploy successfully yet fail to reparse (170+ syntax the parser doesn't yet select
-/// for, a QUOTED_IDENTIFIER edge case, a ScriptDOM bug) - when that happens it contributes zero
-/// findings, and <see cref="ModuleParseHealth"/> is the only place that fact survives; CLAUDE.md's
-/// "never silently counted as clean" applies here just as much as to a file that never deploys.
-/// </summary>
 public sealed record CorpusLiveRepoResult(
     CorpusRepoEntry Repo,
     ScanReport Report,

@@ -4,18 +4,9 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Lineage;
 
-/// <summary>
-/// Pass 2 sibling to <see cref="TvfFenceMap"/>: for every view/inline TVF, whether its own
-/// definition calls a scalar UDF - directly, or inherited through however many further view/iTVF
-/// layers. A caller referencing the view sees an ordinary table reference; only this map, built
-/// once against the resolved catalog, says the view's expansion actually drags per-row scalar-UDF
-/// execution (and, pre-2019, a forced-serial plan) into whatever query names it.
-/// </summary>
 public static class ScalarUdfMap
 {
-    /// <param name="views">Every CREATE VIEW and inline-TVF definition seen (<see cref="ViewDefinitionExtractor.Extract"/>'s <c>Views</c> - a multi-statement/CLR TVF has no body here, so it is never a carrier, matching the MSTVF-as-fence stream's own opacity boundary).</param>
-    /// <param name="catalog">Resolved catalog carrying every scalar UDF's <see cref="ScalarUdfInfo"/>.</param>
-    public static IReadOnlyDictionary<string, ScalarUdfOrigin> Build(IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
+public static IReadOnlyDictionary<string, ScalarUdfOrigin> Build(IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
     {
         var viewsByName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
         foreach (var view in views)
@@ -49,8 +40,6 @@ public static class ScalarUdfMap
             return cached;
         }
 
-        // Cyclic view dependency: ViewDependencyGraph already reports the cycle itself as a
-        // lineage problem, so this map just resolves to no origin rather than looping.
         if (!context.InProgress.Add(view.QualifiedName))
         {
             return null;
@@ -58,12 +47,6 @@ public static class ScalarUdfMap
 
         var direct = FindWorstDirectCall(view, context.Catalog);
 
-        // Both named (plain FROM Foo) AND function-call (FROM dbo.itvf(...)) references can
-        // resolve to another inline TVF this map already has an origin for - TvfFenceMap already
-        // recurses through both shapes; this used to discard functionRefs entirely, so a view
-        // selecting from an inline TVF that itself called a scalar UDF never inherited the
-        // carrier flag. Folded through the same Worse combinator used for direct-vs-inherited
-        // below (not FirstOrDefault, which took an arbitrary candidate rather than the worst one).
         var (functionRefs, namedRefs) = TvfReferenceWalker.CollectFromClauses(view.SelectStatement);
         ScalarUdfOrigin? inherited = null;
         foreach (var origin in namedRefs.Select(named => TryResolveNamedReference(named, context))
@@ -81,8 +64,7 @@ public static class ScalarUdfMap
         return found;
     }
 
-    /// <summary>A plain table-name reference only ever inherits an origin (it can never introduce one) - null when the name isn't a known view/iTVF, or that view/iTVF carries no origin of its own.</summary>
-    private static ScalarUdfOrigin? TryResolveNamedReference(NamedTableReference namedRef, ResolutionContext context)
+private static ScalarUdfOrigin? TryResolveNamedReference(NamedTableReference namedRef, ResolutionContext context)
     {
         var qualifiedName = context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(namedRef.SchemaObject));
         return context.ViewsByName.TryGetValue(qualifiedName, out var referencedView)
@@ -90,8 +72,7 @@ public static class ScalarUdfMap
             : null;
     }
 
-    /// <summary>Mirrors <see cref="TryResolveNamedReference"/> for a function-call table reference (FROM dbo.itvf(...)) - the referenced object can only ever be an inline TVF this same views dictionary already knows about (a multi-statement/CLR TVF has no body here at all, matching the MSTVF-as-fence stream's own opacity boundary).</summary>
-    private static ScalarUdfOrigin? TryResolveFunctionReference(TvfLeafReference functionRef, ResolutionContext context)
+private static ScalarUdfOrigin? TryResolveFunctionReference(TvfLeafReference functionRef, ResolutionContext context)
     {
         var qualifiedName = context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(functionRef.Reference.SchemaObject));
         return context.ViewsByName.TryGetValue(qualifiedName, out var referencedView)
@@ -101,8 +82,7 @@ public static class ScalarUdfMap
 
     private static ScalarUdfOrigin? Inherit(ScalarUdfOrigin origin) => origin with { Depth = origin.Depth + 1 };
 
-    /// <summary>Predicate context is worse than projection regardless of depth - a predicate-context origin always wins when both exist, otherwise the direct (lower-depth) candidate wins, matching <see cref="TvfFenceMap"/>'s own "direct beats inherited" simplification.</summary>
-    private static ScalarUdfOrigin? Worse(ScalarUdfOrigin? direct, ScalarUdfOrigin? inherited)
+private static ScalarUdfOrigin? Worse(ScalarUdfOrigin? direct, ScalarUdfOrigin? inherited)
     {
         if (direct is null)
         {
@@ -119,19 +99,7 @@ public static class ScalarUdfMap
             : direct;
     }
 
-    /// <summary>
-    /// Scans this view/iTVF's OWN select statement (never recursing into a nested view/iTVF's
-    /// text - that happens through <see cref="Resolve"/>'s own recursion instead) for the worst
-    /// (predicate-context beats projection-context; first-found otherwise) direct scalar-UDF
-    /// call. A 2-part function call that doesn't resolve in the catalog's scalar-UDF registry is
-    /// never a candidate - same "never guess" rule as every other catalog-gated stream. Region
-    /// classification (which exact clause a call sits in) mirrors
-    /// <see cref="Predicates.ScalarUdfScanner"/>'s own - the two are independent AST walks over
-    /// different-shaped input (a whole module vs a single view body) rather than a shared
-    /// component, matching how <see cref="TvfFenceMap"/> and <c>TvfFenceScanner</c> already stay
-    /// separate despite overlapping FROM-clause logic.
-    /// </summary>
-    private static ScalarUdfOrigin? FindWorstDirectCall(ViewDefinition view, DatabaseCatalog catalog)
+private static ScalarUdfOrigin? FindWorstDirectCall(ViewDefinition view, DatabaseCatalog catalog)
     {
         var visitor = new DirectCallVisitor(view.SourcePath, catalog);
         view.SelectStatement.Accept(visitor);

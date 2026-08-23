@@ -1,6 +1,5 @@
 namespace SilentScan.Verify;
 
-/// <summary>Connection details for the disposable Docker SQL Server oracle (CLAUDE.md "Local database").</summary>
 public sealed record SqlServerOptions(string Host, int Port, string UserId, string Password)
 {
     public static SqlServerOptions LocalDocker { get; } = new(

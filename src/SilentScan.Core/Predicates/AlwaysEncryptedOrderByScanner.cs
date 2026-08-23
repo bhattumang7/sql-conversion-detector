@@ -5,12 +5,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// See <see cref="AlwaysEncryptedOrderByFinding"/> for the full scope/precision story. Resolves
-/// through <see cref="Lineage.FromScopeResolver"/>'s real per-statement scope chain (matching
-/// <see cref="FloatEqualityPredicateScanner"/>'s own precedent) rather than a direct-base-table-only
-/// shortcut, so a CTE-shadowed reference resolves against its real underlying column.
-/// </summary>
 public static class AlwaysEncryptedOrderByScanner
 {
     public static IReadOnlyList<AlwaysEncryptedOrderByFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
@@ -30,9 +24,6 @@ public static class AlwaysEncryptedOrderByScanner
     {
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-        // Real per-statement CTE scope (matching FloatEqualityPredicateScanner's own stack -
-        // a QuerySpecification has no direct access to its enclosing SelectStatement's
-        // WithCtesAndXmlNamespaces).
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public List<AlwaysEncryptedOrderByFinding> Findings { get; } = [];

@@ -3,9 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Security". See <see cref="SecurityFinding"/> for full scope.
-/// </summary>
 public sealed class SecurityScannerTests
 {
     private static IReadOnlyList<SecurityFinding> Scan(string sql)
@@ -14,8 +11,6 @@ public sealed class SecurityScannerTests
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return SecurityScanner.Scan(result);
     }
-
-    // --- HardCodedCredential ---
 
     [Fact]
     public void DeclareWithCredentialNameAndLiteral_Fires()
@@ -77,8 +72,6 @@ public sealed class SecurityScannerTests
     [Fact]
     public void VariableNameContainingPwdAsSubstringNotWholeWord_NeverFires()
     {
-        // Real false positive caught against the local test database: "OpWD" ("Operating
-        // WeekDays") happens to contain the letters "pwd" as a mid-word substring, not a real word.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             BEGIN
@@ -93,10 +86,6 @@ public sealed class SecurityScannerTests
     [Fact]
     public void VariableNameWithPwdAsWholeWord_NeverFires()
     {
-        // Real false positive caught against the local test database: "PWD" is a genuine, real
-        // whole-word abbreviation in this corpus's own paratransit domain ("Persons/People With
-        // Disabilities"), not "password" - "pwd" is deliberately dropped from the word list
-        // entirely, even as a whole-word match, because of this real ambiguity.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             BEGIN
@@ -120,8 +109,6 @@ public sealed class SecurityScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == SecurityFindingKind.HardCodedCredential);
     }
-
-    // --- HardCodedIpAddress ---
 
     [Fact]
     public void LiteralWithRealIpAddress_Fires()
@@ -190,8 +177,6 @@ public sealed class SecurityScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == SecurityFindingKind.HardCodedIpAddress);
     }
 
-    // --- WeakHashAlgorithm / WeakHashAlgorithmInSensitiveContext ---
-
     [Fact]
     public void HashBytesMd5GeneralUse_FiresGeneralKind()
     {
@@ -247,8 +232,6 @@ public sealed class SecurityScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind is SecurityFindingKind.WeakHashAlgorithm or SecurityFindingKind.WeakHashAlgorithmInSensitiveContext);
     }
-
-    // --- UnprovableDynamicSqlText (via FromDynamicSqlFindings) ---
 
     [Fact]
     public void UnanalyzableDynamicSqlFinding_MapsToUnprovableDynamicSqlText()

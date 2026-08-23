@@ -6,13 +6,6 @@ using SilentScan.Core.Predicates.DynamicSqlValue;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// The scalar-UDF stream folds through provably-constant dynamic SQL exactly like the
-/// sargability/typed/TVF-fence streams already do (CLAUDE.md's dynamic SQL policy: "run back
-/// through the normal pipeline"), remapped to the call's true source line rather than the EXEC
-/// call site. Docker-free, matching <see cref="DynamicSqlTvfFenceTests"/>'s own reasoning: the
-/// remap machinery itself is provenance-only and already oracle-covered for other streams.
-/// </summary>
 public sealed class DynamicSqlScalarUdfTests
 {
     private const string SchemaSql = """
@@ -67,9 +60,6 @@ public sealed class DynamicSqlScalarUdfTests
         Assert.Equal(ScalarUdfFindingKind.PredicateInvocation, finding.Kind);
         Assert.Equal("dbo.fn_IsActive", finding.FunctionQualifiedName);
         Assert.Equal("app.sql", finding.SourcePath);
-        // The call sits on the second line of the folded literal (line 5 of app.sql), not the
-        // EXEC call site itself (line 4) - the whole reason this stream needs its own remap
-        // wiring rather than reusing another stream's.
         Assert.Equal(5, finding.Line);
         Assert.NotNull(finding.DynamicSqlCallSite);
         Assert.Equal(4, finding.DynamicSqlCallSite!.Value.Line);
@@ -112,8 +102,6 @@ public sealed class DynamicSqlScalarUdfTests
 
         var extraction = DynamicSqlScannerV2.Scan(parseResult, callGraph: new ProcCallGraph([]));
 
-        // The pre-existing overloads (no scalar UDF map) must keep compiling and behaving
-        // exactly as they did before this stream existed.
         var pipeline = DynamicSqlPipeline.Analyze(extraction.AnalyzableScripts, catalog, lineage);
         Assert.Empty(pipeline.ScalarUdfFindings);
     }

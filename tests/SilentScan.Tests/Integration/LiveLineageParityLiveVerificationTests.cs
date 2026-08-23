@@ -9,15 +9,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Covers the three outcomes <see cref="LiveLineageParityChecker"/> added on top of a plain
-/// mismatch: a stale cached <c>sys.columns</c> row that agrees with the live answer (not a bug),
-/// an object the server can no longer compile at all (not a bug), and a column that could not be
-/// live-verified at all (an inline TVF parameter with no typed-NULL form). Each test deploys real
-/// DDL to the disposable Docker instance and, where a fixture needs to induce staleness, ALTERs
-/// the base column's type AFTER the view/function was created - the exact real-world sequence
-/// that leaves a view's own cached metadata behind the engine's live answer.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LiveLineageParityLiveVerificationTests
 {
@@ -26,9 +17,6 @@ public sealed class LiveLineageParityLiveVerificationTests
     [Fact]
     public async Task StaleCachedMetadata_BaseColumnRetypedAfterTheViewWasCreated_IsNotAMismatch()
     {
-        // The view's own sys.columns row still says tinyint (snapshotted at CREATE VIEW time);
-        // the live DMV answer is int. The inferred type below is the CURRENT, correct answer -
-        // exactly what this tool's own base-table-driven inference would produce today.
         var report = await CheckAsync(
             """
             CREATE TABLE dbo.Orders (Amount TINYINT NOT NULL);
@@ -54,10 +42,6 @@ public sealed class LiveLineageParityLiveVerificationTests
     [Fact]
     public async Task GenuineInferenceBug_OnAStaleObject_IsStillReportedAsAMismatch()
     {
-        // Same staleness-inducing schema as above, but this time the inferred type is
-        // deliberately wrong - proving a real bug still surfaces as a P0 even on an object whose
-        // cache also happens to be stale, and that the reported "actual" value is the LIVE
-        // answer (int), never the stale cached one (tinyint).
         var report = await CheckAsync(
             """
             CREATE TABLE dbo.Orders (Amount TINYINT NOT NULL);
@@ -79,10 +63,6 @@ public sealed class LiveLineageParityLiveVerificationTests
     [Fact]
     public async Task UncompilableView_IsReportedAsUncompilable_NotAsAMismatch()
     {
-        // Dropping a column a non-schema-bound view references leaves the view deployed but
-        // broken - the server can no longer describe it at all. A deliberately wrong inferred
-        // type on the SURVIVING column must still not produce a P0: there is nothing live to
-        // compare it against.
         var report = await CheckAsync(
             """
             CREATE TABLE dbo.Orders (OrderId INT NOT NULL, Total INT NOT NULL);
@@ -98,14 +78,6 @@ public sealed class LiveLineageParityLiveVerificationTests
         Assert.Empty(report.Mismatches);
         var broken = Assert.Single(report.UncompilableObjects);
         Assert.Equal("dbo.vw_Orders", broken.QualifiedViewName);
-        // sys.dm_exec_describe_first_result_set returns three error rows for this exact DDL
-        // sequence (Msg 207 "Invalid column name 'Total'", Msg 4413 "Could not use view or
-        // function ... because of binding errors", Msg 11501 "The batch could not be analyzed
-        // because of compile errors" - verified directly against the Docker oracle), and
-        // ReadDescribedObjectsAsync keeps the LAST error row read for the object, so 11501 is the
-        // one that actually reaches ErrorNumber/ErrorMessage today. Pinned to the real, specific
-        // value rather than "any nonzero code" so a broken mapping (e.g. always emitting -1, or
-        // grabbing the FIRST row instead of the last) fails this test.
         Assert.Equal(11501, broken.ErrorNumber);
         Assert.Equal("The batch could not be analyzed because of compile errors.", broken.ErrorMessage);
     }
@@ -133,9 +105,6 @@ public sealed class LiveLineageParityLiveVerificationTests
     [Fact]
     public async Task InlineTvf_WithATableValuedParameter_IsReportedAsUnverified()
     {
-        // A TVP has no typed-NULL form a bare probe SELECT can supply, so this function can
-        // never be live-verified - the disagreement below must land as "could not verify", not
-        // as a P0, and nothing may crash trying to build the probe.
         var report = await CheckAsync(
             """
             CREATE TYPE dbo.IntListType AS TABLE (Value INT NOT NULL);
@@ -159,9 +128,6 @@ public sealed class LiveLineageParityLiveVerificationTests
     [Fact]
     public async Task MultiStatementTvf_MismatchIsStillReportedDirectlyAgainstItsAuthoredShape()
     {
-        // A multi-statement TVF's shape is its own authored RETURNS @t TABLE(...) clause - one
-        // source, so it can't go stale, and this checker never live-probes it. Pins that design
-        // decision so a future change can't silently start (or stop) probing them.
         var report = await CheckAsync(
             """
             CREATE TABLE dbo.Orders (OrderId INT NOT NULL);

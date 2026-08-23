@@ -3,16 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 1 "Join predicate incomplete vs. the backing foreign key" -
-/// a runtime row-count behavior, not a query-plan one (like <see
-/// cref="TemporalBoundaryPrecisionOracleTests"/>, not the compile-only SHOWPLAN_XML oracle the
-/// implicit-conversion streams use): proves the actual row-multiplication mechanism directly,
-/// with real seeded data - two revisions of the same order, and one order line tied to only one
-/// of them. Version-insensitive: row multiplication from a partial equality join is pure
-/// relational algebra, unaffected by CE version, interleaved execution, or UDF inlining, so a
-/// single oracle run stands for every engine version this tool targets.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class PartialCompositeForeignKeyJoinOracleTests : OracleTestFixture
 {

@@ -2,12 +2,6 @@ using SilentScan.Cli.Commands;
 
 namespace SilentScan.Tests.Commands;
 
-/// <summary>
-/// Docs-are-current regeneration test for CLAUDE.md's "never hand-edit docs/rules.html" rule -
-/// regenerates the index and every per-rule page into a temp directory and byte-compares against
-/// the committed <c>docs/</c> tree. Drift (a catalog edit that never re-ran <c>rules-doc</c>) fails
-/// the build instead of silently going stale.
-/// </summary>
 public sealed class RulesDocGeneratorTests : IDisposable
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"silentscan-rules-doc-test-{Guid.NewGuid():N}");

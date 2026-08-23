@@ -4,17 +4,6 @@ using SilentScan.Core.Reporting.RuleDocs;
 
 namespace SilentScan.Core.Reporting;
 
-/// <summary>
-/// Renders one rule's own public page (<c>docs/rules/&lt;slug&gt;.html</c>, <see cref="RuleDocSite"/>'s
-/// URL scheme), Sonar-shaped: "Why is this an issue" (the rich, multi-paragraph
-/// <see cref="RuleDocContent.WhyItMatters"/> when <see cref="RuleDocCatalog"/> has an entry for
-/// this rule, else the short <see cref="RuleDefinition.Rationale"/> alone), "How can I fix it"
-/// (fix prose plus noncompliant/compliant example pairs), and - only when the catalog names a
-/// real, checked-in fixture - "Verified by an automated test", so a reader can tell an
-/// illustrative example apart from one this tool's own test suite actually asserts against. No
-/// fabricated content anywhere: a rule with no <see cref="RuleDocCatalog"/> entry and no
-/// <see cref="RuleDefinition.FixGuidance"/> simply gets the "Why is this an issue" section alone.
-/// </summary>
 public static class RulePageHtmlWriter
 {
     private const string ParagraphEnd = "</p>\n";
@@ -156,8 +145,7 @@ public static class RulePageHtmlWriter
             </html>
             """);
 
-    /// <summary>Splits a long-form field on blank lines into separate &lt;p&gt; blocks - RuleDocs prose is authored as multi-paragraph triple-quoted text, not one run-on paragraph.</summary>
-    private static void AppendParagraphs(StringBuilder sb, string text)
+private static void AppendParagraphs(StringBuilder sb, string text)
     {
         var paragraphs = text.Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (var paragraph in paragraphs)

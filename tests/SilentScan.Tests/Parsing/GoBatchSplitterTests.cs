@@ -2,11 +2,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Tests.Parsing;
 
-/// <summary>
-/// GoBatchSplitter had zero test coverage before this - a lexer-aware GO split is easy to get
-/// wrong silently (a false split corrupts both adjacent batches), so every distinguishing case
-/// from the audit gets a fixture here.
-/// </summary>
 public sealed class GoBatchSplitterTests
 {
     [Fact]
@@ -72,9 +67,6 @@ public sealed class GoBatchSplitterTests
     [Fact]
     public void Split_EscapedQuoteInsideString_StaysInsideTheStringState()
     {
-        // 'it''s' is a single string literal containing an escaped quote - a naive scanner
-        // that treats the middle '' as string-end/string-start would desynchronize state for
-        // the rest of the script.
         var script = "INSERT INTO T (Note) VALUES ('it''s a GO test');\nGO\nSELECT 1;";
 
         var batches = GoBatchSplitter.Split(script);
@@ -123,9 +115,6 @@ public sealed class GoBatchSplitterTests
     [Fact]
     public void Split_GoInsideBracketedIdentifier_DoesNotSplit()
     {
-        // An apostrophe inside a bracketed identifier used to flip the lexer into InString (no
-        // dedicated bracket state existed at all), swallowing the real GO separator that follows
-        // into the same batch as the next statement.
         var script = "SELECT [Customer's\nGO\nOrder] FROM T;\nGO\nSELECT 2;";
 
         var batches = GoBatchSplitter.Split(script);
@@ -139,9 +128,6 @@ public sealed class GoBatchSplitterTests
     [Fact]
     public void Split_DoubledClosingBracketInsideIdentifier_StaysInsideTheBracketState()
     {
-        // [a]]b] is a single bracketed identifier containing a literal ']' (escaped as ']]') -
-        // a naive scanner that treats the middle ']' as the identifier's end would desynchronize
-        // state for the rest of the script, same failure shape as the string-escaping test above.
         var script = "SELECT [a]]b] FROM T;\nGO\nSELECT 1;";
 
         var batches = GoBatchSplitter.Split(script);
@@ -152,9 +138,6 @@ public sealed class GoBatchSplitterTests
     [Fact]
     public void Split_NestedBlockComment_DoesNotSplitOnInnerClose()
     {
-        // T-SQL block comments nest - only the OUTERMOST */ actually closes the comment. A
-        // scanner with no depth counter exits at the first inner */, treating the GO between it
-        // and the real outer */ as a genuine separator and splitting mid-comment.
         var script = "/* outer /* inner */ still commented\nGO\nstill commented */\nSELECT 1;\nGO\nSELECT 2;";
 
         var batches = GoBatchSplitter.Split(script);
@@ -203,9 +186,6 @@ public sealed class GoBatchSplitterTests
     [Fact]
     public void SplitWithSpans_GoWithRepeatCount_ReturnsTheSegmentOnce()
     {
-        // Unlike Split(), which repeats the batch 3 times to match deploy semantics,
-        // SplitWithSpans must return each GO-separated segment exactly once - it locates raw
-        // text spans, not a deploy plan.
         var spans = GoBatchSplitter.SplitWithSpans("SELECT 1;\nGO 3");
 
         Assert.Single(spans);

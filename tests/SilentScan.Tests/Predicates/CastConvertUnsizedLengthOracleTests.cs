@@ -3,21 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Small precise adds", "Explicit-length audit of CAST/CONVERT to a
-/// string type" - a runtime DML/query-result behavior, not a query-plan one, the same discipline
-/// <see cref="UnderLengthParameterOracleTests"/> already uses. Proves the underlying mechanism
-/// this whole item rests on: an unsized <c>CAST</c>/<c>CONVERT</c> to a string/binary-family type
-/// silently truncates to 30 characters, a materially different default than a bare DECLARE's own
-/// length-1 default (<see cref="UnderLengthParameterOracleTests"/>'s own subject) - both real,
-/// both silent, but different numbers, confirmed directly rather than assumed from documentation.
-/// This is a general confirmation of the mechanism, not a per-finding proof - the actual finding
-/// path is exercised structurally in <c>TypedPredicateExtractorTests</c>'s
-/// <c>Extract_ColumnComparedToUnsizedConvert_*</c> cases, sharing
-/// <see cref="UnderLengthParameterFinding"/>/<see cref="OversizedParameterFinding"/>'s existing
-/// comparison and reporting path rather than a new finding type, per the checklist item's own
-/// instruction.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class CastConvertUnsizedLengthOracleTests : OracleTestFixture
 {
@@ -71,10 +56,6 @@ public sealed class CastConvertUnsizedLengthOracleTests : OracleTestFixture
     [Fact]
     public async Task ColumnComparedAgainstUnsizedConvertOfALongerValue_SilentlyExcludesTheRealMatch()
     {
-        // The real, end-to-end consequence: a column wide enough to hold the full value never
-        // matches a predicate that routes the comparison value through an unsized CONVERT first,
-        // because the CONVERT itself truncates the value to 30 characters before the comparison
-        // ever runs - independent of the column's own declared width.
         await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));
         await connection.OpenAsync();
 

@@ -6,14 +6,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates.DynamicSqlValue;
 
-/// <summary>
-/// Exercises <see cref="DynamicSqlScannerV2.Scan"/> - the new engine's top-level entry point,
-/// matching <see cref="DynamicSqlScanner.Scan"/>'s own signature so a parity harness can compare
-/// both against the same input (docs/dynamic-sql-rebuild-plan.md Phase 3's exit gate). Covers
-/// what <see cref="DynamicSqlTransferTests"/> does not: multi-batch scripts, nested CREATE
-/// PROCEDURE/TRIGGER scope discovery and DynamicSqlScope propagation, and OUTPUT-parameter
-/// summary recording end to end.
-/// </summary>
 public sealed class DynamicSqlScannerV2Tests
 {
     private const string SourcePath = "test.sql";
@@ -51,9 +43,6 @@ public sealed class DynamicSqlScannerV2Tests
     [Fact]
     public void StubThenAlterProcedurePattern_WalksTheAlteredBody()
     {
-        // A real-world corpus shape (First Responder Kit): a stub CREATE PROCEDURE followed by
-        // ALTER PROCEDURE carrying the real body - matching on the shared
-        // ProcedureStatementBodyBase base (not the concrete CREATE-only type) is what catches it.
         var result = DynamicSqlScannerV2.Scan(Parse(
             "CREATE PROCEDURE dbo.usp_Test AS BEGIN RETURN 0; END;\nGO\n" +
             "ALTER PROCEDURE dbo.usp_Test AS BEGIN EXEC('SELECT 1'); END;"));
@@ -79,9 +68,6 @@ public sealed class DynamicSqlScannerV2Tests
     [Fact]
     public void UnseededFormalParameter_ReportsVariableNotInScope()
     {
-        // No call graph passed at all (the common case for an isolated/unit-tested scan) - a
-        // formal parameter reference behaves exactly like the old scanner's own "no call graph
-        // supplied" fallback: unseeded, reported as an ordinary unresolved variable.
         var result = DynamicSqlScannerV2.Scan(Parse(
             "CREATE PROCEDURE dbo.usp_Test @Status NVARCHAR(20) AS " +
             "BEGIN " +
@@ -126,8 +112,6 @@ public sealed class DynamicSqlScannerV2Tests
     [Fact]
     public void NestedProcedureScope_GetsFreshDeclaredTypesNotLeakedFromOuter()
     {
-        // The outer batch declares @x as INT; the nested procedure declares its OWN @x as
-        // NVARCHAR - the two must never be conflated (a fresh DeclaredTypes dict per scope).
         var result = DynamicSqlScannerV2.Scan(Parse(
             "DECLARE @x INT = 1;\nGO\n" +
             "CREATE PROCEDURE dbo.usp_Test AS " +
@@ -140,15 +124,7 @@ public sealed class DynamicSqlScannerV2Tests
         Assert.Equal("SELECT inner", script.InnerText);
     }
 
-    /// <summary>
-    /// A stored procedure is a public surface - the ONE in-corpus caller this scan found passing
-    /// 'Active' does not mean every caller does (app code, jobs, EXEC-by-name calls are all
-    /// invisible to this scan's own call graph). The seed widens to a choice between the known
-    /// literal (still reported, High confidence) and an unresolved placeholder covering every
-    /// other possible caller (Medium confidence) - never just the one literal asserted as ground
-    /// truth.
-    /// </summary>
-    [Fact]
+[Fact]
     public void FormalParameter_SingleKnownCallerWithLiteralArgument_SeedsChoiceOfLiteralAndExternalCallerPlaceholder()
     {
         var callGraph = new ProcCallGraph([
@@ -199,8 +175,6 @@ public sealed class DynamicSqlScannerV2Tests
             Parse("CREATE PROCEDURE dbo.usp_Test @Status NVARCHAR(20) AS BEGIN EXEC('SELECT ' + @Status); END;"),
             callGraph: callGraph);
 
-        // Both known callers' literals, plus an unresolved alternative for any external caller
-        // this scan's own call graph can't see - a stored procedure is a public surface.
         Assert.Equal(3, result.AnalyzableScripts.Count);
         var texts = result.AnalyzableScripts.Select(s => s.InnerText).ToList();
         Assert.Contains("SELECT Active", texts);
@@ -229,9 +203,6 @@ public sealed class DynamicSqlScannerV2Tests
     [Fact]
     public void OrdinaryCall_OutputArgument_SeededFromKnownCalleeSummary_InsteadOfTainted()
     {
-        // Line 1 = DECLARE, line 2 = the EXEC ... OUTPUT call site, line 3 = the final EXEC(...) -
-        // the call graph's own SourceSpan must match line 2 exactly (DynamicSqlCfg.CompileExecute
-        // looks up ProcCallGraph.EdgeAt by this call site's own real position).
         var callSite = new SourceSpan(SourcePath, 2, 1);
         var callGraph = new ProcCallGraph([
             new ProcCallEdge(null, "dbo.usp_Helper", callSite,

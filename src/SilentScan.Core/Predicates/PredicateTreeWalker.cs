@@ -2,24 +2,9 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// Shared AST-shape recursions used by multiple scanners to flatten a FROM clause's join tree or
-/// a WHERE/ON/HAVING condition's top-level AND-conjuncts before applying a rule to each leaf.
-/// Extracted from six near-identical private copies (docs/detection-checklist.md "Engineering
-/// debt" - the `Flatten*` family) - pure AST traversal, no catalog/lineage lookups, no rule
-/// decisions, so it belongs alongside the scanners it serves rather than under Rules/.
-/// </summary>
 internal static class PredicateTreeWalker
 {
-    /// <summary>
-    /// Every <see cref="QualifiedJoin"/> node reachable from a FROM-clause table reference,
-    /// recursing through nested joins and parenthesized joins, children before the join itself.
-    /// An unqualified join (CROSS JOIN, CROSS/OUTER APPLY) is deliberately a recursion dead end -
-    /// same as every six original copies this was extracted from - so a <see cref="QualifiedJoin"/>
-    /// nested only under an unqualified join is not reached; a plain table/function/derived-table
-    /// reference contributes no node either way.
-    /// </summary>
-    public static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
+public static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
     {
         switch (tableReference)
         {
@@ -47,14 +32,7 @@ internal static class PredicateTreeWalker
         }
     }
 
-    /// <summary>
-    /// Every top-level AND-connected fragment reachable without crossing an OR - <c>(A AND B) OR
-    /// C</c> yields the single fragment <c>(A AND B) OR C</c> unsplit (OR is a different, deliberately
-    /// separate concern - see <c>CatchAllPredicateScanner.FlattenOr</c>), while <c>A AND (B AND C)</c>
-    /// and <c>A AND B AND C</c> both yield the three leaves <c>A</c>, <c>B</c>, <c>C</c>.
-    /// Parentheses are transparently unwrapped at every level. Null yields no fragments.
-    /// </summary>
-    public static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expression)
+public static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expression)
     {
         switch (expression)
         {
@@ -88,17 +66,7 @@ internal static class PredicateTreeWalker
         }
     }
 
-    /// <summary>
-    /// Every leaf <see cref="NamedTableReference"/> reachable from a FROM-clause table
-    /// reference - the nodes that can actually carry a table hint or be named/qualified in a
-    /// finding - recursing through <see cref="QualifiedJoin"/>, <see cref="UnqualifiedJoin"/>
-    /// (CROSS JOIN, CROSS/OUTER APPLY), and parenthesized joins alike. Unlike
-    /// <see cref="FlattenJoinNodes"/>, an unqualified join is NOT a dead end here: a named table
-    /// hinted or referenced under a CROSS APPLY is exactly as real as one under an INNER JOIN, and
-    /// a caller after named tables specifically (rather than join structure) has no reason to miss
-    /// it.
-    /// </summary>
-    public static IEnumerable<NamedTableReference> FlattenNamedTables(TableReference tableReference)
+public static IEnumerable<NamedTableReference> FlattenNamedTables(TableReference tableReference)
     {
         switch (tableReference)
         {

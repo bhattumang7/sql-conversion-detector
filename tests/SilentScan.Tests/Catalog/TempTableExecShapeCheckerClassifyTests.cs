@@ -5,14 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Catalog;
 
-/// <summary>
-/// Pure classification logic for docs/detection-checklist.md Tier 2 "Dynamic SQL quality" item 3
-/// - <see cref="TempTableExecShapeChecker.Classify"/> takes an already-resolved temp table shape
-/// and an already-described result set, no database round trip, so it's covered directly here
-/// rather than only through the full live checker. The live round trip itself (probe building,
-/// the actual DMV call, error handling) is covered by
-/// <c>Integration/TempTableExecShapeCheckerOracleTests</c>.
-/// </summary>
 public sealed class TempTableExecShapeCheckerClassifyTests
 {
     private static readonly TempTableExecShapeCandidate Candidate = new(
@@ -82,9 +74,6 @@ public sealed class TempTableExecShapeCheckerClassifyTests
     [Fact]
     public void MatchingCountUnicodeDescribedIntoNonUnicodeDeclared_ColumnTypeMismatch()
     {
-        // nvarchar (described) -> varchar (declared): WriteLossKind.UnicodeToNonUnicodeReplacement,
-        // the same silent-replacement risk WriteLossFinding already reports for an ordinary
-        // INSERT/UPDATE assignment of this exact type pair.
         var tempColumns = new List<CatalogColumn>
         {
             new("Name", new SqlType(SqlTypeCategory.VarChar, Length: 50), IsNullable: false, IsIdentity: false, IsComputed: false, IsPersisted: false),

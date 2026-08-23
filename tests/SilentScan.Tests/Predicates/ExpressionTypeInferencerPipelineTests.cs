@@ -8,13 +8,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Roadmap Phase B: arithmetic and CASE/COALESCE/NULLIF/IIF - CLAUDE.md's own named hard cases -
-/// previously always resolved Unknown for lack of any type resolution at all
-/// (TypedPredicateExtractor's operand dispatch default arm). Runs through
-/// <see cref="ScanReportBuilder"/>, the same entry point production uses, and the verdict-bearing
-/// case is confirmed against the real oracle, not just static self-consistency.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ExpressionTypeInferencerPipelineTests : OracleTestFixture
 {
@@ -32,9 +25,6 @@ public sealed class ExpressionTypeInferencerPipelineTests : OracleTestFixture
     [Fact]
     public async Task VarcharColumnAgainstCoalesceOfVarcharAndNvarcharParams_ClassifiesScanForced_OracleConfirmed()
     {
-        // Oracle-verified (see ExpressionTypeInferencer's own remarks): COALESCE(varchar,
-        // nvarchar) resolves nvarchar - the SQL_* collation column then converts, same
-        // flagship direction as CLAUDE.md's "varchar column vs nvarchar value" example.
         var report = await EngineAuthoritativeScan.ScanAsync(CoalesceSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
@@ -48,11 +38,6 @@ public sealed class ExpressionTypeInferencerPipelineTests : OracleTestFixture
     [Fact]
     public void NullIf_DoesNotMergeByPrecedence_ClassifiesUsingFirstExpressionTypeOnly()
     {
-        // Static-only regression (NULLIF's asymmetric typing rule is already oracle-verified
-        // by ExpressionTypeInferencerTests): NULLIF(@VarcharParam, @NVarcharParam) must type as
-        // varchar (expr1's own type), NOT the nvarchar a COALESCE of the same two params would
-        // produce - so this predicate must NOT classify ScanForced (same-category, same
-        // collation as the column, seek preserved).
         var sql = """
             CREATE TABLE dbo.AccountsNullIf (Code varchar(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_Code (Code));
             GO

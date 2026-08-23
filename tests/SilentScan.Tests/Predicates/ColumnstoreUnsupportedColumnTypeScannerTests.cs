@@ -4,15 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Catalog-only pass - no AST walking, no predicate site needed. Oracle-confirmed (real DDL
-/// execution - see docs/detection-reference.md Appendix 8): a SQL_VARIANT column participating in
-/// a columnstore index does not deploy at all (Msg 35343). A clustered columnstore index takes no
-/// explicit column list (it implicitly covers every column on the table), so any SQL_VARIANT
-/// column anywhere on the table is caught; a nonclustered columnstore index always takes an
-/// explicit column list, so only a SQL_VARIANT column actually named in that list is caught - one
-/// that's simply left out is a real, legal shape.
-/// </summary>
 public sealed class ColumnstoreUnsupportedColumnTypeScannerTests
 {
     private static IReadOnlyList<ColumnstoreUnsupportedColumnTypeFinding> Scan(string sql)

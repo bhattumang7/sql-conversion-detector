@@ -6,21 +6,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 1 "SET options that silently disable plan features" -
-/// live-mode only (<see cref="DatabaseCatalog.IsIndexedView"/>/<see
-/// cref="DatabaseCatalog.TryGetModuleUsesQuotedIdentifier"/> are only ever populated by
-/// <c>LiveCatalogReader</c>/<c>LiveScanRunner</c>), so these tests build the catalog directly and
-/// parse each fixture with its SOURCE PATH set to the module's own qualified name - exactly what
-/// <c>LiveScanRunner</c>'s own <c>parseResultSource()</c> does (<c>SqlScriptParser.ParseText(m.QualifiedName, ...)</c>) -
-/// so <c>SetOptionScanner.Scan</c>'s <c>moduleQualifiedName = parseResult.SourcePath</c>
-/// convention lines up the same way it would against a real live scan.
-///
-/// QUOTED_IDENTIFIER OFF, ANSI_NULLS OFF, NUMERIC_ROUNDABORT ON, ANSI_WARNINGS OFF,
-/// CONCAT_NULL_YIELDS_NULL OFF, and ANSI_PADDING OFF are covered - ARITHABORT OFF was
-/// investigated and dropped, oracle-falsified: see <see cref="SetOptionFinding"/>'s own doc
-/// comment.
-/// </summary>
 public sealed class SetOptionScannerTests
 {
     private const string ModuleName = "dbo.usp_Test";
@@ -98,9 +83,6 @@ public sealed class SetOptionScannerTests
     [Fact]
     public void NumericRoundabortOnInCommaSeparatedOptionList_StillFires()
     {
-        // SET NUMERIC_ROUNDABORT, ANSI_NULLS ON is legal T-SQL - a comma-separated option list
-        // sharing one IsOn - so this must fire on the NumericRoundAbort bit alone, not require it
-        // to be the only option named.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
 
@@ -130,9 +112,6 @@ public sealed class SetOptionScannerTests
     [Fact]
     public void NumericRoundabortOn_TouchesFilteredIndexTableOnlyThroughAReferencedView_StillFires()
     {
-        // Transitive containment through a view layer, resolved for free from the already-
-        // resolved LineageCatalog (ModuleReachableObjectWalker's own documented mechanism) -
-        // no re-parsing of the view's own body needed.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
 
@@ -182,8 +161,6 @@ public sealed class SetOptionScannerTests
     [Fact]
     public void QuotedIdentifierFlagUnknown_NeverGuesses()
     {
-        // File-mode / a module this scan never read sys.sql_modules for - no flag registered at
-        // all. Must never be treated as "therefore OFF".
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
 
@@ -196,9 +173,6 @@ public sealed class SetOptionScannerTests
     [Fact]
     public void NoSetStatementAndQuotedIdentifierOn_NeverFires()
     {
-        // Nothing this module's own text/catalog flag could ever trigger a finding for - the
-        // (relatively expensive) reachable-object walk is skipped entirely rather than run and
-        // discarded (SetOptionScanner's own short-circuit).
         var catalog = new DatabaseCatalog();
 
         var findings = Scan("CREATE PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END", catalog, usesQuotedIdentifier: true);
@@ -322,9 +296,6 @@ public sealed class SetOptionScannerTests
     [Fact]
     public void SingleStatementSettingMultipleOptionsOfTheSameState_FiresBothKinds()
     {
-        // SET ANSI_WARNINGS, CONCAT_NULL_YIELDS_NULL OFF - a comma-separated option list sharing
-        // one IsOn (T-SQL cannot mix ON and OFF within a single SET statement) legitimately
-        // triggers two distinct kinds from the same PredicateSetStatement node.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
 

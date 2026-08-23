@@ -8,18 +8,6 @@ using SilentScan.Live;
 
 namespace SilentScan.Cli.Commands;
 
-/// <summary>
-/// `silentscan scan-db &lt;connection-string&gt;` — connects to a live SQL Server database,
-/// builds its catalog directly from engine metadata (<c>sys.tables</c>/<c>sys.columns</c>/
-/// <c>sys.indexes</c>) rather than inferring it from DDL text, and runs every readable module
-/// body (views/procs/functions/triggers, from <c>sys.sql_modules</c>) through the full
-/// Lineage/Predicates/Rules pipeline - implicit conversions, MSTVF-as-fence references, and
-/// scalar UDF cost, all in one pass. Types, per-column collations, and the indexed flag are all
-/// facts read from the engine, not guesses. Issues <c>SELECT</c>s only - never DDL/DML, nothing
-/// else is ever executed against the connected database; with <c>--fetch-sql-from-tables</c>,
-/// some of those SELECTs read real row content (not just catalog metadata), still read-only.
-/// Renders as readable text (default) or markdown, or as JSON or SARIF.
-/// </summary>
 public static class ScanDbCommand
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -118,9 +106,6 @@ public static class ScanDbCommand
             return 1;
         }
 
-        // Progress goes to stderr, never stdout: a large-database scan runs for minutes and used
-        // to print nothing at all until the finished report appeared, but the report itself is
-        // piped (--format json/sarif), so the two streams must stay separate.
         var progress = new TextWriterScanProgress(stderr);
         var overall = Stopwatch.StartNew();
 
@@ -137,11 +122,6 @@ public static class ScanDbCommand
 
         await WarnOnParseHealthAsync(result, stderr);
 
-        // Rendering is its own reported stage rather than silent tail-time. On a database with a
-        // large finding count, serializing the report and writing it out is a substantial share
-        // of total wall clock - measured at roughly a third of a real run - and reporting "done"
-        // before it started meant the tool looked finished while it still had seconds of work
-        // left, which is exactly the "takes ages to output anything" symptom.
         string content;
         using (var renderStage = progress.Begin("rendering report"))
         {
@@ -161,23 +141,10 @@ public static class ScanDbCommand
 
         progress.Done(overall.Elapsed);
 
-        // Non-zero on a P0 lineage bug in addition to a hard connection/read failure - findings
-        // built on a type the pipeline got demonstrably wrong (verified against what the engine
-        // computes for the object right now, not its possibly-stale cached metadata) should
-        // never report a clean exit code. An uncompilable object or a merely-stale cache is a
-        // condition of the scanned database, not a tool bug, so neither affects the exit code -
-        // both still appear in the report, prominently.
         return result.LineageParity.Mismatches.Count == 0 ? 0 : 1;
     }
 
-    /// <summary>
-    /// Unlike scan-corpus-live, this command previously inspected <c>ParseHealth</c> nowhere at
-    /// all - a module that failed to parse from <c>sys.sql_modules</c>, or a batch dropped from
-    /// within one, was silently absent from every stream with no stderr signal. Exit code is
-    /// untouched: a module the live server itself accepted but ScriptDOM couldn't reparse is a
-    /// condition of the target database, not a tool failure.
-    /// </summary>
-    private static async Task WarnOnParseHealthAsync(LiveScanResult result, TextWriter stderr)
+private static async Task WarnOnParseHealthAsync(LiveScanResult result, TextWriter stderr)
     {
         foreach (var file in result.Report.ParseHealth.Files)
         {

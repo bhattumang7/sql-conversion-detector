@@ -5,15 +5,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §B "Index-coverage shapes" -
-/// see <see cref="IndexCoverageFinding"/> for the full mechanism, oracle evidence, and the sibling
-/// shape deliberately NOT shipped here. Shares <see cref="CompositeIndexLeadingColumnScanner"/>'s
-/// own AND-flattened "which base columns does this statement genuinely constrain" walk almost
-/// verbatim - a standalone scanner because this rule additionally needs every OTHER column of the
-/// table referenced ANYWHERE (SELECT list, ORDER BY, GROUP BY included) to compute coverage, a
-/// broader column-collection scope than that scanner's own "which columns are bound" question needs.
-/// </summary>
 public static class IndexCoverageScanner
 {
     public static IReadOnlyList<IndexCoverageFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
@@ -37,10 +28,6 @@ public static class IndexCoverageScanner
 
         protected override void InspectStatement(ConstrainedStatement statement)
         {
-            // Every base column of every table in scope referenced ANYWHERE in the whole
-            // statement (SELECT list, WHERE, ORDER BY, GROUP BY, JOIN ON, HAVING) - the coverage
-            // question needs this broader set, unlike CompositeIndexLeadingColumnScanner's own
-            // narrower "referenced anywhere, used only to suppress" set.
             var allReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.Instance);
             var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, allReferencedColumns);
             statement.Node.Accept(referenceVisitor);
@@ -75,9 +62,6 @@ public static class IndexCoverageScanner
                 .Where(i => constrainedColumnsOnTable.Contains(i.KeyColumns[0]))
                 .ToList();
 
-            // The hard precision guard: exactly one real candidate seek path, never more (a real
-            // alternative access path the optimizer could pick instead) and never zero (nothing to
-            // report a lookup against).
             if (candidateIndexes.Count != 1)
             {
                 return;
@@ -85,14 +69,6 @@ public static class IndexCoverageScanner
 
             var index = candidateIndexes[0];
 
-            // A nonclustered index's own leaf row always carries the table's clustering key as
-            // its row locator (that IS the bookmark a lookup follows) - the engine gives every
-            // nonclustered index this column set for free, regardless of its own KeyColumns/
-            // IncludedColumns. IsClustered is live-mode only (see CatalogIndex's own doc comment),
-            // so file mode falls back to the PRIMARY KEY index's own key columns - SQL Server's
-            // real default is CLUSTERED unless a script says otherwise, and getting this wrong in
-            // file mode only means under-reporting (a real lookup missed), never a false claim,
-            // which is the safe direction CLAUDE.md's precision-first rule asks for.
             var clusteringKeyColumns =
                 table.Indexes.FirstOrDefault(i => i.IsClustered && !i.IsColumnstore)?.KeyColumns
                 ?? table.Indexes.FirstOrDefault(i => i.Kind == CatalogIndexKind.PrimaryKey)?.KeyColumns

@@ -5,14 +5,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability stream": BETWEEN
-/// end-of-period boundary - a CORRECTNESS finding (silently dropped rows), not a sargability one
-/// (BETWEEN itself seeks fine here). Needs a real catalog (the column's own declared
-/// TIME/DATETIME2/DATETIMEOFFSET scale is a DDL fact) - unlike most of this file's other tests,
-/// these use the full CatalogBuilder/LineageResolver pipeline directly rather than the
-/// catalog-less ScanFixture helper.
-/// </summary>
 public sealed class TemporalBoundaryPrecisionTests
 {
     private static readonly string FixturesDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "tier1");
@@ -61,9 +53,6 @@ public sealed class TemporalBoundaryPrecisionTests
     [Fact]
     public void BareDateBoundaryWithNoTimePortion_FiresWithZeroFractionalDigits()
     {
-        // The classic, even more common version of this bug: a bare date with NO time
-        // component implies midnight, which is even less precise than any explicit fractional
-        // literal - zero fractional digits is correctly "less than" any positive column scale.
         const string sql = """
             CREATE TABLE dbo.Sessions (Id INT NOT NULL PRIMARY KEY, StartedAt DATETIME2(3) NOT NULL);
             SELECT Id FROM dbo.Sessions WHERE StartedAt BETWEEN '2024-01-01' AND '2024-06-30';
@@ -83,9 +72,6 @@ public sealed class TemporalBoundaryPrecisionTests
     [Fact]
     public void OrdinaryDateTimeColumn_NoDeclaredScale_NeverGuesses()
     {
-        // Plain DATETIME has no fractional-seconds precision concept the way DATETIME2 does
-        // (its own rounding behavior is a different, unrelated legacy quirk) - never guesses a
-        // scale for a category this rule doesn't model.
         const string sql = """
             CREATE TABLE dbo.Legacy (Id INT NOT NULL PRIMARY KEY, OccurredAt DATETIME NOT NULL);
             SELECT Id FROM dbo.Legacy WHERE OccurredAt BETWEEN '2024-01-01' AND '2024-12-31 23:59:59.997';

@@ -3,11 +3,6 @@ using System.Text;
 
 namespace SilentScan.Core.Reporting.Readable;
 
-/// <summary>
-/// Draws a <see cref="ReadableDocument"/> as terminal text or as markdown. This is the only
-/// place either syntax is written, so every report the tool emits (file scan, live scan,
-/// corpus) is laid out the same way for free.
-/// </summary>
 public static class ReadableDocumentRenderer
 {
     public static string Render(ReadableDocument document, ReadableStyle style)
@@ -56,8 +51,6 @@ public static class ReadableDocumentRenderer
 
         builder.AppendLine(heading.Text);
 
-        // Only the two outermost levels get a rule under them; deeper ones would turn a report
-        // with a section per finding kind into more underline than content.
         var rule = heading.Level switch
         {
             1 => '=',
@@ -124,8 +117,6 @@ public static class ReadableDocumentRenderer
 
         for (var i = 0; i < cells.Count; i++)
         {
-            // The last cell is never padded: trailing spaces are invisible in a terminal but
-            // show up as diff noise the moment someone redirects the report to a file.
             builder.Append(i == cells.Count - 1 ? cells[i] : cells[i].PadRight(widths[i]));
 
             if (i != cells.Count - 1)
@@ -147,12 +138,7 @@ public static class ReadableDocumentRenderer
         }
     }
 
-    /// <summary>
-    /// Keeps a cell inside its markdown table row. A pipe would end the cell early and a newline
-    /// would end the row - both silently shift every later cell into the wrong column, which is
-    /// worse than an ugly cell because the table still renders and just says something false.
-    /// </summary>
-    private static string EscapeMarkdownCell(string cell) =>
+private static string EscapeMarkdownCell(string cell) =>
         cell.Replace("|", "\\|", StringComparison.Ordinal)
             .Replace("\r\n", " ", StringComparison.Ordinal)
             .Replace("\n", " ", StringComparison.Ordinal)

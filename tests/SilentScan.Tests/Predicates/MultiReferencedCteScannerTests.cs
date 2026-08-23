@@ -3,11 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Lineage-metric findings" - "Multi-referenced CTE". The
-/// general re-execution mechanism is oracle-confirmed separately via real execution in
-/// <see cref="MultiReferencedCteOracleTests"/>.
-/// </summary>
 public sealed class MultiReferencedCteScannerTests
 {
     private static IReadOnlyList<MultiReferencedCteFinding> Scan(string sql)
@@ -66,8 +61,6 @@ public sealed class MultiReferencedCteScannerTests
             SELECT Id FROM cte;
             """);
 
-        // The recursive member's self-reference plus the single main-body reference is only 1
-        // countable reference (the main body) - never fires.
         Assert.Empty(findings);
     }
 

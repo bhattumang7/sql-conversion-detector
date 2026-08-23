@@ -5,15 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates.DynamicSqlValue;
 
-/// <summary>
-/// Exercises <see cref="TemplateRenderer"/> - the single place that turns an expanded
-/// <see cref="FlatPiece"/> assembly into reparseable text AND builds the
-/// <see cref="DynamicSqlSegmentMap"/> mapping it back to real source coordinates. The multi-line
-/// and escaped-quote cases are ported from <see cref="DynamicSqlSegmentMapTests"/> - the renderer
-/// must reproduce that class's own position-mapping guarantees exactly, since it now OWNS the
-/// only construction of a <see cref="DynamicSqlSegmentMap"/> (docs/dynamic-sql-rebuild-plan.md
-/// §2/§5: no other component builds one or re-derives its arithmetic).
-/// </summary>
 public sealed class TemplateRendererTests
 {
     private static readonly SqlType NVarChar50 = new(SqlTypeCategory.NVarChar, Length: 50);
@@ -30,8 +21,7 @@ public sealed class TemplateRendererTests
         var span = rendered.SegmentMap.Map(innerLine: 1, innerColumn: 8);
         Assert.Equal("test.sql", span.SourcePath);
         Assert.Equal(1, span.Line);
-        Assert.Equal(14, span.Column); // matches DynamicSqlSegmentMapTests.Map_SingleLineLiteral_ReturnsLiteralContentColumn
-    }
+        Assert.Equal(14, span.Column);    }
 
     [Fact]
     public void Render_MultiLineLiteral_ResetsColumnAfterNewline()
@@ -82,8 +72,6 @@ public sealed class TemplateRendererTests
         Assert.Equal("SELECT ".Length, occurrence.InnerStartOffset);
         Assert.Contains("__silentscan_sym_L9C3__", rendered.InnerText, StringComparison.Ordinal);
 
-        // Every position inside the token collapses to the hole's own origin - never the
-        // preceding literal's, and never a position derived from the token TEXT itself.
         var middleOfToken = rendered.SegmentMap.Map(innerLine: 1, innerColumn: occurrence.InnerStartOffset + 5);
         Assert.Equal(holeOrigin, middleOfToken);
     }
@@ -103,9 +91,6 @@ public sealed class TemplateRendererTests
         Assert.EndsWith(" ", rendered.InnerText, StringComparison.Ordinal);
         Assert.DoesNotContain("__silentscan_sym_", rendered.InnerText, StringComparison.Ordinal);
 
-        // OptionalFragment holes are rendered eagerly (never need a failed-parse round trip
-        // first), but still get no PlaceholderOccurrence - there is no scalar type to classify
-        // a syntactic position for, since this hole never stood for a single value at all.
         Assert.Empty(rendered.Placeholders);
     }
 

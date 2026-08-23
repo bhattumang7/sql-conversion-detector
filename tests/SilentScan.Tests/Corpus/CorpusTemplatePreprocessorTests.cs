@@ -19,9 +19,6 @@ public sealed class CorpusTemplatePreprocessorTests
     [Fact]
     public void Apply_SubstitutionMap_ReplacesEveryToken()
     {
-        // docs/audit-remediation-plan.md Phase 6.1: the map comes from the manifest entry, not
-        // a hardcoded repo-name switch - adding a new repo with its own tokens is a manifest
-        // edit only.
         var substitutions = new Dictionary<string, string>
         {
             ["{databaseOwner}"] = "dbo.",

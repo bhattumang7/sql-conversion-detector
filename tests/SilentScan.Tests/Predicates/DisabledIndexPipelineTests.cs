@@ -4,15 +4,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Regression coverage for the disabled-index precision bug (formerly pinned in
-/// KnownGapCharacterizationTests.DisabledIndex_IsStillReportedAsIndexed): a column behind an
-/// index that has been <c>ALTER INDEX ... DISABLE</c>d must never report Indexed = true, since
-/// the engine cannot actually use that index to seek. Runs through
-/// <see cref="ScanReportBuilder"/>, the same entry point production uses, so it exercises the
-/// full catalog -> lineage -> predicate pipeline, not CatalogBuilder in isolation - and the
-/// ScanForced verdict is confirmed against the real oracle (CLAUDE.md: verify the real thing).
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class DisabledIndexPipelineTests : OracleTestFixture
 {

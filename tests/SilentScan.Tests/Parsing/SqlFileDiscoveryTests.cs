@@ -39,8 +39,6 @@ public sealed class SqlFileDiscoveryTests
     [Fact]
     public void EnumerateSqlFiles_CustomExtension_FindsFilesSqlWouldMiss()
     {
-        // docs/audit-remediation-plan.md Phase 6.1: DNN Platform ships DDL as .SqlDataProvider,
-        // not .sql - the default-only lookup finds nothing in a repo shaped like that.
         var tempDir = Directory.CreateTempSubdirectory("silentscan-discovery-");
         try
         {

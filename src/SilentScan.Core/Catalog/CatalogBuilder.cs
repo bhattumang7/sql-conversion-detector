@@ -6,31 +6,11 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Catalog;
 
-/// <summary>
-/// Pass 1: walks parsed .sql files and builds the <see cref="DatabaseCatalog"/> - tables,
-/// columns, types, collations, indexes, PK/UQ, temp tables, table variables (CLAUDE.md Pass 1).
-/// A <see cref="TSqlFragmentVisitor"/>-based visitor rather than a hand-rolled statement switch
-/// (docs/audit-remediation-plan.md Phase 2.5): the default (un-overridden) ExplicitVisit
-/// implementation already recurses into every container - procedure/function/trigger bodies,
-/// IF/WHILE/TRY blocks, BEGIN/END blocks - so a construct nested inside any of them is never
-/// silently missed just because nobody enumerated that specific container type.
-/// </summary>
 public static class CatalogBuilder
 {
     private const string SpRenameConstructKind = "sp_rename";
 
-    /// <summary>
-    /// Builds the catalog. <paramref name="manifestDeclaredCollation"/> is the corpus manifest's
-    /// declaredCollation hint (CLAUDE.md Pass 1: "database default collation from any CREATE
-    /// DATABASE/manifest hint") - used only as a last resort, when no scanned file contains an
-    /// explicit CREATE DATABASE/ALTER DATABASE ... COLLATE statement of its own. Every string
-    /// column's own collation always wins over either source. <paramref name="manifestTempdbCollation"/>
-    /// is a SEPARATE, optional hint for tempdb's own server-level collation (real SQL Server
-    /// instances routinely run tempdb at a different collation than a user database) - null (the
-    /// default) preserves this pass's prior behavior of defaulting a #temp table/table variable's
-    /// columns to the scanned database's own collation instead, since most corpora never state one.
-    /// </summary>
-    public static DatabaseCatalog Build(IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null)
+public static DatabaseCatalog Build(IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null)
     {
         var catalog = new DatabaseCatalog();
         var results = parseResults as IReadOnlyList<SqlParseResult> ?? parseResults.ToList();
@@ -41,20 +21,11 @@ public static class CatalogBuilder
             : null;
         WarnIfCaseSensitive(catalog);
 
-        // CREATE TYPE ... FROM aliases must be known before ANY column resolves its type
-        // (docs/audit-remediation-plan.md Phase 6.2) - the same cross-file-ordering problem
-        // CollectTables solves for tables applies here too (a repo's type aliases routinely
-        // live in their own file, sorted before or after the tables that use them).
         foreach (var result in results)
         {
             Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTypeAliases));
         }
 
-        // Two-phase build (docs/audit-remediation-plan.md Phase 2.5): every CREATE TABLE across
-        // every scanned file is cataloged before any ALTER TABLE/CREATE INDEX/SELECT INTO is
-        // applied, so cross-file ordering (an index or ALTER declared in a file that sorts
-        // before the file with the base CREATE TABLE - routine in real repos that split DDL
-        // across per-object files) no longer drops real catalog data.
         foreach (var result in results)
         {
             Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTables));
@@ -81,20 +52,7 @@ public static class CatalogBuilder
         }
     }
 
-    /// <summary>
-    /// Every catalog dictionary (tables, procedures, functions, synonyms, type aliases) and every
-    /// name comparison this codebase does elsewhere (predicates, lineage) is case-INSENSITIVE
-    /// (<see cref="StringComparer.OrdinalIgnoreCase"/>), unconditionally - correct for the
-    /// overwhelming majority of real SQL Server instances, which run a case-insensitive (<c>_CI_</c>)
-    /// collation. A genuinely case-sensitive database (an explicit <c>_CS_</c> collation, or a
-    /// binary one) makes <c>Foo</c> and <c>FOO</c> distinct objects in the real engine - this scan
-    /// would silently collide them into one catalog entry. Rather than thread a configurable
-    /// comparer through every dictionary in the catalog and every other pass that does its own
-    /// name comparison (a large, invasive change with no evidence any pinned corpus repo actually
-    /// needs it), this reports the mismatch once, honestly, so a reader knows this scan's results
-    /// are unreliable for such a repo instead of silently trusting a wrong catalog match.
-    /// </summary>
-    private static void WarnIfCaseSensitive(DatabaseCatalog catalog)
+private static void WarnIfCaseSensitive(DatabaseCatalog catalog)
     {
         var caseSensitive = new[] { catalog.DefaultCollation, catalog.TempdbCollation }
             .Where(c => c is { IsCaseSensitive: true })
@@ -110,12 +68,7 @@ public static class CatalogBuilder
         }
     }
 
-    /// <summary>
-    /// Explicit DDL always wins over the manifest hint (CLAUDE.md Pass 1: "database default
-    /// collation from any CREATE DATABASE/manifest hint" - DDL is the stronger signal of the
-    /// two, since it's what the repo itself declares rather than an out-of-band annotation).
-    /// </summary>
-    private static Collation? ResolveDefaultCollation(IReadOnlyList<SqlParseResult> results, string? manifestDeclaredCollation)
+private static Collation? ResolveDefaultCollation(IReadOnlyList<SqlParseResult> results, string? manifestDeclaredCollation)
     {
         if (FindExplicitDatabaseCollation(results) is { } explicitName)
         {
@@ -127,14 +80,7 @@ public static class CatalogBuilder
             : null;
     }
 
-    /// <summary>
-    /// Scans every batch's top-level statements (not nested inside procedures/blocks - a
-    /// database-level COLLATE statement is standalone DDL, never buried in a proc body) for the
-    /// last CREATE DATABASE or ALTER DATABASE ... COLLATE, in file/statement order. Last-writer-
-    /// wins, matching every other catalog merge in this pass - the tool assumes a single target
-    /// database per scan, same simplification <see cref="SchemaObjectNameHelper"/> already makes.
-    /// </summary>
-    private static string? FindExplicitDatabaseCollation(IReadOnlyList<SqlParseResult> results)
+private static string? FindExplicitDatabaseCollation(IReadOnlyList<SqlParseResult> results)
     {
         string? found = null;
         foreach (var result in results)
@@ -170,14 +116,7 @@ public static class CatalogBuilder
         ApplyEverythingElse,
     }
 
-    /// <summary>
-    /// One traversal of one file's batches. <see cref="_currentScope"/> tracks the qualified
-    /// name of the innermost enclosing procedure/function/trigger, if any, so a temp table or
-    /// table variable declared inside one gets a catalog key scoped to it - two procedures'
-    /// same-named-but-differently-shaped temp objects (a very common real-world pattern) must
-    /// not clobber each other (docs/audit-remediation-plan.md Phase 2.5).
-    /// </summary>
-    private sealed class Visitor(DatabaseCatalog catalog, string sourcePath, BuildPhase phase) : TSqlFragmentVisitor
+private sealed class Visitor(DatabaseCatalog catalog, string sourcePath, BuildPhase phase) : TSqlFragmentVisitor
     {
         private string? _currentScope;
 
@@ -191,14 +130,7 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        /// <summary>
-        /// <c>CREATE TYPE ... AS TABLE</c> - a reusable column shape for table-valued parameters
-        /// (coverage-remediation-plan.md Phase 3.2). Gated to the same phase as
-        /// <c>CREATE TYPE ... FROM</c> aliases: a TVP parameter referencing this type can appear
-        /// in any scanned file regardless of declaration order, so the shape must be known before
-        /// <see cref="VisitScopedBody"/> processes any procedure/function parameter list.
-        /// </summary>
-        public override void ExplicitVisit(CreateTypeTableStatement node)
+public override void ExplicitVisit(CreateTypeTableStatement node)
         {
             if (phase == BuildPhase.CollectTypeAliases)
             {
@@ -219,13 +151,7 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        /// <summary>
-        /// <c>CREATE SYNONYM name FOR target</c> - a pure name-&gt;name map with nothing else to
-        /// resolve first, so it belongs in the same phase type aliases do: a synonym declared in
-        /// a file that sorts after its consumers (routine in real repos that split DDL per
-        /// object) must still be visible regardless of file order.
-        /// </summary>
-        public override void ExplicitVisit(CreateSynonymStatement node)
+public override void ExplicitVisit(CreateSynonymStatement node)
         {
             if (phase == BuildPhase.CollectTypeAliases)
             {
@@ -248,10 +174,6 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        // CLR constructs (coverage-remediation-plan.md Phase 0.2/3.6): no assembly-backed type,
-        // aggregate, or CLR UDT is modeled - the decision is to count and decline, never guess at
-        // a shape that lives outside the scanned script. Gated to one phase so a file walked
-        // multiple times (CollectTypeAliases/CollectTables/ApplyEverythingElse) doesn't triple-count.
         public override void ExplicitVisit(CreateAssemblyStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
@@ -288,15 +210,6 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        // Full-text/spatial/XML indexes and external (PolyBase) tables: ConstructCoverage.json
-        // carried "Ledgered" rows for these four with verifiedBy: null and no code anywhere
-        // actually recording them - a phantom claim (docs/coverage-remediation-plan.md's own
-        // "Ledgered" status means "every occurrence reaches a SkipLedger entry", which was false
-        // for all four). None of the four contribute a column shape or a seekable comparison
-        // this tool classifies (spatial/XML/full-text indexes support their own predicate
-        // families, not equality/range; an external table's columns live in a data source
-        // outside the scanned repo), so there's nothing to model - but an occurrence should still
-        // be counted rather than silently vanishing, exactly like the CLR constructs above.
         public override void ExplicitVisit(CreateFullTextIndexStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
@@ -309,9 +222,6 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        // Found by the reflection backstop (StatementVariantParityTests) the moment
-        // CreateFullTextIndexStatement above got its own visitor - same out-of-scope reasoning,
-        // reusing the identical "full-text index" construct kind.
         public override void ExplicitVisit(AlterFullTextIndexStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
@@ -360,10 +270,6 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        // ALTER ASSEMBLY (re-pointing an existing CLR assembly's file/version) - same CLR
-        // decline-to-model decision as CREATE ASSEMBLY. Found by the reflection backstop
-        // (coverage-remediation-plan.md Phase 2.1) while auditing CREATE/ALTER parity - was
-        // silently unhandled before this, unlike CREATE ASSEMBLY which was already ledgered.
         public override void ExplicitVisit(AlterAssemblyStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
@@ -376,10 +282,6 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        // ALTER INDEX (REBUILD/REORGANIZE/DISABLE/...) - also found by the reflection backstop.
-        // DISABLE/REBUILD flip CatalogIndex.IsDisabled (the only two that change whether the
-        // engine can actually use the index); other alter types (REORGANIZE, SET, ...) never
-        // affect seekability, so they're ledgered rather than modeled.
         public override void ExplicitVisit(AlterIndexStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
@@ -400,19 +302,7 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        /// <summary>
-        /// Gated to the SAME phase as <see cref="CreateTableStatement"/> (not <c>ApplyEverythingElse</c>,
-        /// where every other DROP/ALTER in this file lives) so create/drop/recreate cycles across a
-        /// corpus's migration-history files resolve correctly: both are collected in one pass, in
-        /// file-then-statement order, before any ALTER/index/computed-column logic ever runs against
-        /// the result. A dropped-and-never-recreated table simply isn't in the catalog by the time
-        /// ApplyEverythingElse or any later pass looks for it - predicates against it resolve to the
-        /// honest "no known DDL" ledger reason instead of a stale, possibly wrong-typed definition
-        /// (the false-positive class this pass exists to close). A drop immediately followed by a
-        /// recreate in the same file set still ends up with the recreated shape, because the second
-        /// CreateTableStatement re-adds it after this removes it, in that same single ordered walk.
-        /// </summary>
-        public override void ExplicitVisit(DropTableStatement node)
+public override void ExplicitVisit(DropTableStatement node)
         {
             if (phase == BuildPhase.CollectTables)
             {
@@ -422,13 +312,7 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        /// <summary>
-        /// <c>DROP INDEX index ON table</c> (and the multi-clause <c>DROP INDEX a.ix1, b.ix2</c> form) -
-        /// lives in <c>ApplyEverythingElse</c> alongside every other index mutation
-        /// (<see cref="VisitCreateIndex"/>, <see cref="VisitAlterIndex"/>), so a script that creates an
-        /// index, drops it, and later queries the column no longer counts it as indexed.
-        /// </summary>
-        public override void ExplicitVisit(DropIndexStatement node)
+public override void ExplicitVisit(DropIndexStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
             {
@@ -438,17 +322,7 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        /// <summary>
-        /// <c>DROP FUNCTION</c> - the registry counterpart to <see cref="VisitFunctionBody"/>'s
-        /// <c>AddScalarFunctionReturnType</c>/<c>AddTableValuedFunctionKind</c>/<c>AddScalarUdfInfo</c>
-        /// calls, in the same <c>ApplyEverythingElse</c> phase so create/drop ordering within one
-        /// pass stays consistent. A dropped TVF's resolved COLUMN shape lives in
-        /// <see cref="Lineage.ViewDefinitionExtractor"/>'s own view/TVF registry, not here; what
-        /// this removes is the scalar return type, the inline-vs-multi-statement kind, and the
-        /// scalar-UDF stream's own metadata. Removing a name that was never registered under any
-        /// of them is a harmless no-op on a dictionary that never had the key.
-        /// </summary>
-        public override void ExplicitVisit(DropFunctionStatement node)
+public override void ExplicitVisit(DropFunctionStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
             {
@@ -464,18 +338,7 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        /// <summary>
-        /// <c>EXEC sp_rename 'objname', 'newname'[, 'objtype']</c> - the one system procedure whose
-        /// effect changes catalog identity rather than data, so it is modeled here rather than left to
-        /// the dynamic-SQL pipeline (which only ever analyzes predicates, never DDL side effects).
-        /// Only literal string arguments are handled, matching every DDL string in this file: a
-        /// variable/expression argument makes the actual rename target undecidable without executing
-        /// the script, so it is ledgered rather than guessed, and the catalog keeps the PRE-rename
-        /// definition (never a false-positive risk - a later reference to the new name simply resolves
-        /// "no known DDL" instead of silently inheriting the wrong shape). Gated to
-        /// <c>ApplyEverythingElse</c>, alongside every other in-place catalog mutation.
-        /// </summary>
-        public override void ExplicitVisit(ExecuteStatement node)
+public override void ExplicitVisit(ExecuteStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
             {
@@ -485,18 +348,7 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        /// <summary>
-        /// <c>USE &lt;database&gt;</c> - genuine cross-database switching mid-scan is not modeled
-        /// (checked against the real pinned 5-repo corpus: no repo actually cross-references
-        /// between two databases it also declares DDL for - mojoportal's two distinct USE targets
-        /// are each a standalone script naming its own single dev database, never referencing the
-        /// other - so building unverified resolution logic for a pattern nothing in the corpus
-        /// exercises would be exactly the kind of speculative complexity this project's precision-
-        /// first, oracle-verified-only discipline exists to avoid). Ledgered rather than silently
-        /// swallowed - unlike before this pass, USE is no longer a construct with zero trace in
-        /// either the ledger or the coverage matrix.
-        /// </summary>
-        public override void ExplicitVisit(UseStatement node)
+public override void ExplicitVisit(UseStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
             {
@@ -578,11 +430,6 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
-        // Every concrete CREATE/ALTER/CREATE OR ALTER procedure and function statement needs its
-        // own override for the same reason Phase 2.3 needed one in TypedPredicateExtractor:
-        // ScriptDOM's Accept() binds at compile time to the most specific ExplicitVisit overload
-        // that exists, so overriding only the common ProcedureStatementBodyBase base type would
-        // never fire for e.g. an AlterProcedureStatement node.
         public override void ExplicitVisit(CreateProcedureStatement node) => VisitScopedBody(node, node.ProcedureReference.Name);
 
         public override void ExplicitVisit(AlterProcedureStatement node) => VisitScopedBody(node, node.ProcedureReference.Name);
@@ -610,11 +457,6 @@ public static class CatalogBuilder
             {
                 RegisterTableValuedParameters(parameters);
 
-                // Triggers reach this same method via VisitScopedBody but are never a
-                // ProcedureStatementBodyBase (they take no parameters), so this only ever
-                // registers a real CREATE/ALTER PROCEDURE's own signature - the foundation the
-                // procedure call graph (Predicates.ProcCallGraphBuilder) matches EXEC call sites'
-                // arguments against.
                 if (node is CreateProcedureStatement or AlterProcedureStatement or CreateOrAlterProcedureStatement)
                 {
                     RegisterProcedureParameters(parameters);
@@ -625,17 +467,7 @@ public static class CatalogBuilder
             _currentScope = previous;
         }
 
-        /// <summary>
-        /// A table-valued parameter (<c>@Orders Website.OrderList READONLY</c>) declares its type
-        /// as a <see cref="UserDataTypeReference"/> naming a <c>CREATE TYPE ... AS TABLE</c> shape
-        /// (coverage-remediation-plan.md Phase 3.2) - registered under the parameter's own
-        /// variable name, scoped to the enclosing procedure/function/trigger exactly like a body-
-        /// declared table variable, so <c>FROM @Orders</c> anywhere in the body resolves through
-        /// the identical <c>VariableTableReference</c> path Phase 3.4 wired up. A parameter whose
-        /// type isn't a registered table type (a scalar type, or a table type this scan never saw)
-        /// is silently not a TVP - nothing to register, not a gap.
-        /// </summary>
-        private void RegisterTableValuedParameters(IList<ProcedureParameter> parameters)
+private void RegisterTableValuedParameters(IList<ProcedureParameter> parameters)
         {
             foreach (var parameter in parameters)
             {
@@ -656,17 +488,7 @@ public static class CatalogBuilder
             }
         }
 
-        /// <summary>
-        /// Every declared parameter, scalar or table-valued, keyed under the procedure's own
-        /// qualified name (<c>_currentScope</c>, already set by the caller) - declaration order
-        /// preserved, since a positional <c>EXEC proc @a, @b</c> call site can only match
-        /// arguments to formals by that order, and a TVP counts as a positional slot exactly
-        /// like a scalar one even though it has no <see cref="SqlType"/> of its own (recorded
-        /// with a null type, same as any other parameter this pass couldn't type - never simply
-        /// omitted, which would shift every later formal's position out of alignment with the
-        /// real declaration).
-        /// </summary>
-        private void RegisterProcedureParameters(IList<ProcedureParameter> parameters)
+private void RegisterProcedureParameters(IList<ProcedureParameter> parameters)
         {
             var registered = new List<ProcedureParameterInfo>(parameters.Count);
             foreach (var parameter in parameters)
@@ -680,20 +502,7 @@ public static class CatalogBuilder
             catalog.AddProcedureParameters(_currentScope!, registered);
         }
 
-        /// <summary>
-        /// A multi-statement TVF's <c>RETURNS @t TABLE(...)</c> is a <see cref="DeclareTableVariableBody"/>
-        /// hanging off the return type, not a <see cref="DeclareTableVariableStatement"/> - so unlike
-        /// an ordinary <c>DECLARE @t TABLE(...)</c> inside the body, it was never registered, and a
-        /// predicate inside the body over <c>FROM @t</c> resolved to no known table (coverage-
-        /// remediation-plan.md Phase 3.4). Registered under the function's own scope, the identical
-        /// key <see cref="VisitDeclareTableVariable"/> uses for a body-declared temp object, before
-        /// entering the body - a predicate against @t anywhere in the body needs it to already exist.
-        /// A CLR TVF's <c>RETURNS TABLE(...)</c> has the same <see cref="TableValuedFunctionReturnType"/>
-        /// shape but no <c>@variable</c> name at all (<c>VariableName</c> is null, <c>AsDefined</c> is
-        /// false) - nothing to register under, and its EXTERNAL NAME body could never reference one
-        /// anyway, so that case is skipped rather than guessed at.
-        /// </summary>
-        private void VisitFunctionBody(FunctionStatementBody node, SchemaObjectName name, FunctionReturnType returnType)
+private void VisitFunctionBody(FunctionStatementBody node, SchemaObjectName name, FunctionReturnType returnType)
         {
             if (phase == BuildPhase.ApplyEverythingElse && returnType is ScalarFunctionReturnType scalarReturn)
             {
@@ -708,12 +517,6 @@ public static class CatalogBuilder
                 RegisterScalarUdfInfo(node, qualifiedName);
             }
 
-            // The RETURNS clause is the only place the three table-valued flavours differ: an
-            // inline TVF returns a SELECT (SelectFunctionReturnType), a multi-statement one
-            // declares the @variable it materializes into, and a CLR one has the same
-            // TableValuedFunctionReturnType shape with no @variable at all (its body is EXTERNAL
-            // NAME). Live mode reads this straight from sys.objects and wins on merge; this path
-            // only ever covers a function whose DDL text is all this scan has.
             if (phase == BuildPhase.ApplyEverythingElse && returnType is not ScalarFunctionReturnType)
             {
                 var tvfKind = returnType switch
@@ -774,10 +577,6 @@ public static class CatalogBuilder
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(createType.Name);
 
-            // CREATE TYPE ... FROM only ever references a built-in type (SQL Server doesn't
-            // allow aliasing an alias), so the existing resolver handles it with no alias
-            // lookup of its own - typeAliases: null here is not a missed case, just "this
-            // resolution never needs one."
             var underlyingType = SqlTypeReferenceResolver.Resolve(createType.DataType, columnCollation: null, typeAliases: null);
             if (underlyingType is null)
             {
@@ -794,11 +593,6 @@ public static class CatalogBuilder
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(createSynonym.Name);
 
-            // SchemaObjectNameHelper.Qualify only reads Database/Schema/Base - it silently
-            // drops a ServerIdentifier, so a four-part linked-server target
-            // (FOR linkedserver.otherdb.dbo.T) would otherwise collide with an unrelated local
-            // key sharing the same database.schema.name tail. Ledgered, never registered under
-            // a name that could alias the wrong object.
             if (createSynonym.ForName.ServerIdentifier is { Value.Length: > 0 })
             {
                 catalog.Skipped.Record(
@@ -847,17 +641,10 @@ public static class CatalogBuilder
                 var qualifiedName = SchemaObjectNameHelper.Qualify(target);
                 if (catalog.Find(qualifiedName, _currentScope) is null)
                 {
-                    // IF EXISTS or a target outside this scan's file set - nothing to remove, but
-                    // still worth an honest ledger entry: a caller diffing the ledger for "why did
-                    // this table disappear" should be able to find this either way.
                     RecordUnresolvedTarget("DROP TABLE", qualifiedName, dropTable);
                     continue;
                 }
 
-                // Remove always clears both the scope-qualified key (if scope is non-null) AND
-                // the bare unscoped key unconditionally, so passing the statement's own current
-                // scope here is safe regardless of which key the entry actually lives under -
-                // unlike AddOrReplace, Remove has no way to leave a stale duplicate behind.
                 catalog.Remove(qualifiedName, _currentScope);
             }
         }
@@ -866,10 +653,6 @@ public static class CatalogBuilder
         {
             foreach (var clause in dropIndex.DropIndexClauses)
             {
-                // Two ScriptDOM shapes: the modern `DROP INDEX ix ON table` (Object + Index
-                // separate) and the SQL 2000-era `DROP INDEX table.ix` form, whose ChildObjectName
-                // carries the table as its base name and the index as ChildIdentifier - both
-                // resolve to the same (table, indexName) pair once unwrapped.
                 var (tableName, indexName) = clause switch
                 {
                     DropIndexClause modern => (modern.Object, modern.Index.Value),
@@ -909,8 +692,7 @@ public static class CatalogBuilder
             }
         }
 
-        /// <summary>Object types <c>sp_rename</c> accepts in its third argument (case-insensitive); anything else (e.g. <c>USERDATATYPE</c>) is ledgered rather than modeled.</summary>
-        private void VisitPossibleSpRename(ExecuteStatement execute)
+private void VisitPossibleSpRename(ExecuteStatement execute)
         {
             if (execute.ExecuteSpecification?.ExecutableEntity is not ExecutableProcedureReference
                 {
@@ -955,9 +737,6 @@ public static class CatalogBuilder
             newName = string.Empty;
             objType = null;
 
-            // sp_rename's arguments can be passed positionally or by @-name; either way, only a
-            // literal string argument is honored - a variable/expression makes the real target
-            // undecidable without executing the script.
             string? Resolve(int position, string parameterName) =>
                 parameters
                     .Select((p, i) => (Param: p, Index: i))
@@ -1035,11 +814,9 @@ public static class CatalogBuilder
             catalog.AddOrReplace(existing with { Indexes = updatedIndexes }, writeScope);
         }
 
-        /// <summary>Sentinel schema value <see cref="SplitTableTarget"/> returns for a three-part (database-qualified) target - cross-database rename resolution is out of scope, matching every other cross-database simplification in this pass.</summary>
-        private const string UnresolvableSchema = "\0unresolvable";
+private const string UnresolvableSchema = "\0unresolvable";
 
-        /// <summary>Splits an sp_rename object-name argument's leading table reference into (schema, qualifiedName), defaulting an unqualified name to dbo and a leading-<c>#</c> name to no schema at all - the same two defaults <see cref="SchemaObjectNameHelper.Resolve"/> applies to a real parsed SchemaObjectName, reimplemented here because sp_rename's arguments are plain string literals, not AST nodes.</summary>
-        private static (string? Schema, string QualifiedName) SplitTableTarget(string name)
+private static (string? Schema, string QualifiedName) SplitTableTarget(string name)
         {
             if (name.StartsWith('#'))
             {
@@ -1055,8 +832,7 @@ public static class CatalogBuilder
             };
         }
 
-        /// <summary>Splits "a.b.c" into ("a.b", "c") - the container-plus-element shape sp_rename's COLUMN/INDEX forms use.</summary>
-        private static (string Container, string Element) SplitLastSegment(string name)
+private static (string Container, string Element) SplitLastSegment(string name)
         {
             var lastDot = name.LastIndexOf('.');
             return lastDot < 0 ? (name, name) : (name[..lastDot], name[(lastDot + 1)..]);
@@ -1066,10 +842,6 @@ public static class CatalogBuilder
         {
             if (createTable.Definition is null)
             {
-                // CREATE TABLE ... AS CLONE OF or CTAS-only forms have no inline column list -
-                // ledgered rather than silently skipped, since the object's real shape is
-                // determinable in principle (from the source table/query) but this pass doesn't
-                // attempt it.
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, createTable.StartLine, createTable.StartColumn,
                     "CREATE TABLE", $"'{SchemaObjectNameHelper.Qualify(createTable.SchemaObjectName)}': no inline column list (CTAS / AS CLONE OF form) - column shape not modeled");
@@ -1080,10 +852,6 @@ public static class CatalogBuilder
             var isTemp = schema is null;
             var kind = isTemp ? CatalogTableKind.TemporaryTable : CatalogTableKind.Table;
 
-            // A #temp table lives in tempdb, which has its own server-level collation - distinct
-            // from the scanned user database's DefaultCollation whenever one was actually
-            // supplied (EffectiveTempdbCollation falls back to DefaultCollation otherwise,
-            // preserving this pass's prior behavior for every corpus that never specifies one).
             var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, isTemp ? catalog.EffectiveTempdbCollation : catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
             var indexesFromConstraints = BuildIndexesFromTableConstraints(createTable.Definition.TableConstraints);
             var allIndexes = (List<CatalogIndex>)[.. indexesFromColumns, .. indexesFromConstraints];
@@ -1099,14 +867,8 @@ public static class CatalogBuilder
                 createTable.StartLine,
                 IsMemoryOptimized: IsMemoryOptimizedTable(createTable.Options));
 
-            // A temp table (#t) is scoped to its declaring procedure, same as a table variable -
-            // it's just as invisible outside that procedure. A batch-level temp table (declared
-            // in an ad-hoc script, not inside any proc) has no scope, matching pre-fix behavior.
             catalog.AddOrReplace(table, isTemp ? _currentScope : null);
 
-            // Only a real persistent table's own computed-column/DEFAULT/CHECK definitions feed
-            // the scalar-UDF SchemaDependency stream - a #temp table's shape is query-local, not
-            // schema every consumer of the real table pays for.
             if (!isTemp)
             {
                 var qualifiedName = SchemaObjectNameHelper.Qualify(createTable.SchemaObjectName);
@@ -1132,16 +894,6 @@ public static class CatalogBuilder
             var mergedColumns = (List<CatalogColumn>)[.. existing.Columns, .. newColumns];
             var mergedIndexes = (List<CatalogIndex>)[.. existing.Indexes, .. indexesFromColumns, .. newIndexes];
 
-            // Scoped lookup AND scoped write-back (coverage-remediation-plan.md Phase 3.2, the
-            // same bug class as the predicate-side index lookup fix above): an ALTER TABLE/CREATE
-            // INDEX targeting a #temp table or table variable must find AND re-store it under the
-            // same scoped key it was declared with, or the update either silently misses a scoped
-            // entry (unscoped Find) or creates a stray unscoped duplicate while leaving the real,
-            // scoped entry stale (unscoped AddOrReplace). FindForMutation reports which scope the
-            // match was ACTUALLY found under (not necessarily _currentScope - a #temp table
-            // declared at batch level and altered from inside a proc is found via the unscoped
-            // fallback even though the ALTER statement's own scope is non-null), so the write-back
-            // targets the one true entry instead of creating a stray duplicate.
             catalog.AddOrReplace(
                 existing with
                 {
@@ -1173,19 +925,12 @@ public static class CatalogBuilder
             var existingColumn = existing.FindColumn(columnName);
             if (existingColumn is null)
             {
-                // ALTER COLUMN on a column this pass never saw declared (e.g. added by a
-                // migration script this scan doesn't include) - nothing to replace.
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, alterColumn.StartLine, alterColumn.StartColumn,
                     "ALTER TABLE ALTER COLUMN", $"column '{columnName}' on '{qualifiedName}' not found in catalog");
                 return;
             }
 
-            // The exact bug this fixes (docs/audit-remediation-plan.md Phase 2.5): a migration
-            // script that widens a column's type (e.g. varchar -> nvarchar) previously left the
-            // ORIGINAL type in the catalog forever, producing wrong-direction findings on
-            // precisely the pattern this tool exists to catch. An unresolvable target type nulls
-            // the column so downstream goes UNKNOWN rather than keeping the stale value.
             var newType = SqlTypeReferenceResolver.Resolve(alterColumn.DataType, alterColumn.Collation, catalog.TypeAliases);
             if (newType is { IsStringFamily: true, Collation: null } && catalog.DefaultCollation is not null)
             {
@@ -1214,12 +959,6 @@ public static class CatalogBuilder
                 .Select(e => e.Name.Value)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // A PK/UNIQUE constraint's backing index is deterministically identifiable by name
-            // (CatalogIndex.Name is set from the constraint's own ConstraintIdentifier in
-            // BuildIndexesFromTableConstraints) - unlike an anonymous/system-named constraint,
-            // whose CatalogIndex.Name never matched anything to begin with, so this removal is
-            // a no-op for it rather than a guess. TableElementType.Index covers a plain
-            // `DROP INDEX ix_name` element inside the same ALTER TABLE DROP list.
             var droppedConstraintOrIndexNames = dropStatement.AlterTableDropTableElements
                 .Where(e => e.TableElementType is TableElementType.Constraint or TableElementType.Index)
                 .Select(e => e.Name.Value)
@@ -1288,19 +1027,12 @@ public static class CatalogBuilder
             var body = declareTableVar.Body;
             if (body.Definition is null)
             {
-                // Should not happen for a syntactically valid DECLARE @t TABLE(...) - ScriptDom's
-                // grammar requires a parenthesized definition - but ledgered defensively rather
-                // than silently returning, matching this pass's own policy everywhere else.
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, declareTableVar.StartLine, declareTableVar.StartColumn,
                     "table variable", $"'{body.VariableName?.Value}' has no table definition to catalog");
                 return;
             }
 
-            // A table variable's columns default to tempdb's own collation, not the user
-            // database's - EffectiveTempdbCollation supplies that when a manifest/CLI value
-            // gave one, falling back to the scanned database's own default otherwise (the
-            // closest available signal, rather than leaving every unqualified column UNKNOWN).
             var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.EffectiveTempdbCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
             var indexesFromConstraints = BuildIndexesFromTableConstraints(body.Definition.TableConstraints);
 
@@ -1358,15 +1090,7 @@ public static class CatalogBuilder
             return indexes;
         }
 
-        /// <summary>
-        /// A table-level PRIMARY KEY constraint (CONSTRAINT PK_X PRIMARY KEY (Col1, Col2))
-        /// implies NOT NULL on its key columns even with no explicit NOT NULL clause on the
-        /// column itself - the inline column-level case is already handled in
-        /// BuildColumnConstraints; this covers the out-of-line, table-level form
-        /// (docs/audit-remediation-plan.md Phase 2.5, needed for the sys.columns diff to agree
-        /// with the real server).
-        /// </summary>
-        private static List<CatalogColumn> ApplyPrimaryKeyNotNull(List<CatalogColumn> columns, List<CatalogIndex> indexes)
+private static List<CatalogColumn> ApplyPrimaryKeyNotNull(List<CatalogColumn> columns, List<CatalogIndex> indexes)
         {
             var primaryKeyColumns = indexes
                 .Where(i => i.Kind == CatalogIndexKind.PrimaryKey)
@@ -1382,12 +1106,7 @@ public static class CatalogBuilder
         }
     }
 
-    /// <summary>
-    /// Exposed for <see cref="Lineage.ViewDefinitionExtractor"/>: a multi-statement TVF's
-    /// RETURNS @t TABLE(...) is column-definition syntax identical to a table variable, and
-    /// its declared columns become <see cref="Lineage.ColumnProvenance.Declared"/> provenance.
-    /// </summary>
-    public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(
+public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(
         TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null, SkipLedger? ledger = null, string? sourcePath = null) =>
         BuildColumns(definition, defaultCollation, typeAliases, ledger, sourcePath).Columns;
 
@@ -1407,19 +1126,12 @@ public static class CatalogBuilder
 
         columns = ResolveComputedColumnTypes(columns, computedExpressions, computedColumnLines, context);
 
-        // Table-level INDEX (...) definitions - e.g. WWI's `INDEX [IX_...] ([Col])` inside a
-        // CREATE TYPE ... AS TABLE - live in TableDefinition.Indexes, a collection entirely
-        // separate from TableConstraints (PK/UNIQUE) and a column's own inline .Index. Found
-        // while wiring up table-valued parameters (coverage-remediation-plan.md Phase 3.2) but
-        // not specific to table types - this was never read for an ordinary CREATE TABLE either,
-        // so a real index declared this way was silently invisible to Indexed lookups everywhere.
         inlineIndexes.AddRange(definition.Indexes.Select(i => BuildInlineIndex(i, columnName: string.Empty)));
 
         return (columns, inlineIndexes);
     }
 
-    /// <summary>Bundles the fixed inputs BuildColumn/ResolveComputedColumnTypes both need but never vary per-column (S107: keeps their own parameter lists to just what varies per call).</summary>
-    private readonly record struct ColumnBuildContext(Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger, string? SourcePath);
+private readonly record struct ColumnBuildContext(Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger, string? SourcePath);
 
     private static CatalogColumn BuildColumn(
         ColumnDefinition columnDefinition, ColumnBuildContext context,
@@ -1437,13 +1149,6 @@ public static class CatalogBuilder
         var resolvedType = declaredType is null ? null : SqlTypeReferenceResolver.Resolve(declaredType, columnDefinition.Collation, context.TypeAliases);
         if (resolvedType is null && context.SourcePath is not null && declaredType is not null)
         {
-            // A table type (TVP shape), CLR UDT, or other explicitly-declared type this
-            // resolver declines to guess at (coverage-remediation-plan.md Phase 0.2) - the
-            // column still enters the catalog as Unknown (VerdictClassifier already treats
-            // a null Type as Unknown, never a guess), but this counts how often it happens
-            // so it isn't invisible in the study's coverage accounting. A computed column
-            // has null DataType (its type comes from the expression, handled separately
-            // below) and never reaches this branch at all.
             context.Ledger?.Record(
                 AnalysisPass.Catalog, context.SourcePath, columnDefinition.StartLine, columnDefinition.StartColumn,
                 "column type", $"column '{name}' has type '{SchemaObjectNameHelper.Qualify(declaredType.Name)}' which could not be resolved");
@@ -1451,9 +1156,6 @@ public static class CatalogBuilder
 
         if (resolvedType is { IsStringFamily: true, Collation: null } && context.DefaultCollation is not null)
         {
-            // CLAUDE.md Pass 1: "database default collation from any CREATE DATABASE/
-            // manifest hint" - applied only when the column itself carries no explicit
-            // COLLATE, which always wins.
             resolvedType = resolvedType with { Collation = context.DefaultCollation };
         }
 
@@ -1473,13 +1175,7 @@ public static class CatalogBuilder
             EncryptionType: ResolveEncryptionType(columnDefinition.Encryption));
     }
 
-    /// <summary>
-    /// A column's own <c>ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = ..., ENCRYPTION_TYPE = ...,
-    /// ALGORITHM = ...)</c> clause - purely syntactic (no <c>CREATE COLUMN ENCRYPTION KEY</c>
-    /// needs to exist for this to parse, matching every other file-mode fact this builder resolves
-    /// without a real engine). Absent entirely when the column carries no such clause.
-    /// </summary>
-    private static ColumnEncryptionType ResolveEncryptionType(ColumnEncryptionDefinition? encryption) =>
+private static ColumnEncryptionType ResolveEncryptionType(ColumnEncryptionDefinition? encryption) =>
         encryption?.Parameters.OfType<ColumnEncryptionTypeParameter>().FirstOrDefault() is { } typeParameter
             ? typeParameter.EncryptionType switch
             {
@@ -1489,8 +1185,7 @@ public static class CatalogBuilder
             }
             : ColumnEncryptionType.None;
 
-    /// <summary>Infers computed columns' types (<see cref="ComputedColumnTypeResolver"/>), applies the default-collation fallback to any newly-resolved string type, and ledgers whichever computed columns are still untyped afterward - the same honesty policy <see cref="BuildColumn"/> applies to an unresolvable declared type.</summary>
-    private static List<CatalogColumn> ResolveComputedColumnTypes(
+private static List<CatalogColumn> ResolveComputedColumnTypes(
         List<CatalogColumn> columns, Dictionary<string, ScalarExpression> computedExpressions, Dictionary<string, (int Line, int Column)> computedColumnLines, ColumnBuildContext context)
     {
         columns = ComputedColumnTypeResolver.ResolveAll(columns, computedExpressions, context.TypeAliases);
@@ -1519,8 +1214,7 @@ public static class CatalogBuilder
         return columns;
     }
 
-    /// <summary>Applies a column's inline constraints (NULL/NOT NULL, inline PK/UNIQUE), returning the resolved nullability.</summary>
-    private static bool BuildColumnConstraints(ColumnDefinition columnDefinition, string columnName, List<CatalogIndex> inlineIndexes)
+private static bool BuildColumnConstraints(ColumnDefinition columnDefinition, string columnName, List<CatalogIndex> inlineIndexes)
     {
         var isNullable = true;
 
@@ -1539,9 +1233,6 @@ public static class CatalogBuilder
                         unique.Columns.Count > 0 ? [.. unique.Columns.Select(ColumnName)] : [columnName],
                         IncludedColumns: []));
 
-                    // A PRIMARY KEY column is implicitly NOT NULL even with no explicit NOT
-                    // NULL clause (needed for the sys.columns diff to agree with the real
-                    // server - docs/audit-remediation-plan.md Phase 2.5).
                     if (unique.IsPrimaryKey)
                     {
                         isNullable = false;
@@ -1560,18 +1251,7 @@ public static class CatalogBuilder
     private static bool IsColumnstoreIndexType(IndexType? indexType) =>
         indexType?.IndexTypeKind is IndexTypeKind.ClusteredColumnStore or IndexTypeKind.NonClusteredColumnStore;
 
-    /// <summary>
-    /// Table-level (<c>INDEX ix (col) WHERE ...</c>/<c>INDEX ix CLUSTERED COLUMNSTORE</c>) and
-    /// column-level (<c>col INT INDEX ix WHERE ...</c>) inline index definitions share this same
-    /// ScriptDom node, which carries <see cref="IndexDefinition.FilterPredicate"/> and
-    /// <see cref="IndexDefinition.IndexType"/> exactly like the standalone <c>CREATE INDEX</c>/
-    /// <c>CREATE COLUMNSTORE INDEX</c> paths read (see VisitCreateIndex/VisitCreateColumnStoreIndex
-    /// above) - before this fix, this method dropped both flags, so a filtered or columnstore
-    /// index declared inline reported <c>IsFiltered</c>/<c>IsColumnstore</c> as false and passed
-    /// <see cref="CatalogTable.IsIndexedColumn"/>'s check as an ordinary seekable index, a false
-    /// "Indexed=true" for the ranking claim this tool leads with.
-    /// </summary>
-    private static CatalogIndex BuildInlineIndex(IndexDefinition inlineIndex, string columnName) => new(
+private static CatalogIndex BuildInlineIndex(IndexDefinition inlineIndex, string columnName) => new(
         inlineIndex.Name?.Value,
         CatalogIndexKind.Index,
         inlineIndex.Unique,

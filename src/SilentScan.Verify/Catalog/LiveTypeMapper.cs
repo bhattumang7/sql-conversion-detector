@@ -3,13 +3,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Verify.Catalog;
 
-/// <summary>
-/// Maps a <c>sys.types.name</c> value (the base type name a live column/parameter/alias
-/// resolves to) to <see cref="SqlTypeCategory"/> and assembles the full <see cref="SqlType"/>
-/// from the raw facet columns <c>sys.columns</c> exposes - the live-mode counterpart of
-/// <c>SilentScan.Core.Parsing.SqlDataTypeMapper</c>/<c>SqlTypeReferenceResolver</c>, which do
-/// the same job from parsed DDL syntax instead of catalog metadata.
-/// </summary>
 public static class LiveTypeMapper
 {
     public static SqlTypeCategory? Map(string typeName) => typeName.ToUpperInvariant() switch
@@ -31,9 +24,6 @@ public static class LiveTypeMapper
         "TEXT" => SqlTypeCategory.Text,
         "NCHAR" => SqlTypeCategory.NChar,
         "NVARCHAR" => SqlTypeCategory.NVarChar,
-        // sysname is a system-supplied alias for nvarchar(128) - sys.types carries it as its
-        // own row (system_type_id shared with nvarchar) rather than resolving it away, so it
-        // needs the same special-case DDL-mode's SqlTypeReferenceResolver already has.
         "SYSNAME" => SqlTypeCategory.NVarChar,
         "NTEXT" => SqlTypeCategory.NText,
         "BINARY" => SqlTypeCategory.Binary,
@@ -47,8 +37,6 @@ public static class LiveTypeMapper
         "DATETIME2" => SqlTypeCategory.DateTime2,
         "DATETIMEOFFSET" => SqlTypeCategory.DateTimeOffset,
 
-        // xml, geography/geometry, hierarchyid, CLR UDTs, cursor/table are not scalar
-        // comparison types this tool reasons about - same scope boundary DDL-mode draws.
         _ => null,
     };
 
@@ -56,18 +44,7 @@ public static class LiveTypeMapper
         SqlTypeCategory.Char or SqlTypeCategory.VarChar or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar
         or SqlTypeCategory.Binary or SqlTypeCategory.VarBinary;
 
-    /// <summary>
-    /// Builds the full <see cref="SqlType"/> for one column/parameter row. <paramref name="maxLength"/>
-    /// is <c>sys.columns.max_length</c> - byte length for binary/non-unicode strings, -1 for
-    /// MAX, and (confusingly) still byte length for nchar/nvarchar, so it is halved for those
-    /// two categories to get the character length DDL-mode's own <see cref="SqlType.Length"/>
-    /// always means. <paramref name="collationName"/> is the column's own resolved collation
-    /// (already the effective one - <c>sys.columns.collation_name</c> is never null for a
-    /// string-family column, unlike a DDL-mode column with no explicit COLLATE, so live mode
-    /// never needs a database-default fallback the way file-mode's collation-sensitivity report
-    /// does).
-    /// </summary>
-    public static SqlType? BuildType(string typeName, short maxLength, byte precision, byte scale, string? collationName)
+public static SqlType? BuildType(string typeName, short maxLength, byte precision, byte scale, string? collationName)
     {
         var category = Map(typeName);
         if (category is null)
@@ -82,11 +59,6 @@ public static class LiveTypeMapper
             return new SqlType(category.Value, Precision: precision, Scale: scale);
         }
 
-        // TIME/DATETIME2/DATETIMEOFFSET's own fractional-seconds-precision scale -
-        // sys.columns.scale carries it exactly like it does for DECIMAL, previously dropped here
-        // (matching a parallel file-mode gap in SqlTypeReferenceResolver, fixed alongside this).
-        // Needed for the BETWEEN end-of-period boundary finding (docs/detection-checklist.md
-        // Tier 1 "Type-aware upgrade of the sargability stream").
         if (category is SqlTypeCategory.Time or SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset)
         {
             return new SqlType(category.Value, Scale: scale);

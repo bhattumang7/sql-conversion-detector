@@ -3,12 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Small precise adds", "Transaction hygiene pair" (first half):
-/// BEGIN TRANSACTION with no reachable COMMIT/ROLLBACK on some path. A real reachability walk,
-/// not a heuristic - see <see cref="TransactionHygieneOracleTests"/> for the real-execution
-/// confirmation of the underlying @@TRANCOUNT mechanism.
-/// </summary>
 public sealed class TransactionHygieneScannerTests
 {
     private static IReadOnlyList<TransactionHygieneFinding> Scan(string procedureBody)
@@ -89,8 +83,6 @@ public sealed class TransactionHygieneScannerTests
             SELECT 1;
             """);
 
-        // The THEN branch resolves and returns cleanly; the implicit ELSE path falls through
-        // still open and reaches the end of the procedure body unresolved.
         Assert.Single(findings);
     }
 
@@ -144,8 +136,6 @@ public sealed class TransactionHygieneScannerTests
             END CATCH
             """);
 
-        // CATCH is analyzed entering with the state as of the TRY/CATCH construct's own start -
-        // open, since BEGIN TRANSACTION precedes it - and CATCH itself never resolves.
         Assert.Single(findings);
     }
 
@@ -180,8 +170,6 @@ public sealed class TransactionHygieneScannerTests
             END
             """);
 
-        // The loop's own zero-iteration path leaves the transaction open, falling off the end
-        // of the procedure unresolved.
         Assert.Single(findings);
     }
 

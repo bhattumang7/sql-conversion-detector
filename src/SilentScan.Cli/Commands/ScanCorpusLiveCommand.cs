@@ -10,16 +10,6 @@ using SilentScan.Verify;
 
 namespace SilentScan.Cli.Commands;
 
-/// <summary>
-/// `silentscan scan-corpus-live` — the engine-authoritative counterpart to <c>scan-corpus</c>
-/// (roadmap "make the corpus catalog engine-authoritative": CLAUDE.md hard scope, "corpus
-/// scanning deploys the repo's (whitelist-filtered) DDL to the disposable Docker instance, then
-/// reads the catalog and module text back out"). A separate command rather than a flag on
-/// <c>scan-corpus</c> - the roadmap's own next item is deleting the file-parsed catalog path
-/// entirely once this one is trusted, which is a clean removal only if the old command was never
-/// mutated in place. Requires the disposable Docker SQL Server oracle (docs/local-dev.md) -
-/// unlike <c>scan-corpus</c>, this actually deploys DDL and connects.
-/// </summary>
 public static class ScanCorpusLiveCommand
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -133,13 +123,6 @@ public static class ScanCorpusLiveCommand
         var hadMissingRepo = false;
         var hadUnexpectedFailure = false;
 
-        // Deliberately sequential, not AsParallel like scan-corpus - every repo here creates and
-        // drops its OWN disposable database on the SAME shared Docker instance, and this
-        // session's own earlier RCA (LivePlanCacheReader flakiness) found real, reproducible
-        // failure modes from exactly this kind of concurrent DDL churn against one instance.
-        // GUID-suffixed database names (CorpusLiveScanRunner) make concurrent runs SAFE from
-        // collisions, but not free of that churn - running repos one at a time keeps this
-        // command's own footprint on the instance no worse than a single verify-corpus run.
         foreach (var repo in manifest.Repos)
         {
             var repoRoot = Path.Combine(clonesRoot, RepoDirectoryName(repo.Url));
@@ -178,8 +161,7 @@ public static class ScanCorpusLiveCommand
         return hadMissingRepo || hadUnexpectedFailure ? 1 : 0;
     }
 
-    /// <summary>Deploys/scans one repo and reports every diagnostic to <paramref name="stderr"/> - null return means an unexpected deploy/scan failure (not a missing clone, which the caller already handled), never a silent "nothing to report."</summary>
-    private static async Task<CorpusLiveRepoResult?> ScanOneRepoAsync(
+private static async Task<CorpusLiveRepoResult?> ScanOneRepoAsync(
         CorpusRepoEntry repo, string repoRoot, SqlServerOptions sqlOptions, TextWriter stderr, FindingConfidence minimumConfidence,
         CancellationToken cancellationToken = default)
     {
@@ -211,9 +193,6 @@ public static class ScanCorpusLiveCommand
                 $"{ParseHealthReport.MinimumAcceptableParseSuccessRate:P0} dialect-sniffing threshold - findings are still reported, but treat them with reduced confidence.");
         }
 
-        // Distinct from the file-level dialect-sniffing check above: a module that deployed
-        // successfully can still fail to reparse from its own sys.sql_modules text, contributing
-        // zero findings while never appearing in a "parse failure" section anywhere else.
         foreach (var failure in result.ModuleParseHealth.Files.Where(f => f.Errors.Count > 0))
         {
             await stderr.WriteLineAsync(
@@ -221,9 +200,6 @@ public static class ScanCorpusLiveCommand
                 $"({failure.Errors.Count} error(s)) - it contributes zero findings to this scan.");
         }
 
-        // Batch-level, not file/module-level: a GO-separated batch that failed to parse was
-        // dropped entirely and never even reached ScriptDOM's Batches, so neither check above
-        // ever sees it - this is the only place that names what object, if any, was lost.
         foreach (var unanalyzed in result.Report.ParseHealth.Files.SelectMany(f => f.UnanalyzedBatches))
         {
             var what = unanalyzed.ObjectName is { } name ? $"{unanalyzed.Kind} '{name}'" : "an unidentified object";

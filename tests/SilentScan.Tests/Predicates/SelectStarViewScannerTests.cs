@@ -5,13 +5,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Lineage-metric findings" - "SELECT * inside a view or
-/// inline TVF". No oracle needed for the shipped claim (a pure catalog/lineage/AST fact) - the
-/// underlying frozen-column-list mechanism was separately confirmed directly against the oracle
-/// (real execution, sys.dm_exec_describe_first_result_set, and sys.columns all staying frozen
-/// after a base-table ALTER until sp_refreshview), documented in the finding's own doc comment.
-/// </summary>
 public sealed class SelectStarViewScannerTests
 {
     private static IReadOnlyList<SelectStarViewFinding> Scan(string ddl, string probe)
@@ -141,9 +134,6 @@ public sealed class SelectStarViewScannerTests
     [Fact]
     public void ConsumerReferencesViaInlineTvfCallSyntax_StillFires()
     {
-        // A real, common corpus shape this rule initially missed: an inline TVF invoked with
-        // parameters (FROM SomeTvf(@p1, @p2)) rather than a plain table reference - resolving
-        // this correctly requires the real lineage relations, not an empty resolvedViews map.
         var findings = Scan(
             """
             CREATE TABLE dbo.T (A INT NOT NULL, B INT NOT NULL, C INT NOT NULL);
@@ -169,10 +159,6 @@ public sealed class SelectStarViewScannerTests
     [Fact]
     public void TwoConsumersOfTheSameViewOnOneLine_HaveDistinctColumns()
     {
-        // Two sibling QuerySpecifications sharing the same ConsumerSourcePath, ConsumerLine and
-        // ViewQualifiedName (a UNION ALL of two narrowing consumers) - the exact shape that made
-        // ScanReportBuilder's OrderBy chain nondeterministic before ConsumerColumn joined it,
-        // since Line alone can't tell these two findings apart.
         var findings = Scan(TwoLevelStarViewDdl, "SELECT v1.A FROM dbo.vOuter v1 UNION ALL SELECT v2.B FROM dbo.vOuter v2;");
 
         Assert.Equal(2, findings.Count);

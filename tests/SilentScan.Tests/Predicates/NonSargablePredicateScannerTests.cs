@@ -3,11 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Every rule fixture here is a real-world-sourced repro (see file header comments for
-/// citations) per CLAUDE.md's "no invented corpus" rule, except where a fixture's own
-/// comment explicitly documents that no real-world source could be found.
-/// </summary>
 public sealed class NonSargablePredicateScannerTests
 {
     private static readonly string FixturesDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "tier1");
@@ -64,9 +59,6 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_IsNullSargableRewrite_DoesNotFire()
     {
-        // Near-miss sibling: "Age = 0 OR Age IS NULL" is the sargable rewrite of
-        // ISNULL(Age, 0) = 0 from the same Brent Ozar article - Age stays unwrapped on both
-        // branches, so this must NOT fire.
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_isnull_clean.sql");
 
         Assert.Empty(findings);
@@ -94,9 +86,6 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_CaseWhenTestWrapsColumn_Fires()
     {
-        // The exact, measured Microsoft Q&A repro (Erland Sommarskog): the column is wrapped in
-        // the CASE's own WHEN test, not its THEN value - a naive "only search THEN/ELSE"
-        // implementation would miss this.
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_case_when_test_fires.sql");
 
         var finding = Assert.Single(findings);
@@ -255,14 +244,6 @@ public sealed class NonSargablePredicateScannerTests
         Assert.Contains("rewritable to col LIKE", finding.Detail);
     }
 
-    // FUNCTION_WRAPPED_COLUMN_json_value_clean.sql (the suppression itself) and
-    // FUNCTION_WRAPPED_COLUMN_json_value_different_path_fires.sql (the precision guard against a
-    // similar-but-different computed column) both need a real catalog with computed-column
-    // definitions - this file's catalog-less ScanFixture always resolves TableQualifiedName to
-    // null for them, which would pass trivially rather than exercising the matcher. Covered in
-    // JsonComputedColumnSuppressionTests instead, against a real catalog (and, for the
-    // suppression case, the live Docker oracle).
-
     [Fact]
     public void LeadingWildcardLike_PercentPrefix_Fires()
     {
@@ -300,16 +281,7 @@ public sealed class NonSargablePredicateScannerTests
         Assert.Empty(findings);
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md "Second OSS/commercial sweep": scoping `SR0006` ("move a
-    /// column reference to one side of a comparison operator") against the shipped stream -
-    /// this locks in that a REVERSED operand order (the literal written FIRST, `3.975 &gt;
-    /// UnitPrice + 1` instead of `UnitPrice + 1 &lt; 3.975`) still fires identically, since
-    /// <c>Visit(BooleanComparisonExpression)</c> inspects both
-    /// <c>FirstExpression</c>/<c>SecondExpression</c> symmetrically - confirming SR0006's own
-    /// claim is already fully subsumed here, not merely assumed from reading the visitor code.
-    /// </summary>
-    [Fact]
+[Fact]
     public void ColumnArithmetic_ReversedOperandOrder_StillFires()
     {
         var sql = """
@@ -342,9 +314,6 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void LikePattern_LiteralWithoutLeadingWildcard_DoesNotFire()
     {
-        // Near-miss sibling: once the pattern is a literal instead of a parameter, whether it
-        // has a leading wildcard is statically knowable - this is not the "unanalyzable" case
-        // the sibling fixture pins, and this literal has no leading wildcard either.
         var findings = ScanFixture("LIKE_PATTERN_NOT_LITERAL_clean.sql");
 
         Assert.Empty(findings);
@@ -353,9 +322,6 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void WildcardColumnInFunction_HavingCountStar_DoesNotCrashAndDoesNotFire()
     {
-        // Regression test for a real NullReferenceException found scanning
-        // olahallengren/SQL-Server-Maintenance-Solution during the Phase 4 pilot - see the
-        // fixture file header for the exact source line.
         var findings = ScanFixture("WILDCARD_COLUMN_IN_FUNCTION_clean.sql");
 
         Assert.Empty(findings);
@@ -364,9 +330,6 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_AggregateInHaving_DoesNotFire()
     {
-        // docs/audit-remediation-plan.md Phase 3.1: confirmed false positive - SUM(Qty) in
-        // HAVING was flagged as FunctionWrappedColumn before this fix, even though an
-        // aggregate wrapping a grouped column is not an avoidable non-sargable transform.
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_having_aggregate_clean.sql");
 
         Assert.Empty(findings);
@@ -375,9 +338,6 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_ScalarFunctionInHaving_StillFires()
     {
-        // Near-miss sibling: a non-aggregate function wrapping a column in HAVING is exactly
-        // as non-sargable as the same wrap in WHERE - the aggregate exclusion must be scoped
-        // to aggregate function names, not to "any function call found in HAVING".
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_having_scalar_fires.sql");
 
         var finding = Assert.Single(findings);
@@ -389,9 +349,6 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_HavingDateRange_DoesNotFire()
     {
-        // Near-miss sibling: the same date-range rewrite as
-        // FunctionWrappedColumn_SargableDateRange_DoesNotFire, but in HAVING over a grouped
-        // raw column instead of WHERE. Must NOT fire.
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_having_scalar_clean.sql");
 
         Assert.Empty(findings);
@@ -400,9 +357,6 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_InsideSelectListCase_DoesNotFire()
     {
-        // docs/audit-remediation-plan.md Phase 3.1: confirmed false positive - a SELECT-list
-        // CASE expression's WHEN condition was treated identically to a WHERE-clause predicate
-        // before this fix, even though a SELECT-list computation has no seek to lose.
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_select_list_case_clean.sql");
 
         Assert.Empty(findings);
@@ -411,8 +365,6 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_InJoinOnClause_StillFires()
     {
-        // A JOIN's ON clause is a filter context exactly like WHERE - proves the context-gating
-        // rewrite didn't regress ON-clause detection while excluding the SELECT list.
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_join_on_fires.sql");
 
         var finding = Assert.Single(findings);
@@ -424,9 +376,6 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_JoinOnDateRange_DoesNotFire()
     {
-        // Near-miss sibling: the same date-range rewrite as
-        // FunctionWrappedColumn_SargableDateRange_DoesNotFire, but in a JOIN's ON clause
-        // instead of WHERE. Must NOT fire.
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_join_on_clean.sql");
 
         Assert.Empty(findings);

@@ -5,13 +5,6 @@ using SilentScan.Bench.Scenarios;
 
 namespace SilentScan.Bench.Execution;
 
-/// <summary>
-/// Creates and seeds one synthetic table per <see cref="TypePairScenario"/> (CLAUDE.md
-/// Benchmark protocol: "One synthetic table per type-pair under test"). Row generation runs
-/// entirely server-side via a tally CTE over sys.all_columns (a cross join large enough to
-/// cover the 10M-row ceiling) rather than sending one INSERT per row from the client, which
-/// would dominate wall-clock time at scale and isn't what's being measured.
-/// </summary>
 public static partial class SyntheticTableSeeder
 {
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
@@ -19,15 +12,11 @@ public static partial class SyntheticTableSeeder
 
     public static async Task SeedAsync(SqlConnection connection, TypePairScenario scenario, string tableName, int rowCount, CancellationToken cancellationToken = default)
     {
-        // Table names can't be parameterized in DDL; validate rather than trust the caller.
         if (!ValidIdentifier().IsMatch(tableName))
         {
             throw new ArgumentException($"'{tableName}' is not a safe SQL identifier for a synthetic table name.", nameof(tableName));
         }
 
-        // Table/type text below is safe to interpolate: the name was just validated above,
-        // and the type/seed-expression strings only ever come from TypePairScenario's fixed,
-        // hardcoded scenario list - nothing here is derived from corpus or external input.
         await using (var createCommand = connection.CreateCommand())
         {
             createCommand.CommandText = $"""

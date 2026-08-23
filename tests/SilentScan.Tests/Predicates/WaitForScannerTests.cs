@@ -3,11 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Small precise adds": WAITFOR DELAY/WAITFOR TIME inside a routine or
-/// batch. Fully syntax-only, no oracle needed - a blocked worker thread is a documented,
-/// unconditional mechanism, not a plan-shape claim.
-/// </summary>
 public sealed class WaitForScannerTests
 {
     private static IReadOnlyList<WaitForFinding> Scan(string sql)
@@ -72,8 +67,6 @@ public sealed class WaitForScannerTests
     [Fact]
     public void WaitForReceive_NeverFires()
     {
-        // Service Broker's WAITFOR (RECEIVE ...) is a distinct, legitimate blocking-wait idiom with
-        // its own TIMEOUT option - not a timer sleep, deliberately never matched by this rule.
         var findings = Scan("WAITFOR (RECEIVE TOP(1) * FROM dbo.SomeQueue), TIMEOUT 5000;");
 
         Assert.Empty(findings);

@@ -4,12 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Catch-all / kitchen-sink predicates" sibling: "parameter
-/// overwritten before use in a predicate" (sniffing-defeat). Structural/path-sensitivity tests
-/// for the reachability-walk logic; the general staleness mechanism is oracle-confirmed
-/// separately in <see cref="ParameterReassignmentPredicateOracleTests"/>.
-/// </summary>
 public sealed class ParameterReassignmentPredicateScannerTests
 {
     private static IReadOnlyList<ParameterReassignmentPredicateFinding> Scan(string sql)
@@ -45,12 +39,6 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void CteSharesNameWithIndexedBaseTable_AttributesThroughToTheRealUnderlyingColumn()
     {
-        // Same shape as CatchAllPredicateScanner's own 2026-08 audit finding: cteRelations was
-        // always null, so a CTE named the same as dbo.Customers silently resolved against the
-        // real table's own indexed Code column instead of the CTE's actual body (which renames
-        // Region to Code). Fixed: the reference resolves THROUGH the CTE to its true source -
-        // Region (unindexed), not Code (indexed) - so the finding's own shape changes to match
-        // reality rather than staying wrong.
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
@@ -85,8 +73,6 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void PredicateUse_BeforeReassignment_NeverFires()
     {
-        // The sniffed value is still live for THIS predicate - reassignment happens afterward,
-        // which is irrelevant to a comparison that already ran against the real sniffed value.
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
@@ -111,8 +97,6 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void DeclaredLocalVariable_NotAFormalParameter_NeverFires()
     {
-        // A DECLARE'd local was never sniffable to begin with - LocalVariablePredicateFinding's
-        // own, separate concern, not this stream's.
         var findings = Scan(
             "CREATE PROCEDURE dbo.usp_Find AS BEGIN DECLARE @p VARCHAR(20) = 'A'; SET @p = 'B'; SELECT 1 FROM dbo.Customers WHERE Code = @p; END");
 
@@ -122,11 +106,6 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void DeclaredLocalVariable_ReassignedThenUsedInPredicate_NeverFires()
     {
-        // Regression: caught against the real corpus - a DECLARE'd local reassigned via SET
-        // then compared in a predicate was incorrectly tracked identically to a genuine formal
-        // parameter before this scanner filtered Reassign() to formal-parameter names only. A
-        // DECLARE'd local was never sniffed to begin with, so there is no staleness to report -
-        // this shape belongs to LocalVariablePredicateFinding, never this stream.
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
@@ -143,8 +122,6 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void ReassignmentOnlyInOneIfBranch_MergedAfter_NeverFires()
     {
-        // Sound, not merely conservative: a predicate after the IF cannot be guaranteed to see
-        // the reassigned value unless BOTH branches produced it.
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20), @flag INT AS
@@ -197,8 +174,6 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void ReassignmentInsideWhileLoopBody_NeverPropagatesPastTheLoop()
     {
-        // The loop might run zero times - a predicate AFTER the loop cannot be guaranteed to see
-        // a reassignment that only happened inside the loop body.
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
@@ -215,9 +190,6 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void ReassignmentInTryBlock_CatchStartsFromPreTryState_NeverInheritsIt()
     {
-        // CATCH enters with the state as of the TRY/CATCH construct's own start (an error can
-        // occur at the TRY block's very first statement) - matches OutputParameterScanner's
-        // identical documented reasoning.
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS

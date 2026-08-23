@@ -3,13 +3,6 @@ using SilentScan.Core.Diagnostics;
 
 namespace SilentScan.Tests.Diagnostics;
 
-/// <summary>
-/// A large-database scan runs for minutes and previously emitted nothing until the finished
-/// report was rendered. These pin the contract that makes the new output usable: the stage name
-/// is visible the moment the stage STARTS (not only once it finishes), the report's own stdout
-/// is never written to, and the counter stays correct when advanced from the parallel passes
-/// that actually drive it.
-/// </summary>
 public sealed class ScanProgressTests
 {
     [Fact]
@@ -20,9 +13,6 @@ public sealed class ScanProgressTests
 
         using var stage = progress.Begin("reading catalog");
 
-        // The whole point of the partial line: while the stage is still running, the caller can
-        // already see what it is doing. Asserting only the final line would pass even if nothing
-        // were emitted until Dispose - which is the exact behavior being fixed.
         Assert.Equal("reading catalog... ", writer.ToString());
     }
 
@@ -59,8 +49,6 @@ public sealed class ScanProgressTests
     [Fact]
     public void Advance_FromManyThreadsCountsEveryItemExactlyOnce()
     {
-        // The counter is incremented from inside AsParallel() bodies in both the Tier-1 and typed
-        // passes, so a non-atomic increment would silently under-report on every real scan.
         const int total = 5_000;
         var writer = new StringWriter();
         var progress = new TextWriterScanProgress(writer);
@@ -89,8 +77,6 @@ public sealed class ScanProgressTests
             stage.Complete("1,000 modules");
         }
 
-        // Heartbeats only start after the stage has been running for a while; a sub-second stage
-        // must not litter its line with progress fragments.
         Assert.Matches(@"^parsing modules\.\.\. 1,000 modules \(\d+\.\d+s\)\r?\n$", writer.ToString());
     }
 
@@ -105,8 +91,6 @@ public sealed class ScanProgressTests
         stage.Dispose();
         stage.Dispose();
 
-        // Exactly one emitted line, and the stage name appears on it - a second Dispose writing
-        // a duplicate line would fail the line count, so no regex occurrence-counting is needed.
         var line = Assert.Single(writer.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries));
         Assert.Contains("resolving lineage", line, StringComparison.Ordinal);
     }
@@ -125,8 +109,6 @@ public sealed class ScanProgressTests
     [Fact]
     public void Done_FormatsInvariantlyRegardlessOfAmbientCulture()
     {
-        // A comma decimal separator (de-DE and friends) would make the elapsed time unparseable
-        // for anything consuming these lines out of a CI log.
         var original = CultureInfo.CurrentCulture;
         try
         {
@@ -154,8 +136,6 @@ public sealed class ScanProgressTests
         stage.Complete("ignored");
         progress.Done(TimeSpan.FromSeconds(1));
 
-        // No writer to assert against by design - the contract is that a library caller that
-        // wants no output gets a fully functional no-op rather than a null it must guard.
         Assert.NotNull(stage);
     }
 
@@ -165,9 +145,6 @@ public sealed class ScanProgressTests
         var writer = new StringWriter();
         var progress = new TextWriterScanProgress(writer);
 
-        // A stage whose body throws is disposed by its `using` without ever reaching Complete.
-        // Reporting "0" there reads as a stage that succeeded and found nothing - the opposite of
-        // what happened, and the first line a user sees above the actual error.
         var body = void (IScanProgress p) =>
         {
             using var stage = p.Begin("reading catalog");

@@ -79,9 +79,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_TableValuedParameterPositionallyPrecedingScalar_KeepsLaterScalarAligned()
     {
-        // A TVP occupies a real positional slot even though it carries no SqlType - if it were
-        // simply omitted from the callee's registered parameter list, @AfterTvp below would
-        // wrongly match the TVP's own formal name instead of the real trailing scalar parameter.
         var (graph, _) = BuildFrom("""
             CREATE TYPE dbo.CodeList AS TABLE (Code varchar(20) NOT NULL);
             GO
@@ -110,10 +107,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_SpExecuteSqlCall_ProducesNoEdge()
     {
-        // sp_executesql is the dynamic SQL engine's own concern (a system proc, never itself
-        // catalogued as a CREATE PROCEDURE) - it must never appear as a call graph edge, and
-        // must not be reported as an unresolvable callee either, since it was never meant to
-        // resolve against this graph in the first place.
         var (graph, ledger) = BuildFrom("EXEC sp_executesql N'SELECT 1';");
 
         Assert.Empty(graph.Edges);
@@ -152,9 +145,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableWithSingleUnconditionalLiteralAssignment_PropagatesLiteral()
     {
-        // One-level constant propagation (CLAUDE.md roadmap): DECLARE @v = 'literal' then EXEC
-        // callee @v resolves the SAME as passing the literal directly would - @v is never
-        // reassigned, so its value at the call site is unambiguous.
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
             GO
@@ -176,8 +166,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableReassignedInsideIf_DoesNotPropagateLiteral()
     {
-        // @v's value at the call site depends on which IF branch ran - this scan has no way to
-        // determine that relative to the call, so it must not guess either branch's literal.
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
             GO
@@ -199,9 +187,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableAssignedTwiceAtTopLevel_PropagatesTheLastAssignmentBeforeTheCall()
     {
-        // Two top-level assignments are no longer ambiguous once WHERE the call sits relative to
-        // them is known - T-SQL executes top-to-bottom, so the LAST assignment before the call
-        // ('Archived') is genuinely what's in effect when the call actually runs, not a guess.
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
             GO
@@ -221,8 +206,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableAssignedAgainAfterTheCall_DoesNotPropagateTheLaterAssignment()
     {
-        // A later assignment (after the call site) is irrelevant to what the call itself sees -
-        // only the LAST assignment BEFORE the call matters, matching real T-SQL execution order.
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
             GO
@@ -242,9 +225,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableAssignedNonLiterallyThenLiterallyBeforeTheCall_PropagatesTheLastLiteral()
     {
-        // A non-literal assignment earlier in the prefix poisons the value only up to the point a
-        // LATER literal assignment (still before the call) overwrites it again - the non-literal
-        // write is not "sticky" once a real, later, position-proven literal supersedes it.
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
             GO
@@ -264,12 +244,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_DirectIntegerLiteralArgument_PopulatesLiteralArgument()
     {
-        // An integer literal's own source text (digits only) IS its canonical string form -
-        // unlike a date/money/real literal, there's no formatting ambiguity to guess about, so
-        // (unlike those other literal kinds) it seeds LiteralArgument directly, the same as a
-        // StringLiteral already does. Real corpus shape: a bitmask/mode argument
-        // (dbo.spRIL_PrintingFunction's own @ColumnControlBits/@RowControlBits) passed as a bare
-        // integer literal at its one in-database call site.
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Mask int) AS SELECT 1;
             GO
@@ -285,9 +259,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableAssignedIntegerLiteralAtTopLevel_PropagatesTheIntegerLiteral()
     {
-        // One-level constant propagation through a caller variable (already proven for a string
-        // literal above) extends the same way to an integer literal assigned via DECLARE's own
-        // initializer.
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Mask int) AS SELECT 1;
             GO
@@ -307,13 +278,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_DirectDecimalLiteralArgument_DoesNotPopulateLiteralArgument()
     {
-        // A decimal/real/money literal's own source text is NOT provably its canonical string
-        // form (trailing zeros, precision, and formatting can differ from what an implicit
-        // conversion to varchar actually produces) - unlike an integer literal (digits only, no
-        // such ambiguity), seeding from it would be a guess this project's soundness-first rule
-        // forbids, so LiteralArgument stays null even though IsLiteral is still true. (A T-SQL
-        // date literal is NOT a distinct case here - ScriptDOM parses it as an ordinary
-        // StringLiteral, already covered by the passing string-literal tests above.)
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@d decimal(10,2)) AS SELECT 1;
             GO
@@ -364,8 +328,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableUndeclared_CallerArgumentTypeStaysNull()
     {
-        // A variable this pass never saw a DECLARE/formal-parameter for (e.g. an undeclared name,
-        // or one this scan simply never observed) must never guess a type.
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@P int) AS SELECT 1;
             GO
@@ -380,9 +342,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_ScopeChange_DoesNotLeakVariableTypesAcrossProcedures()
     {
-        // dbo.Other declares its own @Local of a DIFFERENT type - dbo.Caller's own EXEC must
-        // resolve @Local against ITS OWN declaration, never a stale one left over from a
-        // previously-visited, unrelated scope.
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@P int) AS SELECT 1;
             GO
@@ -403,10 +362,6 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void RealCallerCalleePair_MatchingDeclaredTypes_ArgumentMismatchScannerNeverFires()
     {
-        // Near-miss sibling of ProcCallArgumentMismatchPipelineTests's oracle-confirmed fires
-        // case - a caller variable whose declared type matches the parameter exactly, run
-        // through the real builder end-to-end (file-mode catalog is enough here; no live DB
-        // needed since this is a pure type-declaration fact, not a runtime one).
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Code varchar(20)) AS SELECT @Code;
             GO

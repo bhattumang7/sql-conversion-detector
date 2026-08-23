@@ -4,14 +4,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// docs/audit-remediation-plan.md Phase 4.3 "Done when": IN-list findings are oracle-confirmed,
-/// not just statically classified. Confirms the specific claim
-/// TypedPredicateExtractorTests.Extract_InListOneNvarcharLiteralAmongVarchar_SqlCollation_
-/// ScanForced depends on - that a SINGLE higher-precedence literal anywhere in an otherwise-
-/// homogeneous IN list is enough to force the real optimizer to convert the column for the
-/// whole comparison, not just element-by-element.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class InListPredicateOracleTests : IAsyncLifetime
 {

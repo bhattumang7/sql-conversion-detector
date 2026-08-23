@@ -3,7 +3,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Parsing;
 
-/// <summary>Maps ScriptDOM's <see cref="SqlDataTypeOption"/> to our <see cref="SqlTypeCategory"/>.</summary>
 public static class SqlDataTypeMapper
 {
     public static SqlTypeCategory? Map(SqlDataTypeOption option) => option switch
@@ -38,7 +37,6 @@ public static class SqlDataTypeMapper
         SqlDataTypeOption.DateTimeOffset => SqlTypeCategory.DateTimeOffset,
         SqlDataTypeOption.Json => SqlTypeCategory.Json,
 
-        // Cursor/Table/Vector/None are not scalar comparison types this tool reasons about.
         _ => null,
     };
 }

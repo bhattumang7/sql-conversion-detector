@@ -5,11 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second OSS/commercial sweep": declared type of size 1 or 2.
-/// Purely advisory/structural - no oracle needed, distinct from the compared-column-driven
-/// under-length stream.
-/// </summary>
 public sealed class UndersizedDeclarationScannerTests
 {
     private static CatalogColumn Col(string name, SqlTypeCategory category, int length) =>

@@ -6,13 +6,6 @@ using SilentScan.Core.Predicates.DynamicSqlValue;
 
 namespace SilentScan.Tests.Predicates.DynamicSqlValue;
 
-/// <summary>
-/// Exercises <see cref="ExpressionEvaluator.Fold"/> - the mechanical bridge between ScriptDOM
-/// scalar expressions and <see cref="BuiltinRegistry"/> (docs/dynamic-sql-rebuild-plan.md Phase 3
-/// §3/§4). Builtin-specific correctness (REPLACE's collation guard, QUOTENAME's null-result
-/// threshold, ...) is already covered by <see cref="BuiltinRegistryTests"/>; these tests confirm
-/// the evaluator recurses/dispatches correctly, not the registry's own per-function behavior.
-/// </summary>
 public sealed class ExpressionEvaluatorTests
 {
     private const int Cap = 32;
@@ -41,8 +34,7 @@ public sealed class ExpressionEvaluatorTests
 
     private static string TaintReason(SqlTextValue value) => Assert.IsType<SqlTextValue.Tainted>(value).Reason;
 
-    /// <summary>Flattens every Lit piece's text - Concat deliberately keeps adjacent literals as separate pieces (never merges them, to preserve each one's own origin), so a multi-piece assertion needs this instead of <see cref="LitText"/>'s single-piece assumption.</summary>
-    private static string FlattenLitText(SqlTextValue value)
+private static string FlattenLitText(SqlTextValue value)
     {
         var template = Assert.IsType<SqlTextValue.Template>(value);
         return string.Concat(template.Pieces.Select(p => Assert.IsType<TemplatePiece.Lit>(p).Text));
@@ -88,8 +80,6 @@ public sealed class ExpressionEvaluatorTests
     [Fact]
     public void Concatenation_TaintedLeftOperandWithNoAlternatives_KeepsItsOwnReason()
     {
-        // Both operands ARE folded (Concat needs the right one to extend a tainted left operand's
-        // own GuardedAlternatives, if any) - with none present here, the result is unchanged.
         Assert.Equal("variable-not-in-scope", TaintReason(Fold("@unknown + 'b'")));
     }
 
@@ -114,8 +104,6 @@ public sealed class ExpressionEvaluatorTests
     [Fact]
     public void FunctionCall_Substring_IntegerArgumentFromVariable_DeclinesFunctionCallArgumentDiverges()
     {
-        // This evaluator never tracks numeric variables - a length/start argument that isn't
-        // itself a foldable integer EXPRESSION declines with its own specific reason.
         Assert.Equal("non-literal-expression:function-call-argument-diverges", TaintReason(Fold("SUBSTRING('abcdef', @start, 3)")));
     }
 
@@ -192,24 +180,12 @@ public sealed class ExpressionEvaluatorTests
     [Fact]
     public void SearchedCase_OneBranchDoesNotFold_DeclinesWithThatBranchsOwnReason()
     {
-        // The overall CASE still declines (its own value genuinely depends on which branch runs,
-        // and @unknown's own branch never resolves) - but SqlTextValue.Join's existing mixed
-        // Tainted/Template handling means the decline now carries @unknown's own specific reason
-        // (more informative than the old generic "non-literal-expression:conditional" wrapper),
-        // with the KNOWN 'c' branch preserved as a recoverable GuardedAlternative rather than
-        // discarded outright - the same join-site mechanism every other divergence in this engine
-        // already relies on (loop back-edges, TRY/CATCH, IF/ELSE), now reached for CASE/IIF too.
         Assert.Equal("variable-not-in-scope", TaintReason(Fold("CASE WHEN 1 = 1 THEN @unknown ELSE 'c' END")));
     }
 
     [Fact]
     public void SearchedCase_OneBranchDoesNotFold_PreservesTheKnownBranchAsGuardedAlternative()
     {
-        // The same shape as the test above, examined at the SqlTextValue level: the overall
-        // result stays Tainted (never a guess about which branch actually ran), but the KNOWN
-        // 'c' branch is not simply discarded - it survives as a GuardedAlternative, the exact same
-        // recovery mechanism DynamicSqlCfg's IF/ELSE join already relies on, now reached for
-        // CASE/IIF too via SqlTextValue.Join instead of FoldConditional's own separate early-decline.
         var tainted = Assert.IsType<SqlTextValue.Tainted>(Fold("CASE WHEN 1 = 1 THEN @unknown ELSE 'c' END"));
 
         var alternative = Assert.Single(tainted.GuardedAlternatives!);
@@ -220,7 +196,6 @@ public sealed class ExpressionEvaluatorTests
     [Fact]
     public void ColumnReference_Declines()
     {
-        // No FROM clause context in these tests - a bare column reference always declines here.
         Assert.Equal("non-literal-expression:column-reference", TaintReason(Fold("SomeColumn")));
     }
 

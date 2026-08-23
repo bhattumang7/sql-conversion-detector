@@ -11,52 +11,9 @@ using SilentScan.Verify.Catalog;
 
 namespace SilentScan.Live;
 
-/// <summary>
-/// Ties the live-database pieces together into the same <see cref="ScanReport"/> shape a
-/// file-mode <c>scan</c> produces: read the real catalog from engine metadata
-/// (<see cref="LiveCatalogReader"/>), read every readable module body
-/// (<see cref="LiveModuleReader"/>), then run the unchanged Lineage/Predicates/Rules pipeline
-/// (<see cref="ScanReportBuilder"/>) against the live catalog instead of one inferred from DDL
-/// text. A module's findings carry its <c>[schema].[object]</c> qualified name as their source
-/// path, so an origin reads as <c>dbo.usp_GetOrders:37</c> - a real line number within the
-/// stored module definition. Module bodies are NOT parsed once and held for the run: only the
-/// raw module text (<c>modules</c>, cheap - see <c>parseResultSource</c> below) is retained, and
-/// every phase that needs the parsed ScriptDOM ASTs reparses fresh from it. A parsed AST runs
-/// roughly 200x the size of its source text (measured directly), so holding every module's AST
-/// simultaneously for the whole run - what this used to do - made a large database's peak memory
-/// scale with its total module text times 200, for the run's entire duration; reparsing per
-/// phase instead trades a bounded amount of extra CPU (ScriptDOM reparses quickly) for a peak
-/// bounded by the single largest phase's needs rather than their sum.
-/// </summary>
 public static class LiveScanRunner
 {
-    /// <param name="connectionString">Live database connection string.</param>
-    /// <param name="includePlanCacheEvidence">
-    /// When true, additionally reads the live plan cache (<see cref="LivePlanCacheReader"/>) and
-    /// ranks findings by whether they are actually observed converting in a real cached plan,
-    /// with execution counts - turning "this predicate could scan" into "this one is scanning
-    /// right now". Off by default: it requires <c>VIEW SERVER STATE</c>, a permission a live-mode
-    /// caller may not have, and reads a chunk of the plan cache that an ordinary catalog+module
-    /// scan has no need to touch.
-    /// </param>
-    /// <param name="minimumConfidence">The least confident a finding may be and still appear in the returned report - see <see cref="FindingConfidence"/>. Defaults to <see cref="FindingConfidence.High"/>, unchanged from before this parameter existed.</param>
-    /// <param name="progress">
-    /// Stage progress sink. A scan of a large database runs for minutes; without this it
-    /// produced no output at all until the finished report was rendered, leaving a caller unable
-    /// to distinguish a slow stage from a hung one. Defaults to no output.
-    /// </param>
-    /// <param name="fetchSqlFromTables">
-    /// When true, additionally lets the dynamic-SQL engine's own SELECT-assignment splice
-    /// (<c>SELECT @sql = Definition FROM dbo.Templates WHERE Name = 'X'</c>) fetch the real
-    /// value from this target once the WHERE clause pins the row down to a literal key, instead
-    /// of leaving it a RowDependentColumn hole - see <see cref="LiveTableRowValueFetcher"/>. Off
-    /// by default: it reads real row content (not just catalog metadata) from a user table, a
-    /// meaningfully bigger read than every other live probe this tool issues, so it stays opt-in
-    /// even though `scan-db` targets a development/staging database the user is already working
-    /// against, not an untrusted one.
-    /// </param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    public static async Task<LiveScanResult> RunAsync(
+public static async Task<LiveScanResult> RunAsync(
         string connectionString,
         bool includePlanCacheEvidence = false,
         FindingConfidence minimumConfidence = FindingConfidence.High,
@@ -84,11 +41,6 @@ public static class LiveScanRunner
         var moduleCount = modules.Count;
         var unanalyzable = moduleResult.Unanalyzable;
 
-        // docs/detection-checklist.md Tier 1 "SET options that silently disable plan features" -
-        // QUOTED_IDENTIFIER OFF is baked in wholesale at CREATE/ALTER compile time
-        // (sys.sql_modules.uses_quoted_identifier), already read by LiveModuleReader for parsing
-        // purposes alone; registered here so a later rule can query it per-module too, instead of
-        // the flag being read once and then discarded.
         foreach (var module in modules)
         {
             catalog.AddModuleUsesQuotedIdentifier(module.QualifiedName, module.UsesQuotedIdentifier);
@@ -98,30 +50,10 @@ public static class LiveScanRunner
             catalog.AddModuleUsesDatabaseCollation(module.QualifiedName, module.UsesDatabaseCollation);
         }
 
-        // A lazy, re-enumerable query, not a materialized list: every module's parsed AST runs
-        // roughly 200x the size of its source text (measured directly: 12MB of module text
-        // peaked at 2.5GB RSS), so holding one List<SqlParseResult> for every module for the
-        // WHOLE run - as this used to do - makes that 200x multiplier apply to the entire
-        // database's module text simultaneously, for the run's entire duration. modules itself
-        // (the raw text, ~200x smaller) is the only thing kept alive here; calling
-        // parseResultSource() below re-walks it and reparses from scratch every time, so each of
-        // the phases that follows gets its own fresh AST set, individually collectable before the
-        // next phase's reparse begins, instead of all of them adding up at once.
         IEnumerable<SqlParseResult> parseResultSource() =>
             modules.AsParallel().AsOrdered()
                 .Select(m => SqlScriptParser.ParseText(m.QualifiedName, m.Definition, m.UsesQuotedIdentifier, catalog.CompatibilityLevel));
 
-        // Roadmap Phase C2 (live catalog parity): engine metadata alone knows nothing about
-        // temp tables/table variables/TVP shapes or a scalar UDF's return type - those live only
-        // as text inside a module body. Running CatalogBuilder over the SAME parsed module
-        // bodies and merging in only what it can contribute that engine metadata cannot closes
-        // the gap that otherwise made a live scan of a synonym/UDF/temp-table-heavy database
-        // strictly WORSE than scanning the same objects' scripted-out DDL from disk. The real
-        // database's own default/tempdb collation (already read by LiveCatalogReader, not a
-        // manifest guess) is threaded through as the fallback hint a #temp table/table variable
-        // column with no explicit COLLATE of its own needs - without this, every such column's
-        // collation stayed permanently unresolved (Verdict.Unknown), since CatalogBuilder had
-        // nothing at all to fall back to.
         using (var extrasStage = progress.Begin("merging module-body catalog extras"))
         {
             catalog.MergeFileModeExtras(CatalogBuilder.Build(parseResultSource(), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name));
@@ -129,12 +61,6 @@ public static class LiveScanRunner
         }
         PhaseMemory.ReleaseBetweenPhases();
 
-        // A #temp table CREATEd only inside a dynamically-built SQL string (SET @ddl = @ddl +
-        // 'CREATE TABLE #Runs (...)'; EXEC (@ddl)) is invisible to the static-body pass just
-        // above - it has no literal CreateTableStatement anywhere in the AST. Best-effort,
-        // catalog-free constant-folding (this pass runs before the real catalog is even
-        // complete) recovers the common case: a chain of literal concatenation building the
-        // whole DDL text inside one proc. See DynamicSqlTempTableDiscovery's own doc comment.
         using (var dynamicExtrasStage = progress.Begin("discovering dynamic-SQL temp tables"))
         {
             var discovered = DynamicSqlTempTableDiscovery.Discover(parseResultSource(), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name);
@@ -143,11 +69,6 @@ public static class LiveScanRunner
         }
         PhaseMemory.ReleaseBetweenPhases();
 
-        // Resolved once, here, and handed to ScanReportBuilder below so the findings pipeline
-        // reuses this exact instance. Lineage is a pure function of (catalog, parseResultSource()'s
-        // output), so resolving it twice never disagreed with itself - but on a large database it
-        // is one of the two most expensive passes in the run, and paying for it twice bought
-        // nothing.
         LineageCatalog lineage;
         using (var lineageStage = progress.Begin("resolving lineage"))
         {
@@ -181,11 +102,6 @@ public static class LiveScanRunner
                 parseResultSource(), catalog: catalog, minimumConfidence: minimumConfidence, resolvedLineage: lineage, progress: progress);
         }
 
-        // docs/detection-checklist.md Tier 2 "Dynamic SQL quality" item 3: INSERT INTO #temp EXEC
-        // proc's shape mismatch needs its own live round trip per call site
-        // (sys.dm_exec_describe_first_result_set) - not something ScanReportBuilder's own
-        // catalog+lineage pipeline above can produce, so it's computed here and merged into the
-        // report afterward, the same shape LineageParity already uses for a live-only concern.
         TempTableExecShapeReport tempTableExecShape;
         using (var tempTableStage = progress.Begin("checking INSERT...EXEC temp-table shapes"))
         {
@@ -199,10 +115,6 @@ public static class LiveScanRunner
         }
         PhaseMemory.ReleaseBetweenPhases();
 
-        // docs/detection-checklist.md "Second OSS/commercial sweep": "Database-level
-        // configuration flags" - a single, cheap read of the target database's own row in
-        // sys.databases (plus sys.database_query_store_options), reported once per scan run, not
-        // per module - the same live-only-merge pattern the temp-table-shape stage above uses.
         using (var databaseConfigStage = progress.Begin("reading database-level configuration flags"))
         {
             var databaseConfigFindings = (await new DatabaseConfigurationReader(connectionString).ReadAsync(cancellationToken))
@@ -211,10 +123,6 @@ public static class LiveScanRunner
             databaseConfigStage.Complete($"{databaseConfigFindings.Count:N0} findings");
         }
 
-        // docs/detection-reference.md Appendix 8 - a query-text clause shape (LIKE pattern, TOP/
-        // paging count, etc.) that stays unparameterized even under PARAMETERIZATION FORCED is
-        // only a real finding when the target database actually has that setting on; a syntax
-        // scan over every module's own AST is otherwise wasted work with nothing to report.
         using (var forcedParamStage = progress.Begin("checking forced-parameterization-defeating query shapes"))
         {
             var isParameterizationForced = await new DatabaseConfigurationReader(connectionString)
@@ -226,8 +134,6 @@ public static class LiveScanRunner
             forcedParamStage.Complete($"{forcedParameterizationFindings.Count:N0} findings");
         }
 
-        // A module that names an object the engine's own binder cannot resolve right now -
-        // live-only by construction, same merge pattern as DatabaseConfigurationFindings above.
         using (var danglingReferenceStage = progress.Begin("checking for references to nonexistent objects"))
         {
             var danglingObjectReferenceFindings = (await new DanglingObjectReferenceChecker(connectionString).CheckAsync(cancellationToken))
@@ -236,29 +142,14 @@ public static class LiveScanRunner
             danglingReferenceStage.Complete($"{danglingObjectReferenceFindings.Count:N0} findings");
         }
 
-        // docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §A "Physical/schema
-        // design" - catalog-only (no live round trip of its own needed here; CatalogIndex.IsClustered
-        // was already populated by the LiveCatalogReader read above), but merged in the same
-        // live-only-only-empty-in-file-mode shape as the two stages just above, since the flag it
-        // depends on is itself live-only.
         using (var indexDesignStage = progress.Begin("checking clustered/heap index design"))
         {
-            // docs/detection-checklist.md full-archive practitioner sweep §E "Columnstore index
-            // present on a table that is also a live DML target of transactional code" -
-            // IndexDesignScanner is catalog-only and has no AST access of its own, so the one AST
-            // fact it needs (which tables are a direct DML target anywhere in this corpus) is
-            // computed here, once, from the same parse results the rest of this pipeline already
-            // walks.
             var dmlTargetTables = DmlTargetTableScanner.Scan(parseResultSource(), catalog);
             var indexDesignFindings = IndexDesignScanner.Scan(catalog, dmlTargetTables).Where(f => f.Confidence <= minimumConfidence).ToList();
             report = report with { IndexDesignFindings = indexDesignFindings };
             indexDesignStage.Complete($"{indexDesignFindings.Count:N0} findings");
         }
 
-        // docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §A "Identity/sequence
-        // range exhaustion" - catalog-only (no extra live round trip: CatalogColumn's identity
-        // seed/increment/current-value fields were already populated by the catalog read above),
-        // merged in the same live-only shape as IndexDesignFindings just above.
         using (var identityRangeStage = progress.Begin("checking identity/sequence range"))
         {
             var identityRangeFindings = IdentityRangeScanner.Scan(catalog).Where(f => f.Confidence <= minimumConfidence).ToList();
@@ -266,14 +157,6 @@ public static class LiveScanRunner
             identityRangeStage.Complete($"{identityRangeFindings.Count:N0} findings");
         }
 
-        // docs/detection-checklist.md "Second full-archive practitioner sweep" §G: "View defined
-        // with SELECT * whose compiled column list has gone stale against the base table's
-        // current shape" - needs the live-only DatabaseCatalog.TryGetViewCompiledColumns registry
-        // (already populated by the LiveCatalogReader read above), merged in the same live-only
-        // shape as IndexDesignFindings/IdentityRangeFindings just above. The view-definition list
-        // itself is re-extracted here rather than threaded through from ScanReportBuilder (which
-        // never exposes its own internal list) - the same "re-derive the one AST fact needed"
-        // shape DmlTargetTableScanner's own call above already uses.
         using (var staleSelectStarViewStage = progress.Begin("checking SELECT * view staleness against base tables"))
         {
             var (views, _) = ViewDefinitionExtractor.Extract(parseResultSource(), catalog.DefaultCollation, catalog.TypeAliases, ledger: null);
@@ -291,18 +174,6 @@ public static class LiveScanRunner
             planCacheEvidence = await planCacheReader.ReadObservedConversionsAsync(cancellationToken: cancellationToken);
             rankedFindings = RankByPlanCacheEvidence(report.TypedFindings, planCacheEvidence);
 
-            // Roadmap Phase D: everything above only ranks/confirms findings this scan ALREADY
-            // produced from module bodies - an ad-hoc, parameterized application-side query was
-            // never a stored procedure body at all, so it never became a TypedPredicateFinding in
-            // the first place, no matter how often the plan cache shows it converting. This
-            // promotes exactly the (table, column) pairs the module-body pass never covered.
-            // SQL Server identifiers are case-insensitive - every other identifier map in this
-            // codebase (DatabaseCatalog's own dictionaries) is keyed OrdinalIgnoreCase, but the
-            // default tuple comparer ToHashSet() would otherwise use here is ordinal/case-
-            // sensitive. One side of this key comes from parsed module text, the other from the
-            // live plan cache/sys metadata - a casing difference between them (dbo.Orders vs
-            // dbo.orders) would miss the match and publish a duplicate workload finding for a
-            // column this scan already reported.
             var alreadyCovered = report.TypedFindings
                 .Select(f => (f.Column.TableQualifiedName, f.Column.ColumnName))
                 .ToHashSet(TupleOrdinalIgnoreCaseComparer.Instance);
@@ -317,9 +188,6 @@ public static class LiveScanRunner
     private static List<RankedFinding> RankByPlanCacheEvidence(
         IReadOnlyList<TypedPredicateFinding> findings, PlanCacheEvidenceResult evidence)
     {
-        // OrderByDescending is a stable sort - ties (including "no plan-cache evidence for
-        // either") keep ScanReportBuilder's own CLAUDE.md Pass-4 rank (ScanForced + indexed +
-        // depth>=1 first) as the secondary ordering, rather than losing it.
         return findings
             .Select(f =>
             {
@@ -332,22 +200,6 @@ public static class LiveScanRunner
     }
 }
 
-/// <summary>
-/// A live scan's findings plus the catalog-connectivity summary, how many modules were parsed
-/// and analyzed, the environment parity gate's result, every module this pass saw but could not
-/// read a T-SQL body for (CLR-assembly-backed or encrypted - CLAUDE.md's same-honesty dynamic-
-/// SQL rule, applied to modules with no body to analyze at all), and - when requested - the
-/// plan-cache ranking signal. <paramref name="LineageParity"/> is never merely informational: a
-/// non-empty <see cref="LiveLineageParityReport.Mismatches"/> means this run's findings rest on
-/// at least one type the pipeline got wrong, verified against what the engine computes for that
-/// object right now - not against its cached <c>sys.columns</c> metadata, which can go stale
-/// without being a tool bug (see <see cref="LiveLineageParityChecker"/>). The
-/// <see cref="TempTableExecShapeReport"/> findings folded into <see cref="Report"/>'s own
-/// <c>TempTableExecShapeFindings</c> are exposed again, whole, so its <c>Unanalyzed</c> list
-/// (every <c>INSERT INTO #temp EXEC proc</c> site this pass declined to judge, and why) is
-/// reachable at all - the same "findings in the report, honesty list beside it" split
-/// <see cref="LineageParity"/> already uses.
-/// </summary>
 public sealed record LiveScanResult(
     ScanReport Report,
     LiveCatalogSummary CatalogSummary,
@@ -359,10 +211,8 @@ public sealed record LiveScanResult(
     IReadOnlyList<WorkloadFinding> WorkloadFindings,
     TempTableExecShapeReport TempTableExecShape);
 
-/// <summary>One static finding plus whether the live plan cache actually shows it converting right now, and how often.</summary>
 public sealed record RankedFinding(TypedPredicateFinding Finding, bool ObservedInLivePlanCache, long ObservedExecutionCount);
 
-/// <summary>SQL Server identifiers are case-insensitive - matches every other identifier map in this codebase (DatabaseCatalog's own dictionaries all use OrdinalIgnoreCase), unlike the default tuple comparer's ordinal/case-sensitive behavior.</summary>
 internal sealed class TupleOrdinalIgnoreCaseComparer : IEqualityComparer<(string TableQualifiedName, string ColumnName)>
 {
     public static readonly TupleOrdinalIgnoreCaseComparer Instance = new();

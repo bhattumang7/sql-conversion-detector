@@ -9,14 +9,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
-/// <summary>
-/// Folds a T-SQL scalar expression to a <see cref="SqlTextValue"/> against a variable state -
-/// replaces the old scanner's <c>TryFoldExpression</c>/<c>TryFoldIntegerLiteral</c> dispatch.
-/// Builtin-specific knowledge lives entirely in <see cref="BuiltinRegistry"/>; this class's own
-/// job is purely mechanical: recurse into an expression tree, resolve each argument to a
-/// <see cref="BuiltinArgument"/>, and hand the result to the registry - see
-/// docs/dynamic-sql-rebuild-plan.md §3/§4.
-/// </summary>
 public static class ExpressionEvaluator
 {
     private const string FnLeft = "LEFT";
@@ -25,15 +17,7 @@ public static class ExpressionEvaluator
     private const string FnSubstring = "SUBSTRING";
     private const string NonLiteralOther = "non-literal-expression:other";
 
-    /// <summary>
-    /// Every T-SQL system global variable's own return type this evaluator recognizes, each
-    /// oracle-verified (sys.dm_exec_describe_first_result_set, compat 160) rather than assumed
-    /// from documentation - real corpus shapes surfaced via scan-db --fetch-sql-from-tables
-    /// against a restored production database (`(SELECT @@TRANCOUNT)` chief among them). Not
-    /// exhaustive of every T-SQL global variable that exists - only the ones actually observed,
-    /// widened again if a future scan surfaces another.
-    /// </summary>
-    private static readonly Dictionary<string, SqlType> GlobalVariableTypes = new(StringComparer.OrdinalIgnoreCase)
+private static readonly Dictionary<string, SqlType> GlobalVariableTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         ["@@TRANCOUNT"] = new SqlType(SqlTypeCategory.Int),
         ["@@ROWCOUNT"] = new SqlType(SqlTypeCategory.Int),
@@ -44,8 +28,7 @@ public static class ExpressionEvaluator
         ["@@FETCH_STATUS"] = new SqlType(SqlTypeCategory.Int),
     };
 
-    /// <summary>Folds a scalar expression to its <see cref="SqlTextValue"/> - a <see cref="SqlTextValue.Template"/> (possibly with holes/choices) or <see cref="SqlTextValue.Tainted"/> with a machine-readable reason, never a guess. <paramref name="catalog"/>, when supplied, lets a call to a user-defined scalar function this scanner does not itself model still resolve to a typed hole from that function's own catalog-read RETURNS clause (see <see cref="TryFoldUserScalarFunction"/>) instead of declining outright.</summary>
-    public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog = null)
+public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog = null)
     {
         switch (expression)
         {
@@ -62,17 +45,8 @@ public static class ExpressionEvaluator
                 return Fold(paren.Expression, state, sourcePath, cap, catalog);
 
             case GlobalVariableExpression { Name: { } globalName } when GlobalVariableTypes.TryGetValue(globalName, out var globalType):
-                // A T-SQL system global variable (@@TRANCOUNT, @@ROWCOUNT, ...) - its own TYPE is
-                // a fixed language guarantee (oracle-verified via sys.dm_exec_describe_first_result_set,
-                // compat 160) regardless of session state, but its VALUE depends on runtime
-                // execution state (transaction depth, the previous statement's own row count,
-                // ...) this scanner can never know statically - the same EnvironmentDependent
-                // treatment SERVERPROPERTY/DB_NAME already get.
                 return new SqlTextValue.Template([new TemplatePiece.Hole(globalType, Span(sourcePath, expression), HoleKind.EnvironmentDependent)]);
 
-            // ScriptDOM can wrap an operand in a UnaryExpression carrying UnaryExpressionType.Positive
-            // purely as an artifact of how it resolves adjacent tokens. Unary plus has no real effect
-            // on a string operand, so folding through to the inner expression is exact.
             case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Positive } unary:
                 return Fold(unary.Expression, state, sourcePath, cap, catalog);
 
@@ -84,10 +58,6 @@ public static class ExpressionEvaluator
 
             case FunctionCall { FunctionName.Value: var functionName } isNullCall
                 when string.Equals(functionName, FnIsNull, StringComparison.OrdinalIgnoreCase) && isNullCall.Parameters.Count == 2:
-                // ISNULL(a, b): whenever `a` folds at all, that value is PROVABLY non-NULL - a
-                // variable folds to a real value only by tracing a real literal/DECLARE/SET
-                // chain, and a bare `SET @x = NULL` never folds (no NullLiteral case here) rather
-                // than being treated as some placeholder value. `b` is never even inspected.
                 return Fold(isNullCall.Parameters[0], state, sourcePath, cap, catalog);
 
             case CoalesceExpression { Expressions.Count: > 0 } coalesce:
@@ -104,15 +74,6 @@ public static class ExpressionEvaluator
                     && FoldInteger(startExpr, state, sourcePath, cap, out var substringStart)
                     && substringStart >= 1
                     && TryTrimThroughAlternatives(Fold(sourceRef, state, sourcePath, cap, catalog), substringStart - 1, TryTrimLeadingCharacters) is { } trimmedFromStart:
-                // SUBSTRING(x, n, LEN(x)) is a common "drop a fixed prefix" idiom (e.g. trimming a
-                // leading " AND " off a predicate string built by repeated concatenation) - and,
-                // crucially, it never actually needs x's own LENGTH to be known: SQL Server clamps
-                // a too-long `length` argument down to whatever remains from `start` to the end of
-                // the string (oracle-verified, see BuiltinRegistry.Substring), so requesting
-                // LEN(x) characters ALWAYS returns "everything from position n onward" regardless
-                // of x's true length. This lets the result be computed by trimming (n-1) characters
-                // off x's own already-folded value structurally, even when x is not fully known
-                // (e.g. still contains a Hole later in the template) - see TryTrimLeadingCharacters.
                 return trimmedFromStart;
 
             case FunctionCall
@@ -126,12 +87,6 @@ public static class ExpressionEvaluator
                     && FoldInteger(zeroStartExpr, state, sourcePath, cap, out var zeroStart)
                     && zeroStart == 0
                     && TryTrimThroughAlternatives(Fold(zeroStartSourceRef, state, sourcePath, cap, catalog), 1, TryTrimTrailingCharacters) is { } trimmedForZeroStart:
-                // SUBSTRING(x, 0, LEN(x)) - oracle-verified (SUBSTRING('Hello', 0, 5) = 'Hell'):
-                // T-SQL treats a start below 1 as "begin one position before the string", which
-                // consumes one character of the length budget on that non-existent position - so
-                // a length of exactly LEN(x) returns LEN(x) - 1 REAL characters, i.e. everything
-                // except the LAST character. A real corpus idiom (alongside the more common
-                // SUBSTRING(x, 1, LEN(x) - 1)) for stripping exactly one trailing character.
                 return trimmedForZeroStart;
 
             case FunctionCall
@@ -152,15 +107,6 @@ public static class ExpressionEvaluator
                     && FoldInteger(trimCountExpr, state, sourcePath, cap, out var trimCount)
                     && trimCount >= 0
                     && TryTrimThroughAlternatives(Fold(trailingSourceRef, state, sourcePath, cap, catalog), trimCount, TryTrimTrailingCharacters) is { } trimmedFromEnd:
-                // SUBSTRING(x, 1, LEN(x) - K) is the mirror-image "drop a fixed trailing
-                // separator" idiom (e.g. stripping a trailing ',' left by repeated
-                // `@select = @select + '...,'` concatenation). Unlike the leading-trim case
-                // above, this one is NOT clamp-safe by itself - a too-short x makes LEN(x) - K
-                // negative, a real SQL Server runtime error (Msg 537), not "everything". So this
-                // only folds when K literal characters are structurally PROVEN present at x's own
-                // tail (walked off by TryTrimTrailingCharacters): that proof is itself proof that
-                // x's true length is >= K, so LEN(x) - K is non-negative and the result is exactly
-                // x with its last K characters removed - never a guess about x's unseen middle.
                 return trimmedFromEnd;
 
             case FunctionCall functionCall:
@@ -185,9 +131,6 @@ public static class ExpressionEvaluator
                 return new SqlTextValue.Tainted("non-literal-expression:column-reference", Span(sourcePath, expression));
 
             case ScalarSubquery { QueryExpression: QuerySpecification { FromClause: not null } }:
-                // A subquery reading a real FROM clause has its value living in a database row,
-                // not anywhere in the source file - this can never fold without reading real
-                // table data (forbidden for corpus code, CLAUDE.md).
                 return new SqlTextValue.Tainted("non-literal-expression:sql-loaded-from-table", Span(sourcePath, expression));
 
             case ScalarSubquery
@@ -198,15 +141,6 @@ public static class ExpressionEvaluator
                     SelectElements: [SelectScalarExpression { Expression: { } wrappedExpression }],
                 },
             }:
-                // `(SELECT expr)` with no FROM at all is a common T-SQL idiom for evaluating a
-                // single scalar expression (real corpus shapes: `(SELECT @@TRANCOUNT)`,
-                // `(SELECT CAST(SCOPE_IDENTITY() AS INT))`, `(SELECT REPLACE(@x, ...))`,
-                // `(SELECT CASE WHEN ... END)`) - T-SQL requires a real table source for WHERE/
-                // GROUP BY/HAVING/ORDER BY, so FromClause being null already guarantees none of
-                // those exist either; the subquery contributes NOTHING beyond parenthesizing the
-                // one wrapped expression, whose value doesn't depend on any database row. Simply
-                // folding that inner expression through the SAME recursion reuses every existing
-                // builtin/CASE/user-function rule rather than reinventing a second copy of them.
                 return Fold(wrappedExpression, state, sourcePath, cap, catalog);
 
             case ScalarSubquery:
@@ -217,15 +151,7 @@ public static class ExpressionEvaluator
         }
     }
 
-    /// <summary>
-    /// Always folds BOTH operands before delegating to <see cref="SqlTextValue.Concat"/> - folding
-    /// is pure (reads <paramref name="state"/>, never mutates it), so there is no cost to skip by
-    /// short-circuiting on a tainted left operand, and <see cref="SqlTextValue.Concat"/> itself
-    /// needs the right operand's own value to extend a tainted left operand's own
-    /// <see cref="SqlTextValue.GuardedAlternatives"/> (a short-circuit here would silently drop
-    /// that extension, discarding a real, recoverable value for no benefit).
-    /// </summary>
-    private static SqlTextValue FoldConcatenation(BinaryExpression binary, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
+private static SqlTextValue FoldConcatenation(BinaryExpression binary, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         var left = Fold(binary.FirstExpression, state, sourcePath, cap, catalog);
         var right = Fold(binary.SecondExpression, state, sourcePath, cap, catalog);
@@ -234,13 +160,6 @@ public static class ExpressionEvaluator
 
     private static SqlTextValue FoldConditional(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
-        // SearchedCaseExpression/IIfCall each have a real BooleanExpression condition this
-        // evaluator CAN sometimes prove true or false outright (see TryEvaluatePredicate) -
-        // when it can, the whole conditional folds to exactly the branch T-SQL's own
-        // short-circuit semantics would take, instead of unioning every branch as if all were
-        // reachable. SimpleCaseExpression compares an input expression against several VALUES
-        // (a different shape - no single boolean predicate to evaluate per branch) and keeps the
-        // existing union-every-branch behavior below unconditionally (whenClauses stays null).
         IReadOnlyList<(BooleanExpression Condition, ScalarExpression Then)>? whenClauses = null;
         IEnumerable<ScalarExpression> thenExpressions = [];
         ScalarExpression? elseExpression = null;
@@ -262,9 +181,6 @@ public static class ExpressionEvaluator
                 break;
         }
 
-        // A bare CASE with no matching WHEN and no ELSE returns SQL NULL, which this domain has
-        // no representation for - silently omitting that outcome from the union would be
-        // unsound, not merely imprecise, so this declines instead of guessing.
         if (elseExpression is null)
         {
             return new SqlTextValue.Tainted("non-literal-expression:conditional", Span(sourcePath, expression));
@@ -281,15 +197,6 @@ public static class ExpressionEvaluator
             }
         }
 
-        // A branch that itself folds to Tainted no longer aborts the WHOLE conditional outright -
-        // SqlTextValue.Join already handles a mixed Tainted/Template join gracefully (attaching
-        // the KNOWN branch as a GuardedAlternative under the taint, the same mechanism every
-        // other join point in this engine - loop back-edges, TRY/CATCH, GOTO convergence -
-        // already relies on), so folding through Join here instead of pre-empting it lets a
-        // conditional with one genuinely unresolvable branch and one perfectly known branch still
-        // recover the known one, rather than discarding it. Never a guess: an unresolvable
-        // branch's own content stays exactly as unresolvable as before, only reachable via its
-        // own GuardedAlternative machinery, not silently assumed.
         SqlTextValue? union = null;
         foreach (var branch in remainingBranches.Append(elseExpression))
         {
@@ -300,22 +207,7 @@ public static class ExpressionEvaluator
         return union!;
     }
 
-    /// <summary>
-    /// Walks <paramref name="whenClauses"/> in T-SQL's own short-circuit order: a WHEN whose
-    /// condition provably evaluates FALSE is excluded entirely (never a real possibility, so
-    /// including it in the union would be needless imprecision - the bug this method fixes: a
-    /// corpus CASE guarding <c>QUOTENAME(@col)</c> behind <c>COALESCE(@col, N'') &lt;&gt; N''</c>
-    /// was including the QUOTENAME branch even when @col provably folded to the SAME empty
-    /// literal the guard checks against, producing an invalid empty-bracket <c>[]</c> in the
-    /// "fully known" reconstructed SQL); a WHEN provably TRUE means every EARLIER WHEN was
-    /// provably false (or this loop would have already returned) and no LATER WHEN/ELSE can ever
-    /// run - <paramref name="decided"/> carries that THEN expression out for the caller to fold
-    /// as the whole conditional's own answer, short-circuiting immediately. The first WHEN whose
-    /// condition can't be determined either way stops the walk: from there on, everything
-    /// (that WHEN's own THEN, every later WHEN's THEN, and ELSE) is genuinely still reachable and
-    /// returned for the caller's existing union-every-remaining-branch fallback.
-    /// </summary>
-    private static List<ScalarExpression> ResolveDeterminableBranches(
+private static List<ScalarExpression> ResolveDeterminableBranches(
         IReadOnlyList<(BooleanExpression Condition, ScalarExpression Then)> whenClauses, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog, out ScalarExpression? decided)
     {
         decided = null;
@@ -340,15 +232,7 @@ public static class ExpressionEvaluator
         return remaining;
     }
 
-    /// <summary>
-    /// Proves a WHEN condition true/false only for the one shape this corpus actually needs:
-    /// an equality/inequality comparison where BOTH sides fold to a fully-known literal string
-    /// (via <see cref="TryFoldToKnownLiteralText"/>). Anything else - a comparison this evaluator
-    /// doesn't model, or either side resolving to a Hole/Choice/Tainted value - returns null
-    /// (undetermined), never a guess: the caller's own fallback (union every still-reachable
-    /// branch) stays sound for every predicate shape this doesn't recognize.
-    /// </summary>
-    private static bool? TryEvaluatePredicate(BooleanExpression predicate, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
+private static bool? TryEvaluatePredicate(BooleanExpression predicate, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         if (predicate is not BooleanComparisonExpression { ComparisonType: BooleanComparisonType.Equals or BooleanComparisonType.NotEqualToExclamation or BooleanComparisonType.NotEqualToBrackets } comparison)
         {
@@ -366,15 +250,7 @@ public static class ExpressionEvaluator
         return comparison.ComparisonType == BooleanComparisonType.Equals ? equal : !equal;
     }
 
-    /// <summary>
-    /// COALESCE's own definite value, for predicate-evaluation purposes, is its FIRST argument's
-    /// own value whenever that argument is a KNOWN literal (a literal is provably non-NULL, so
-    /// COALESCE never even reaches its later arguments) - matching <see cref="Fold"/>'s own
-    /// identical COALESCE handling elsewhere. Any other first argument (a Hole/Choice/Tainted -
-    /// genuinely unknown whether it's NULL at runtime) makes COALESCE's own result unknowable
-    /// too, so this returns null rather than guessing which argument wins.
-    /// </summary>
-    private static string? TryFoldToKnownLiteralText(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
+private static string? TryFoldToKnownLiteralText(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         if (expression is CoalesceExpression { Expressions.Count: > 0 } coalesce)
         {
@@ -401,8 +277,7 @@ public static class ExpressionEvaluator
         return ToSqlTextValue(result, Span(sourcePath, site));
     }
 
-    /// <summary>Bundles the loose values every step of a function-call fold needs to pass along together (Sonar S107's 7-parameter cap) - <paramref name="Site"/> is the call's own already-1-based <see cref="SourceSpan"/>, computed once in <see cref="FoldFunctionCall"/>.</summary>
-    private sealed record FunctionCallFoldContext(
+private sealed record FunctionCallFoldContext(
         string FunctionName, IList<ScalarExpression> Parameters, SourceSpan Site, Dictionary<string, SqlTextValue> State, string SourcePath, int Cap, DatabaseCatalog? Catalog);
 
     private static SqlTextValue FoldFunctionCall(
@@ -417,14 +292,6 @@ public static class ExpressionEvaluator
 
         var foldContext = new FunctionCallFoldContext(functionName, parameters, Span(sourcePath, site), state, sourcePath, cap, catalog);
 
-        // Every non-integer argument position is folded EXACTLY ONCE here, up front - reused both
-        // for TryFoldCrossProduct's own choice-detection scan and, via ToBuiltinArgument, for the
-        // ordinary non-choice path below. A naive "fold once to check for a Choice, fold again in
-        // the fallback path" design re-runs Fold on the SAME child expression twice per call,
-        // which for a chain of nested function calls (REPLACE(REPLACE(REPLACE(@x, ...), ...), ...) -
-        // a real dynamic-SQL-building pattern) doubles the cost at EVERY nesting level: O(2^depth)
-        // instead of O(depth). Caching here keeps every call site linear regardless of how deeply
-        // its arguments themselves nest other function calls.
         var foldedArguments = new SqlTextValue?[parameters.Count];
         for (var i = 0; i < parameters.Count; i++)
         {
@@ -456,21 +323,7 @@ public static class ExpressionEvaluator
         return ToSqlTextValue(BuiltinRegistry.Fold(call), foldContext.Site);
     }
 
-    /// <summary>
-    /// A call to a function <see cref="BuiltinRegistry"/> has no spec for is not necessarily
-    /// unanalyzable: when it's a user-defined SCALAR function the catalog already read a RETURNS
-    /// type for (from that function's own CREATE/ALTER FUNCTION DDL - CLAUDE.md: catalog truth
-    /// always comes from the engine, never a file-parsed guess), the return TYPE is a hard fact
-    /// regardless of the function's own body or this call's arguments - the same "known shape,
-    /// unknown value" reasoning as <see cref="HoleKind.NonDeterministicTyped"/>/<see
-    /// cref="HoleKind.EnvironmentDependent"/>, just sourced from the catalog instead of this
-    /// registry's own builtin knowledge. The function's body is never inspected or evaluated -
-    /// only its declared signature. <paramref name="site"/> must be the real <see cref="FunctionCall"/>
-    /// node (never a <see cref="LeftFunctionCall"/>/<see cref="RightFunctionCall"/>, which are
-    /// always builtins and never reach here) so <see cref="SchemaObjectNameHelper.QualifyFunctionCall"/>
-    /// can read its schema-qualified CallTarget.
-    /// </summary>
-    private static bool TryFoldUserScalarFunction(FunctionCall site, DatabaseCatalog? catalog, string sourcePath, out SqlTextValue result)
+private static bool TryFoldUserScalarFunction(FunctionCall site, DatabaseCatalog? catalog, string sourcePath, out SqlTextValue result)
     {
         result = null!;
         if (catalog is not { } knownCatalog)
@@ -488,42 +341,7 @@ public static class ExpressionEvaluator
         return true;
     }
 
-    /// <summary>
-    /// REPLACE's own source argument, unlike every other builtin's arguments, is common to
-    /// receive as a MULTI-piece Template mixing literal text with an already-opaque
-    /// <see cref="TemplatePiece.Hole"/> - typically from an EARLIER REPLACE's own hole-splice in
-    /// the same chain, a real corpus pattern (SQL-Server-First-Responder-Kit's sp_BlitzIndex.sql
-    /// and others): several sequential
-    /// <c>SET @sql = REPLACE(@sql, '@@@Marker@@@', @CallerSuppliedValue)</c> calls, each
-    /// substituting one placeholder marker for a value this scanner can't prove constant. Once
-    /// the FIRST REPLACE splices a hole in, the source for the SECOND is neither pure Text nor a
-    /// single Hole - <see cref="ToBuiltinArgument"/> (correctly) declines that shape, since it has
-    /// no notion of per-piece splicing. This reuses <see cref="BuiltinRegistry.Fold"/>'s existing,
-    /// already-tested REPLACE logic (empty-pattern decline, collation-sensitivity check, hole
-    /// splicing) per LITERAL segment of the source, leaving every existing Hole piece completely
-    /// untouched and in place (opaque - REPLACE never searches inside an already-unknown value,
-    /// the same treatment a Hole gets everywhere else in this scanner). The source MAY also carry
-    /// one or more embedded <see cref="TemplatePiece.Choice"/> pieces, at any nesting depth,
-    /// alongside Lit/Hole pieces (a real corpus shape: several independently-guarded IF-appended
-    /// column-list fragments concatenated together, THEN passed through one shared
-    /// <c>REPLACE(@sql, '$dbname$', @DB_Name)</c> call) - handled by
-    /// <see cref="FoldReplaceOverPiecesPreservingChoices"/>, a STRUCTURAL tree transform (never a
-    /// cross-product): every Choice's own branching shape is kept exactly as-is, only each LEAF
-    /// Lit segment is spliced - unlike <see cref="TryFoldCrossProduct"/>'s own multi-choice
-    /// restriction (which exists because THAT mechanism enumerates concrete combinations across
-    /// MULTIPLE ARGUMENT positions, where composing independently-guarded choices risks
-    /// reporting combinations that can never co-occur), REPLACE's own substitution is IDENTICAL
-    /// regardless of which alternative is active - it never needs to know which combination of
-    /// guards produced the source text, only to touch each leaf's own known literal content, so
-    /// preserving the ORIGINAL branch structure (rather than materializing every combination) is
-    /// both cheaper and exactly as sound. A pattern spanning a Lit/Hole or Lit/Choice boundary in
-    /// some hypothetical combination is never found (no guessing across piece boundaries) - the
-    /// same conservative, under-report-never-fabricate behavior every other splice here uses.
-    /// Only engages when the source genuinely carries at least one Hole or Choice piece; a
-    /// single-piece or all-literal multi-piece source is already handled by the ordinary paths
-    /// below.
-    /// </summary>
-    private static bool TryFoldReplaceWithMixedSource(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
+private static bool TryFoldReplaceWithMixedSource(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
     {
         result = null!;
         if (!string.Equals(context.FunctionName, "REPLACE", StringComparison.OrdinalIgnoreCase) || context.Parameters.Count != 3)
@@ -545,21 +363,7 @@ public static class ExpressionEvaluator
         return true;
     }
 
-    /// <summary>
-    /// Runs REPLACE across every <see cref="TemplatePiece.Lit"/> piece of <paramref name="pieces"/>
-    /// independently (reusing <see cref="BuiltinRegistry.Fold"/>'s own REPLACE logic verbatim,
-    /// including its collation-sensitivity check), leaving every <see cref="TemplatePiece.Hole"/>
-    /// untouched and in place. A <see cref="TemplatePiece.Choice"/> is never expanded - this
-    /// recurses into EACH of its own alternatives (itself a <see cref="SqlTextValue.Template"/>,
-    /// so a NESTED Choice recurses again) and rebuilds a Choice with the SAME
-    /// <see cref="TemplatePiece.Choice.GuardText"/> but transformed alternatives, so the result
-    /// has the identical branching SHAPE as the input, just spliced at every leaf. Matches
-    /// <see cref="TryFoldCrossProduct"/>'s own "one bad path taints the whole thing" policy: a
-    /// Choice means "one of these really happens", so a single alternative that can't complete
-    /// the splice (a collation-sensitive segment, an empty pattern) taints the ENTIRE result, not
-    /// just that branch - never a partial union that silently drops a real possibility.
-    /// </summary>
-    private static SqlTextValue FoldReplaceOverPiecesPreservingChoices(IReadOnlyList<TemplatePiece> pieces, BuiltinArgument patternArgument, BuiltinArgument replacementArgument, SourceSpan site)
+private static SqlTextValue FoldReplaceOverPiecesPreservingChoices(IReadOnlyList<TemplatePiece> pieces, BuiltinArgument patternArgument, BuiltinArgument replacementArgument, SourceSpan site)
     {
         var newPieces = new List<TemplatePiece>();
         foreach (var piece in pieces)
@@ -602,39 +406,9 @@ public static class ExpressionEvaluator
         return new SqlTextValue.Template(newPieces);
     }
 
-    /// <summary>An argument position resolving to a Template carrying exactly one <see cref="TemplatePiece.Choice"/> among otherwise-all-literal pieces - see <see cref="TryFoldCrossProduct"/>'s own doc comment for why this needs to be recognized even when the Choice isn't the argument's ONLY piece.</summary>
-    private sealed record EmbeddedChoice(int Index, IReadOnlyList<TemplatePiece> Prefix, TemplatePiece.Choice Choice, IReadOnlyList<TemplatePiece> Suffix);
+private sealed record EmbeddedChoice(int Index, IReadOnlyList<TemplatePiece> Prefix, TemplatePiece.Choice Choice, IReadOnlyList<TemplatePiece> Suffix);
 
-    /// <summary>
-    /// When exactly one non-integer argument position resolves to a value carrying a genuine
-    /// multi-alternative <see cref="TemplatePiece.Choice"/> (a variable that diverged across IF
-    /// branches BEFORE reaching this call - e.g. <c>REPLACE(@sql, ...)</c> where @sql itself is a
-    /// Choice), the whole builtin call is folded once per alternative - substituting just that
-    /// one argument each time - and the results re-joined under the SAME guard text as a fresh
-    /// Choice, instead of <see cref="ToBuiltinArgument"/> collapsing the whole argument straight
-    /// to the generic "symbolic-value-in-function-argument" the moment it sees more than one
-    /// possible value. The Choice does NOT need to be the argument's only piece - a real corpus
-    /// shape (SQL-Server-First-Responder-Kit's sp_DatabaseRestore.sql) builds @FileListParamSQL
-    /// via <c>IF @MajorVersion >= 13 SET @x += N', SnapshotUrl';</c> (no ELSE - a genuine
-    /// 2-alternative Choice, both purely literal) followed by MORE straight-line concatenation
-    /// (<c>SET @x += N')' + NCHAR(13) + NCHAR(10);</c>), which <see cref="SqlTextValue.Concat"/>
-    /// deliberately never distributes over a Choice (that would risk a cartesian explosion at
-    /// every intermediate concatenation instead of once, here, at the one place it's actually
-    /// needed) - so the Choice ends up as ONE piece among several literal ones. Each alternative
-    /// is spliced back into its own original surrounding literal pieces before folding, so what
-    /// reaches the builtin is either fully literal or a genuine single Hole, never the "MIX of
-    /// literal and Choice pieces" shape <see cref="ToBuiltinArgument"/> itself still declines
-    /// (unchanged - it has no notion of which OTHER pieces came from which branch, so it must
-    /// never guess; only this cross-product, which processes ONE Choice's alternatives exactly
-    /// once against their own known surrounding text, can do this soundly). If ANY alternative's
-    /// own fold taints, the WHOLE result taints with that specific reason - a Choice means "one
-    /// of these really happens", so a defect on even one path is a real defect, not something a
-    /// partial union may silently drop. More than one diverging argument at once is a real,
-    /// deliberately-left-declining feature gap (composing two independently-guarded choices into
-    /// a cross product risks reporting combinations that can never actually co-occur together) -
-    /// returns false so the ordinary single-fold path runs and reports its own generic reason.
-    /// </summary>
-    private static bool TryFoldCrossProduct(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
+private static bool TryFoldCrossProduct(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
     {
         result = null!;
         var embedded = FindSoleChoiceArgument(foldedArguments);
@@ -647,8 +421,7 @@ public static class ExpressionEvaluator
         return true;
     }
 
-    /// <summary>Extracted from <see cref="TryFoldCrossProduct"/> solely to keep that method's own Cognitive Complexity (Sonar S3776) under the two nested-loop bodies it previously carried. Returns null when no argument diverges, or when MORE than one does (the deliberately-declined multi-choice case - see <see cref="TryFoldCrossProduct"/>'s own doc comment).</summary>
-    private static EmbeddedChoice? FindSoleChoiceArgument(SqlTextValue?[] foldedArguments)
+private static EmbeddedChoice? FindSoleChoiceArgument(SqlTextValue?[] foldedArguments)
     {
         EmbeddedChoice? found = null;
         for (var i = 0; i < foldedArguments.Length; i++)
@@ -669,8 +442,7 @@ public static class ExpressionEvaluator
         return found;
     }
 
-    /// <summary>True only when <paramref name="template"/> carries EXACTLY one <see cref="TemplatePiece.Choice"/> piece and every other piece is a plain <see cref="TemplatePiece.Lit"/> - a <see cref="TemplatePiece.Hole"/> alongside a Choice is a genuinely different (and rarer) shape this cross-product doesn't attempt, since splicing a Choice's own alternative next to an UNRELATED hole gives no more information than declining does.</summary>
-    private static bool TryExtractSoleEmbeddedChoice(SqlTextValue.Template template, int index, out EmbeddedChoice embedded)
+private static bool TryExtractSoleEmbeddedChoice(SqlTextValue.Template template, int index, out EmbeddedChoice embedded)
     {
         embedded = null!;
         var choiceAt = -1;
@@ -699,8 +471,7 @@ public static class ExpressionEvaluator
         return true;
     }
 
-    /// <summary>Extracted from <see cref="TryFoldCrossProduct"/> for the same Cognitive Complexity reason as <see cref="FindSoleChoiceArgument"/>. Folds the whole call once per alternative in <paramref name="embedded"/>'s own Choice, splicing it back into its own original surrounding literal pieces each time (every OTHER argument reuses <paramref name="foldedArguments"/>'s already-computed value rather than re-folding), and re-unions the results - or returns the first Tainted alternative's own value outright, per the "one bad path taints the whole Choice" policy documented on <see cref="TryFoldCrossProduct"/>.</summary>
-    private static SqlTextValue FoldOverChoiceAlternatives(FunctionCallFoldContext context, EmbeddedChoice embedded, SqlTextValue?[] foldedArguments)
+private static SqlTextValue FoldOverChoiceAlternatives(FunctionCallFoldContext context, EmbeddedChoice embedded, SqlTextValue?[] foldedArguments)
     {
         SqlTextValue? union = null;
         foreach (var alternative in embedded.Choice.Alternatives)
@@ -727,8 +498,7 @@ public static class ExpressionEvaluator
         return union!;
     }
 
-    /// <summary>The per-position argument resolution <see cref="FoldOverChoiceAlternatives"/>'s own loop needs, extracted to turn its nested ternary (Sonar S3358) into a named, independently-readable statement: the diverging position gets this alternative's own (already-spliced-back-into-its-surroundings) value, every other position reuses its already-cached fold (or, for an integer position never cached up front, folds it now).</summary>
-    private static BuiltinArgument ResolveArgumentAt(FunctionCallFoldContext context, int index, int choiceIndex, SqlTextValue.Template splicedAlternative, SqlTextValue?[] foldedArguments)
+private static BuiltinArgument ResolveArgumentAt(FunctionCallFoldContext context, int index, int choiceIndex, SqlTextValue.Template splicedAlternative, SqlTextValue?[] foldedArguments)
     {
         if (index == choiceIndex)
         {
@@ -740,8 +510,7 @@ public static class ExpressionEvaluator
             : FoldArgument(context.FunctionName, index, context.Parameters[index], context.State, context.SourcePath, context.Cap, context.Catalog);
     }
 
-    /// <summary>Every (function, zero-based parameter index) pair whose argument is INTEGER-typed rather than string/hole-typed - LEFT/RIGHT's length, SUBSTRING's start/length, STR's length/decimal, CHAR/NCHAR's code point.</summary>
-    private static readonly HashSet<(string Function, int Index)> IntegerArgumentPositions =
+private static readonly HashSet<(string Function, int Index)> IntegerArgumentPositions =
     [
         (FnLeft, 1), (FnRight, 1),
         (FnSubstring, 1), (FnSubstring, 2),
@@ -750,13 +519,7 @@ public static class ExpressionEvaluator
         ("REPLICATE", 1),
     ];
 
-    /// <summary>
-    /// An integer-typed argument position resolves via <see cref="FoldInteger"/>, never the
-    /// general string-value <see cref="Fold"/> - this evaluator tracks only string variable
-    /// values, never numeric ones, so a numeric variable reference always fails here. Every other
-    /// position resolves as an ordinary string/hole argument.
-    /// </summary>
-    private static BuiltinArgument FoldArgument(string functionName, int index, ScalarExpression parameter, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
+private static BuiltinArgument FoldArgument(string functionName, int index, ScalarExpression parameter, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         if (IntegerArgumentPositions.Contains((functionName.ToUpperInvariant(), index)))
         {
@@ -768,20 +531,7 @@ public static class ExpressionEvaluator
         return ToBuiltinArgument(Fold(parameter, state, sourcePath, cap, catalog));
     }
 
-    /// <summary>
-    /// A builtin argument's own fold is frequently a MULTI-piece all-literal Template - e.g.
-    /// <c>QUOTENAME(@TableName + '_' + @Suffix)</c>, where the argument expression is itself a
-    /// concatenation of several literal variables, each contributing its own <see cref="TemplatePiece.Lit"/>
-    /// piece rather than one single piece. Flattening every-piece-is-Lit down to one
-    /// <see cref="BuiltinArgument.Text"/> (regardless of piece count) is what makes this a KNOWN
-    /// value the registry can actually evaluate, matching the old scanner's own
-    /// <c>TryFlatten</c>. A single bare <see cref="TemplatePiece.Hole"/> is the ONLY shape that
-    /// transfers as a typed-unknown; anything else unresolved (a <see cref="TemplatePiece.Choice"/>
-    /// not yet expanded, or a MIX of literal and hole pieces - REPLACE's own hole-splice is the
-    /// one place that shape is handled, and it never reaches this general path) declines rather
-    /// than guessing.
-    /// </summary>
-    private static BuiltinArgument ToBuiltinArgument(SqlTextValue value) => value switch
+private static BuiltinArgument ToBuiltinArgument(SqlTextValue value) => value switch
     {
         SqlTextValue.Tainted tainted => new BuiltinArgument.Unresolved(tainted.Reason, tainted.Location, tainted.DeclaredType),
         SqlTextValue.Template { Pieces: [TemplatePiece.Hole hole] } => new BuiltinArgument.Hole(hole.Type, hole.Kind),
@@ -797,21 +547,7 @@ public static class ExpressionEvaluator
         _ => new SqlTextValue.Tainted(NonLiteralOther, site),
     };
 
-    /// <summary>
-    /// Folds an integer-valued argument: a bare literal, a variable whose own tracked value is
-    /// an already-resolved integer literal (see <see cref="TryLiteralAsInteger"/> - populated by
-    /// <c>DynamicSqlTransfer.FoldByDeclaredType</c> for a DECLARE/SET into an INTEGER-family
-    /// variable, itself routed through this same method so a straight-line chain of int
-    /// variables resolves end to end), +/-/&amp;/|/^ of two such foldable integers (a "strip the
-    /// trailing delimiter" idiom, e.g. <c>LEN(@x) - LEN(@y)</c>, ordinary int variable arithmetic
-    /// like <c>@start + 1</c>, or the bitmask-flag idiom real corpus report procs use everywhere
-    /// - <c>@RowControlBits &amp; @RCB_MASK_X</c> - both operands local, DECLARE'd integer
-    /// constants and a caller-seeded bitmask parameter), or <c>LEN(...)</c> over a string this
-    /// evaluator already folds to a single concrete value. Anything else (an unsupported
-    /// function, a column reference, a variable whose own value isn't itself a resolved integer)
-    /// declines rather than guessing.
-    /// </summary>
-    public static bool FoldInteger(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
+public static bool FoldInteger(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
     {
         switch (expression)
         {
@@ -859,15 +595,7 @@ public static class ExpressionEvaluator
         }
     }
 
-    /// <summary>
-    /// True when <paramref name="value"/> is a single already-resolved literal-text piece that
-    /// parses as an integer - the shape an INTEGER-family DECLARE/SET stores (see
-    /// <c>DynamicSqlTransfer.FoldByDeclaredType</c>), reusing the exact same
-    /// <see cref="TemplatePiece.Lit"/> representation a string literal already uses rather than a
-    /// separate numeric domain. Shared by <see cref="FoldInteger"/>'s own variable-reference case
-    /// and <c>DynamicSqlTransfer</c>'s <c>+=</c> handling, so both read a folded int the same way.
-    /// </summary>
-    internal static bool TryLiteralAsInteger(SqlTextValue value, out int result)
+internal static bool TryLiteralAsInteger(SqlTextValue value, out int result)
     {
         if (value is SqlTextValue.Template { Pieces: [TemplatePiece.Lit lit] } && int.TryParse(lit.Text, out result))
         {
@@ -878,14 +606,11 @@ public static class ExpressionEvaluator
         return false;
     }
 
-    /// <summary>Oracle-verified: LEN trims TRAILING spaces before counting (unlike DATALENGTH, not folded here) - <see cref="string.TrimEnd(char[])"/> over the space character matches exactly. The inner string may be a MULTI-piece all-literal Template (e.g. a concatenation) - see <see cref="ToBuiltinArgument"/>'s own doc comment for why flattening every-piece-is-Lit, not just a single piece, matters.</summary>
-    private static bool TryFoldLenArgument(ScalarExpression argument, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
+private static bool TryFoldLenArgument(ScalarExpression argument, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
     {
         var folded = Fold(argument, state, sourcePath, cap);
         if (folded is not SqlTextValue.Template { Pieces.Count: > 0 } template || !template.Pieces.All(p => p is TemplatePiece.Lit))
         {
-            // A placeholder's LEN is not a number - this evaluator does not know the real value,
-            // so it cannot know its length either.
             value = 0;
             return false;
         }
@@ -894,22 +619,7 @@ public static class ExpressionEvaluator
         return true;
     }
 
-    /// <summary>
-    /// The <c>SUBSTRING(x, n, LEN(x))</c> idiom's own splice: removes the first <paramref name="count"/>
-    /// characters from <paramref name="value"/>'s FIRST piece and keeps every later piece
-    /// unchanged - safe (and exact) only when that first piece is itself an already-known
-    /// <see cref="TemplatePiece.Lit"/> at least <paramref name="count"/> characters long, which
-    /// covers the realistic case this idiom is used for (trimming a fixed leading literal
-    /// fragment, e.g. <c>" AND "</c>, off a predicate string that may still contain unresolved
-    /// holes further along). Declines (returns null) for a <see cref="SqlTextValue.Tainted"/>
-    /// source, an empty template, a non-<see cref="TemplatePiece.Lit"/> or too-short first piece
-    /// (would require slicing INTO a later piece - not attempted, never a guess) - the caller
-    /// falls back to the ordinary per-argument decomposition exactly as before this existed.
-    /// <paramref name="count"/> of 0 returns <paramref name="value"/> unchanged, whatever its
-    /// shape (even <see cref="SqlTextValue.Tainted"/>) - <c>SUBSTRING(x, 1, LEN(x))</c> is exactly
-    /// <c>x</c>, so no fold precondition is needed at all in that case.
-    /// </summary>
-    private static SqlTextValue? TryTrimLeadingCharacters(SqlTextValue value, int count)
+private static SqlTextValue? TryTrimLeadingCharacters(SqlTextValue value, int count)
     {
         if (count == 0)
         {
@@ -926,30 +636,7 @@ public static class ExpressionEvaluator
             : null;
     }
 
-    /// <summary>
-    /// Consumes <paramref name="count"/> characters across however many LEADING
-    /// <see cref="TemplatePiece.Lit"/> pieces it takes (Concat does not guarantee adjacent Lit
-    /// pieces are merged into one - e.g. an empty <c>''</c> initializer contributes its own empty
-    /// Lit piece ahead of the real text). If the walk instead reaches a leading
-    /// <see cref="TemplatePiece.Choice"/> with characters still owed, recurses into EACH of its
-    /// own alternatives (a real corpus shape: several independently-guarded optional column-list
-    /// prefixes concatenated before the fixed literal text this trim targets) and rebuilds a
-    /// Choice with the SAME <see cref="TemplatePiece.Choice.GuardText"/> but trimmed alternatives
-    /// - never a cross-product, the exact same structure-preserving policy
-    /// <see cref="FoldReplaceOverPiecesPreservingChoices"/> already uses. Unlike that policy's
-    /// "one bad alternative taints everything" rule, an alternative that can't prove it has
-    /// enough characters here is simply DROPPED from the rebuilt Choice rather than failing the
-    /// whole trim - the real idiom this targets always guards the whole SUBSTRING call behind its
-    /// own <c>IF LEN(x) > 0</c> (e.g. real corpus shape: several independently-guarded optional
-    /// column-list fragments, THEN one shared trailing-comma trim - see
-    /// dbo.spRIL_NTD/dbo.spRIL_TripsActualInformation2), so the alternative combination that
-    /// leaves x too short to trim is exactly the one where that guard is FALSE and this statement
-    /// never actually runs; dropping it keeps every OTHER, genuinely reachable alternative
-    /// analyzed instead of losing all of them to one structurally-impossible-to-trim case.
-    /// Declines outright (returns null) only when NO alternative can prove enough length, or the
-    /// piece isn't a Lit/Choice at all (a Hole - never sliced into unknown content).
-    /// </summary>
-    private static List<TemplatePiece>? TrimLeadingFromPieces(IReadOnlyList<TemplatePiece> pieces, int count)
+private static List<TemplatePiece>? TrimLeadingFromPieces(IReadOnlyList<TemplatePiece> pieces, int count)
     {
         var remaining = count;
         var index = 0;
@@ -985,16 +672,7 @@ public static class ExpressionEvaluator
         return null;
     }
 
-    /// <summary>
-    /// The mirror image of <see cref="TryTrimLeadingCharacters"/>: walks backward from the END of
-    /// <paramref name="value"/>'s own pieces, consuming <paramref name="count"/> characters across
-    /// however many trailing <see cref="TemplatePiece.Lit"/> pieces it takes. Declines (returns
-    /// null) the instant it would need to consume from a non-Lit piece (Hole/Choice) - reaching
-    /// the requested count entirely within literal text is itself the proof that x's real runtime
-    /// length is at least <paramref name="count"/>, which is what makes the caller's
-    /// <c>LEN(x) - count</c> non-negative and this trim exact rather than a guess.
-    /// </summary>
-    private static SqlTextValue? TryTrimTrailingCharacters(SqlTextValue value, int count)
+private static SqlTextValue? TryTrimTrailingCharacters(SqlTextValue value, int count)
     {
         if (count == 0)
         {
@@ -1011,23 +689,7 @@ public static class ExpressionEvaluator
             : null;
     }
 
-    /// <summary>
-    /// The mirror image of <see cref="TrimLeadingFromPieces"/>: walks backward from the END of
-    /// <paramref name="pieces"/>, consuming <paramref name="count"/> characters across however
-    /// many trailing <see cref="TemplatePiece.Lit"/> pieces it takes, then - if it instead reaches
-    /// a trailing <see cref="TemplatePiece.Choice"/> with characters still owed - recurses into
-    /// EACH of its own alternatives and rebuilds a Choice with the SAME GuardText but trimmed
-    /// alternatives (a real corpus shape: several independently-guarded optional column-list
-    /// fragments concatenated, THEN one shared trailing-comma trim - see
-    /// dbo.spRIL_NTD/dbo.spRIL_TripsActualInformation2). An alternative that can't prove enough
-    /// trailing length (e.g. the "every optional fragment was skipped, x stayed empty" case) is
-    /// DROPPED rather than failing the whole trim - see <see cref="TrimLeadingFromPieces"/>'s own
-    /// doc comment for why that's sound here specifically (the real idiom always guards the whole
-    /// SUBSTRING call behind its own <c>IF LEN(x) > 0</c>, so the too-short combination is exactly
-    /// the one where that guard is false and this statement never actually runs). Declines
-    /// outright only when NO alternative can prove enough length.
-    /// </summary>
-    private static List<TemplatePiece>? TrimTrailingFromPieces(IReadOnlyList<TemplatePiece> pieces, int count)
+private static List<TemplatePiece>? TrimTrailingFromPieces(IReadOnlyList<TemplatePiece> pieces, int count)
     {
         var remaining = count;
         var index = pieces.Count - 1;
@@ -1063,26 +725,7 @@ public static class ExpressionEvaluator
         return null;
     }
 
-    /// <summary>
-    /// Applies a leading/trailing trim helper (<see cref="TryTrimLeadingCharacters"/> or
-    /// <see cref="TryTrimTrailingCharacters"/>) through a <see cref="SqlTextValue.Tainted"/>
-    /// source's own <see cref="SqlTextValue.GuardedAlternatives"/> instead of giving up the moment
-    /// <paramref name="value"/> isn't a plain <see cref="SqlTextValue.Template"/> - a real corpus
-    /// shape (e.g. <c>SUBSTRING(@select, 1, LEN(@select) - 1)</c> stripping a trailing separator
-    /// off a column list built by several EARLIER IF-guarded appends elsewhere in the same batch)
-    /// reaches this trim with @select ALREADY Tainted from something upstream, its own per-branch
-    /// known values preserved only as alternatives. Each alternative is independently trimmed and
-    /// kept ONLY if the underlying trim helper proves it can be (never a guess per-alternative,
-    /// same soundness rule the helper itself already enforces) - an alternative whose own trim
-    /// fails is simply dropped, not treated as poisoning the others: unlike a single value's own
-    /// Choice cross-product (where every alternative is a real possibility for the SAME concrete
-    /// execution, so one bad path taints the whole thing), each GuardedAlternative here belongs to
-    /// a MUTUALLY EXCLUSIVE guard condition - a different, independent execution - so one failing
-    /// to trim says nothing about whether the others are valid. Returns null (declines) only when
-    /// NONE of the alternatives could be trimmed, matching the plain-Template case's own "nothing
-    /// recoverable" outcome.
-    /// </summary>
-    private static SqlTextValue? TryTrimThroughAlternatives(SqlTextValue value, int count, Func<SqlTextValue, int, SqlTextValue?> trim)
+private static SqlTextValue? TryTrimThroughAlternatives(SqlTextValue value, int count, Func<SqlTextValue, int, SqlTextValue?> trim)
     {
         if (trim(value, count) is { } direct)
         {

@@ -3,11 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Cursor and control-flow correctness". See <see
-/// cref="ControlFlowRiskFinding"/> for full scope - "an output parameter never assigned" is already
-/// covered by the separately-shipped <see cref="OutputParameterFinding"/>, not tested here.
-/// </summary>
 public sealed class ControlFlowRiskScannerTests
 {
     private static IReadOnlyList<ControlFlowRiskFinding> Scan(string sql)
@@ -16,8 +11,6 @@ public sealed class ControlFlowRiskScannerTests
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return ControlFlowRiskScanner.Scan(result);
     }
-
-    // --- CursorFetchColumnCountMismatch ---
 
     [Fact]
     public void FetchIntoFewerVariablesThanCursorColumns_Fires()
@@ -92,8 +85,6 @@ public sealed class ControlFlowRiskScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.CursorFetchColumnCountMismatch);
     }
 
-    // --- EmptyCatchBlock ---
-
     [Fact]
     public void EmptyCatchBlock_Fires()
     {
@@ -115,10 +106,6 @@ public sealed class ControlFlowRiskScannerTests
     [Fact]
     public void EmptyCatchBlock_ReportsARealLineNotASentinel()
     {
-        // Regression guard: an empty StatementList carries no token span of its own (ScriptDom
-        // leaves its StartLine at -1 for a zero-statement list) - a first version of this scanner
-        // reported that raw -1 straight through, caught only by running against the real corpus,
-        // not by this test suite alone.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             BEGIN
@@ -152,8 +139,6 @@ public sealed class ControlFlowRiskScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.EmptyCatchBlock);
     }
-
-    // --- TriggerEmitsOutput ---
 
     [Fact]
     public void SelectInTrigger_Fires()
@@ -197,10 +182,6 @@ public sealed class ControlFlowRiskScannerTests
     [Fact]
     public void CursorDefiningSelectInTrigger_NeverFiresTriggerOutput()
     {
-        // Regression guard: a cursor's own DECLARE cur CURSOR FOR SELECT ... never sends a
-        // client-visible result set - it only supplies the cursor's row source. A real false
-        // positive caught only by running against the real corpus, not by this test suite alone:
-        // the first version of this scanner flagged this shape as trigger output.
         var findings = Scan("""
             CREATE TRIGGER dbo.Trg ON dbo.T AFTER INSERT AS
             BEGIN
@@ -217,9 +198,6 @@ public sealed class ControlFlowRiskScannerTests
     [Fact]
     public void NoLockInsideCursorDefiningSelectInTrigger_StillFiresDirtyRead()
     {
-        // The cursor-defining-SELECT exclusion above must be narrow: it excludes only the
-        // TriggerEmitsOutput check, never the other checks that can legitimately fire inside the
-        // same SELECT.
         var findings = Scan("""
             CREATE TRIGGER dbo.Trg ON dbo.T AFTER INSERT AS
             BEGIN
@@ -240,8 +218,6 @@ public sealed class ControlFlowRiskScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.TriggerEmitsOutput);
     }
-
-    // --- DirtyReadIsolationHint ---
 
     [Fact]
     public void NoLockHint_Fires()
@@ -283,8 +259,6 @@ public sealed class ControlFlowRiskScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.DirtyReadIsolationHint);
     }
-
-    // --- DuplicatedCallArgument ---
 
     [Fact]
     public void ExecWithSameVariablePassedTwice_Fires()
@@ -339,8 +313,6 @@ public sealed class ControlFlowRiskScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.DuplicatedCallArgument);
     }
 
-    // --- LegacyIdentityIntrinsic ---
-
     [Fact]
     public void AtAtIdentityReference_Fires()
     {
@@ -369,8 +341,6 @@ public sealed class ControlFlowRiskScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.LegacyIdentityIntrinsic);
     }
-
-    // --- GotoUsage ---
 
     [Fact]
     public void Goto_Fires()
@@ -401,8 +371,6 @@ public sealed class ControlFlowRiskScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.GotoUsage);
     }
-
-    // --- CaseExpressionMissingElse ---
 
     [Fact]
     public void SimpleCaseWithNoElse_Fires()
@@ -436,8 +404,6 @@ public sealed class ControlFlowRiskScannerTests
     [Fact]
     public void SearchedCaseWithNoElse_NeverFiresMissingElse()
     {
-        // Deliberately excluded - a searched CASE's boolean conditions are typically a
-        // deliberately partial set, unlike a simple CASE's fixed, enumerable value list.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             BEGIN
@@ -448,8 +414,6 @@ public sealed class ControlFlowRiskScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.CaseExpressionMissingElse);
     }
-
-    // --- NonDeterministicCaseInput ---
 
     [Fact]
     public void NewIdAsSimpleCaseInput_Fires()
@@ -511,8 +475,6 @@ public sealed class ControlFlowRiskScannerTests
     [Fact]
     public void GetDateAsSimpleCaseInput_NeverFiresNonDeterministic()
     {
-        // GETDATE() is deliberately out of scope for this kind - the checklist's own proposed
-        // list is NEWID()/RAND()/CRYPT_GEN_RANDOM() only.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             BEGIN

@@ -4,12 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second full-archive practitioner sweep" §G: "Aggregate argument
-/// containing a division ... on a table with a columnstore or batch-mode-eligible index" - see
-/// <see cref="AggregateDivisionColumnstoreFinding"/> for the full scope/precision story, including
-/// the honest live-reproduction attempt.
-/// </summary>
 public sealed class AggregateDivisionColumnstoreScannerTests
 {
     private static IReadOnlyList<AggregateDivisionColumnstoreFinding> Scan(string sql, bool withColumnstoreIndex = true)
@@ -64,7 +58,6 @@ public sealed class AggregateDivisionColumnstoreScannerTests
     [Fact]
     public void CaseGuardedDivision_OnRowstoreTable_NoColumnstoreIndex_NeverFires()
     {
-        // No columnstore index present - the structural precondition this rule needs isn't met.
         var findings = Scan(
             "SELECT SUM(CASE WHEN Denom <> 0 THEN Num / Denom ELSE 0 END) FROM dbo.Ratios;",
             withColumnstoreIndex: false);
@@ -75,7 +68,6 @@ public sealed class AggregateDivisionColumnstoreScannerTests
     [Fact]
     public void DivisionByLiteralConstant_NeverFires()
     {
-        // A literal divisor can never be zero - not error-prone regardless of execution mode.
         var findings = Scan("SELECT SUM(CASE WHEN Denom <> 0 THEN Num / 100 ELSE 0 END) FROM dbo.Ratios;");
 
         Assert.Empty(findings);

@@ -4,22 +4,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// A standing regression tripwire for the scan pipeline's SUMMARY-level numbers - distinct from
-/// FullPipelineSyntheticMiniProjectTests' individual planted-finding assertions, which each
-/// check ONE specific finding's own shape but never bundle every summary field together in one
-/// place. A classification-logic change that shifts how many comparisons resolve to each verdict
-/// (the kind of change task #8/#9's own type-inference work made earlier) could silently move
-/// these numbers with no single existing test positioned to catch the shift, since every other
-/// test only asserts a narrow slice of it. Deliberately targets the checked-in, fully synthetic
-/// fixtures/mini_project/ - not the real pilot corpus (corpus/manifest.json's 5 repos): those
-/// depend on an external clone step this project doesn't guarantee before `dotnet test` runs
-/// (no clone provisioning is documented in docs/local-dev.md), and their own pinned commit SHAs
-/// could themselves be bumped independently of any code change here, which would make a
-/// real-corpus golden count drift for reasons having nothing to do with a regression. No live
-/// database needed - this only asserts the STATIC summary shape, not oracle confirmation (that's
-/// FullPipelineSyntheticMiniProjectTests' job, per-finding, already).
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class CorpusSummaryRegressionTripwireTests
 {
@@ -36,12 +20,6 @@ public sealed class CorpusSummaryRegressionTripwireTests
             Assert.Empty(fileHealth.Errors);
         }
 
-        // TypedPredicateSummary - every classified comparison, verdict-bearing or not. Individual
-        // findings behind these counts are each already named and oracle-confirmed in
-        // FullPipelineSyntheticMiniProjectTests (DisplayName/ScanForced, Region/RangeSeek,
-        // OrderCode/ScanForced depth 2, AccountCode/ScanForced via dynamic Tier C, Phone/ScanForced
-        // via Tier B, Email/ScanForced via Tier A) - this only pins the BUNDLE staying the same
-        // shape, not re-proving any one of them against the real engine again.
         var typed = report.TypedPredicateSummary;
         Assert.Equal(9, typed.TotalClassified);
         Assert.Equal(3, typed.SeekPreservedCount);
@@ -53,13 +31,6 @@ public sealed class CorpusSummaryRegressionTripwireTests
         Assert.Equal(5, typed.DistinctScanForcedCount);
         Assert.Equal(9, typed.DistinctTotalClassified);
 
-        // DynamicSqlSummary - the 5 EXEC/sp_executesql call sites the fixture plants (4
-        // analyzable: literal/Tier B/Tier C/clean, 1 genuinely Unanalyzable: EXEC(@Sql) where
-        // @Sql is a procedure parameter with no known caller in this fixture. The scanner now
-        // seeds @Sql as a symbolic placeholder of its own declared type (NVARCHAR(MAX) resolves
-        // fine with no catalog), but the WHOLE EXEC argument is nothing but that one placeholder -
-        // the pipeline's own position classifier refuses this shape before ever reparsing it,
-        // since there is no real SQL text left once the placeholder is removed.
         var dynamicSql = report.DynamicSqlSummary;
         Assert.Equal(5, dynamicSql.TotalCallSites);
         Assert.Equal(4, dynamicSql.AnalyzedCount);
@@ -67,16 +38,10 @@ public sealed class CorpusSummaryRegressionTripwireTests
         Assert.Equal(0, dynamicSql.InnerParseFailedCount);
         Assert.Equal(1, Assert.Contains("symbolic-value-not-positionable:whole-statement", dynamicSql.UnanalyzableReasonCounts));
 
-        // SkippedConstructSummary - the fixture's one deliberately-unresolvable comparison
-        // (both sides non-column), ledgered rather than silently dropped.
         var skipped = report.SkippedConstructSummary;
         Assert.Equal(1, skipped.TotalCount);
         Assert.Equal(1, Assert.Contains("no column operand", skipped.CountsByConstructKind));
 
-        // Findings-list counts - not duplicated logic with the summaries above (a
-        // TypedFindings.Count that disagreed with RangeSeek+ScanForced+Unknown would itself be a
-        // bug the OTHER mini_project test already guards - repeated here only as a cheap total
-        // sanity check on every OTHER finding stream this fixture plants).
         Assert.Single(report.Tier1Findings);
         Assert.Equal(6, report.TypedFindings.Count);
         Assert.Empty(report.ExpressionDerivedFindings);

@@ -5,14 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Hint and index-shape catalog checks": "Hint validity against the
-/// catalog" - see <see cref="IndexHintFinding"/>/<see cref="IndexHintFindingKind"/> for the
-/// oracle-confirmed mechanism behind each kind (Msg 308 for a nonexistent index; Index Scan
-/// instead of Index Seek for an unbound leading column). Both are pure catalog+AST facts once
-/// established, so a hand-built catalog exercises the scanner's own matching/suppression logic
-/// directly, the same discipline <see cref="CompositeIndexLeadingColumnScannerTests"/> uses.
-/// </summary>
 public sealed class IndexHintScannerTests
 {
     private static CatalogTable Table(string schema, string name, IReadOnlyList<CatalogColumn> columns, IReadOnlyList<CatalogIndex> indexes) =>
@@ -73,10 +65,6 @@ public sealed class IndexHintScannerTests
     [Fact]
     public void HintedTableReferencedWithDifferentCasingThanDdl_BoundLeadingColumnStillSuppresses()
     {
-        // 2026-08 audit: same shape as CompositeIndexLeadingColumnScannerTests' casing test -
-        // the leading column IS bound, just through a differently-cased table reference; a
-        // case-sensitive suppression-set lookup missed it and reported a bogus
-        // HintedIndexNotSeekable finding on already-seekable code.
         var findings = Scan("SELECT 1 FROM DBO.ORDERS WITH (INDEX(IX_Orders_Status)) WHERE Status = 5;", CatalogWithIndex());
 
         Assert.Empty(findings);
@@ -85,13 +73,6 @@ public sealed class IndexHintScannerTests
     [Fact]
     public void CteSharesNameWithHintedRealTable_NeverFires()
     {
-        // 2026-08 audit: InspectNamedTable independently re-qualified and looked the hinted
-        // table up directly against the catalog, bypassing FromScopeResolver's already-CTE-aware
-        // scope entirely - so a CTE named the same as dbo.Orders (projecting only OrderId, never
-        // Status) silently resolved as if it WERE dbo.Orders, validating the hint against the
-        // REAL table's indexes and firing a HintedIndexNotSeekable finding about a statement
-        // that, through the CTE, never references dbo.Orders at all. A CTE is never schema-
-        // qualified, so it always shadows a same-named real base table.
         var findings = Scan(
             "WITH Orders AS (SELECT OrderId FROM dbo.Orders) " +
             "SELECT 1 FROM Orders WITH (INDEX(IX_Orders_Status));",
@@ -111,8 +92,6 @@ public sealed class IndexHintScannerTests
     [Fact]
     public void OrdinalIndexHint_DeclinedAsOutOfScope()
     {
-        // INDEX(0) has no Identifier and no catalog name to resolve against - deliberately
-        // declined rather than guessed at (see the finding's own doc comment).
         var findings = Scan("SELECT 1 FROM dbo.Orders WITH (INDEX(0)) WHERE OrderId = 1;", CatalogWithIndex());
 
         Assert.Empty(findings);
@@ -121,8 +100,6 @@ public sealed class IndexHintScannerTests
     [Fact]
     public void UpdateStatementTargetHint_Fires()
     {
-        // T-SQL only allows an index hint in a FROM or OPTION clause - an UPDATE naming a hint on
-        // its own target needs the extended FROM form, oracle-confirmed via the real parser.
         var findings = Scan("UPDATE o SET OrderId = OrderId FROM dbo.Orders o WITH (INDEX(IX_Orders_Status)) WHERE OrderId = 1;", CatalogWithIndex());
 
         var finding = Assert.Single(findings);
@@ -144,9 +121,6 @@ public sealed class IndexHintScannerTests
     [Fact]
     public void HintOnTableUnderCrossApply_Fires()
     {
-        // A named table under CROSS APPLY/OUTER APPLY (an UnqualifiedJoin, not a QualifiedJoin)
-        // was previously outside the FROM-tree walk entirely - PredicateTreeWalker.FlattenNamedTables
-        // now descends into it the same way it already did for an ordinary INNER/OUTER JOIN.
         var catalog = CatalogWithIndex();
         catalog.AddOrReplace(Table("dbo", "OrderLines", [Col("OrderId")], []));
 

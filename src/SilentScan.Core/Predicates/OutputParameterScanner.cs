@@ -3,65 +3,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second OSS/commercial sweep": "Output parameter not populated on
-/// every code path". A real, sound (never-guess) reachability walk over a procedure's own
-/// control-flow AST - IF/ELSE, TRY/CATCH, WHILE, BEGIN/END, RETURN - tracking, per path, the SET
-/// of the procedure's own OUTPUT parameters not yet PROVEN assigned. Directly reuses the
-/// reachability-walk shape <see cref="TransactionHygieneScanner"/> already established for "does
-/// every path resolve a state", adapted from a single tracked site to a set of tracked names.
-///
-/// Only <c>CREATE/ALTER/CREATE OR ALTER PROCEDURE</c> bodies are visited: a scalar or table-valued
-/// function cannot declare an <c>OUTPUT</c> parameter at all (a hard T-SQL compile error), and a
-/// trigger takes no parameters - neither can ever have a finding.
-///
-/// An assignment is recognized in exactly three forms, matching real T-SQL idiom:
-/// <list type="bullet">
-/// <item><c>SET @p = ...</c> (or any compound-assignment form, e.g. <c>+=</c>) - a
-/// <see cref="SetVariableStatement"/> targeting the parameter's own name.</item>
-/// <item><c>SELECT @p = ...</c> - a <see cref="SelectSetVariable"/> element in a top-level
-/// <see cref="QuerySpecification"/>'s own select list (not inside a nested subquery - only the
-/// outermost query of a standalone SELECT statement is inspected).</item>
-/// <item><c>EXEC OtherProc @p = @p OUTPUT</c> - passing this procedure's own OUTPUT parameter
-/// onward as the OUTPUT argument to a nested call. Treated as an assignment even though this pass
-/// cannot verify the callee actually assigns it on every path of ITS OWN body - the alternative
-/// (declining to recognize this idiom at all) would false-positive on a real, common, and
-/// deliberate "delegate the whole output" pattern; a genuinely broken callee is the callee's own
-/// procedure's finding, not a reason to double-flag the caller.</item>
-/// </list>
-///
-/// <b>Known v1 scope limits, stated honestly (never guessed past):</b>
-/// <list type="bullet">
-/// <item>A <c>GOTO</c> anywhere in the procedure body declines the WHOLE procedure's analysis -
-/// identical reasoning to <see cref="TransactionHygieneScanner"/>'s own documented choice: an
-/// arbitrary jump target defeats a structural reachability walk without a real labeled-block CFG.</item>
-/// <item>A <c>CATCH</c> block is analyzed as entering with whatever assignment state existed at
-/// the START of its own <c>TRY</c>/<c>CATCH</c> construct - sound, not merely conservative, for
-/// the identical reason <see cref="TransactionHygieneScanner"/>'s own doc comment states: an error
-/// inside <c>TRY</c> can occur at literally the first statement.</item>
-/// <item>A <c>WHILE</c> loop body is analyzed as running exactly one representative iteration,
-/// OR-merged with the "ran zero times" possibility - the same approximation
-/// <see cref="TransactionHygieneScanner"/> already documents for its own reason.</item>
-/// <item>No cross-procedure tracking beyond the direct "passed onward as OUTPUT" recognition
-/// above - an <c>EXEC</c> to another procedure that does NOT pass this parameter onward is never
-/// followed into that callee's own body, matching every other stream in this codebase with the
-/// same "no proc-call-transitive walk" limit.</item>
-/// <item>An OUTPUT parameter reachable only through a query result (e.g. an INSERT...EXEC target
-/// column, or a value read back from a temp table populated by a nested call) is never recognized
-/// as an assignment source - only the three direct forms above are.</item>
-/// </list>
-///
-/// <b>THROW is deliberately NOT treated as a finding site</b> - unlike a <c>RETURN</c> or the
-/// natural end of the body, a <c>THROW</c> raises a real, loud engine error the instant it
-/// executes; the caller does not silently receive a stale output value without any signal at
-/// all, which is the specific "silent" defect this stream (and this codebase's whole scope rule)
-/// targets - flagging it here would double-count a defect the engine itself already surfaces,
-/// the same reasoning <see cref="Rules.WriteLossClassifier"/>'s own scope statement gives for
-/// excluding cases T-SQL already hard-errors on. A <c>THROW</c> IS treated as terminal for the
-/// walk (no statement after it executes on that path), but contributes no finding of its own.
-/// <c>RAISERROR</c> is NOT treated as terminal at all - by default it does not stop batch
-/// execution the way <c>THROW</c> does, so statements after it are genuinely still reachable.
-/// </summary>
 public static class OutputParameterScanner
 {
     public static IReadOnlyList<OutputParameterFinding> Scan(SqlParseResult parseResult)
@@ -108,7 +49,6 @@ public static class OutputParameterScanner
 
             if (outputNames.Count == 0 || statementList is null)
             {
-                // No OUTPUT parameters to track, or an EXTERNAL NAME (CLR) body with nothing to walk.
                 return;
             }
 
@@ -143,8 +83,6 @@ public static class OutputParameterScanner
         {
             foreach (var statement in statements)
             {
-                // Nothing left to prove, or already declined - short-circuit the rest of this
-                // path (matches TransactionHygieneScanner's identical short-circuit shape).
                 if (state.Declined)
                 {
                     return state;
@@ -159,7 +97,6 @@ public static class OutputParameterScanner
                 state = nextState;
                 if (terminal)
                 {
-                    // Terminal: nothing after this executes on this path.
                     return state;
                 }
             }
@@ -188,8 +125,6 @@ public static class OutputParameterScanner
                     return (state with { Unassigned = [] }, true);
 
                 case ThrowStatement:
-                    // Terminal, but never a finding site - see class doc comment: a THROW is a
-                    // real, loud engine error, not a silent defect.
                     return (state with { Unassigned = [] }, true);
 
                 case GoToStatement:
@@ -288,9 +223,6 @@ public static class OutputParameterScanner
 
             var tryResult = AnalyzeSequential(tryCatch.TryStatements.Statements, CloneState(enteringState));
 
-            // CATCH enters with the state as of the TRY/CATCH construct's own start - sound, not
-            // merely conservative, for the same reason TransactionHygieneScanner's own doc
-            // comment gives.
             var catchResult = AnalyzeSequential(tryCatch.CatchStatements.Statements, CloneState(enteringState));
 
             return MergeBranches(tryResult, catchResult);

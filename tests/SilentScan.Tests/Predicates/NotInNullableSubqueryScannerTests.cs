@@ -4,13 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "NOT IN over a nullable subquery column" - the classic
-/// three-valued-logic correctness trap real-world reports of this bug describe verbatim (e.g. the
-/// SQLServerCentral thread "Subquery Returns No Rows when there are NULLs and 'NOT IN' is used").
-/// Structural/AST tests for the extraction logic; the general result-set-corruption mechanism is
-/// oracle-confirmed separately via real execution in <see cref="NotInNullableSubqueryOracleTests"/>.
-/// </summary>
 public sealed class NotInNullableSubqueryScannerTests
 {
     private static IReadOnlyList<NotInNullableSubqueryFinding> Scan(string sql, string extraDdl = "")
@@ -58,13 +51,6 @@ public sealed class NotInNullableSubqueryScannerTests
     [Fact]
     public void SubquerySourceIsACteSharingANameWithANullableRealTable_NeverFires()
     {
-        // 2026-08 audit: cteRelations was always null when resolving the NOT IN subquery's own
-        // FROM clause, so a CTE named the same as dbo.ChildNullable (built here over the NOT
-        // NULL table instead) silently resolved against the real nullable table by name -
-        // firing on a query whose subquery source is provably not the nullable one at all. A
-        // CTE is never schema-qualified, so it always shadows a same-named base table; resolving
-        // correctly through the CTE yields a non-Depth-0 provenance this scanner's own declared
-        // scope already declines rather than guesses at.
         var findings = Scan(
             "WITH ChildNullable AS (SELECT RefId FROM dbo.ChildNotNull) " +
             "SELECT Id FROM dbo.Parent WHERE Id NOT IN (SELECT RefId FROM ChildNullable);");
@@ -99,8 +85,6 @@ public sealed class NotInNullableSubqueryScannerTests
     [Fact]
     public void SubqueryNotNullFilterOnlyReachableThroughOr_StillFires()
     {
-        // "WHERE RefId IS NOT NULL OR SomeFlag = 1" does not unconditionally exclude NULLs from
-        // every row the subquery could project - the OR branch can still let a NULL through.
         var findings = Scan(
             "SELECT Id FROM dbo.Parent WHERE Id NOT IN (SELECT RefId FROM dbo.ChildNullable WHERE RefId IS NOT NULL OR RefId = 1);");
 
@@ -128,8 +112,6 @@ public sealed class NotInNullableSubqueryScannerTests
     [Fact]
     public void SubqueryProjectsMultipleColumns_NeverFires()
     {
-        // Not valid T-SQL for a real IN subquery (would be a runtime error), but the scanner
-        // should not misbehave on it either - a defensive shape guard, not a claim this compiles.
         var findings = Scan("SELECT Id FROM dbo.Parent WHERE Id NOT IN (SELECT RefId, RefId FROM dbo.ChildNullable);");
 
         Assert.Empty(findings);

@@ -6,7 +6,6 @@ using SilentScan.Verify;
 
 namespace SilentScan.Bench.Commands;
 
-/// <summary>`silentscan-bench run` — runs the full benchmark matrix and writes the cost table CSV (CLAUDE.md Benchmark protocol).</summary>
 public static class RunCommand
 {
     private static readonly int[] DefaultRowCounts = [10_000, 1_000_000, 10_000_000];

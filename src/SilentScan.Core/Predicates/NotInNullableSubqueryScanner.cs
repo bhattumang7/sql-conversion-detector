@@ -6,24 +6,6 @@ using SilentScan.Core.Predicates.Normalization;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "NOT IN over a nullable subquery column" - a standalone
-/// scanner, not folded into <see cref="TypedPredicateExtractor"/>: <c>InPredicate</c> with a
-/// <c>Subquery</c> is a materially different AST shape than a plain
-/// <c>BooleanComparisonExpression</c>, and resolving the subquery's own projected column needs a
-/// SECOND, independent <see cref="FromScopeResolver"/> call over the subquery's own
-/// <c>FromClause</c> - a kind of nested-scope resolution none of the existing predicate scanners
-/// do. <see cref="TypedPredicateExtractor"/> itself explicitly bails on <c>NOT IN</c> without
-/// looking at the subquery at all (it is not sargable regardless of type match), so there is no
-/// overlap or double-count risk between the two.
-///
-/// Deliberately base-table-only, Depth-0-only on the subquery side, like
-/// <see cref="CatchAllPredicateScanner"/>/<see cref="PartialCompositeForeignKeyJoinScanner"/>:
-/// only a bare <c>ColumnReferenceExpression</c> projected as the subquery's sole SELECT element,
-/// resolving to a base table, is matched - an expression, a multi-column/<c>SELECT *</c>
-/// subquery, or a set-operator (<c>UNION</c>/<c>EXCEPT</c>/<c>INTERSECT</c>) subquery is left
-/// unanalyzed rather than guessed at.
-/// </summary>
 public static class NotInNullableSubqueryScanner
 {
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
@@ -45,16 +27,7 @@ public static class NotInNullableSubqueryScanner
     {
         public List<NotInNullableSubqueryFinding> Findings { get; } = [];
 
-        /// <summary>
-        /// The enclosing statement's own CTE scope - a CTE declared on the outer statement's WITH
-        /// clause is visible inside a nested NOT IN subquery too (standard CTE visibility), and a
-        /// QuerySpecification has no direct access to its enclosing SelectStatement's own
-        /// WithCtesAndXmlNamespaces. Resolving the subquery's FROM clause against the catalog
-        /// instead of this scope (cteRelations always null, pre-fix) silently matched a CTE-
-        /// shadowed subquery source against an unrelated real table of the same name (2026-08
-        /// audit).
-        /// </summary>
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -171,8 +144,7 @@ public static class NotInNullableSubqueryScanner
                 sourcePath, predicate.StartLine, predicate.StartColumn));
         }
 
-        /// <summary>True iff the subquery's own WHERE unconditionally (via a top-level AND chain, never merely reachable through an OR branch) excludes NULLs from the exact same projected column - the single most common real-world fix for this bug, and firing on already-fixed code would be a visible false positive.</summary>
-        private bool HasDefensiveNotNullFilter(
+private bool HasDefensiveNotNullFilter(
             BooleanExpression? subqueryWhere, string tableQualifiedName, string columnName,
             IReadOnlyDictionary<string, ScopeEntry> innerByAlias, IReadOnlyList<ScopeEntry> innerOrdered)
         {

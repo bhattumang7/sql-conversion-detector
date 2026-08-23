@@ -3,12 +3,6 @@ using SilentScan.Core.Reporting;
 
 namespace SilentScan.Cli.Commands;
 
-/// <summary>
-/// `silentscan rules-doc` - regenerates <c>docs/rules.html</c> (the index) and
-/// <c>docs/rules/*.html</c> (one page per rule) from <see cref="RuleCatalog"/>, the same single
-/// source of truth SARIF's own <c>rules</c> block reads. Never hand-edit either; run this
-/// instead. Reads fixture paths relative to the current directory, so run it from the repo root.
-/// </summary>
 public static class RulesDocCommand
 {
     public static Command Create()

@@ -3,15 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Lineage-metric findings" - "Multi-referenced CTE". Oracle-
-/// confirms the general mechanism once (not per finding, per this session's own precedent): SQL
-/// Server does NOT materialize a plain CTE once and reuse it - each downstream reference
-/// independently re-runs the CTE's own defining query. Load-bearing, not a folklore-trusted claim:
-/// an earlier stream this session (the FAST_FORWARD cursor finding) found a piece of "everyone
-/// knows this" SQL Server behavior to be backwards once actually checked against the oracle, so
-/// this claim gets the same direct verification rather than being assumed.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class MultiReferencedCteOracleTests : OracleTestFixture
 {
@@ -48,8 +39,6 @@ public sealed class MultiReferencedCteOracleTests : OracleTestFixture
             await onCommand.ExecuteNonQueryAsync();
         }
 
-        // STATISTICS IO's per-table lines arrive as SqlInfoMessage events, not as query results -
-        // capture them off the connection's InfoMessage event around the real execution.
         var scanCount = -1;
         connection.InfoMessage += (_, args) =>
         {

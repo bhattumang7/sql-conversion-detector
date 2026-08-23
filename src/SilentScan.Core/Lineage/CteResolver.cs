@@ -4,23 +4,9 @@ using SilentScan.Core.Diagnostics;
 
 namespace SilentScan.Core.Lineage;
 
-/// <summary>
-/// Resolves a statement's <c>WITH ... AS (...)</c> common table expressions to inline relations
-/// (docs/audit-remediation-plan.md Phase 2.4). A CTE is not a persisted view/TVF, so it adds no
-/// view-layer depth - the same treatment <see cref="FromScopeResolver"/> already gives a derived
-/// table subquery. CTE names shadow catalog tables/views of the same name for the lifetime of
-/// the statement they're declared in, matching real SQL Server name resolution: a corpus table
-/// named the same as a CTE is not the same object, and resolving through the catalog anyway
-/// (the pre-fix behavior) silently produces wrong provenance, not just an Unknown.
-/// </summary>
 public static class CteResolver
 {
-    /// <summary>
-    /// Resolves every CTE in <paramref name="withClause"/> in declaration order, so a later CTE
-    /// can reference an earlier one by name (standard, non-recursive chaining) via the growing
-    /// result dictionary. Returns an empty dictionary for a statement with no WITH clause.
-    /// </summary>
-    public static IReadOnlyDictionary<string, ResolvedRelation> Resolve(
+public static IReadOnlyDictionary<string, ResolvedRelation> Resolve(
         WithCtesAndXmlNamespaces? withClause, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger, string? procScope = null)
     {
         var ctes = new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase);
@@ -44,9 +30,6 @@ public static class CteResolver
                 }
                 else
                 {
-                    // Same wrong-base-column risk as the view column-list case in
-                    // LineageResolver: a position-based Zip on a count mismatch silently
-                    // shifts every later declared name onto a different resolved column.
                     ledger?.Record(
                         AnalysisPass.Lineage, sourcePath, cte.StartLine, cte.StartColumn, "CTE column list",
                         $"'{name}' declares {cte.Columns.Count} column name(s) but its query resolved {columns.Count} - column identity can't be trusted");
@@ -62,28 +45,7 @@ public static class CteResolver
         return ctes;
     }
 
-    /// <summary>
-    /// A recursive CTE's own query text has no rows to compare against on the first (anchor)
-    /// evaluation - resolving the recursive member as if it could see its own final output would
-    /// be a guess, so only the anchor branch (the top-level UNION/UNION ALL side that does NOT
-    /// reference the CTE's own name) is resolved. Unlike a plain UNION, this is NOT reported as
-    /// a <see cref="ColumnProvenance.Union"/> of "anchor, Unknown": T-SQL enforces (Msg 240,
-    /// "Types don't match between the anchor and the recursive part") that the recursive
-    /// member's column types are IDENTICAL to the anchor's - a script that violates this simply
-    /// doesn't compile, so the anchor's type IS the CTE's type by engine guarantee, not an
-    /// unverified guess. The Union-with-Unknown wrapper this used to produce made every
-    /// TypedPredicateExtractor operand under it non-eligible for a verdict at all (a Union
-    /// branch is never a BaseColumn/Declared), so no predicate through any recursive CTE could
-    /// ever be classified - this fixes that for the whole class, not just this one construct.
-    ///
-    /// The INDEX claim is a different story: a recursive CTE materializes through a stack spool,
-    /// so the outer predicate is not reliably pushed into the anchor's own base-table access -
-    /// same reasoning as an INSTEAD OF trigger's pseudo-table (<see cref="FromScopeResolver.ToPseudoTableRelation(ResolvedRelation, string)"/>).
-    /// Any <see cref="ColumnProvenance.BaseColumn"/> in the anchor's own resolution is therefore
-    /// downgraded to <see cref="ColumnProvenance.Declared"/> here - the type is real and usable
-    /// for a verdict, the index is not.
-    /// </summary>
-    private static List<ResolvedColumn> ResolveRecursiveAnchor(
+private static List<ResolvedColumn> ResolveRecursiveAnchor(
         CommonTableExpression cte, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
         IReadOnlyDictionary<string, ResolvedRelation> priorCtes, string sourcePath, SkipLedger? ledger, string? procScope)
     {
@@ -92,28 +54,15 @@ public static class CteResolver
             AnalysisPass.Lineage, sourcePath, cte.StartLine, cte.StartColumn, "recursive CTE",
             $"'{name}' is a recursive CTE - only the anchor member was resolved; T-SQL requires the recursive member's column types to match the anchor's exactly (Msg 240), so the anchor's types are used directly, with any base-table index claim dropped (a recursive CTE materializes through a spool, not a direct index access)");
 
-        // A chain of two or more recursive members (WITH c AS (anchor UNION ALL r1 UNION ALL r2 ...))
-        // parses left-associatively - ((anchor UNION ALL r1) UNION ALL r2) - so the anchor can sit
-        // arbitrarily deep inside nested BinaryQueryExpressions, not just as one of the outermost
-        // node's two direct children. Flattening the whole chain into its written-order branch list
-        // (also unwraps the QueryParenthesisExpression a parenthesized CTE body wraps every branch
-        // in, the same unwrap QueryExpressionResolver.Resolve already does one file over) finds the
-        // true anchor regardless of how many recursive members follow it.
         var branches = FlattenUnionBranches(cte.QueryExpression);
         if (branches.Count < 2 || ReferencesSelf(branches[0], name))
         {
-            // Not a top-level UNION/UNION ALL chain at all, or the very first branch already
-            // references the CTE (malformed, or a shape this pass doesn't recognize as a valid
-            // recursive CTE) - nothing safe to anchor on.
             return [];
         }
 
         var anchorCount = branches.TakeWhile(b => !ReferencesSelf(b, name)).Count();
         if (anchorCount != 1 || !branches.Skip(1).All(b => ReferencesSelf(b, name)))
         {
-            // A valid recursive CTE unions exactly one anchor member first, then one or more
-            // recursive members - anything else (multiple anchor members, or a non-contiguous mix)
-            // is declined rather than guessed at.
             return [];
         }
 
@@ -124,22 +73,13 @@ public static class CteResolver
             Provenance = c.Provenance switch
             {
                 ColumnProvenance.BaseColumn { Type: { } type } => new ColumnProvenance.Declared(type, TableQualifiedName: name),
-                // Same two-armed pattern FromScopeResolver.ToPseudoTableRelation uses for an
-                // INSTEAD OF trigger's pseudo-table: a BaseColumn with no resolved type at all
-                // can't become Declared (its Type is non-nullable) - Unknown, explicit, rather
-                // than silently left as a BaseColumn that would still claim a real index.
                 ColumnProvenance.BaseColumn => new ColumnProvenance.Unknown($"recursive CTE '{name}' anchor column has an unresolved declared type"),
                 _ => c.Provenance,
             },
         })];
     }
 
-    /// <summary>Flattens a left-associative chain of <see cref="BinaryQueryExpression"/> nodes
-    /// (and the <see cref="QueryParenthesisExpression"/> wrapper each branch/the whole chain may
-    /// carry) into its written-order list of leaf branches - <c>A UNION ALL B UNION ALL C</c>
-    /// parses as <c>(A UNION ALL B) UNION ALL C</c>, so this recurses through the FIRST side
-    /// before the SECOND to preserve that order.</summary>
-    private static List<QueryExpression> FlattenUnionBranches(QueryExpression queryExpression)
+private static List<QueryExpression> FlattenUnionBranches(QueryExpression queryExpression)
     {
         var unwrapped = UnwrapParentheses(queryExpression);
         if (unwrapped is not BinaryQueryExpression binary)
@@ -152,11 +92,7 @@ public static class CteResolver
         return branches;
     }
 
-    /// <summary>Whether a CTE's own defining query references its own name - the sole, engine-
-    /// mandated recursion mechanism in T-SQL (no separate <c>RECURSIVE</c> keyword). Internal so
-    /// <c>Predicates.RecursiveCteMaxRecursionScanner</c> can reuse the exact same detection rather
-    /// than re-deriving it - see that scanner's own doc comment.</summary>
-    private static QueryExpression UnwrapParentheses(QueryExpression queryExpression) =>
+private static QueryExpression UnwrapParentheses(QueryExpression queryExpression) =>
         queryExpression is QueryParenthesisExpression parenthesis ? UnwrapParentheses(parenthesis.QueryExpression) : queryExpression;
 
     internal static bool ReferencesSelf(QueryExpression queryExpression, string cteName)

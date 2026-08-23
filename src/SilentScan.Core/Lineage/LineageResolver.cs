@@ -5,11 +5,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Lineage;
 
-/// <summary>
-/// Pass 2: resolves every view/inline-TVF output column to its <see cref="ColumnProvenance"/>
-/// (CLAUDE.md Pass 2). Views are resolved in dependency order so a column's provenance
-/// chains all the way down to the physical base table, however many view layers sit between.
-/// </summary>
 public static class LineageResolver
 {
     public static LineageCatalog Resolve(DatabaseCatalog catalog, IEnumerable<SqlParseResult> parseResults)
@@ -53,8 +48,7 @@ public static class LineageResolver
         return new ResolvedRelation(view.QualifiedName, [.. columnNames.Select(n => new ResolvedColumn(n, new ColumnProvenance.Unknown(reason)))]);
     }
 
-    /// <summary>Best-effort column names for a cyclic view so its shape is still reportable, even though every column's type is Unknown.</summary>
-    private static IReadOnlyList<string> TryInferOutputNames(SelectStatement selectStatement)
+private static IReadOnlyList<string> TryInferOutputNames(SelectStatement selectStatement)
     {
         if (selectStatement.QueryExpression is not QuerySpecification { SelectElements: var elements })
         {
@@ -69,9 +63,6 @@ public static class LineageResolver
 
     private static ResolvedRelation ResolveView(ViewDefinition view, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, SkipLedger ledger)
     {
-        // A view's own WITH clause (docs/audit-remediation-plan.md Phase 2.4) is resolved once
-        // and stays visible for the whole view body - CTEs are visible throughout their
-        // containing statement, not scoped per nested subquery.
         var cteRelations = CteResolver.Resolve(view.SelectStatement.WithCtesAndXmlNamespaces, catalog, resolvedViews, view.SourcePath, ledger);
         var columns = QueryExpressionResolver.Resolve(view.SelectStatement.QueryExpression, catalog, resolvedViews, view.SourcePath, ledger, cteRelations);
 
@@ -83,12 +74,6 @@ public static class LineageResolver
             }
             else
             {
-                // A count mismatch means position-based Zip would silently attribute an
-                // explicit name to the WRONG resolved column - e.g. `SELECT *` over an
-                // unknown-DDL table yields fewer columns than declared, and Zip then shifts
-                // every later name onto a different table's provenance entirely. That's a
-                // wrong-base-column finding with a real type attached, not just an Unknown -
-                // exactly the false positive CLAUDE.md forbids. Degrade every column instead.
                 ledger.Record(
                     AnalysisPass.Lineage, view.SourcePath, view.SourceLine, 0, "view column list",
                     $"'{view.QualifiedName}' declares {explicitNames.Count} column name(s) but its SELECT resolved {columns.Count} - column identity can't be trusted");

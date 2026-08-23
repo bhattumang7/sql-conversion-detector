@@ -7,19 +7,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// Builds the procedure call graph: every <c>EXEC dbo.SomeProc @arg1, @P2 = @arg2</c> call site
-/// whose target resolved to a procedure this scan actually saw a <c>CREATE/ALTER PROCEDURE</c>
-/// for (<see cref="DatabaseCatalog.TryGetProcedureParameters"/>), with each actual argument
-/// matched to the callee's own declared formal parameter. <c>sp_executesql</c> is deliberately
-/// excluded - that's the dynamic SQL engine's own concern, with its own argument-binding
-/// mechanism (<see cref="DynamicSqlScript.ArgumentBindings"/>). A call site whose target can't be
-/// resolved to a known procedure (a system proc, a synonym pointing nowhere cataloged, or a name
-/// this scan never saw declared) is ledgered rather than silently producing no edge - CLAUDE.md's
-/// "never silently counted as clean" applies to a call graph exactly as much as to a predicate.
-/// This pass only supplies the raw graph; using it to seed a callee's own parameter types or to
-/// trace a constant value across a call edge are separate, later concerns.
-/// </summary>
 public static class ProcCallGraphBuilder
 {
     public static ProcCallGraph Build(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog, SkipLedger ledger)
@@ -42,11 +29,6 @@ public static class ProcCallGraphBuilder
         private string? _currentScope;
         private IList<TSqlStatement>? _currentScopeStatements;
 
-        // A variable's DECLARED type never changes after its own DECLARE, unlike its VALUE - so,
-        // unlike ResolvePropagatedLiteral's reaching-definitions walk, this needs no statement-
-        // order/conditional-write tracking at all: every DECLARE in the scope (at any nesting
-        // depth) and the scope's own formal parameters (if it's a proc/function) are recorded
-        // once, seeded fresh per scope.
         private readonly Dictionary<string, SqlType?> _variableTypes = new(StringComparer.OrdinalIgnoreCase);
 
         public List<ProcCallEdge> Edges { get; } = [];
@@ -110,16 +92,10 @@ public static class ProcCallGraphBuilder
                 }
             }
 
-            // The overwhelmingly common `AS BEGIN ... END` shape wraps the WHOLE body in a
-            // single BeginEndBlockStatement - without unwrapping it, "the scope's own top-level
-            // statements" would be a one-element list containing just that wrapper, and every
-            // DECLARE/SET/EXEC actually in the body (all one level deeper) would look like it
-            // sits inside a nested block, never straight-line, to TryResolveTopLevelLiteral.
             _currentScopeStatements = statementList?.Statements is [BeginEndBlockStatement singleBlock]
                 ? singleBlock.StatementList.Statements
                 : statementList?.Statements;
 
-            // StatementList is null for an EXTERNAL NAME (CLR) body - nothing to walk.
             statementList?.AcceptChildren(this);
             _currentScope = previous;
             _currentScopeStatements = previousStatements;
@@ -145,14 +121,7 @@ public static class ProcCallGraphBuilder
             Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
 
-        /// <summary>
-        /// A named argument (<c>@P = value</c>) matches its formal by name, wherever it appears;
-        /// every other argument matches by position among the REMAINING (not-yet-named) formals,
-        /// in the order it appears - T-SQL itself requires every positional argument before any
-        /// named one, so a simple left-to-right position counter over the un-named formals is
-        /// exact, not an approximation.
-        /// </summary>
-        private static List<ProcCallArgument> MatchArguments(
+private static List<ProcCallArgument> MatchArguments(
             IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, string sourcePath,
             IList<TSqlStatement>? currentScopeStatements, ExecuteStatement callSite, IReadOnlyDictionary<string, SqlType?> variableTypes)
         {
@@ -192,18 +161,7 @@ public static class ProcCallGraphBuilder
             return matched;
         }
 
-        /// <summary>
-        /// A literal expression this pass can seed a callee with directly, without any
-        /// formatting guess: a <see cref="StringLiteral"/> (its text IS the value), or an
-        /// <see cref="IntegerLiteral"/> (its own <c>Value</c> text - digits only, no locale/
-        /// precision/rounding ambiguity - IS also exactly the text T-SQL's own implicit int-to-
-        /// varchar conversion produces, unlike a date, money, or real literal, where the source
-        /// text and the canonical string form can genuinely differ). Any other literal kind
-        /// (date, money, real/float, binary, ...) stays unseeded on purpose - seeding those from
-        /// raw source text would be a guess about formatting this project's soundness-first rule
-        /// forbids, not a proven fact.
-        /// </summary>
-        private static ProcCallLiteralArgument? TryGetDirectLiteralArgument(ScalarExpression parameterValue, string sourcePath) => parameterValue switch
+private static ProcCallLiteralArgument? TryGetDirectLiteralArgument(ScalarExpression parameterValue, string sourcePath) => parameterValue switch
         {
             StringLiteral stringLiteral => ToLiteralArgument(stringLiteral, sourcePath),
             IntegerLiteral integerLiteral => ToIntegerLiteralArgument(integerLiteral, sourcePath),
@@ -216,27 +174,7 @@ public static class ProcCallGraphBuilder
                 ? TryResolveTopLevelLiteral(currentScopeStatements, callerVariableName, sourcePath, callSite)
                 : null;
 
-        /// <summary>
-        /// One-level constant propagation (CLAUDE.md roadmap: trace a caller variable's own
-        /// literal assignment back through a proc-call edge) for a bare variable argument -
-        /// <c>DECLARE @v NVARCHAR(20) = N'Active'; EXEC callee @v;</c> resolves to 'Active' the
-        /// same way passing the literal directly would. Deliberately conservative on one front,
-        /// required for this to be a proven fact rather than a guess: <paramref
-        /// name="variableName"/> must never be written inside ANY nested IF/WHILE/TRY anywhere in
-        /// this scope (<see cref="ConditionallyWrittenVariableCollector"/>) - a conditional write
-        /// means the value at any given point depends on which branch ran, which this pass has no
-        /// fold-state tracking to resolve. Beyond that, this walks the scope's OWN top-level
-        /// statements in program order UP TO (not including) the top-level statement that itself
-        /// contains <paramref name="callSite"/> (<see cref="FindTopLevelStatementIndex"/>) and
-        /// takes the LAST literal assignment found there - T-SQL executes top-to-bottom, so a
-        /// later top-level SET always overwrites an earlier one by the time the call actually
-        /// runs, exactly like two agreeing (or disagreeing) literals aren't actually ambiguous
-        /// once WHERE the call sits relative to them is known. A non-literal assignment anywhere
-        /// in that prefix still poisons everything at-or-before it (the variable's value there is
-        /// genuinely unknown, not just unproven) unless a LATER literal assignment in the same
-        /// prefix overwrites it again.
-        /// </summary>
-        private static ProcCallLiteralArgument? TryResolveTopLevelLiteral(
+private static ProcCallLiteralArgument? TryResolveTopLevelLiteral(
             IList<TSqlStatement> scopeStatements, string variableName, string sourcePath, ExecuteStatement callSite)
         {
             if (IsWrittenInsideConditional(scopeStatements, variableName))
@@ -248,15 +186,7 @@ public static class ProcCallGraphBuilder
             return FindLastLiteralAssignmentBeforeCall(scopeStatements, variableName, sourcePath, callIndex);
         }
 
-        /// <summary>
-        /// The index of the top-level statement in <paramref name="scopeStatements"/> that either
-        /// IS <paramref name="target"/> or contains it as a descendant (identified by (line,
-        /// column) span containment - ScriptDOM guarantees a nested fragment's own start position
-        /// falls strictly within its container's, T-SQL having no non-linear text layout) - or
-        /// <paramref name="scopeStatements"/>.Count if none contains it (defensive: should not
-        /// happen for a call site genuinely reached via this same scope's own traversal).
-        /// </summary>
-        private static int FindTopLevelStatementIndex(IList<TSqlStatement> scopeStatements, TSqlFragment target)
+private static int FindTopLevelStatementIndex(IList<TSqlStatement> scopeStatements, TSqlFragment target)
         {
             for (var i = 0; i < scopeStatements.Count; i++)
             {
@@ -299,14 +229,7 @@ public static class ProcCallGraphBuilder
             return poisoned.Names.Contains(variableName);
         }
 
-        /// <summary>
-        /// One pass over the scope's own top-level statements STRICTLY BEFORE <paramref
-        /// name="callIndex"/>, tracking the LAST DECLARE/SET that targets <paramref
-        /// name="variableName"/> - T-SQL executes top-to-bottom, so a later assignment always
-        /// overwrites an earlier one by the time the call itself runs; earlier assignments (agreeing
-        /// or not) are no longer ambiguous once WHERE the call sits relative to them is known.
-        /// </summary>
-        private static ProcCallLiteralArgument? FindLastLiteralAssignmentBeforeCall(
+private static ProcCallLiteralArgument? FindLastLiteralAssignmentBeforeCall(
             IList<TSqlStatement> scopeStatements, string variableName, string sourcePath, int callIndex)
         {
             ProcCallLiteralArgument? current = null;
@@ -319,11 +242,6 @@ public static class ProcCallGraphBuilder
                     continue;
                 }
 
-                // A real assignment (DECLARE's own initializer, or a SET) whose RHS this pass
-                // can't fold to a literal makes the variable's value genuinely unknown from here
-                // on - `current` becomes null (literal is null in that case) exactly like the
-                // fold-declined case, but a LATER literal assignment before the call can still
-                // overwrite it again, so this keeps walking rather than giving up outright.
                 everAssigned = true;
                 current = literal;
             }
@@ -331,14 +249,7 @@ public static class ProcCallGraphBuilder
             return everAssigned ? current : null;
         }
 
-        /// <summary>
-        /// True (with <paramref name="literal"/> set, possibly to null) when <paramref
-        /// name="statement"/> is a DECLARE or SET that targets <paramref name="variableName"/> -
-        /// null literal means the assignment exists but isn't a foldable string literal (a
-        /// non-literal RHS, or a <c>+=</c>/other non-plain assignment kind), which the caller
-        /// treats identically to "found a real assignment, but not a literal one".
-        /// </summary>
-        private static bool TryGetAssignmentToVariable(TSqlStatement statement, string variableName, string sourcePath, out ProcCallLiteralArgument? literal)
+private static bool TryGetAssignmentToVariable(TSqlStatement statement, string variableName, string sourcePath, out ProcCallLiteralArgument? literal)
         {
             literal = null;
             switch (statement)
@@ -371,25 +282,10 @@ public static class ProcCallGraphBuilder
             return new ProcCallLiteralArgument(stringLiteral.Value, sourcePath, stringLiteral.StartLine, stringLiteral.StartColumn, prefixLength);
         }
 
-        /// <summary>
-        /// No quote prefix to strip (<c>PrefixLength: 0</c>) - an integer literal's own source
-        /// text (digits, optionally a leading sign) already IS its canonical string form, the
-        /// same convention <c>ExpressionEvaluator.FoldInteger</c> uses when it stores a folded
-        /// integer back as a <c>Lit</c> piece for a later statement to read.
-        /// </summary>
-        private static ProcCallLiteralArgument ToIntegerLiteralArgument(IntegerLiteral integerLiteral, string sourcePath) =>
+private static ProcCallLiteralArgument ToIntegerLiteralArgument(IntegerLiteral integerLiteral, string sourcePath) =>
             new(integerLiteral.Value, sourcePath, integerLiteral.StartLine, integerLiteral.StartColumn, PrefixLength: 0);
 
-        /// <summary>
-        /// Every variable name written (DECLARE-with-value or SET) anywhere inside an IF/WHILE/
-        /// TRY-CATCH subtree, at any nesting depth - the set <see cref="TryResolveTopLevelLiteral"/>
-        /// refuses to trust, since a write inside a conditional construct means the value at any
-        /// given later point depends on which branch actually ran, something this single-pass
-        /// scan (no fold-state tracking the way the dynamic SQL engine's own reaching-definitions
-        /// analysis has) cannot determine. A bare BEGIN/END block is NOT conditional and does not
-        /// bump depth - only IF/WHILE/TRY genuinely branch.
-        /// </summary>
-        private sealed class ConditionallyWrittenVariableCollector : TSqlFragmentVisitor
+private sealed class ConditionallyWrittenVariableCollector : TSqlFragmentVisitor
         {
             private int _conditionalDepth;
 

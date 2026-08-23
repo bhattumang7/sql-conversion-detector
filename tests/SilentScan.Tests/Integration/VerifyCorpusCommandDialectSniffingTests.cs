@@ -3,12 +3,6 @@ using SilentScan.Verify.Commands;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// CLAUDE.md's corpus dialect-sniffing criterion ("ScriptDOM parse success >= 90% of files"),
-/// wired into `verify-corpus`'s own exit code and warning output - an audit finding: the rate
-/// was computed (<see cref="Core.Reporting.ParseHealthReport.ParseSuccessRate"/>) but nothing
-/// ever checked it against the threshold CLAUDE.md names.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class VerifyCorpusCommandDialectSniffingTests : IDisposable
 {
@@ -26,8 +20,6 @@ public sealed class VerifyCorpusCommandDialectSniffingTests : IDisposable
             GO
             """);
 
-        // A file whose content is not T-SQL at all - the case CLAUDE.md's dialect sniffing
-        // exists to catch (e.g. a MySQL-dialect file parsed as T-SQL noise).
         File.WriteAllText(Path.Combine(cloneDir, "not_tsql.sql"), "THIS IS $$$ NOT VALID T-SQL AT ALL ((((");
 
         _manifestPath = Path.Combine(_root, "manifest.json");
@@ -72,10 +64,6 @@ public sealed class VerifyCorpusCommandDialectSniffingTests : IDisposable
     [Fact]
     public async Task RunAsync_RepoAtOrAboveDialectSniffingThreshold_NoWarningAndReturnsZero()
     {
-        // Same repo shape as the below-threshold sibling above, but with the one non-T-SQL file
-        // removed - every file in this repo parses, a 100% ParseSuccessRate, comfortably at/above
-        // CLAUDE.md's 90% bar. Proves the warning path is conditional on the real threshold check,
-        // not merely always/never firing regardless of the actual parse success rate.
         var cloneDir = Path.Combine(_root, "clones", "example");
         File.Delete(Path.Combine(cloneDir, "not_tsql.sql"));
 

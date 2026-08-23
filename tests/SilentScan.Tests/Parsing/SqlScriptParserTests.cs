@@ -4,10 +4,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Tests.Parsing;
 
-/// <summary>
-/// Phase 0 spike: prove ScriptDOM parses a table + two stacked views + a proc, and that we
-/// can walk the AST to the WHERE predicate's column reference. See plan.md Phase 0.
-/// </summary>
 public sealed class SqlScriptParserTests
 {
     private static readonly string FixturePath = Path.Combine(
@@ -80,9 +76,6 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseFile_OneBadBatchAmongGoodOnes_RetainsTheGoodBatches()
     {
-        // docs/audit-remediation-plan.md Phase 4.4, audit finding B4: ScriptDOM itself drops
-        // only the malformed batch, not the whole file - verified directly against the parser
-        // before this was relied on (a throwaway probe program parsing this exact shape).
         var path = WriteTempFile(Encoding.UTF8.GetBytes(
             """
             CREATE TABLE dbo.A (Id INT NOT NULL);
@@ -116,9 +109,6 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseFile_QuotedIdentifierRequiredForSchemaQualifiedName_RecoversViaRetry()
     {
-        // Verified directly against the parser: a double-quoted schema-qualified identifier
-        // only parses under QUOTED_IDENTIFIER ON, which is the tool's own default - so this
-        // exercises the retry path for a script written assuming the opposite default.
         var path = WriteTempFile(Encoding.UTF8.GetBytes("SELECT Id FROM dbo.\"Orders\";\nGO\n"));
 
         try
@@ -136,12 +126,6 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseFile_Windows1252EncodedIdentifier_DecodesCorrectlyInsteadOfUtf8Mojibake()
     {
-        // A table name containing an accented character (Windows-1252/Latin-1 corpora are
-        // common in older T-SQL scripts), saved without a BOM. Verified directly against the
-        // parser: decoding this as UTF-8 does NOT produce a parse error (ScriptDOM's lexer
-        // accepts the resulting U+FFFD replacement character inside an identifier without
-        // complaint) - it silently produces the WRONG table name instead, which the encoding
-        // fallback exists to prevent.
         var sql = "CREATE TABLE dbo.Café (Id INT NOT NULL);\nGO\n";
         var path = WriteTempFile(Encoding.Latin1.GetBytes(sql));
 
@@ -185,10 +169,6 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseText_QuotedIdentifierOff_ParsesLegacyExecStringLiteralCleanly()
     {
-        // Under QUOTED_IDENTIFIER OFF (the setting a module was actually CREATEd/ALTERed with,
-        // per sys.sql_modules.uses_quoted_identifier), "..." is a plain string literal - the
-        // legacy EXEC("...") dynamic-SQL idiom. The live path must be able to parse a module
-        // with this ground-truth setting instead of always assuming QI ON.
         var result = SqlScriptParser.ParseText("test.sql", "EXEC(\"SELECT 1\");", initialQuotedIdentifiers: false);
 
         Assert.False(result.HasErrors);
@@ -197,9 +177,6 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseText_QuotedIdentifierOn_RejectsLegacyExecStringLiteralAsUnclosedIdentifier()
     {
-        // The same text under QI ON (the tool's existing 2-arg-overload default) is NOT legal -
-        // "..." is an identifier delimiter, so this must remain a genuine parse error rather
-        // than silently accepted both ways.
         var result = SqlScriptParser.ParseText("test.sql", "EXEC(\"SELECT 1\");", initialQuotedIdentifiers: true);
 
         Assert.True(result.HasErrors);
@@ -208,9 +185,6 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void DecodeFile_Windows1252EncodedIdentifier_DecodesCorrectlyInsteadOfUtf8Mojibake()
     {
-        // DecodeFile is ParseFile's own decode step, exposed for callers (corpus template
-        // substitution) that must transform the text before parsing it - it must apply the
-        // identical BOM-detection/Latin-1 fallback, not a plain File.ReadAllText.
         var sql = "CREATE TABLE dbo.Café (Id INT NOT NULL);\nGO\n";
         var path = WriteTempFile(Encoding.Latin1.GetBytes(sql));
 
@@ -226,9 +200,6 @@ public sealed class SqlScriptParserTests
         }
     }
 
-    // DROP TABLE IF EXISTS was added in SQL Server 2016 (compat level 130) - a well-established,
-    // version-gated construct independent of anything this project probed itself, unlike a very
-    // recent addition whose exact introducing version is easier to get wrong from memory.
     private const string DropTableIfExists = "DROP TABLE IF EXISTS dbo.T;";
 
     [Fact]
@@ -250,8 +221,6 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseText_DropTableIfExists_UnknownCompatLevel_UsesNewestDialectAndSucceeds()
     {
-        // No compat level known (compatibilityLevel: null) - the newest available dialect is
-        // used, which accepts every older construct too (a superset dialect always does).
         var result = SqlScriptParser.ParseText("test.sql", DropTableIfExists, initialQuotedIdentifiers: true, compatibilityLevel: null);
 
         Assert.False(result.HasErrors);
@@ -260,9 +229,6 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseText_DropTableIfExists_CompatLevelBelow100_FloorsToOldestParserRatherThanGuessingNewer()
     {
-        // A compat level below ScriptDOM's oldest available parser (100) floors to 100 rather
-        // than silently accepting a newer construct the real, older target would reject - the
-        // more conservative choice per CreateParser's own doc comment.
         var result = SqlScriptParser.ParseText("test.sql", DropTableIfExists, initialQuotedIdentifiers: true, compatibilityLevel: 80);
 
         Assert.True(result.HasErrors);

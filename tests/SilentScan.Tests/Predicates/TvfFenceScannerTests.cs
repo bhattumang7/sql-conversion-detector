@@ -5,11 +5,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Every rule fixture here is a real-world-sourced repro (see file header comments for
-/// citations) per CLAUDE.md's "no invented corpus" rule, matching the discipline
-/// <see cref="NonSargablePredicateScannerTests"/> already follows for Tier-1.
-/// </summary>
 public sealed class TvfFenceScannerTests
 {
     private static readonly string FixturesDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "tvf_fence");
@@ -99,9 +94,6 @@ public sealed class TvfFenceScannerTests
         Assert.Equal(1, nested.Depth);
         Assert.NotNull(nested.OriginSourcePath);
 
-        // The view's own body still reports its own direct CorrelatedApply finding - this
-        // pair's own point is that BOTH exist: the fence is visible to the view's own author and
-        // invisible to everyone who just references the view.
         Assert.Contains(findings, f => f.Kind == TvfFenceFindingKind.CorrelatedApply);
     }
 
@@ -111,17 +103,7 @@ public sealed class TvfFenceScannerTests
         Assert.Empty(ScanFixture("NESTED_UNDER_VIEW_OR_TVF_clean.sql"));
     }
 
-    /// <summary>
-    /// Regression: an inline TVF is called with the exact same function-call syntax as a
-    /// multi-statement one (a distinct ScriptDom node - <c>SchemaObjectFunctionTableReference</c>
-    /// - from the bare <c>NamedTableReference</c> a plain view uses), so the nested-fence check
-    /// has to run for BOTH reference shapes, not just the named-table one. An earlier version of
-    /// this scanner only checked the fence map from <c>VisitNamedReference</c>, so a fence hidden
-    /// behind an inline TVF wrapper (confirmed against the real local test database: two inline
-    /// TVFs there wrap a multi-statement one and are themselves referenced by name from other
-    /// procedures) never surfaced.
-    /// </summary>
-    [Fact]
+[Fact]
     public void NestedUnderViewOrTvf_ViaInlineTvfFunctionCallSyntax_Fires()
     {
         var findings = ScanFixture("NESTED_UNDER_VIEW_OR_TVF_via_inline_tvf_fires.sql");

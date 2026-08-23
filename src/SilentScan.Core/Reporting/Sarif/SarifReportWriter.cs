@@ -10,19 +10,10 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Reporting.Sarif;
 
-/// <summary>
-/// Converts a <see cref="ScanReport"/> to SARIF 2.1.0 JSON (CLAUDE.md: "SARIF export so the
-/// tool doubles as a CI gate later"). Rule IDs and levels are stable across runs so CI
-/// baselining/suppression works.
-/// </summary>
 public static class SarifReportWriter
 {
     private const string ToolName = "SilentScan";
 
-    // Read from the assembly's own version (Directory.Build.props' <Version>) rather than a
-    // hardcoded literal - a hardcoded string silently stops tracking the tool's actual version
-    // the moment someone forgets to update it by hand, which defeats SARIF's whole purpose of
-    // letting CI baselining/suppression key off driver.version.
     private static readonly string ToolVersion =
         typeof(SarifReportWriter).Assembly.GetName().Version?.ToString() ?? "0.0.0";
 
@@ -129,8 +120,6 @@ public static class SarifReportWriter
         var notifications = BuildParseHealthNotifications(report.ParseHealth);
         var invocation = new SarifInvocation(ExecutionSuccessful: true, notifications);
 
-        // No public repository exists for this project yet, so informationUri (optional in
-        // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
         var log = new SarifLog(
             "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
             "2.1.0",
@@ -139,14 +128,7 @@ public static class SarifReportWriter
         return JsonSerializer.Serialize(log, JsonOptions);
     }
 
-    /// <summary>
-    /// The SARIF honesty channel for "the tool did not get to look at something" - a parse error
-    /// pinpoints WHERE parsing failed; an unanalyzed-batch notification (see
-    /// <see cref="UnanalyzedBatch"/>) additionally names WHAT object, if any, was lost as a
-    /// result. Neither is a <see cref="SarifResult"/> - notifications are never rule-bound
-    /// findings about the SQL, only the tool reporting its own coverage.
-    /// </summary>
-    private static List<SarifNotification> BuildParseHealthNotifications(ParseHealthReport parseHealth)
+private static List<SarifNotification> BuildParseHealthNotifications(ParseHealthReport parseHealth)
     {
         var notifications = new List<SarifNotification>();
 
@@ -192,13 +174,6 @@ public static class SarifReportWriter
     {
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.Tier1RuleId(finding.Kind), finding.Confidence);
 
-        // A syntactic pattern is only worth a reader's full attention when it's confirmed on a
-        // real, leading-key-indexed column - one where there was an actual seek to lose. finding
-        // .Indexed is null (unresolved) far more often than it's false (resolved-and-confirmed-
-        // unindexed) in real corpora, so both demote the same way: only Indexed == true keeps
-        // the kind's normal severity. Without this, every syntactic hit on an unindexed or
-        // unresolvable column reported at the same "warning" level as a genuine index-defeating
-        // one - the single largest source of unranked noise this pass produced.
         var isConfirmedIndexed = finding.Indexed == true;
         var level = isConfirmedIndexed && finding.Kind != SargabilityFindingKind.LikePatternNotLiteral ? LevelWarning : LevelNote;
         level = FloorLevelForConfidence(level, finding.Confidence);
@@ -221,11 +196,6 @@ public static class SarifReportWriter
             _ => LevelNote,
         };
 
-        // Mirrors the Tier-1 downgrade below: a ScanForced/RangeSeek verdict on a column with no
-        // evidence it's indexed cost nothing extra beyond the conversion itself - there was no
-        // seek to lose. Every corpus finding this tool has actually produced against real-world
-        // repos has been on an unindexed column (an audit finding), so without this every one of
-        // them reported at "error" regardless of whether an index was ever in play.
         var level = finding.Column.Indexed == true ? baseLevel : DowngradeOneLevel(baseLevel);
         level = FloorLevelForConfidence(level, finding.Confidence);
 
@@ -246,9 +216,6 @@ public static class SarifReportWriter
             : string.Join(", ", finding.UnderlyingBaseColumns.Select(bc => $"{bc.TableQualifiedName}.{bc.ColumnName}{(bc.Indexed ? " (indexed)" : " (not indexed)")}"));
         var message = $"Column '{finding.ColumnName}' is a computed expression by the time it reaches this predicate ({chain}); underlying: {underlying}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
 
-        // Same indexed-based downgrade as every other verdict-bearing finding kind: an
-        // expression-derived column with no indexed base column underneath it isn't costing an
-        // otherwise-available seek.
         var anyUnderlyingIndexed = finding.UnderlyingBaseColumns.Any(bc => bc.Indexed);
         var level = anyUnderlyingIndexed ? LevelError : DowngradeOneLevel(LevelError);
         level = FloorLevelForConfidence(level, finding.Confidence);
@@ -259,10 +226,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(CollationConflictFinding finding)
     {
-        // Always error, regardless of whether either column is indexed - this isn't a
-        // sargability downgrade candidate the way an ordinary verdict or expression-derived
-        // finding is; the query does not compile at all (oracle-verified: SQL Server Msg 468),
-        // which outranks every seek-versus-scan concern.
         var message = $"Collation conflict: '{finding.FirstTableQualifiedName}.{finding.FirstColumnName}' (COLLATE {finding.FirstCollationName}) {finding.Operator} '{finding.SecondTableQualifiedName}.{finding.SecondColumnName}' (COLLATE {finding.SecondCollationName}) does not compile.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CollationConflictRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
@@ -272,8 +235,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(ColumnCollationDriftFinding finding)
     {
-        // Informational, not error/warning - this is a seed, not yet a comparison that's
-        // actually happening; no seek was lost and nothing failed to compile.
         var kindNote = finding.IsTempObject ? "tempdb's effective" : "the database's default";
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (COLLATE {finding.ColumnCollationName}) differs from {kindNote} collation (COLLATE {finding.BaselineCollationName}) - a conversion seed for any future comparison against a column/literal carrying that collation.";
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ColumnCollationDriftRuleId, finding.Confidence);
@@ -284,8 +245,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(CrossTableTypeDriftFinding finding)
     {
-        // Informational, not error/warning - a seed on a foreign key relationship, not yet a
-        // query that actually joins on it.
         var message = $"FK '{finding.ConstraintName}': '{finding.ParentTableQualifiedName}.{finding.ParentColumnName}' ({finding.ParentTypeDisplay}) references '{finding.ReferencedTableQualifiedName}.{finding.ReferencedColumnName}' ({finding.ReferencedTypeDisplay}) - the types differ{(finding.CollationDiffers ? " (collation differs)" : string.Empty)}.";
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CrossTableTypeDriftRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
@@ -295,8 +254,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(ProcCallArgumentMismatchFinding finding)
     {
-        // Same severity treatment as a WriteLossFinding - warning, not error/downgraded-by-index,
-        // since "is this indexed" has no bearing on a silent-data-loss assignment.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ProcCallArgumentMismatchRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var callerLabel = finding.CallerScopeQualifiedName ?? "a top-level batch";
@@ -307,8 +264,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(TemporalBoundaryPrecisionFinding finding)
     {
-        // Error, not warning/note - unlike a sargability finding, this is a live correctness
-        // bug (silently dropped rows), oracle-confirmed, not a "worth investigating" signal.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TemporalBoundaryPrecisionRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (scale {finding.ColumnScale}) is compared with BETWEEN against upper bound '{finding.BoundaryLiteralText}' ({finding.BoundaryLiteralFractionalDigits} fractional digit(s)) - rows in the precision gap are silently excluded. Rewrite as >= start AND < (start of the next period).";
@@ -318,9 +273,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(MaxTypedColumnFinding finding)
     {
-        // Informational, not error/warning - a structural catalog fact, not evidence of an
-        // actual predicate/join comparison against it. It can never be an index key column,
-        // but that's an inherent property, not something a query newly triggered.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MaxTypedColumnRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = finding.Kind == NonIndexableColumnFindingKind.LegacyLargeObject
@@ -332,8 +284,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(ColumnstoreUnsupportedColumnTypeFinding finding)
     {
-        // Error, not warning - oracle-confirmed this does not deploy at all (Msg 35343), not a
-        // perf/plan-shape claim.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ColumnstoreUnsupportedColumnTypeRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} and participates in columnstore index '{finding.IndexName}' - this does not deploy (Msg 35343: a SQL_VARIANT column cannot participate in a columnstore index).";
@@ -381,10 +331,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(OversizedParameterFinding finding)
     {
-        // Warning, not error - oracle-falsified that a bare equality predicate shows any memory-
-        // grant difference; this is a structural report of a length mismatch, not a plan-shape
-        // claim for this specific predicate. Not downgraded by indexed-ness either: the risk is
-        // about the value's declared size feeding a sort/hash operator, unrelated to seek loss.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.OversizedParameterRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (length {finding.ColumnLength}) is compared against a parameter/variable/expression declared with length {finding.OtherOperandLength} - risks memory-grant inflation if the value feeds a sort/hash operator.";
@@ -394,12 +340,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(PartialCompositeForeignKeyJoinFinding finding)
     {
-        // Warning, not error/downgraded-by-index - "is this indexed" has no bearing here; the
-        // defect is row multiplication, not a lost seek. Not error either: unlike a collation
-        // conflict (a compile failure) or a temporal-boundary drop (a proven row-count gap this
-        // scanner can directly demonstrate per-finding), whether the omission is a real bug or a
-        // deliberate fan-out is genuinely ambiguous to static analysis alone (see the finding's
-        // own doc comment) - reflected in its default Medium confidence, not just its SARIF level.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.PartialCompositeForeignKeyJoinRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var matched = string.Join(", ", finding.MatchedColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}"));
@@ -411,11 +351,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(SetOptionFinding finding)
     {
-        // Error, not warning/downgraded-by-index: unlike a sargability finding, this isn't "worth
-        // investigating" - ModuleReachableObjectWalker already proved the module touches a real
-        // filtered index or indexed view, so the SET option genuinely disables a plan feature
-        // this exact module would otherwise use, oracle-confirmable per docs/detection-
-        // checklist.md's own note on the compile-only SHOWPLAN_XML mechanism.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SetOptionRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var touchedDisplay = DescribeTouchedObjectForSetOption(finding);
@@ -439,12 +374,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(UnderLengthParameterFinding finding)
     {
-        // Warning, same severity tier as OversizedParameterFinding and WriteLossFinding's own
-        // identical class of concern (a write/comparison silently narrowing a value with no
-        // error raised) - this pass never traces the variable's actual assigned value, so it
-        // cannot claim truncation DID happen for a specific query, only that the declared-length
-        // pairing risks it. Not downgraded by indexed-ness: the risk is about the compared VALUE
-        // being truncated, unrelated to seek loss.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UnderLengthParameterRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var otherLengthDisplay = finding.IsImplicitDefault ? "no explicit length (defaults to 1)" : $"length {finding.OtherOperandLength}";
@@ -458,13 +387,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(AnsiPaddingMismatchFinding finding)
     {
-        // Error, not warning - stronger than every other structural report in this section: a
-        // non-padded column can NEVER store a value ending in whitespace at all (stripped at
-        // INSERT time), so a pattern with significant trailing whitespace can never match
-        // anything the column could ever contain. Not a conditional risk dependent on an unknown
-        // runtime value like OversizedParameterFinding/UnderLengthParameterFinding - a provably
-        // always-false predicate, the same certainty tier TemporalBoundaryPrecisionFinding's own
-        // oracle-confirmed row-drop gets.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AnsiPaddingMismatchRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is a non-ANSI-padded column (trailing blanks stripped at INSERT) compared via LIKE against pattern {finding.PatternLiteralText}, whose trailing whitespace is significant - this predicate can never match any value the column could ever store.";
@@ -474,9 +396,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(CatchAllPredicateFinding finding)
     {
-        // Warning, downgraded when not confirmed indexed (matches Tier1Findings' own downgrade
-        // convention) - there was no seek to lose if the column was never indexed in the first
-        // place, even though the catch-all shape itself is real either way.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CatchAllPredicateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(finding.Indexed ? LevelWarning : LevelNote, finding.Confidence);
         var indexedNote = finding.Indexed ? string.Empty : " (would defeat an index if one existed - none is confirmed indexed today)";
@@ -487,9 +406,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(LocalVariablePredicateFinding finding)
     {
-        // Note, not warning/error: purely informational per the finding's own doc comment - the
-        // predicate is still fully sargable, only the row-count ESTIMATE is at risk, and this
-        // pass has no way to know whether that estimate actually matters for real data.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.LocalVariablePredicateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' {finding.Operator} {finding.VariableName} - a DECLARE'd local, not a formal parameter, so its value is invisible to the cardinality estimator (falls back to average-density statistics). The predicate still seeks if the column is indexed; only the row-count estimate is at risk.";
@@ -499,10 +415,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(FilteredIndexParameterMismatchFinding finding)
     {
-        // Error, not Note: unlike LocalVariablePredicateFinding/ParameterReassignmentPredicateFinding
-        // above (a cardinality-ESTIMATE risk only, predicate still seeks), this is a real access-
-        // path defect - the filtered index is oracle-confirmed genuinely unusable for this query
-        // shape, not merely mis-estimated.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FilteredIndexParameterMismatchRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var operandKind = finding.IsFormalParameter ? "formal parameter" : "local variable";
@@ -513,9 +425,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(ParameterReassignmentPredicateFinding finding)
     {
-        // Note, not warning/error: purely informational per the finding's own doc comment - the
-        // predicate is still fully sargable, only the row-count ESTIMATE (built from the now-stale
-        // sniffed value) is at risk, the identical certainty tier LocalVariablePredicateFinding uses.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ParameterReassignmentPredicateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' {finding.Operator} @{finding.ParameterName} - {finding.ParameterName} is a formal parameter reassigned at line {finding.ReassignmentLine} before this predicate runs, so the optimizer's compile-time sniffed value (the caller's original argument) is stale by the time this comparison executes. The predicate still seeks if the column is indexed; only the row-count estimate is at risk.";
@@ -525,8 +434,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(CodeMetricFinding finding)
     {
-        // Note, not warning/error: a pure maintainability/readability signal - no query result or
-        // plan is ever affected by any of these eight metrics.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CodeMetricRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = finding.Kind switch
@@ -554,12 +461,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(FormattingFinding finding)
     {
-        // Note, not warning/error, for every kind except the two visual-ambiguity ones (a
-        // dangling statement or a misread ELSE IF) - a pure readability/maintainability signal,
-        // no query result or plan is ever affected. The ambiguity kinds still stay Note-tier: the
-        // STATEMENT'S OWN behavior is unaffected either way, only a future edit relying on the
-        // misleading visual shape is at risk (the same reasoning CodeMetricFinding already
-        // established for this class of Tier 4 finding).
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FormattingRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = finding.Kind switch
@@ -589,10 +490,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(ForcedParameterizationFinding finding)
     {
-        // Warning, not error - a plan-cache/compile-cost risk (a fresh compile per distinct
-        // literal, defeating the setting the database was explicitly configured for), not itself
-        // a proof of a wrong result - the same tier ColumnstoreIndexOnDmlTargetTable uses for its
-        // own oracle-confirmed structural mechanism.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ForcedParameterizationRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
@@ -607,10 +504,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(DeadCodeFinding finding)
     {
-        // Warning, not error - a structural/maintainability risk, not itself a proof of a wrong
-        // result (the same tier ForcedSerialFinding/FormattingFinding use), even for the
-        // structurally-provable High-confidence kinds (unreachable code, unused label, redundant
-        // jump): the flagged code's own current behavior is unaffected either way.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DeadCodeRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -633,9 +526,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(DuplicationFinding finding)
     {
-        // Warning, not error - a structural/maintainability risk, not itself a proof of a wrong
-        // result, matching DeadCodeFinding's own tier: the flagged code's current behavior is
-        // unaffected either way, even for the structurally-unambiguous High-confidence kinds.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DuplicationRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -678,10 +568,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(DeprecatedSyntaxFinding finding)
     {
-        // Note level for the two purely informational, workflow-tracking kinds (to-do/fix-me - not
-        // a defect at all); Warning for everything else - a real syntax/behavior risk, but not
-        // itself proof of a wrong result the way the EqualsNullComparison/NotEqualsNullComparison
-        // kinds' own High confidence already signals through the confidence-based level floor.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DeprecatedSyntaxRuleId(finding.Kind), finding.Confidence);
         var baseLevel = finding.Kind is DeprecatedSyntaxFindingKind.TaskCommentTodo or DeprecatedSyntaxFindingKind.TaskCommentFixme
             ? LevelNote
@@ -693,9 +579,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(StatementShapeFinding finding)
     {
-        // Note level for the purely-advisory BareSelectStar kind (Low confidence by
-        // construction); Warning for everything else - a real correctness/maintainability risk,
-        // never itself proof of a wrong result.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.StatementShapeRuleId(finding.Kind), finding.Confidence);
         var baseLevel = finding.Kind == StatementShapeFindingKind.BareSelectStar ? LevelNote : LevelWarning;
         var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
@@ -705,13 +588,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(ControlFlowRiskFinding finding)
     {
-        // Error for the structurally-unambiguous, hard-fact kinds (a cursor FETCH that always fails
-        // at runtime; a CATCH block that swallows every error with zero statements; a simple CASE
-        // with no ELSE, which silently returns NULL; a non-deterministic CASE input, oracle-confirmed
-        // to make every WHEN branch effectively unreachable) - the same "provably-wrong-outcome" tier
-        // NotInNullableSubqueryFinding/TempTableExecShapeFinding use. Warning for everything else,
-        // including GotoUsage (a maintainability risk, not itself a provably wrong outcome) - a real,
-        // well-documented risk, never itself proof of a wrong result in isolation.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ControlFlowRiskRuleId(finding.Kind), finding.Confidence);
         var baseLevel = finding.Kind is ControlFlowRiskFindingKind.CursorFetchColumnCountMismatch
             or ControlFlowRiskFindingKind.EmptyCatchBlock
@@ -726,11 +602,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(SecurityFinding finding)
     {
-        // Error for the two structurally-unambiguous, hard-fact kinds (a hardcoded non-benign IP
-        // address; a HASHBYTES call naming a weak algorithm outright) - the same tier
-        // ControlFlowRiskFinding uses for its own hard-fact kinds. Warning for the sharper but
-        // context-dependent/name-based kinds, since none of these is a provable vulnerability in
-        // isolation - this pass never traces as far as an actual external-input boundary.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SecurityRuleId(finding.Kind), finding.Confidence);
         var baseLevel = finding.Kind is SecurityFindingKind.HardCodedIpAddress or SecurityFindingKind.WeakHashAlgorithm
             ? LevelError
@@ -742,12 +613,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(NotInNullableSubqueryFinding finding)
     {
-        // Error, not warning - a data-correctness bug, the same certainty tier
-        // AnsiPaddingMismatchFinding/TemporalBoundaryPrecisionFinding get: not a conditional risk
-        // dependent on an unknown runtime value, but a query that returns the wrong RESULT SET
-        // right now, for this exact code, the instant the underlying data contains one NULL in
-        // the subquery column. Never downgraded by indexed-ness - there is no seek/scan angle to
-        // this finding at all.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NotInNullableSubqueryRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var outerColumnDisplay = finding.OuterColumnName ?? "<expression>";
@@ -758,10 +623,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(NonUniqueUpdateSourceFinding finding)
     {
-        // Error, not warning - the absence of a uniqueness guarantee is itself the full, provable
-        // defect (no current data has to be inspected or assumed), the same "structural, not
-        // data-dependent" framing PartialCompositeForeignKeyJoinFinding uses. Never downgraded by
-        // indexed-ness - there is no seek/scan angle to this finding at all.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NonUniqueUpdateSourceRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var joinColumns = string.Join(", ", finding.JoinColumnNames);
@@ -773,10 +634,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(ForcedSerialFinding finding)
     {
-        // Warning, not error: a performance-cost finding, not a correctness one - forced-serial
-        // execution never changes the result, only its cost, the same "structural risk" tier
-        // CatchAllPredicateFinding/SetOptionFinding get rather than the provably-wrong-result
-        // Error tier NotInNullableSubqueryFinding/NonUniqueUpdateSourceFinding get.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ForcedSerialRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -793,11 +650,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(SelfReferencingDmlFinding finding)
     {
-        // Warning, not error: a performance-cost finding, not a correctness one - the same
-        // "structural risk, not provably-wrong-result" tier ForcedSerialFinding/CatchAllPredicateFinding
-        // use. Never names one specific operator (spool or sort) in the message - the oracle
-        // confirmed both mechanisms occur depending on statement shape, see this finding's own
-        // doc comment.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SelfReferencingDmlRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var viaDisplay = finding.Kind == SelfReferencingDmlFindingKind.ThroughView
@@ -810,10 +662,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(UntrustedConstraintFinding finding)
     {
-        // Warning, not error: real optimizer forfeiture (join elimination / constraint-based
-        // rewrites), but the finding itself proves no wrong result on its own - the same
-        // "structural risk, not provably-wrong-result" tier ForcedSerialFinding/SetOptionFinding
-        // get, not the Error tier a correctness finding gets.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UntrustedConstraintRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var kindDisplay = finding.Kind == UntrustedConstraintFindingKind.ForeignKey ? "foreign key" : "CHECK constraint";
@@ -824,11 +672,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(CheckConstraintFinding finding)
     {
-        // Error, not warning - a data-correctness bug the same certainty tier
-        // NotInNullableSubqueryFinding/AnsiPaddingMismatchFinding get, not the "structural risk,
-        // not provably-wrong-result" Warning tier UntrustedConstraintFinding itself uses: both
-        // kinds here are unconditional, oracle-confirmed engine mechanics with no workload
-        // dependence - see CheckConstraintFinding's own doc comment for the evidence.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CheckConstraintRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = finding.Kind switch
@@ -845,9 +688,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(DefaultNullableConstraintFinding finding)
     {
-        // Warning, not error - see DefaultNullableConstraintFinding's own doc comment: a DEFAULT
-        // is an insert-convenience feature, not a data-integrity guarantee the schema claims to
-        // enforce, unlike CheckConstraintFinding.NullNotHandled.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DefaultNullableConstraintRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' carries a DEFAULT constraint ({finding.DefaultDefinitionText}) but is still nullable - a caller supplying NULL explicitly for this column bypasses the default entirely, silently, with no error.";
@@ -877,10 +717,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(BareTopNoOrderByFinding finding)
     {
-        // Warning at High confidence, floored to Note here since BareTopNoOrderByFinding ships at
-        // Medium - see its own doc comment: the nondeterminism mechanism is a certain, documented
-        // engine fact, but whether any real caller depends on the returned row set is workload
-        // intent this pass cannot see.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.BareTopNoOrderByRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = "TOP with no ORDER BY anywhere in this query - SQL Server does not guarantee which rows TOP returns, or their order, without an ORDER BY; the returned row set can change run to run with plan choice, parallelism, or statistics drift.";
@@ -899,9 +735,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(AggregateDivisionColumnstoreFinding finding)
     {
-        // Note, not Warning - see AggregateDivisionColumnstoreFinding's own doc comment: shipped
-        // as a structural risk flag only, Low confidence, after a genuine but unsuccessful
-        // live-reproduction attempt against this tool's own standing engine build.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AggregateDivisionColumnstoreRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"{finding.AggregateFunctionName}(...) on '{finding.TableQualifiedName}' (backed by a columnstore index) contains a CASE-guarded division by a non-constant divisor - historically reported as unreliable under batch-mode/vectorized execution's own CASE-branch evaluation, unlike rowstore scalar evaluation.";
@@ -911,12 +744,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(SecurityPredicateIndexFinding finding)
     {
-        // Warning, not Error - a structural risk flag (Medium confidence): the "no supporting
-        // index on the predicate's own bound columns forces a scan+residual-filter" mechanism is
-        // oracle-confirmed and unconditional, but the actual real-world cost is still workload-
-        // dependent (table size, access frequency), the same tier
-        // IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable already uses for an analogous
-        // exact-structural-precondition-but-workload-dependent-cost claim.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SecurityPredicateIndexRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var columns = string.Join(", ", finding.FilteredColumns);
@@ -927,11 +754,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(DanglingObjectReferenceFinding finding)
     {
-        // Error, not warning: this is not a workload-dependent structural risk, it's a proven
-        // future runtime failure - the referenced object does not exist right now, and Msg 208 is
-        // guaranteed the moment any caller reaches the statement that names it, exactly like
-        // IndexHintFindingKind.IndexDoesNotExist's identical "compiles clean, hard-errors at
-        // runtime" tier.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DanglingObjectReferenceRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var referencedName = finding.ReferencedSchemaName is { } schema ? $"{schema}.{finding.ReferencedEntityName}" : finding.ReferencedEntityName;
@@ -942,9 +764,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(CascadingForeignKeyFinding finding)
     {
-        // Note, not warning/error: purely informational per the finding's own doc comment - a
-        // real, exact catalog fact, but no magnitude claim (how many rows, how often), the same
-        // no-magnitude-claim tier LocalVariablePredicateFinding uses for its own reason.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CascadingForeignKeyRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var actions = string.Join(", ", new[]
@@ -959,11 +778,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(TemporalTableHistoryIndexGapFinding finding)
     {
-        // Warning, not error: an oracle-confirmed real mechanism (the history-side branch of the
-        // FOR SYSTEM_TIME UNION ALL scans without a matching index), but the oracle confirmation is
-        // of the general mechanism, not a per-finding plan-XML probe against a real query site - the
-        // same "structural risk, not provably-wrong-result" tier UntrustedConstraintFinding/
-        // ForcedSerialFinding get, not the Error tier a correctness finding gets.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TemporalTableHistoryIndexGapRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var indexDisplay = finding.CurrentIndexName is null ? "an unnamed index" : $"'{finding.CurrentIndexName}'";
@@ -975,8 +789,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(ModuleCompileFlagFinding finding)
     {
-        // Warning, not error: a real, structural cost/risk, not a proven-wrong-result claim - the
-        // same "structural risk" tier SetOptionFinding/CascadingForeignKeyFinding use.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ModuleCompileFlagRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -993,8 +805,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(WindowFrameFinding finding)
     {
-        // Warning, not error: a real, oracle-measured performance cost, not a proven-wrong-result
-        // claim - the same "structural risk" tier ForcedSerialFinding/CatchAllPredicateFinding use.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.WindowFrameRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -1011,8 +821,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(WaitForFinding finding)
     {
-        // Warning, not error: a documented structural cost/risk, not a proven-wrong-result claim -
-        // the same "structural risk" tier ForcedSerialFinding/CatchAllPredicateFinding use.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.WaitForRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.IsInsideTransaction
@@ -1024,10 +832,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(TransactionHygieneFinding finding)
     {
-        // Warning, not error: a real, oracle-confirmed correctness/robustness defect, but the
-        // same "structural risk" tier ForcedSerialFinding/WaitForFinding already use rather than
-        // the LevelError tier reserved for a proven-wrong-RESULT claim (this finding's defect is
-        // a leaked lock/session-state condition, not a wrong row set).
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TransactionHygieneRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message =
@@ -1038,10 +842,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(OutputParameterFinding finding)
     {
-        // Warning, not error: same "structural risk, not a plan-shape claim" tier
-        // TransactionHygieneFinding/ForcedSerialFinding already use - the actual harm depends on
-        // whether a real caller reads the parameter's post-call value at all, which this pass
-        // cannot observe.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.OutputParameterRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message =
@@ -1052,9 +852,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(DatabaseConfigurationFinding finding)
     {
-        // No file/line applies - this is a database-granularity fact, not a module/predicate one.
-        // The database's own name stands in for a "location" so the SARIF result still carries an
-        // artifactLocation, matching this writer's existing shape for every other finding.
         var (ruleId, level, message) = finding.Kind switch
         {
             DatabaseConfigurationFindingKind.PageVerifyNotChecksum => (
@@ -1095,9 +892,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(CompositeIndexLeadingColumnFinding finding)
     {
-        // Warning, not error: a provable structural (b-tree prefix) fact, but a per-index claim
-        // ("this index cannot seek this query"), never an index-recommendation or overall-query-
-        // is-slow claim - the same "structural risk" tier ForcedSerialFinding/WindowFrameFinding use.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CompositeIndexLeadingColumnRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var indexLabel = finding.IndexName ?? "(unnamed index)";
@@ -1184,14 +978,8 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ViewOrderingRuleId(finding.Kind), finding.Confidence);
         var message = finding.Kind switch
         {
-            // Warning/High: oracle-confirmed the ordering is provably never guaranteed to a
-            // consumer - the same "structural risk, high confidence" tier as e.g.
-            // AnsiPaddingMismatchFinding's own LIKE case.
             ViewOrderingFindingKind.TopPercentOrderByNeverLimits =>
                 $"'{finding.ObjectQualifiedName}' uses TOP (100) PERCENT ... ORDER BY - 100 PERCENT never excludes a row, so this ORDER BY exists only to satisfy T-SQL's view-ordering grammar rule and is not guaranteed to any consumer that doesn't apply its own ORDER BY.",
-            // Note/Low: purely informational - this pass cannot see whether any real consumer
-            // relies on the unguaranteed order, the same no-magnitude-claim tier
-            // CascadingForeignKeyFinding uses for its own reason.
             ViewOrderingFindingKind.OrderByNotGuaranteedToConsumer =>
                 $"'{finding.ObjectQualifiedName}' uses a row-limiting TOP/OFFSET ... ORDER BY - the ORDER BY does decide which rows survive, but the final output order is not guaranteed to a consumer that doesn't apply its own ORDER BY.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
@@ -1204,9 +992,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(MultiReferencedCteFinding finding)
     {
-        // Warning, not error: a real, structural cost (each reference re-runs the CTE's own
-        // query), but a performance-cost claim, not a correctness one - the same "structural
-        // risk" tier ForcedSerialFinding/CatchAllPredicateFinding use.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MultiReferencedCteRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = $"CTE '{finding.CteName}' is referenced {finding.ReferenceCount} times downstream of its own WITH clause - each reference independently re-runs the CTE's own defining query, SQL Server does not materialize it once and reuse it.";
@@ -1245,9 +1030,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(UnparameterizedDynamicSqlFinding finding)
     {
-        // Structural/plan-cache report, not a provably-wrong-result claim - same "informational,
-        // but the underlying fact is exact" tier as CatchAllPredicateFinding/SetOptionFinding:
-        // warning, floored by confidence, never downgraded by index-existence (irrelevant here).
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UnparameterizedDynamicSqlRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -1262,9 +1044,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(NonPersistedComputedColumnFinding finding)
     {
-        // Informational, not error/warning - a structural catalog fact (is_persisted = 0),
-        // definitionally true independent of whether any scanned query touches the column,
-        // same tier as MaxTypedColumnFinding's own structural report.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NonPersistedComputedColumnRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is a non-persisted computed column ({finding.DefinitionText}) - recomputed from the base row on every read that touches it.";
@@ -1274,21 +1053,10 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(IndexDesignFinding finding)
     {
-        // Error for the structurally-provable, no-estimation kinds (both heap kinds, non-unique
-        // clustered index, and the GUID/NEWID default - an exact DEFAULT-text match, not a
-        // heuristic). Warning for the threshold-based wide-key kind, matching how this codebase
-        // already floors severity by confidence elsewhere (FloorLevelForConfidence handles the
-        // Medium-confidence downgrade for it on top of this).
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.IndexDesignRuleId(finding.Kind), finding.Confidence);
-        // TimestampColumnNaming is a naming-only recommendation (Low confidence, informational) -
-        // Note rather than Error/Warning, the same tier NonPersistedComputedColumnFinding uses for
-        // an equally informational structural fact.
         var baseLevel = finding.Kind switch
         {
             IndexDesignFindingKind.WideClusteredKey => LevelWarning,
-            // Both are the checklist's own "structural risk flag only, never a proven-cost claim"
-            // kinds (Medium confidence) - Warning, the same tier WideClusteredKey uses for its own
-            // threshold-based judgment call, not Error's "structurally-provable, no-estimation" tier.
             IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable => LevelWarning,
             IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization => LevelWarning,
             IndexDesignFindingKind.TimestampColumnNaming => LevelNote,
@@ -1301,10 +1069,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(IdentityRangeFinding finding)
     {
-        // IdentitySeedOrIncrementAnomaly is Low-confidence/informational by construction (see its
-        // own doc comment) - Note. IdentityRangeNearExhaustion is a real, structurally-provable
-        // approaching-failure condition (the next INSERT past the type's own range raises a hard
-        // error) - Error, floored by confidence like every other stream.
         var baseLevel = finding.Kind == IdentityRangeFindingKind.IdentityRangeNearExhaustion ? LevelError : LevelNote;
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.IdentityRangeRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
@@ -1314,9 +1078,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(FloatEqualityFinding finding)
     {
-        // A correctness claim (can silently return the wrong rows), not a performance one - Error,
-        // the same tier NotInNullableSubqueryFinding/TempTableExecShapeFinding's column-count
-        // mismatch use for "provably wrong outcome" findings.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FloatEqualityRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TypeDisplay}) is compared with = in this predicate - IEEE-754 floating-point representation error means two values a person would call the same number can compare unequal, silently returning the wrong rows.";
@@ -1326,9 +1087,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(AlwaysEncryptedOrderByFinding finding)
     {
-        // A hard compile failure (Msg 33277), the same certainty tier CollationConflictFinding/
-        // Verdict.OperandClash use - always Error, never confidence-floored, since there is no
-        // "maybe" about whether the statement compiles.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AlwaysEncryptedOrderByRuleId, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.EncryptionTypeDisplay}) is referenced in this ORDER BY clause - an Always Encrypted column can never be sorted on; the statement does not compile.";
 
@@ -1357,10 +1115,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(TriggerOrderFinding finding)
     {
-        // A real, catalog-provable structural risk - engine-documented undefined order, not a
-        // proven-active bug (whether any of the unordered triggers actually depends on order is
-        // intent this pass cannot see) - Warning, same tier as CrossTableTypeDriftFinding's own
-        // "real risk, not yet a confirmed defect" reasoning, floored by confidence.
         var triggerList = string.Join(", ", finding.UnorderedTriggerNames);
         var message = $"'{finding.TableQualifiedName}' has {finding.UnorderedTriggerNames.Count} AFTER {finding.EventTypeDescription} triggers with no sp_settriggerorder pin between them ({triggerList}) - their relative firing order is undefined by the engine.";
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TriggerOrderRuleId, finding.Confidence);
@@ -1371,19 +1125,11 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(QueryAntiPatternFinding finding)
     {
-        // TableVariableLowCompatEstimate and CountStarVariableExistenceCheck/
-        // NonAggregateHavingPredicate are mechanically-confirmed hard facts about the connected
-        // engine/optimizer, not magnitude estimates - Error. Every other kind is a real but
-        // context-dependent risk (a deliberate GLOBAL cursor, a genuinely tiny RBAR loop, a stale
-        // estimate that may never matter, a fan-out that may be intentional) - Warning.
         var baseLevel = finding.Kind switch
         {
             QueryAntiPatternFindingKind.TableVariableLowCompatEstimate => LevelError,
             QueryAntiPatternFindingKind.CountStarVariableExistenceCheck => LevelError,
             QueryAntiPatternFindingKind.NonAggregateHavingPredicate => LevelWarning,
-            // MergeNonUniqueUsingSource/RecursiveCteMissingMaxRecursion are mechanically-confirmed
-            // hard engine facts too (a real error the moment the shape is exercised), same tier as
-            // the two above - every other new kind is a real but context-dependent risk.
             QueryAntiPatternFindingKind.MergeNonUniqueUsingSource => LevelError,
             QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion => LevelError,
             _ => LevelWarning,
@@ -1396,8 +1142,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(IndexCoverageFinding finding)
     {
-        // Oracle-confirmed hard fact (real Lookup="1" plan-XML marker for the non-covering shape) -
-        // Error, floored by confidence like every other stream.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.IndexCoverageRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}' via index '{finding.IndexName ?? "<unnamed>"}' ({string.Join(", ", finding.IndexKeyColumns)}) does not cover ({string.Join(", ", finding.UncoveredColumns)}) - a matched row needs a Key/RID Lookup back to the base table.";
@@ -1407,12 +1151,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(TriggerCorrectnessFinding finding)
     {
-        // MultiRowUnsafe* are oracle-confirmed silent-wrong-value engine facts, same tier as the
-        // shipped WriteLossFinding stream - error. NoEarlyOutForEmptyInvocation is genuinely
-        // advisory (Low confidence by construction) - note. DirectRecursiveTrigger only ever
-        // fires once the gating live database option is confirmed on, a real mechanical fact once
-        // gated - warning (not error: whether the recursive branch is ever actually reached at
-        // runtime is real control-flow this pass cannot fully resolve, per its own doc comment).
         var baseLevel = finding.Kind switch
         {
             TriggerCorrectnessFindingKind.MultiRowUnsafeSingleRowAssignment => LevelError,
@@ -1432,9 +1170,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(CrossModuleLockOrderFinding finding)
     {
-        // A static deadlock-RISK claim, not a runtime guarantee (the finding's own doc comment
-        // spells out everything real interleaving/row-granularity this pass cannot see) -
-        // warning, floored by confidence like every other stream.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CrossModuleLockOrderRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var first = finding.FirstTableFirstOrdering;
@@ -1448,8 +1183,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(TriggerRecursionCycleFinding finding)
     {
-        // Same "static structural risk, gated on a live-confirmed engine setting" framing as
-        // TriggerCorrectnessFindingKind.DirectRecursiveTrigger - warning, floored by confidence.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TriggerRecursionCycleRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var firstHop = finding.Hops[0];
@@ -1465,16 +1198,11 @@ public static class SarifReportWriter
 
         if (finding.Kind == TempTableExecShapeFindingKind.ColumnCountMismatch)
         {
-            // A hard runtime error every time this statement executes (Msg 213/8164), not a
-            // silent defect - same "provably wrong outcome" tier as NotInNullableSubqueryFinding,
-            // error rather than warning.
             var level = FloorLevelForConfidence(LevelError, finding.Confidence);
             var message = $"INSERT INTO {finding.TempTableQualifiedName} EXEC {finding.ExecutedProcQualifiedName}: the temp table declares {finding.TempTableDeclaredColumnCount} column(s) but the executed proc's real result set describes {finding.DescribedColumnCount} - this raises a hard error (Msg 213/8164) every time it runs.";
             return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
         }
 
-        // Silent data loss at a call boundary, not a predicate - same tier as WriteLossFinding/
-        // ProcCallArgumentMismatchFinding: always warning, never downgraded by index existence.
         var typeLevel = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var typeMessage = $"INSERT INTO {finding.TempTableQualifiedName} EXEC {finding.ExecutedProcQualifiedName}: position {finding.ColumnPosition} ('{finding.ColumnName}', {finding.TempColumnTypeDisplay}) receives {finding.DescribedColumnTypeDisplay} from the executed proc's real result set - {DescribeWriteLossKind(finding.WriteLoss!.Value)}.";
         return BuildResult(ruleId, typeLevel, typeMessage, finding.SourcePath, finding.Line, startColumn: finding.Column);
@@ -1492,10 +1220,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(TvfFenceFinding finding)
     {
-        // Correlated APPLY and a fence inherited invisibly through a view/TVF layer are the two
-        // cases no engine-version mitigation and no text-matching tool rescue, so both stay at
-        // error; a direct FROM/JOIN reference and INSERT...EXEC are real but ordinary fences
-        // (warning); a standalone reference is genuine but has no surrounding plan to poison.
         var level = finding.Kind switch
         {
             TvfFenceFindingKind.CorrelatedApply or TvfFenceFindingKind.NestedUnderViewOrTvf => LevelError,
@@ -1527,10 +1251,6 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(ScalarUdfFinding finding)
     {
-        // Predicate-context and reached-through-lineage are the two cases where the claim is
-        // strongest (non-sargable AND per-row AND, pre-2019/non-inlineable, serial); a schema
-        // dependency poisons every query touching the table but has no query-site call to point
-        // at; a plain projection-context call is real per-row cost with no sargability impact.
         var level = finding.Kind switch
         {
             ScalarUdfFindingKind.PredicateInvocation or ScalarUdfFindingKind.NestedUnderViewOrTvf => LevelError,
@@ -1539,8 +1259,6 @@ public static class SarifReportWriter
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled ScalarUdfFindingKind."),
         };
 
-        // A scalar UDF the engine itself inlines (2019+) dissolves into the calling plan at
-        // compile time - real, but no longer the maximal claim the base level asserts.
         if (finding.Inlineability == ScalarUdfInlineability.Inlineable)
         {
             level = DowngradeOneLevel(level);
@@ -1608,14 +1326,7 @@ public static class SarifReportWriter
         return $" - touches {featureKind} '{touched}'{indexSuffix}";
     }
 
-    /// <summary>
-    /// Floors a finding's computed level to <c>note</c> once its confidence drops below
-    /// <see cref="FindingConfidence.High"/> - a finding resting on an assumption (a dynamic-SQL
-    /// symbolic placeholder standing in for a value this scanner could not prove constant) never
-    /// outranks one resting on real source text, regardless of what its own severity would
-    /// otherwise compute to.
-    /// </summary>
-    private static string FloorLevelForConfidence(string level, FindingConfidence confidence) =>
+private static string FloorLevelForConfidence(string level, FindingConfidence confidence) =>
         confidence == FindingConfidence.High ? level : LevelNote;
 
     private static string DowngradeOneLevel(string level) => level switch
@@ -1629,13 +1340,7 @@ public static class SarifReportWriter
     private const string TierContextual = "Contextual";
     private const string TierAdvisory = "Advisory";
 
-    /// <summary>
-    /// Names the same axis every <c>BuildResult</c> call already computes into <c>level</c> - a
-    /// finding that reaches <c>error</c> only does so after surviving every per-kind severity/
-    /// indexed/confidence computation upstream, so naming it here (rather than re-deriving it
-    /// from the finding itself) can never drift from what <c>level</c> already says.
-    /// </summary>
-    private static string DetermineTier(string level) => level switch
+private static string DetermineTier(string level) => level switch
     {
         LevelError => TierProven,
         LevelWarning => TierContextual,
@@ -1685,15 +1390,7 @@ public static class SarifReportWriter
             [new SarifLocation(new SarifPhysicalLocation(new SarifArtifactLocation(ToUri(sourcePath)), new SarifRegion(line, startColumn)))],
             new SarifResultProperties(DetermineTier(level)));
 
-    /// <summary>
-    /// Emits a real <c>file://</c> URI for an absolute path, or a percent-encoded relative
-    /// reference otherwise - not the previous ad-hoc "swap backslashes, escape spaces" scheme,
-    /// which produced a scheme-less string like <c>/home/user/repo/file.sql</c> that strict
-    /// SARIF consumers (GitHub code scanning included) reject as an invalid
-    /// artifactLocation.uri, and left every other reserved URI character (<c>#</c>, <c>?</c>,
-    /// <c>%</c> itself, ...) unescaped.
-    /// </summary>
-    private static string ToUri(string sourcePath)
+private static string ToUri(string sourcePath)
     {
         var normalized = sourcePath.Replace('\\', '/');
         if (Path.IsPathRooted(sourcePath))

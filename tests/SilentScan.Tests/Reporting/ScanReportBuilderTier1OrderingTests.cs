@@ -2,13 +2,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Reporting;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability stream" #5, index-
-/// existence weighting: a Tier-1 (syntactic non-sargability) finding on an indexed column is a
-/// real lost seek, on an unindexed column it's noise (there was no seek to lose). Mirrors
-/// TypedFindings' own existing <c>ThenByDescending(f => f.Column.Indexed)</c> ranking, which
-/// Tier1Findings never had until now - this test is the regression guard for that gap.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ScanReportBuilderTier1OrderingTests
 {

@@ -6,16 +6,6 @@ using SilentScan.Verify.Catalog;
 
 namespace SilentScan.Live.Catalog;
 
-/// <summary>
-/// The live-round-trip half of docs/detection-checklist.md Tier 2 "Dynamic SQL quality" item 3 -
-/// <see cref="TempTableExecShapeCandidateScanner"/> finds every <c>INSERT INTO #temp EXEC proc</c>
-/// site and resolves the caller-side temp table's own declared columns (no network needed for
-/// that); this class describes each site's EXECUTED proc via
-/// <c>sys.dm_exec_describe_first_result_set</c> (compile-only,
-/// <see cref="LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly"/>) and compares the two
-/// shapes POSITIONALLY - the only binding T-SQL actually uses for <c>INSERT ... EXEC</c>. Live-
-/// mode only, mirroring <see cref="LiveLineageParityChecker"/>'s own constructor shape.
-/// </summary>
 public sealed class TempTableExecShapeChecker
 {
     private readonly string _connectionString;
@@ -52,11 +42,6 @@ public sealed class TempTableExecShapeChecker
                 continue;
             }
 
-            // A proc with no rows in sys.parameters is either genuinely niladic or doesn't exist
-            // at all - the two are indistinguishable from this dictionary alone, but describing
-            // it against an empty argument list is safe either way: a real niladic proc describes
-            // normally, and a nonexistent one comes back as a real compile error from the engine
-            // itself below, caught the same way any other describe failure is.
             var parameters = parametersByProc.TryGetValue(candidate.ExecutedProcQualifiedName, out var found)
                 ? found
                 : [];

@@ -3,17 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Forced-serial construct inventory" - oracle-confirms the
-/// general mechanism once (not per finding): a real executed statement that writes to a table
-/// variable (as a DML target, or as an OUTPUT INTO target) is forced serial
-/// (<c>NonParallelPlanReason="TableVariableTransactionsDoNotSupportParallelNestedTransaction"</c>),
-/// while a read-only reference to the same table variable, or an OUTPUT INTO a real table, is not.
-///
-/// Real execution (<c>SET STATISTICS XML ON</c>), not compile-only <c>SET SHOWPLAN_XML</c> -
-/// <c>NonParallelPlanReason</c> is an actual-plan attribute, the same class of correction the
-/// catch-all-predicate stream's RECOMPILE oracle needed earlier this session.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class TableVariableModificationOracleTests : OracleTestFixture
 {
@@ -113,9 +102,6 @@ public sealed class TableVariableModificationOracleTests : OracleTestFixture
             SELECT b.Id FROM dbo.BigTable b JOIN @t t ON b.Grp = t.Grp OPTION (MAXDOP 0);
             """);
 
-        // Each statement in the batch produces its own STATISTICS XML result set; the capture
-        // helper keeps the LAST one, which is this SELECT's own plan - the earlier INSERT's own
-        // (legitimately reason-carrying) plan is a separate result set, not this one.
         Assert.DoesNotContain("NonParallelPlanReason=\"TableVariableTransactionsDoNotSupportParallelNestedTransaction\"", planXml);
     }
 

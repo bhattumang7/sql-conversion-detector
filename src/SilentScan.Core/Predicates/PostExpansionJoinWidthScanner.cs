@@ -5,12 +5,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Lineage-metric findings" - "Post-expansion join width".
-/// Reuses <see cref="FromScopeResolver"/>'s own <c>Resolve</c> method (the same FROM-clause flattening every other
-/// scanner in this codebase already uses) purely for its written-reference-count/qualified-name
-/// output - the expansion itself comes from the already-built <see cref="ViewExpansionMap"/>.
-/// </summary>
 public static class PostExpansionJoinWidthScanner
 {
     public const int MinimumGap = 3;
@@ -35,16 +29,7 @@ public static class PostExpansionJoinWidthScanner
     {
         public List<PostExpansionJoinWidthFinding> Findings { get; } = [];
 
-        /// <summary>
-        /// The enclosing SELECT's own CTE scope - a QuerySpecification has no direct access to
-        /// its enclosing SelectStatement's WithCtesAndXmlNamespaces. A CTE is never schema-
-        /// qualified, so it always shadows a same-named real base table; resolving through the
-        /// catalog instead (cteRelations always null, pre-fix) silently counted a CTE-shadowed
-        /// leaf as a real, expandable base table using an unrelated real table's own expansion
-        /// factor, rather than the honest "unresolved, partially unexpanded" this scanner already
-        /// gives a derived table or PIVOT (2026-08 audit).
-        /// </summary>
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -83,8 +68,6 @@ public static class PostExpansionJoinWidthScanner
                 var qualifiedName = entry.Relation.QualifiedName;
                 if (qualifiedName is null)
                 {
-                    // A derived table, PIVOT/UNPIVOT, or other unresolved shape - contributes no
-                    // countable base table, and the expansion below it is unknown, not zero.
                     partiallyUnexpanded = true;
                     continue;
                 }

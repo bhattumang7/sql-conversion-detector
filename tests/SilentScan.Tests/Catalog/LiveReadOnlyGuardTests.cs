@@ -3,12 +3,6 @@ using SilentScan.Verify.Catalog;
 
 namespace SilentScan.Tests.Catalog;
 
-/// <summary>
-/// The code-level backstop for "a connected live database is scanned read-only" (CLAUDE.md hard
-/// scope). Every SQL string every live reader sends passes through <see cref="LiveReadOnlyGuard"/>
-/// via its <c>CreateReadOnlyCommand</c> extension - this pins the guard's own logic directly, so
-/// a future edit that weakens it (e.g. widening the allowed statement set) fails here first.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LiveReadOnlyGuardTests
 {
@@ -71,10 +65,6 @@ public sealed class LiveReadOnlyGuardTests
         Assert.Throws<InvalidOperationException>(() => connection.CreateReadOnlyCommand("DROP TABLE dbo.T;"));
     }
 
-    // The live lineage parity gate's ground truth (SilentScan.Live.Catalog.LiveDescribedColumnReader)
-    // describes views/inline TVFs via sys.dm_exec_describe_first_result_set - compile-only, never
-    // executing the described batch. Pinned here first because everything built on top of it
-    // assumes the guard accepts these exact shapes.
     [Fact]
     public void AssertSelectOnly_ViewDescribeBatchCrossApply_DoesNotThrow() =>
         LiveReadOnlyGuard.AssertSelectOnly("""
@@ -107,9 +97,6 @@ public sealed class LiveReadOnlyGuardTests
     public void AssertSelectOnly_SynthesizedDescribeProbeText_DoesNotThrow(string probeText) =>
         LiveReadOnlyGuard.AssertSelectOnly(probeText);
 
-    // docs/detection-checklist.md Tier 2 "Dynamic SQL quality" item 3 - the one carve-out on top
-    // of the default SELECT-only guarantee, scoped narrowly to sys.dm_exec_describe_first_result_set
-    // probe text alone (SilentScan.Live.Catalog.LiveDescribedColumnReader.DescribeProcedureOrderedAsync).
     [Fact]
     public void AssertDescribeFirstResultSetProbeOnly_PlainSelect_DoesNotThrow() =>
         LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly("SELECT name FROM sys.tables;");
@@ -138,7 +125,5 @@ public sealed class LiveReadOnlyGuardTests
 
     [Fact]
     public void AssertSelectOnly_NamedProcedureExec_StillThrows() =>
-        // The default guard must NOT gain this carve-out - only AssertDescribeFirstResultSetProbeOnly
-        // does, and only for its own one caller's probe text.
         Assert.Throws<InvalidOperationException>(() => LiveReadOnlyGuard.AssertSelectOnly("EXEC [dbo].[usp_AllOrders];"));
 }

@@ -1,9 +1,5 @@
 namespace SilentScan.Core.TypeInference;
 
-/// <summary>
-/// A fully-resolved T-SQL scalar type: category plus the facets that affect
-/// comparison semantics (length/precision/scale, and collation for string types).
-/// </summary>
 public sealed record SqlType(
     SqlTypeCategory Category,
     int? Length = null,
@@ -13,12 +9,6 @@ public sealed record SqlType(
     bool IsMax = false,
     bool LengthKnown = true)
 {
-    // LengthKnown distinguishes "Length is null because this facet genuinely has none, or was
-    // genuinely declared with none" (the default, true) from "Length is null because this pass
-    // couldn't compute it" (e.g. ExpressionTypeInferencer.Combine's cross-category merge, which
-    // has no way to know a merged result's true length) - a caller that reads a null Length as
-    // "declared with T-SQL's implicit length-1 default" must check this first, or it fabricates a
-    // cause for a length it never actually inferred. See Rules.ParameterLengthClassifier.
 
     public bool IsStringFamily => Category is SqlTypeCategory.Char or SqlTypeCategory.VarChar
         or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar or SqlTypeCategory.Text

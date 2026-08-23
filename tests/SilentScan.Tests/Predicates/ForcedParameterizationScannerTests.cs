@@ -3,13 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-reference.md Appendix 8 - each clause shape here was independently
-/// oracle-confirmed against the standing Docker instance (2026-08-20) by inspecting the real
-/// cached PREPARED plan text under PARAMETERIZATION FORCED, not read off the DMV's name alone.
-/// Fully syntax-only; the live is_parameterization_forced precondition is gated entirely outside
-/// this scanner (see ForcedParameterizationFinding's own doc comment).
-/// </summary>
 public sealed class ForcedParameterizationScannerTests
 {
     private static IReadOnlyList<ForcedParameterizationFinding> Scan(string sql)
@@ -102,8 +95,6 @@ public sealed class ForcedParameterizationScannerTests
     [Fact]
     public void OrderByBareOrdinalLiteral_NeverFires()
     {
-        // The ordinal-position idiom (ORDER BY 1) is a structurally different, untested shape -
-        // deliberately excluded, see OrderByExpressionLiteral's own doc comment.
         var findings = Scan("SELECT Id FROM dbo.T ORDER BY 1;");
 
         Assert.DoesNotContain(findings, f => f.Kind == ForcedParameterizationFindingKind.OrderByExpressionLiteral);

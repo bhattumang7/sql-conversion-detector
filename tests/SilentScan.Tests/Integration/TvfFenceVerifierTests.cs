@@ -5,14 +5,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Exercises <see cref="TvfFenceVerifier"/> end-to-end against the real oracle
-/// (docs/detection-checklist.md Tier 1 #2). The plan-XML marker itself (<c>PhysicalOp="Table-
-/// valued function"</c> for a real fence, absent for an inline TVF; <c>StatementType="INSERT
-/// EXEC"</c> for INSERT...EXEC) was hand-verified directly against this same Docker instance
-/// before being hardcoded into <see cref="TvfFenceVerifier"/> - this locks that verification in
-/// as a regression test rather than leaving it a one-off manual check.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class TvfFenceVerifierTests : IAsyncLifetime
 {
@@ -79,9 +71,6 @@ public sealed class TvfFenceVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_MislabeledInlineTvf_IsNotConfirmed()
     {
-        // Negative control: a (deliberately mislabeled) finding claiming an inline TVF is a
-        // fence must not be confirmed - proves the plan-shape signal actually distinguishes the
-        // two, not just that SOME plan XML was captured.
         var finding = FunctionFinding(TvfFenceFindingKind.FromOrJoin, "dbo.itvf_NotAFence");
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
@@ -92,9 +81,6 @@ public sealed class TvfFenceVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_CorrelatedApplyKind_StillConfirmsViaDummyArguments()
     {
-        // CorrelatedApply's own source arguments reference an outer row this probe has no scope
-        // for - proves the dummy-argument substitution (TvfFenceProbeBuilder never reuses the
-        // finding's own ReferenceFragmentText) still reaches the same underlying confirmation.
         var finding = FunctionFinding(TvfFenceFindingKind.CorrelatedApply, "dbo.fn_Fence");
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);

@@ -5,18 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Lineage;
 
-/// <summary>
-/// Covers FromScopeResolver.ResolveTvfTableReference's CatalogTableKind.ClrTableValuedFunction
-/// fallback: a live scan-db run has no sys.sql_modules body to parse for a SQLCLR (assembly)
-/// TVF - there is no DDL text for it at all, even in principle - so LiveCatalogReader instead
-/// registers its return-table shape straight from sys.columns metadata. This locks in that
-/// FromScopeResolver actually consults that catalog entry as a fallback once the ordinary
-/// inline/multi-statement TVF lookup misses, rather than leaving every column drawn from a CLR
-/// TVF permanently untypeable the way it was before this fallback existed. CatalogBuilder never
-/// produces a ClrTableValuedFunction entry itself (only LiveCatalogReader does, from live
-/// metadata) - built here by hand, then merged into the catalog, exactly as LiveCatalogReader
-/// would.
-/// </summary>
 public sealed class FromScopeResolverClrTvfTests
 {
     private static LineageCatalog BuildLineageWithClrTvf(CatalogTable clrTvf, params string[] batches)
@@ -63,9 +51,6 @@ public sealed class FromScopeResolverClrTvfTests
     [Fact]
     public void ViewOverUnregisteredTvf_StillLedgersUnresolved()
     {
-        // Sanity check that the fallback is genuinely conditional: a TVF name with no catalog
-        // entry AT ALL (never resolved as inline/multi-statement, never registered as a CLR
-        // shape either) still declines exactly as before this fallback existed - never a guess.
         var lineage = BuildLineageWithClrTvf(
             new CatalogTable("dbo", "Split", CatalogTableKind.ClrTableValuedFunction, [], [], "dbo.Split", 0),
             "CREATE VIEW dbo.vw_Unknown AS SELECT u.x FROM dbo.NotRegisteredTvf('a') AS u;");

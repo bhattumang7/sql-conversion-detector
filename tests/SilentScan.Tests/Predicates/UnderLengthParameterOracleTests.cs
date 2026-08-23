@@ -3,19 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 1 "Under-length and length-defaulted string declarations" -
-/// a runtime DML/query-result behavior, not a query-plan one (like <see
-/// cref="TemporalBoundaryPrecisionOracleTests"/>/<see cref="WriteLossOracleTests"/>, not the
-/// compile-only SHOWPLAN_XML oracle the implicit-conversion streams use): proves the actual
-/// truncation mechanism directly, with a real seeded row and real query execution - an
-/// under-length variable's ASSIGNMENT (not the predicate) is where the value is silently cut,
-/// so by the time the predicate runs, it is comparing against the truncated text, not the
-/// original. This is a general confirmation of the rule's own premise (the same discipline
-/// CaseFoldColumnPipelineTests/DateFunctionColumnPipelineTests use to confirm a Tier-1 rule's
-/// general mechanism), not a per-finding proof - <see cref="UnderLengthParameterFinding"/> stays
-/// non-verdict-bearing and structural for the reasons its own doc comment states.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class UnderLengthParameterOracleTests : OracleTestFixture
 {
@@ -54,10 +41,6 @@ public sealed class UnderLengthParameterOracleTests : OracleTestFixture
     [Fact]
     public async Task ShorterVariableAssignedALikePattern_LosesTheWildcardAndChangesWhatMatches()
     {
-        // The pattern-shape-changing case: 'ABC%' is 4 characters - a VARCHAR(3) variable
-        // truncates it to 'ABC', silently dropping the wildcard entirely. LIKE 'ABC' (no
-        // wildcard) requires an EXACT match, not a prefix match, so a row that should have
-        // matched as a prefix is silently excluded.
         await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));
         await connection.OpenAsync();
 

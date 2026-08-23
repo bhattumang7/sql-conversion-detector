@@ -4,14 +4,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Locks in VerdictClassifier's oracle-verified "same-family widening never converts" rule
-/// against the real server, so a future SQL Server version or a misremembered assumption
-/// fails loudly here rather than only showing up as a wrong published finding. Found during
-/// the Phase 4 corpus pilot: two confirmed false positives before this fix - WideWorldImporters'
-/// `WHERE IsPermittedToLogon = 0` (bit vs int) and `WHERE ExpectedDeliveryDate >= @StartingWhen`
-/// (date vs datetime).
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class SameFamilyWideningOracleTests : IAsyncLifetime
 {
@@ -61,9 +53,6 @@ public sealed class SameFamilyWideningOracleTests : IAsyncLifetime
 
     [Fact]
     public async Task BitColumn_VsVarcharParameter_ConvertImplicitAppliesToTheParameterNotTheColumn() =>
-        // ConvertImplicitDetector only reports conversions applied to a real table column, so
-        // a conversion on the @p parameter (the correct, harmless direction here since BIT
-        // outranks VARCHAR) must not be reported as a column-side finding.
         Assert.False(await HasColumnConversion("DECLARE @p VARCHAR(5) = '0'; SELECT PersonId FROM dbo.People WHERE IsPermittedToLogon = @p;"));
 
     [Fact]
@@ -73,7 +62,6 @@ public sealed class SameFamilyWideningOracleTests : IAsyncLifetime
 
     [Fact]
     public async Task DateColumn_VsVarcharParameter_ConvertImplicitAppliesToTheParameterNotTheColumn() =>
-        // date outranks the string family, same shape as the bit-vs-varchar case above.
         Assert.False(await HasColumnConversion(
             "DECLARE @p VARCHAR(20) = '2024-01-01'; SELECT Id FROM dbo.PurchaseOrders WHERE ExpectedDeliveryDate >= @p;"));
 }

@@ -6,13 +6,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability stream" #3:
-/// CHARINDEX(x, col) = 1 / LEFT(col, n) = 'x' are both exactly equivalent to col LIKE 'x%' - this
-/// proves the rewrite itself is real (the rewritten form actually seeks), not just that the
-/// original form scans, plus the same computed-column precision guard every other rule in this
-/// stream shares.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class CharindexLeftRewritePipelineTests : OracleTestFixture
 {

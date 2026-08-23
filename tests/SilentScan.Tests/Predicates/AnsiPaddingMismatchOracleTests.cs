@@ -3,17 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 1 "SET options that silently disable plan features" -
-/// "ANSI_PADDING OFF as a second, independent finding". A runtime DML/query-result behavior, not
-/// a query-plan one, so this uses the same self-authored-probe-row-plus-real-execution discipline
-/// <see cref="WriteLossOracleTests"/>/<see cref="TemporalBoundaryPrecisionOracleTests"/>/<see
-/// cref="UnderLengthParameterOracleTests"/> already use for this class of claim - and,
-/// critically, is what DISCOVERED the finding's own scope correction: an initial assumption that
-/// plain equality would also be affected was tested directly here first and falsified (still
-/// matches, both with a padded column and with a trailing-whitespace literal) before LIKE was
-/// confirmed as the one shape that actually differs.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class AnsiPaddingMismatchOracleTests : OracleTestFixture
 {
@@ -74,9 +63,6 @@ public sealed class AnsiPaddingMismatchOracleTests : OracleTestFixture
     [Fact]
     public async Task NonPaddedColumn_PlainEqualityAgainstPaddedColumnOrTrailingWhitespaceLiteral_StillMatches()
     {
-        // The falsification that scoped this finding to LIKE only: T-SQL trims trailing spaces
-        // for '=' comparisons regardless of ANSI_PADDING or which side has them, so neither a
-        // cross-column equality nor a trailing-whitespace literal shows any difference here.
         await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));
         await connection.OpenAsync();
 

@@ -7,33 +7,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Live.Catalog;
 
-/// <summary>
-/// The live-mode counterpart to <c>SilentScan.Verify.Oracle.LineageParityChecker</c>: diffs every
-/// resolved view/TVF's statically-inferred column type against ground truth. For a view or inline
-/// TVF (<c>V</c>/<c>IF</c>), ground truth is what the engine computes for that object RIGHT NOW
-/// (<c>sys.dm_exec_describe_first_result_set</c>, via <see cref="LiveDescribedColumnReader"/>) -
-/// never its cached <c>sys.columns</c> metadata. SQL Server snapshots a view's/inline-TVF's own
-/// column metadata at CREATE/ALTER time and never refreshes it when an upstream base column is
-/// later retyped (short of <c>sp_refreshview</c>/<c>sp_refreshsqlmodule</c>), so a plain
-/// cached-metadata diff conflates three different things: this tool's inference disagreeing with
-/// the live answer (a genuine bug), the cache disagreeing with the live answer while this tool's
-/// inference agrees with it (a stale cache, not a tool bug), and an object that can no longer
-/// compile at all (a database condition, not a tool bug). Base tables (<c>U</c>) and
-/// multi-statement TVFs (<c>TF</c>) are exempt from live probing: a base table's <c>sys.columns</c>
-/// IS its definition, and a multi-statement TVF's shape is its own authored
-/// <c>RETURNS @t TABLE(...)</c> clause - both are read from one source, so staleness is
-/// structurally impossible for them, and the plain cached-metadata diff stays correct as-is.
-///
-/// The corpus oracle's own <c>LineageParityChecker</c> is deliberately left doing the plain
-/// cached-metadata diff: it runs inside a freshly-provisioned disposable database immediately
-/// after deploying the corpus DDL, where nothing has been ALTERed since, so staleness there is
-/// structurally impossible too.
-///
-/// Self-contained rather than depending on SilentScan.Verify's reader shape (a connection string,
-/// not a <c>SqlServerOptions</c>/database-name pair, is this project's only way to reach a
-/// database - decomposing an arbitrary connection string back into host/port/user/password to
-/// reuse Verify's reader would be lossy for anything but the simplest auth mode).
-/// </summary>
 public sealed class LiveLineageParityChecker
 {
     private readonly string _connectionString;
@@ -46,10 +19,6 @@ public sealed class LiveLineageParityChecker
     public async Task<LiveLineageParityReport> CheckAsync(
         LineageCatalog lineage, CancellationToken cancellationToken = default)
     {
-        // Every relation this gate will actually diff, resolved up front so the read below can
-        // discard the (far larger) set of columns belonging to objects lineage never resolved,
-        // without materializing them. Cyclic views are excluded here rather than mid-loop: their
-        // inferred types are meaningless, so fetching their columns would be wasted work.
         var wanted = lineage.AllRelations.Keys
             .Where(name => name is not null && !lineage.CyclicViews.Contains(name))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -67,13 +36,7 @@ public sealed class LiveLineageParityChecker
         return Classify(lineage, actualByObject, described, unrenderable);
     }
 
-    /// <summary>
-    /// Live-describes every wanted view (one batched round trip) and inline TVF (one round trip
-    /// each, needing its own synthesized argument list) - split out of <see cref="CheckAsync"/>
-    /// purely to keep that method's own cognitive complexity readable; the classification loop
-    /// below is what actually decides what a described (or unrenderable) result means.
-    /// </summary>
-    private static async Task<(Dictionary<string, DescribedObject> Described, Dictionary<string, string> Unrenderable)> DescribeProbeableObjectsAsync(
+private static async Task<(Dictionary<string, DescribedObject> Described, Dictionary<string, string> Unrenderable)> DescribeProbeableObjectsAsync(
         SqlConnection connection, HashSet<string> wanted, Dictionary<string, ActualObject> actualByObject, CancellationToken cancellationToken)
     {
         var described = new Dictionary<string, DescribedObject>(StringComparer.OrdinalIgnoreCase);
@@ -122,8 +85,6 @@ public sealed class LiveLineageParityChecker
         {
             if (qualifiedName is null || !actualByObject.TryGetValue(qualifiedName, out var actualObject))
             {
-                // Not every resolved relation is a real server object (derived tables, MSTVFs
-                // that never became one) - absence here is not itself a mismatch.
                 continue;
             }
 
@@ -164,9 +125,6 @@ public sealed class LiveLineageParityChecker
             return;
         }
 
-        // Not a V/IF object at all (base table or multi-statement TVF) - its cached
-        // sys.columns/authored shape IS ground truth, exactly as before this class began
-        // live-probing anything.
         if (cached is not null && CompareFacets(inferredType, cached) is { } cachedDisagreement)
         {
             buckets.Mismatches.Add(new LiveLineageParityMismatch(qualifiedName, column.Name, cachedDisagreement.Facet, cachedDisagreement.InferredValue, cachedDisagreement.ActualValue));
@@ -205,8 +163,7 @@ public sealed class LiveLineageParityChecker
         }
     }
 
-    /// <summary>The four outcome lists <see cref="Classify"/> accumulates into before sorting them into the returned <see cref="LiveLineageParityReport"/> - one mutable accumulator instead of threading four lists plus a dedup set through every classification call.</summary>
-    private sealed class ParityBuckets
+private sealed class ParityBuckets
     {
         public List<LiveLineageParityMismatch> Mismatches { get; } = [];
 
@@ -225,18 +182,7 @@ public sealed class LiveLineageParityChecker
             [.. Unverified.OrderBy(m => m.QualifiedViewName, StringComparer.Ordinal).ThenBy(m => m.ColumnName, StringComparer.Ordinal)]);
     }
 
-    /// <summary>
-    /// Reads every relevant object's columns AND object type code in ONE round trip, keyed by the
-    /// same <c>schema.object</c> form <see cref="SchemaObjectNameHelper.Qualify"/> produces for
-    /// lineage keys - the object type code decides whether an object is live-probed at all (only
-    /// <c>V</c>/<c>IF</c> are). This used to be a per-relation <c>OBJECT_ID(@objectName)</c> query
-    /// issued sequentially on a single connection - on a database with thousands of views that is
-    /// thousands of serial round trips, so the gate's wall-clock was dominated by network latency
-    /// rather than by any work. Rows for objects lineage did not resolve are skipped as they
-    /// stream past, so peak memory tracks the number of resolved relations, not the number of
-    /// columns in the database.
-    /// </summary>
-    private static async Task<Dictionary<string, ActualObject>> ReadAllColumnsAsync(
+private static async Task<Dictionary<string, ActualObject>> ReadAllColumnsAsync(
         SqlConnection connection, HashSet<string> wanted, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -279,13 +225,7 @@ public sealed class LiveLineageParityChecker
         return byObject;
     }
 
-    /// <summary>
-    /// Compares category first, then collation for a string-family type - the one comparison
-    /// implementation shared by all three facet diffs this gate makes (inferred-vs-live,
-    /// inferred-vs-cached for non-probed objects, cached-vs-live for staleness detection), so
-    /// they can never drift from one another. Null means no disagreement.
-    /// </summary>
-    private static (string Facet, string InferredValue, string ActualValue)? CompareFacets(SqlType inferredType, ActualColumn actual)
+private static (string Facet, string InferredValue, string ActualValue)? CompareFacets(SqlType inferredType, ActualColumn actual)
     {
         var mappedCategory = LiveTypeMapper.Map(actual.TypeName);
         if (mappedCategory != inferredType.Category)

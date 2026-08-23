@@ -6,13 +6,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Covers <see cref="NonSargablePredicateScanner"/>'s catalog/lineage-aware overload directly:
-/// a syntactic finding's <see cref="SargabilityFinding.TableQualifiedName"/>/
-/// <see cref="SargabilityFinding.Indexed"/> must reflect the real catalog, not stay
-/// permanently unresolved the way the no-catalog overload (still used by the plain fixture
-/// tests) necessarily does.
-/// </summary>
 public sealed class NonSargablePredicateScannerIndexResolutionTests
 {
     private static IReadOnlyList<SargabilityFinding> ScanWithCatalog(string sql)
@@ -57,10 +50,6 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     [Fact]
     public void FunctionWrappedColumn_InsideUnsatisfiableAndBranch_EliminatedByNormalization()
     {
-        // Id=1 AND Id=2 can never select a row, so UPPER(Notes)='X' - an ordinary conjunct of
-        // the same unsatisfiable AND - never reaches a real Filter/Seek decision either, even
-        // though this scanner's own contradiction algebra never looks at wrapped-column
-        // comparisons directly (it only has to prove the ENCLOSING AND is dead).
         var result = SqlScriptParser.ParseText("test.sql", """
             CREATE TABLE dbo.Orders (Id INT NOT NULL, Notes VARCHAR(200) NOT NULL);
             GO
@@ -80,8 +69,6 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     [Fact]
     public void FunctionWrappedColumn_OnNonLeadingCompositeKeyColumn_ResolvesIndexedFalse()
     {
-        // The column is technically a key column of an index, but not the LEADING one - it
-        // can't drive a seek on its own, matching IndexDeploymentChecker's oracle precondition.
         var findings = ScanWithCatalog("""
             CREATE TABLE dbo.Orders (OrderId INT NOT NULL, Notes VARCHAR(200) NOT NULL, CONSTRAINT PK_Orders PRIMARY KEY (OrderId, Notes));
             GO
@@ -95,12 +82,6 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     [Fact]
     public void FunctionWrappedColumn_ReferencedThroughCteInsideInsertSelect_ResolvesIndexedTrue()
     {
-        // The bug this closes: NonSargablePredicateScanner had no ExplicitVisit(InsertStatement)
-        // override at all, unlike TypedPredicateExtractor's identical one - so a CTE declared on
-        // an INSERT ... SELECT never got pushed, and a reference to it through the CTE alias
-        // failed to resolve in FromScopeResolver. The syntactic finding still fired (InspectSide
-        // works on the raw AST regardless of scope resolution), but Indexed silently resolved to
-        // false/unresolved instead of true - understating the finding for ranking purposes.
         var findings = ScanWithCatalog("""
             CREATE TABLE dbo.Orders (OrderDate DATETIME NOT NULL);
             CREATE INDEX IX_Orders_OrderDate ON dbo.Orders(OrderDate);
@@ -120,12 +101,6 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     [Fact]
     public void FunctionWrappedColumn_OnUnresolvableTable_RecordsSkipInsteadOfSilence()
     {
-        // The bug this closes: NonSargablePredicateScanner passed ledger: null to every shared
-        // resolver it calls (FromScopeResolver/ScalarExpressionResolver/CteResolver) - the one
-        // pass with zero trace of what it couldn't resolve, unlike every other pass in this
-        // codebase. An unresolvable FROM table now leaves a real ledger entry, matching
-        // FunctionWrappedColumn_OnUnresolvableTable_LeavesIndexedNull's existing Indexed=null
-        // claim with an explicit reason instead of silence.
         var result = SqlScriptParser.ParseText("test.sql", "SELECT 1 FROM dbo.Missing WHERE UPPER(Notes) = 'X';");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
 
@@ -142,7 +117,6 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     [Fact]
     public void FunctionWrappedColumn_OnUnresolvableTable_LeavesIndexedNull()
     {
-        // No CREATE TABLE for dbo.Missing anywhere in the scan - never guess.
         var findings = ScanWithCatalog("SELECT 1 FROM dbo.Missing WHERE UPPER(Notes) = 'X';");
 
         var finding = Assert.Single(findings);

@@ -3,14 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Temporal table history-side index gap".
-/// <see cref="DatabaseCatalog.TemporalTablePairs"/> is only ever populated by live mode - these
-/// tests build the catalog directly, the same pattern <c>UntrustedConstraintScannerTests</c>
-/// already uses for the same reason. Both sides of a pair are ordinary <see cref="CatalogTable"/>
-/// rows (a history table is not a distinct catalog object kind), so the tests construct them the
-/// same way any other table/index fixture in this codebase does.
-/// </summary>
 public sealed class TemporalTableHistoryIndexGapScannerTests
 {
     private static CatalogIndex Index(string? name, CatalogIndexKind kind, params string[] keyColumns) =>
@@ -67,10 +59,6 @@ public sealed class TemporalTableHistoryIndexGapScannerTests
     [Fact]
     public void ReversedKeyColumnOrderOnHistorySide_StillFires()
     {
-        // Oracle-decided (TemporalTableHistoryIndexGapFinding's own doc comment): key-column
-        // order is treated as significant even though a reversed order can still allow a seek
-        // for a full-equality-on-every-column predicate - the conservative, structurally-safe
-        // reading for a finding that makes no claim about any one query's own predicate shape.
         var current = Table("dbo", "WidgetB", Index("IX_WidgetB_Region_Code", CatalogIndexKind.Index, "Region", "Code"));
         var history = Table("dbo", "WidgetBHistory", Index("IX_WidgetBHistory_Code_Region", CatalogIndexKind.Index, "Code", "Region"));
         var catalog = CatalogWithPair(current, history);
@@ -82,9 +70,6 @@ public sealed class TemporalTableHistoryIndexGapScannerTests
     [Fact]
     public void PrimaryKeyIndex_NeverCompared()
     {
-        // Oracle-confirmed structurally impossible on a history table (Msg 13558) - a PK-kind
-        // current-side index must never be a candidate, or this would always fire with no
-        // possible fix.
         var current = Table("dbo", "Widget", Index("PK_Widget", CatalogIndexKind.PrimaryKey, "WidgetId"));
         var history = Table("dbo", "WidgetHistory", Index("ix_WidgetHistory", CatalogIndexKind.Index, "ValidTo", "ValidFrom"));
         var catalog = CatalogWithPair(current, history);
@@ -95,8 +80,6 @@ public sealed class TemporalTableHistoryIndexGapScannerTests
     [Fact]
     public void UniqueConstraintIndex_NeverCompared()
     {
-        // Oracle-confirmed structurally impossible on a history table (Msg 13583), same reasoning
-        // as the PRIMARY KEY case above.
         var current = Table("dbo", "Widget", Index("UQ_Widget_Code", CatalogIndexKind.UniqueConstraint, "Code"));
         var history = Table("dbo", "WidgetHistory");
         var catalog = CatalogWithPair(current, history);

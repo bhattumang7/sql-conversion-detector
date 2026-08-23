@@ -10,45 +10,7 @@ namespace SilentScan.Core.Reporting;
 
 public static class ScanReportBuilder
 {
-    /// <summary>
-    /// Builds a report from already-parsed sources. <paramref name="catalog"/> is REQUIRED
-    /// (roadmap "delete the file-parsed catalog path and the file-only scan pipeline" - CLAUDE.md
-    /// hard scope: "Everything goes via the database — no file-parsed catalog, no file-only
-    /// scan") - this method no longer infers one from <paramref name="allParseResults"/> itself.
-    /// Every real caller reads the catalog from a live database's own metadata
-    /// (<c>SilentScan.Verify.Catalog.LiveCatalogReader</c>, via <c>LiveScanRunner</c>/
-    /// <c>CorpusLiveScanRunner</c>) - the only place file-parsed catalog inference
-    /// (<see cref="CatalogBuilder"/>) still runs at all is <c>DatabaseCatalog.MergeFileModeExtras</c>,
-    /// contributing what engine metadata alone cannot see (temp tables, table variables, a scalar
-    /// UDF's return type) on top of that real catalog, never in place of it.
-    /// </summary>
-    /// <param name="allParseResults">Already-parsed sources to run Lineage/Predicates/Rules over.</param>
-    /// <param name="catalog">The real catalog, read from a live database's own metadata.</param>
-    /// <param name="minimumConfidence">
-    /// The least confident a finding may be and still appear in the returned report - see
-    /// <see cref="FindingConfidence"/>. Defaults to <see cref="FindingConfidence.High"/>, matching
-    /// this method's behavior before the field existed: nothing here is filtered out unless a
-    /// caller explicitly opts into a lower tier. Applied after <see cref="TypedPredicateSummary"/>
-    /// is computed, so that summary's own denominator - "how many comparisons were classified at
-    /// all" - stays complete regardless of what the caller chooses to have reported.
-    /// </param>
-    /// <param name="resolvedLineage">
-    /// An already-resolved lineage catalog for exactly these parse results and this catalog, when
-    /// the caller has one. <c>LiveScanRunner</c> must resolve lineage itself to run the live
-    /// parity gate before the report is built; passing that same instance back in here avoids
-    /// resolving it a second time, which on a large database is one of the two most expensive
-    /// passes run twice for no benefit. Pass <see langword="null"/> (the default) and this
-    /// method resolves its own, exactly as it always has.
-    /// </param>
-    /// <param name="progress">Stage progress sink; defaults to no output.</param>
-    /// <param name="rowValueFetcher">
-    /// scan-db's own opt-in <c>--fetch-sql-from-tables</c> live row fetch (<see
-    /// cref="ILiveRowValueFetcher"/>) - lets the dynamic-SQL engine's SELECT-assignment splice
-    /// resolve a real value instead of a RowDependentColumn hole when the WHERE clause pins the
-    /// row down to a literal key. Null (the default, and every corpus/file-mode caller) leaves
-    /// that shape exactly as it was - purely additive precision, never a soundness requirement.
-    /// </param>
-    public static ScanReport BuildFromParseResults(
+public static ScanReport BuildFromParseResults(
         IEnumerable<SqlParseResult> allParseResults,
         DatabaseCatalog catalog,
         FindingConfidence minimumConfidence = FindingConfidence.High,
@@ -59,33 +21,13 @@ public static class ScanReportBuilder
         progress ??= NullScanProgress.Instance;
         var fileHealth = new List<FileParseHealth>();
 
-        // Parsed once here, then shared by every phase below. This deliberately used to stay a
-        // lazy query: a live scan hands in a re-enumerable source that reparses each module from
-        // cheap retained text (LiveScanRunner), so never materializing meant never holding every
-        // module's AST at once. Measured directly, that traded away far more than it bought. The
-        // ~50 phases below each re-enumerate this source, so every module was parsed 50 times per
-        // scan; at the scale the design was written for (800 modules, ~12MB of module text) that
-        // ran 380s and allocated 87GB, against 50s and 4GB for holding one AST set, while peaking
-        // at 1,683MB versus 1,778MB - a 5.6% memory difference for a 7.6x runtime one. Holding the
-        // ASTs is the cheaper side of that trade by a wide margin, and it removes the bulk of the
-        // per-phase garbage that PhaseMemory's forced collections existed to clear.
         var parseResults = allParseResults as IReadOnlyList<SqlParseResult> ?? allParseResults.ToList();
 
-        // AST-free in the sense that still matters: only the source path of every usable file
-        // survives into usableSourcePaths, not the SqlParseResult/Fragment itself.
         var (usableSourcePaths, usableCount) = CollectUsableSourcePaths(parseResults, fileHealth);
 
-        // Declared once and reused BY REFERENCE so every phase below reads identically to before.
         IReadOnlyList<SqlParseResult> usableParseResults =
             parseResults.Where(r => usableSourcePaths.Contains(r.SourcePath)).ToList();
 
-        // Lineage needs every cleanly-parsed file together, so views can resolve against tables
-        // (and other views) declared in a different file. Resolved before Tier-1 scanning (which
-        // used to run catalog-blind) so a syntactic finding's column can be resolved through the
-        // same machinery Pass 3/4 use, carrying real Indexed/TableQualifiedName information
-        // instead of none at all. Also resolved before the dynamic SQL scan below - the call
-        // graph a proc-body parameter seed needs (ProcCallGraphBuilder.Build) requires
-        // TryGetProcedureParameters, which requires the catalog the caller already supplied.
         LineageCatalog lineage;
         if (resolvedLineage is not null)
         {
@@ -98,11 +40,6 @@ public static class ScanReportBuilder
             lineageStage.Complete($"{lineage.AllRelations.Count:N0} relations");
         }
 
-        // MSTVF-as-fence stream (docs/detection-checklist.md Tier 1 #2): which view/inline-TVF
-        // definitions inherit a multi-statement/CLR TVF fence from somewhere inside their own
-        // body. A second, small extraction pass over the same parse results - LineageResolver
-        // doesn't expose the ViewDefinition list it builds internally, and re-deriving it here
-        // is cheap next to the passes either side of it.
         IReadOnlyDictionary<string, Lineage.TvfFenceOrigin> tvfFenceMap;
         IReadOnlyDictionary<string, Lineage.ScalarUdfOrigin> scalarUdfMap;
         IReadOnlyDictionary<string, Lineage.ViewExpansionOrigin> viewExpansionMap;
@@ -127,15 +64,6 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
-        // OUTPUT-parameter tracking (roadmap "trace a constant OUTPUT value across a proc-call
-        // edge"): an ordinary `EXEC dbo.Helper @out = @var OUTPUT` can only seed the CALLER's
-        // @var from a summary of what dbo.Helper's own body always assigns its OUTPUT parameter -
-        // which this same scan produces as a side effect of walking dbo.Helper's body for its OWN
-        // EXEC sites. A single pass can only feed a callee's summary forward to a caller scanned
-        // AFTER it; re-running with the summaries seen so far closes that regardless of file/proc
-        // order, and running until no NEW summary appears (capped, matching this codebase's other
-        // bounded-recursion limits) also resolves a short OUTPUT-through-OUTPUT chain, not just
-        // one hop. The FINAL pass below is the one whose findings/scripts are actually reported.
         var dynamicSqlExtractions = ScanDynamicSqlWithOutputSummaries(
             usableParseResults, procCallGraph, catalog, rowValueFetcher, usableCount, progress);
         PhaseMemory.ReleaseBetweenPhases();
@@ -143,32 +71,8 @@ public static class ScanReportBuilder
         var dynamicSqlFindings = dynamicSqlExtractions.SelectMany(r => r.Findings).ToList();
         var dynamicSqlScripts = dynamicSqlExtractions.SelectMany(r => r.AnalyzableScripts).ToList();
 
-        // Pass 1 (CatalogBuilder) resolves a SELECT ... INTO target's columns against tables
-        // already known to the catalog only - views/CTEs/UNION sources are a Pass 2 concept
-        // catalog-building can't depend on without inverting the pass order. Re-resolves those
-        // targets now that lineage exists, mutating the same catalog instance every pass below
-        // reads (SelectIntoLineagePass docs: closes a silent-drop gap, not just an Unknown one).
         SelectIntoLineagePass.Apply(catalog, lineage, usableParseResults);
 
-        // catalog/lineage are read-only from this point on (SelectIntoLineagePass.Apply just
-        // above was the last write to catalog; nothing here mutates either) - every file's
-        // Tier-1 scan and typed extraction is fully independent of every other file's, so both
-        // run in parallel (CLAUDE.md roadmap: "scale the scan pipeline"). Each file gets its OWN
-        // ledger/result rather than sharing one mutable accumulator across threads (SkipLedger is
-        // explicitly not thread-safe), merged back together afterward; final findings are sorted
-        // by source path/line below regardless, so the parallel completion order never leaks into
-        // the report's own deterministic ordering.
-        // #temp tables are session-scoped in real SQL Server (visible to a callee EXEC'd from
-        // the proc that created them), unlike a table variable (always proc-local, never
-        // propagated) - a "driver" proc that creates #Results and EXECs several sub-procs
-        // against it is common, real corpus code. Every distinct caller scope is carried here,
-        // not just a single one - the consumer (FromScopeResolver/TypedPredicateExtractor) tries
-        // each caller's own scoped catalog entry for the SPECIFIC name being resolved and only
-        // uses the result when every caller that has one agrees on its exact shape
-        // (CatalogTable.HasSameShapeAs); when they disagree, or when this is the only caller
-        // known for one #temp name but not another, resolution still declines rather than guess.
-        // Computed once here, before EITHER Tier-1 or the typed pass runs, so both benefit
-        // identically - a #temp table's own resolvability shouldn't depend on which pass asks.
         var callerScopeByCalleeScope = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in procCallGraph.Edges
                      .Where(e => e.CallerScopeQualifiedName is not null)
@@ -1068,10 +972,6 @@ public static class ScanReportBuilder
         IReadOnlyList<CrossModuleLockOrderFinding> crossModuleLockOrderFindings;
         using (var lockOrderStage = progress.Begin("scanning cross-module lock ordering"))
         {
-            // A whole-scan pass, not per-file - the same table pair must be seen written in
-            // opposite order by two DIFFERENT top-level procedures, which can live in different
-            // files, so this needs every usable parse result together rather than one file at a
-            // time the way every SelectMany-based stage above works.
             crossModuleLockOrderFindings = CrossModuleLockOrderScanner.Scan(usableParseResults, catalog);
             lockOrderStage.Complete($"{crossModuleLockOrderFindings.Count:N0} findings");
         }
@@ -1080,8 +980,6 @@ public static class ScanReportBuilder
         IReadOnlyList<TriggerRecursionCycleFinding> triggerRecursionCycleFindings;
         using (var triggerRecursionStage = progress.Begin("scanning multi-hop trigger recursion cycles"))
         {
-            // Same "whole-scan, not per-file" reasoning as CrossModuleLockOrderScanner just above -
-            // a genuine two-table cycle's two triggers routinely live in different files.
             triggerRecursionCycleFindings = TriggerRecursionCycleScanner.Scan(usableParseResults, catalog);
             triggerRecursionStage.Complete($"{triggerRecursionCycleFindings.Count:N0} findings");
         }
@@ -1231,9 +1129,6 @@ public static class ScanReportBuilder
         skippedConstructs.AddRange(tier1SkippedEntries);
         skippedConstructs.AddRange(extractionResults.SelectMany(r => r.SkippedConstructs));
 
-        // Tier A of the dynamic SQL policy (CLAUDE.md): reparse provably-constant EXEC/
-        // sp_executesql arguments through the same pipeline and fold their findings in,
-        // remapped back to their true source location.
         var dynamicSqlResult = DynamicSqlPipeline.Analyze(dynamicSqlScripts, catalog, lineage, tvfFenceMap, scalarUdfMap, callerScopeByCalleeScope);
         dynamicSqlFindings = [.. dynamicSqlFindings, .. dynamicSqlResult.Findings];
         tier1Findings = [.. tier1Findings, .. dynamicSqlResult.Tier1Findings];
@@ -1245,10 +1140,6 @@ public static class ScanReportBuilder
         scalarUdfFindings = [.. scalarUdfFindings, .. dynamicSqlResult.ScalarUdfFindings];
         skippedConstructs.AddRange(dynamicSqlResult.SkippedConstructs);
 
-        // docs/detection-checklist.md Tier 2 "Dynamic SQL quality" - purely a dynamic-SQL-pass
-        // finding (a concatenation boundary only exists inside a folded EXEC/sp_executesql
-        // assembly's own reparse), so unlike every other stream above it has no static-file half
-        // to merge with - the dynamic SQL result IS the whole list.
         var unparameterizedDynamicSqlFindings = dynamicSqlResult.UnparameterizedFindings
             .Where(f => f.Confidence <= minimumConfidence)
             .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
@@ -1257,16 +1148,8 @@ public static class ScanReportBuilder
             .ThenBy(f => f.Kind)
             .ToList();
 
-        // Captured before SeekPreserved findings are dropped below - the report's only
-        // denominator for "N flagged out of M comparisons classified" (CLAUDE.md precision
-        // discipline: a bare finding count with no base rate can't be checked against
-        // anything).
         var typedPredicateSummary = TypedPredicateSummary.From(typedFindings);
 
-        // Previously computed only by VerifyCorpusCommand - a plain `scan`/`scan-corpus` run
-        // carried the raw DynamicSqlFindings list with no rollup anywhere in its own output (an
-        // audit finding), so a reader had to hand-count outcomes to get the "X% of dynamic SQL
-        // call sites we could not analyze" figure CLAUDE.md's dynamic SQL policy requires.
         var dynamicSqlSummary = DynamicSqlSummary.From(dynamicSqlFindings);
 
         typedFindings = [.. typedFindings.Where(f => f.Verdict != Verdict.SeekPreserved && f.Confidence <= minimumConfidence)];
@@ -1277,14 +1160,6 @@ public static class ScanReportBuilder
         tvfFenceFindings = [.. tvfFenceFindings.Where(f => f.Confidence <= minimumConfidence)];
         scalarUdfFindings = [.. scalarUdfFindings.Where(f => f.Confidence <= minimumConfidence)];
 
-        // Deterministic output ordering (CLAUDE.md), then CLAUDE.md's Pass 4 rank:
-        // SCAN_FORCED + indexed + depth>=1 first. Index-existence weighting
-        // (docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability stream" #5)
-        // mirrors TypedFindings' own ThenByDescending(f => f.Column.Indexed) below - a non-
-        // sargable predicate on an unindexed column is noise, on an indexed column it's a real
-        // lost seek. Indexed is nullable (unresolved != false, CLAUDE.md's own "never guess"
-        // discipline) - true ranks first (a proven lost seek), unresolved ranks second (real
-        // signal, just not confirmed), false ranks last (confirmed noise).
         tier1Findings = [.. tier1Findings
             .OrderBy(f => f.Indexed switch { true => 0, null => 1, false => 2 })
             .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
@@ -1310,12 +1185,6 @@ public static class ScanReportBuilder
         collationConflictFindings = [.. collationConflictFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.ColumnPosition)];
         writeLossFindings = [.. writeLossFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.ColumnPosition)];
 
-        // docs/detection-checklist.md's own rank for this stream: correlated APPLY first (no
-        // engine version rescues it), then a fence inherited invisibly through a view/TVF layer
-        // (ranked by how many layers deep - the number no text-matching tool can produce), then
-        // a direct FROM/JOIN reference, then INSERT...EXEC, then a standalone reference last
-        // (real, but nothing around it to poison) - exactly the declared order of
-        // TvfFenceFindingKind's own enum members.
         tvfFenceFindings = [.. tvfFenceFindings
             .OrderBy(f => f.Kind)
             .ThenByDescending(f => f.Depth)
@@ -1323,14 +1192,6 @@ public static class ScanReportBuilder
             .ThenBy(f => f.Line)
             .ThenBy(f => f.Column)];
 
-        // docs/detection-checklist.md's own rank for this stream: predicate-context invocation
-        // first (the maximal claim - non-sargable AND per-row AND, pre-2019 or non-inlineable,
-        // serial), then reached-through-lineage (depth is the number no text-matching tool can
-        // produce), then a schema-level dependency, then a plain projection-context invocation
-        // last - the declared order of ScalarUdfFindingKind's own enum members. Within a kind,
-        // NotInlineable ranks above Unknown above Inlineable - the severity-downgrade guard
-        // expressed as ordering, matching the checklist's "report inlined-in-2019+ cases at
-        // reduced severity".
         scalarUdfFindings = [.. scalarUdfFindings
             .OrderBy(f => f.Kind)
             .ThenBy(f => InlineabilityRank(f.Inlineability))
@@ -1345,16 +1206,6 @@ public static class ScanReportBuilder
             .ThenBy(s => s.Column)
             .ToList();
 
-        // Every stream landed after the original eight (filtered just above, lines ~1131-1137)
-        // never got this same minimumConfidence cut applied - a real gap, not a deliberate
-        // design choice: CLAUDE.md's own contract for this parameter is "the least confident a
-        // finding may be and still appear in the report," and a Low/Medium-confidence finding
-        // from any of these streams was silently bypassing that promise regardless of what the
-        // caller (scan-db --confidence, scan-corpus --confidence) actually asked for. Fixed by
-        // applying the identical `<= minimumConfidence` cut to every remaining stream, in one
-        // place, right before construction, so a future new stream only has to be added to this
-        // one block rather than remembering to filter itself inline the way each new stream's
-        // own scan phase above never did.
         columnCollationDriftFindings = [.. columnCollationDriftFindings.Where(f => f.Confidence <= minimumConfidence)];
         crossTableTypeDriftFindings = [.. crossTableTypeDriftFindings.Where(f => f.Confidence <= minimumConfidence)];
         procCallArgumentMismatchFindings = [.. procCallArgumentMismatchFindings.Where(f => f.Confidence <= minimumConfidence)];
@@ -1428,8 +1279,6 @@ public static class ScanReportBuilder
             untrustedConstraintFindings, cascadingForeignKeyFindings, multiReferencedCteFindings,
             nestedViewDepthFindings, postExpansionJoinWidthFindings, selectStarViewFindings, unparameterizedDynamicSqlFindings,
             nonPersistedComputedColumnFindings,
-            // TempTableExecShapeFindings needs a live database round trip (sys.dm_exec_describe_first_result_set)
-            // this builder never issues - always empty here; LiveScanRunner merges the real result in afterward.
             [],
             selfReferencingDmlFindings,
             temporalTableHistoryIndexGapFindings,
@@ -1438,11 +1287,6 @@ public static class ScanReportBuilder
             compositeIndexLeadingColumnFindings, indexHintFindings,
             sessionDateSettingFindings, cartesianJoinFindings, undersizedDeclarationFindings, truncateSwallowedFindings, unindexedTempTableUsageFindings,
             outputParameterFindings,
-            // DatabaseConfigurationFindings needs a live database round trip against the
-            // sys.databases and sys.database_query_store_options catalog views, which this
-            // builder never issues, so it is always empty here. LiveScanRunner merges the
-            // real result in afterward, the same pattern already established for
-            // TempTableExecShapeFindings.
             [],
             parameterReassignmentPredicateFindings,
             codeMetricFindings,
@@ -1454,14 +1298,7 @@ public static class ScanReportBuilder
             statementShapeFindings,
             controlFlowRiskFindings,
             securityFindings,
-            // IndexDesignFindings needs CatalogIndex.IsClustered, populated only by a live catalog
-            // read (LiveCatalogReader) - always empty here; LiveScanRunner merges the real result
-            // in afterward, same pattern TempTableExecShapeFindings/DatabaseConfigurationFindings
-            // already established.
             [],
-            // IdentityRangeFindings needs CatalogColumn's identity seed/increment/current-value
-            // fields, populated only by a live catalog read - always empty here; LiveScanRunner
-            // merges the real result in afterward, same pattern as IndexDesignFindings above.
             [],
             floatEqualityFindings,
             queryAntiPatternFindings,
@@ -1472,26 +1309,12 @@ public static class ScanReportBuilder
             checkConstraintFindings,
             defaultNullableConstraintFindings,
             tryCastComputedColumnPredicateFindings,
-            // StaleSelectStarViewFindings needs a live-only catalog registry (a view's own
-            // compiled sys.columns row set, DatabaseCatalog.TryGetViewCompiledColumns) this
-            // builder never populates - always empty here; LiveScanRunner merges the real result
-            // in afterward, same pattern IndexDesignFindings/IdentityRangeFindings already
-            // established.
             [],
             bareTopNoOrderByFindings,
             stringConcatNullFindings,
             aggregateDivisionColumnstoreFindings,
             securityPredicateIndexFindings,
-            // DanglingObjectReferenceFindings needs a live database round trip against
-            // sys.sql_expression_dependencies/sys.dm_sql_referenced_entities, which this builder
-            // never issues - always empty here; LiveScanRunner merges the real result in
-            // afterward, same pattern TempTableExecShapeFindings/DatabaseConfigurationFindings
-            // already established.
             [],
-            // ForcedParameterizationFindings needs a live database round trip
-            // (sys.databases.is_parameterization_forced) this builder never issues - always empty
-            // here; LiveScanRunner merges the real result in afterward, same pattern as the other
-            // live-only streams above.
             [],
             columnstoreBatchModeDisqualifyingTypeFindings,
             alwaysEncryptedOrderByFindings,
@@ -1514,12 +1337,6 @@ public static class ScanReportBuilder
         {
             fileHealth.Add(ParseHealthReportBuilder.ToFileParseHealth(result));
 
-            // A batch containing a syntax error is dropped by ScriptDOM itself, not the whole
-            // file (docs/audit-remediation-plan.md Phase 4.4, audit finding B4) - excluding the
-            // whole file whenever Errors was non-empty threw away every OTHER batch's tables/
-            // views/procs too, even when they parsed perfectly cleanly. A file contributes
-            // whatever batches it has left; one with zero surviving batches contributes nothing
-            // either way.
             if (result.BatchCount > 0)
             {
                 usableSourcePaths.Add(result.SourcePath);
@@ -1530,8 +1347,6 @@ public static class ScanReportBuilder
         return (usableSourcePaths, usableCount);
     }
 
-    // See BuildFromParseResults' own call-site comment for why this runs to a fixed-point over
-    // several rounds rather than once.
     private static List<DynamicSqlExtractionResult> ScanDynamicSqlWithOutputSummaries(
         IEnumerable<SqlParseResult> usableParseResults,
         ProcCallGraph procCallGraph,
@@ -1541,25 +1356,10 @@ public static class ScanReportBuilder
         IScanProgress progress)
     {
         const int maxOutputSummaryRounds = 5;
-        // Written keyed by the callee's own declared name (summary.QualifiedName), read keyed by
-        // the call-site spelling (edge.CalleeQualifiedName) - a bare default comparer silently
-        // dropped OUTPUT-parameter propagation whenever the two differed in casing (2026-08
-        // audit). ValueTuple element names are compile-time only, so the (Table, Column) comparer
-        // is the same underlying (string, string) comparer this dictionary needs.
         var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>(TableColumnKeyComparer.Instance);
         List<DynamicSqlExtractionResult> dynamicSqlExtractions = [];
         using (var dynamicStage = progress.Begin("scanning dynamic SQL", usableCount * maxOutputSummaryRounds))
         {
-            // Every round scans the exact same parsed modules - only outputSummaryIndex differs
-            // between rounds. Materialized ONCE here rather than re-enumerating the lazy
-            // usableParseResults query per round (which would reparse the whole corpus fresh up
-            // to 5 times for no reason, since nothing about the parse itself changes round to
-            // round) - a real, measured regression: on a database whose OUTPUT-summary chains
-            // need several rounds to converge, this stage became the slowest in the scan purely
-            // from redundant reparsing. Scoped to this `using` block and released by
-            // PhaseMemory.ReleaseBetweenPhases() right after, exactly like every other phase's
-            // own bounded materialization (CatalogBuilder's internal one, callgraph's, tier1's,
-            // typed's) - never held simultaneously with another phase's.
             var forThisPhase = usableParseResults.ToList();
 
             var rounds = 0;
@@ -1567,15 +1367,6 @@ public static class ScanReportBuilder
             {
                 rounds = round + 1;
 
-                // Each round is independent per parse result (the shared outputSummaryIndex is
-                // read-only for the duration of a round and only folded in afterward), so the
-                // round itself parallelizes even though the rounds are inherently sequential.
-                // AsOrdered, unlike the Tier-1/typed passes below: those feed lists that get
-                // sorted deterministically before reporting, but this one folds its results into
-                // outputSummaryIndex, where two modules summarizing the SAME (proc, parameter)
-                // key resolve last-writer-wins. Unordered completion would make which summary
-                // survives depend on thread scheduling - a real determinism break, not a
-                // cosmetic one.
                 dynamicSqlExtractions = forThisPhase
                     .AsParallel()
                     .AsOrdered()

@@ -4,22 +4,8 @@ using System.Text.Json.Serialization;
 
 namespace SilentScan.Core.Diagnostics;
 
-/// <summary>
-/// The checked-in, top-down construct coverage matrix (docs/coverage-remediation-plan.md Phase
-/// 0.1) - the counterpart to <see cref="SkipLedger"/>'s bottom-up, per-scan accounting. Where the
-/// ledger says what one scan actually saw, this says what the tool is designed to handle at all,
-/// so a gap can be found by reading a checked-in table instead of by reading the visitor code and
-/// noticing an unmatched node type. Loaded once from the embedded
-/// <c>Diagnostics/ConstructCoverage.json</c> resource.
-/// </summary>
 public sealed class ConstructCoverageCatalog
 {
-    // Field order matters here: static field initializers run top-to-bottom, and Instance's
-    // initializer calls LoadEmbedded(), which reads JsonOptions - JsonOptions must be declared
-    // (and therefore initialized) first, or LoadEmbedded() runs against a still-null
-    // JsonSerializerOptions and silently falls back to case-sensitive default matching against
-    // this file's camelCase JSON, leaving every record null with no exception at the call site
-    // that would explain why.
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     public static ConstructCoverageCatalog Instance { get; } = LoadEmbedded();

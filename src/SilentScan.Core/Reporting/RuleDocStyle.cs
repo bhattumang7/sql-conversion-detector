@@ -1,6 +1,5 @@
 namespace SilentScan.Core.Reporting;
 
-/// <summary>Shared page chrome (styles + light/dark tokens) for the rule index and every per-rule page, so the two never drift into two different looks.</summary>
 internal static class RuleDocStyle
 {
     public const string Css = """

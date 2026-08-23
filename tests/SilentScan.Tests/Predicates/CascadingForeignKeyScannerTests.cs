@@ -3,12 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Lineage-metric findings": "Cascading FK actions (ON
-/// DELETE/UPDATE CASCADE)". <see cref="DatabaseCatalog.ForeignKeys"/> is only ever populated by
-/// live mode - these tests build the catalog directly, same pattern as
-/// <c>UntrustedConstraintScannerTests</c>.
-/// </summary>
 public sealed class CascadingForeignKeyScannerTests
 {
     [Fact]

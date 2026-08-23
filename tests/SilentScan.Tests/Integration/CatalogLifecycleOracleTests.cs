@@ -7,16 +7,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Roadmap Phase A1 (catalog lifecycle): DROP TABLE/DROP INDEX/DROP VIEW previously left a
-/// stale definition in the catalog forever, a real false-positive risk for any repo whose
-/// scanned file set includes a migration history (drop-and-recreate-with-a-different-type is
-/// exactly the pattern this tool exists to catch, so getting it backwards would be its own
-/// bug). This doesn't just assert the static catalog "looks right" in isolation - it deploys
-/// the identical script to the real disposable oracle and cross-checks
-/// <see cref="CatalogBuilder"/>'s output against <see cref="LiveCatalogReader"/> reading the
-/// real <c>sys.columns</c>/<c>sys.indexes</c> after the same DROP/CREATE sequence actually ran.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class CatalogLifecycleOracleTests : OracleTestFixture
 {
@@ -52,8 +42,6 @@ public sealed class CatalogLifecycleOracleTests : OracleTestFixture
     [Fact]
     public async Task RealServer_DropTableThenRecreateWithDifferentType_HasTheRecreatedType()
     {
-        // Sanity check of the Ddl script itself against the real engine, not of this tool's
-        // code - confirms the fixture actually exercises what it claims to.
         var real = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         var table = Assert.Single(real.Tables, t => t.Name == "Orders");

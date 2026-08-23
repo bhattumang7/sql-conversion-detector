@@ -3,12 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Size and complexity metrics" - eight configurable-threshold
-/// structural metrics over the AST. Fully syntax-only, no oracle needed - none of these change a
-/// query's result or its plan. Tests use small custom thresholds (rather than the real calibrated
-/// defaults) so fixtures stay short and readable.
-/// </summary>
 public sealed class CodeMetricScannerTests
 {
     private static IReadOnlyList<CodeMetricFinding> Scan(string sql, CodeMetricThresholds thresholds)

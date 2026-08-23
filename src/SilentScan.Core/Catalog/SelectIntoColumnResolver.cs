@@ -5,15 +5,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Catalog;
 
-/// <summary>
-/// Infers a <c>SELECT ... INTO #target FROM ...</c> temp table's columns
-/// (docs/audit-remediation-plan.md Phase 2.5, CLAUDE.md Pass 1: "temp tables (#t via SELECT
-/// INTO and CREATE TABLE #t)"). Deliberately minimal: this is Pass 1, so it resolves only
-/// against tables already known to the catalog (never views - those are a Pass 2/Lineage
-/// concept catalog-building can't depend on without inverting the pass order), and only a bare
-/// column reference or SELECT * - anything else (an expression, a function call, a literal with
-/// no explicit alias) resolves to an untyped column rather than guessing its result type.
-/// </summary>
 internal static class SelectIntoColumnResolver
 {
     public static List<CatalogColumn> Resolve(
@@ -45,8 +36,6 @@ internal static class SelectIntoColumnResolver
                     break;
 
                 case SelectScalarExpression { ColumnName.Value: { } aliasedName }:
-                    // An explicitly-aliased non-column expression (arithmetic, CASE, a function
-                    // call, a literal, ...) - the name is known, the type is never guessed.
                     columns.Add(new CatalogColumn(aliasedName, null, IsNullable: true, IsIdentity: false, IsComputed: false, IsPersisted: false));
                     break;
 
@@ -61,16 +50,7 @@ internal static class SelectIntoColumnResolver
         return columns;
     }
 
-    /// <summary>
-    /// The statement's own declared CTE names, name-only (no Lineage-level resolution - CLAUDE.md's
-    /// pass-ordering rule forbids catalog-building from depending on Lineage/view resolution, so
-    /// this can only ever ask "is this name syntactically a CTE here," never "what does the CTE
-    /// actually select"). Mirrors the same decline-set shape <c>DirectBaseTableResolver</c> used
-    /// before Phase 1.5 migrated its callers onto real Lineage-level CTE resolution - that upgrade
-    /// isn't available to this pass, so the decline-only shape is the correct, permanent answer
-    /// here, not a stepping stone.
-    /// </summary>
-    private static HashSet<string> CteNamesOf(SelectStatement select) =>
+private static HashSet<string> CteNamesOf(SelectStatement select) =>
         select.WithCtesAndXmlNamespaces is { CommonTableExpressions: { } ctes }
             ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), StringComparer.OrdinalIgnoreCase)
             : [];
@@ -92,19 +72,10 @@ internal static class SelectIntoColumnResolver
             {
                 if (leaf is not NamedTableReference named)
                 {
-                    // A derived table, CTE, or table-valued source - not a base table this pass
-                    // can resolve without Lineage-level query resolution; left unresolved.
                     ordered.Add(null);
                     continue;
                 }
 
-                // A CTE reference parses as an ordinary NamedTableReference, identical in shape to
-                // a real base table - and a CTE is never schema-qualified, so it always shadows a
-                // same-named real base table for this statement's own lifetime. Resolving against
-                // the catalog anyway (the previous behavior) would silently attribute a SELECT
-                // INTO target column's type to an unrelated real table sharing the CTE's name -
-                // the exact bug class fixed across seven Predicates-layer scanners in Phase 1.5,
-                // present here too until this fix. Declined (left unresolved), never guessed at.
                 if (named.SchemaObject.SchemaIdentifier is null && cteNames.Contains(named.SchemaObject.BaseIdentifier.Value))
                 {
                     ordered.Add(null);
@@ -115,14 +86,6 @@ internal static class SelectIntoColumnResolver
                 var table = catalog.Find(qualifiedName, scope);
                 var alias = named.Alias?.Value ?? SchemaObjectNameHelper.Resolve(named.SchemaObject).Name;
 
-                // A legal, if unusual, query - `FROM dbo.T JOIN audit.T ON ...` exposes two leaves
-                // under the same unqualified name (T), both unaliased. Silently last-wins here (the
-                // previous behavior) would make a later qualified reference like T.Col resolve
-                // against whichever leaf happened to be flattened last, attributing the column's
-                // type to the wrong table - the same poison rule FromScopeResolver.cs already
-                // applies for the identical ambiguity at the Lineage layer (its own doc comment:
-                // "poison the entry rather than guess which one a bare reference meant"). Poisoned
-                // to null - this resolver's own existing convention for "declined, never guessed."
                 byAlias[alias] = byAlias.ContainsKey(alias) ? null : table;
                 ordered.Add(table);
             }

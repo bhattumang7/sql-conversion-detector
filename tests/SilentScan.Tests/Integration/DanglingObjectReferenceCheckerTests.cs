@@ -5,13 +5,6 @@ using SilentScan.Verify.Deployment;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Oracle-confirmed directly against the local Docker instance: a stored procedure referencing a
-/// table that was never created compiles clean (SQL Server defers name resolution for a module
-/// body until it runs) and only fails with Msg 208 ("Invalid object name") at EXEC time - these
-/// tests assert the checker surfaces that gap from the catalog alone, without ever executing the
-/// broken module itself.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class DanglingObjectReferenceCheckerTests
 {
@@ -55,10 +48,6 @@ public sealed class DanglingObjectReferenceCheckerTests
     [Fact]
     public async Task ViewLeftBehindAfterItsBaseTableWasDropped_IsReportedAsAView()
     {
-        // Unlike CREATE PROCEDURE, CREATE VIEW validates its referenced tables immediately - a
-        // view can never be created against a table that never existed. The real way a view ends
-        // up dangling is a base table dropped out from under it afterward, which SQL Server does
-        // not retroactively invalidate the view for.
         var findings = await CheckAsync(
             """
             CREATE TABLE dbo.WidgetInventory (WidgetId INT NOT NULL);
@@ -78,8 +67,6 @@ public sealed class DanglingObjectReferenceCheckerTests
     [Fact]
     public async Task TriggerReferencingInsertedPseudoTable_IsNotReported()
     {
-        // "inserted"/"deleted" are trigger pseudo-tables - always unresolvable to a real object
-        // ID by design, never a real broken reference.
         var findings = await CheckAsync(
             """
             CREATE TABLE dbo.WidgetInventory (WidgetId INT NOT NULL);
@@ -96,11 +83,6 @@ public sealed class DanglingObjectReferenceCheckerTests
     [Fact]
     public async Task ProcedureCallingAnUnqualifiedProcedureName_IsCallerDependentAndNotReported()
     {
-        // EXEC SomeProc with no schema at all resolves at run time relative to the caller's own
-        // context (is_caller_dependent = 1, oracle-confirmed) - not a missing-object claim. A
-        // schema-qualified EXEC dbo.SomeProc is NOT caller-dependent and IS a genuine missing-
-        // object claim (SQL Server's own deferred-name-resolution warning says exactly this at
-        // CREATE time) - deliberately not tested as a "not reported" case here.
         var findings = await CheckAsync(
             """
             CREATE PROCEDURE dbo.RunReport AS

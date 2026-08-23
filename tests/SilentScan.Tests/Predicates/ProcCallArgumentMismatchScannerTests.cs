@@ -4,14 +4,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Call-boundary half of docs/detection-checklist.md Tier 1's "call-boundary argument mismatch"
-/// item - reuses <see cref="Rules.WriteLossClassifier"/> against a caller-side variable's
-/// declared type vs. the callee's own declared parameter type. Built directly against a
-/// hand-constructed <see cref="ProcCallGraph"/> - the graph itself (including
-/// <see cref="ProcCallArgument.CallerArgumentType"/> resolution) is covered separately in
-/// <c>ProcCallGraphBuilderTests</c>.
-/// </summary>
 public sealed class ProcCallArgumentMismatchScannerTests
 {
     private static ProcCallGraph GraphWith(ProcCallArgument argument) =>
@@ -64,9 +56,6 @@ public sealed class ProcCallArgumentMismatchScannerTests
     [Fact]
     public void LiteralArgument_NeverFires()
     {
-        // A literal argument has no CallerVariableName at all - nothing to look up a declared
-        // type for, so it's out of scope for this rule by construction (the literal's own value,
-        // not a declared type, is what would matter, and this rule only reasons about types).
         var argument = new ProcCallArgument(
             "@P", new SqlType(SqlTypeCategory.Int), FormalParameterIsOutput: false,
             CallerVariableName: null, IsLiteral: true, CallerArgumentType: null);

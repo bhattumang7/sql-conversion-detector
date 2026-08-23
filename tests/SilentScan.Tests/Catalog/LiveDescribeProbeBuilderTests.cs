@@ -5,11 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Catalog;
 
-/// <summary>
-/// Pure, no-database coverage for <see cref="LiveDescribeProbeBuilder"/> - every input is
-/// already-read catalog metadata, so this is cheap to run exhaustively without the Docker oracle
-/// the reader it feeds needs.
-/// </summary>
 public sealed class LiveDescribeProbeBuilderTests
 {
     [Fact]
@@ -81,9 +76,6 @@ public sealed class LiveDescribeProbeBuilderTests
     [Fact]
     public void BuildFunctionProbe_ParameterWithUnrenderableSqlType_ReturnsNullWithAReasonNamingIt()
     {
-        // SqlVariant/UserDefined-adjacent categories with no fixed T-SQL DECLARE spelling -
-        // SqlTypeSyntaxFormatter.Format itself returns null for these; the probe builder must
-        // surface that as an unrenderable reason rather than emitting broken SQL.
         var parameters = new List<FunctionParameterSpec> { new("@tag", new SqlType(SqlTypeCategory.UserDefined), IsTableType: false) };
 
         var (probe, reason) = LiveDescribeProbeBuilder.BuildFunctionProbe("dbo.fn_Tagged", parameters);
@@ -104,10 +96,6 @@ public sealed class LiveDescribeProbeBuilderTests
     [Fact]
     public void BuildProcedureProbe_MultipleParameters_PositionalBareNullArguments()
     {
-        // EXECUTE's own grammar accepts only a constant or a variable as an argument value, never
-        // an arbitrary expression - CAST(NULL AS type) (used for the function-probe sibling) is a
-        // real parse error here, oracle-confirmed (Msg 156). A bare, untyped NULL compiles and
-        // implicitly converts to whatever the parameter's own declared type is.
         var parameters = new List<ProcedureParameterSpec>
         {
             new("@id", IsTableType: false, IsOutput: false),

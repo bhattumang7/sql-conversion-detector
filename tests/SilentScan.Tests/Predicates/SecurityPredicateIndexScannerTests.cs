@@ -5,18 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md practitioner-sweep item "Row-Level Security predicate function with
-/// no supporting index on its own filtered columns". <see cref="CatalogSecurityPredicate"/> is only
-/// ever populated live - the hand-built-catalog tests below exercise the scanner's own reparse/
-/// index-matching logic directly (the same "no Docker oracle needed to exercise the scanner's own
-/// logic" shape <c>CheckConstraintScannerTests</c> already established), while the
-/// <c>LiveDeployment_*</c> tests at the bottom prove the full live-read path against the real
-/// standing Docker oracle (a fresh, disposable database, dropped unconditionally afterward) - the
-/// scan-vs-seek mechanism and the "forces single-threaded execution" non-reproduction are both
-/// documented with their own plan-XML evidence in <see cref="SecurityPredicateIndexFinding"/>'s own
-/// doc comment.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class SecurityPredicateIndexScannerTests
 {
@@ -64,8 +52,6 @@ public sealed class SecurityPredicateIndexScannerTests
     [Fact]
     public void BoundColumnLeadsOnlyADisabledIndex_StillFires()
     {
-        // A disabled index enforces/serves nothing today - the same "disabled doesn't count as
-        // supporting" discipline IndexDesignScanner's own UnindexedForeignKey check already uses.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table(
             "dbo", "T", [Column("Id"), Column("TenantId")],
@@ -80,9 +66,6 @@ public sealed class SecurityPredicateIndexScannerTests
     [Fact]
     public void BoundColumnIsNotTheLeadingKeyColumn_StillFires()
     {
-        // TenantId is present in the index, but only as a non-leading column - an equality
-        // seek against TenantId alone still cannot use this index, the same "leading column
-        // only" discipline every other index-coverage check in this codebase uses.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table(
             "dbo", "T", [Column("Id"), Column("TenantId"), Column("OtherKey")],
@@ -109,8 +92,6 @@ public sealed class SecurityPredicateIndexScannerTests
     [Fact]
     public void BlockPredicate_NeverFires()
     {
-        // A BLOCK predicate does not filter the table's own read path the way a FILTER predicate
-        // does - see SecurityPredicateIndexFinding's own doc comment for why only FILTER is in scope.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "T", [Column("Id"), Column("TenantId")], []));
         catalog.AddSecurityPredicate(new CatalogSecurityPredicate(
@@ -147,8 +128,6 @@ public sealed class SecurityPredicateIndexScannerTests
     [Fact]
     public void PredicateFunctionCalledWithNoColumnArgument_NeverGuesses()
     {
-        // A literal argument (or no argument at all) binds to nothing this pass can check
-        // against the table's own columns - never guessed at.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "T", [Column("Id"), Column("TenantId")], []));
         catalog.AddSecurityPredicate(new CatalogSecurityPredicate(
@@ -172,10 +151,6 @@ public sealed class SecurityPredicateIndexScannerTests
     [Fact]
     public void AtLeastOneBoundColumnIndexed_OtherUnindexedColumnStillDoesNotFireAlone()
     {
-        // This pass cannot see the predicate function's own body, so it cannot tell whether
-        // multiple bound columns combine with AND (a composite leading-prefix index would
-        // suffice) or OR (each column needs its own index) - requiring every bound column to
-        // individually lead some index is the direction that never over-reports either way.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table(
             "dbo", "T", [Column("Id"), Column("TenantId"), Column("RegionId")],
@@ -184,21 +159,10 @@ public sealed class SecurityPredicateIndexScannerTests
             "Security.TenantFilter", "dbo.T", "([Security].[fn_TenantRegionPredicate]([TenantId],[RegionId]))",
             IsFilterPredicate: true, IsPolicyEnabled: true));
 
-        // TenantId leads an active index, so this deliberately conservative check never fires -
-        // even though RegionId itself has no supporting index.
         Assert.Empty(SecurityPredicateIndexScanner.Scan(catalog));
     }
 
-    /// <summary>
-    /// End-to-end against the real standing Docker oracle (a fresh, disposable database, dropped
-    /// unconditionally afterward) - proves the full live-read path (<c>LiveCatalogReader</c>'s new
-    /// <see cref="DatabaseCatalog.SecurityPredicates"/> registry, through <see
-    /// cref="SecurityPredicateIndexScanner"/>, into the real <see
-    /// cref="SilentScan.Core.Reporting.ScanReport.SecurityPredicateIndexFindings"/> stream) works
-    /// against a real <c>CREATE SECURITY POLICY</c>/<c>sys.security_predicates.predicate_definition</c>
-    /// string, not just the hand-authored text used by the catalog-builder tests above.
-    /// </summary>
-    [Fact]
+[Fact]
     public async Task LiveDeployment_UnindexedFilterPredicateColumn_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(

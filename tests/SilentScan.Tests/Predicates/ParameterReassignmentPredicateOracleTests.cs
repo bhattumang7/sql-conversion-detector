@@ -4,23 +4,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Catch-all / kitchen-sink predicates" sibling: "parameter
-/// overwritten before use in a predicate" (sniffing-defeat). Oracle-confirms the general
-/// mechanism once (the same "confirm the premise directly, not per finding" precedent
-/// <see cref="LocalVariablePredicateOracleTests"/> already established): a stored procedure's
-/// cached plan is compiled against the ARGUMENT the caller actually supplied (parameter
-/// sniffing) - reassigning that same parameter inside the body before a later predicate use does
-/// NOT recompile anything or change what was sniffed. The predicate's own row-count estimate
-/// still reflects the ORIGINAL sniffed argument, even though the predicate executes against the
-/// NEW, reassigned value - exactly the staleness <see cref="ParameterReassignmentPredicateFinding"/>
-/// exists to report.
-///
-/// A genuinely compile-time phenomenon, like <see cref="LocalVariablePredicateOracleTests"/> (not
-/// like the catch-all stream's own RECOMPILE finding, which needed real execution) - parameter
-/// sniffing for a stored-procedure EXEC is fully visible to the compile-only
-/// <c>SET SHOWPLAN_XML ON</c> probe <see cref="PlanXmlCapture"/> already uses.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ParameterReassignmentPredicateOracleTests : OracleTestFixture
 {
@@ -72,15 +55,8 @@ public sealed class ParameterReassignmentPredicateOracleTests : OracleTestFixtur
     {
         var capture = new PlanXmlCapture(Options);
 
-        // Control: calling usp_FindDirect with the common value sniffs 'Common' AND the predicate
-        // genuinely runs against 'Common' - the real histogram step applies, a large estimate.
         var directPlan = await capture.CaptureAsync(DatabaseName, "EXEC dbo.usp_FindDirect @p = 'Common';");
 
-        // The body reassigns @p to a value with ZERO real rows before the predicate runs - if the
-        // plan were built against the value the predicate ACTUALLY compares, the estimate would be
-        // the near-zero "value never seen" density guess. Reassignment happens BEFORE the predicate
-        // executes, but sniffing happened at compile time against the ORIGINAL 'Common' argument -
-        // the compiled plan cannot see the reassignment at all.
         var reassignedPlan = await capture.CaptureAsync(DatabaseName, "EXEC dbo.usp_FindReassigned @p = 'Common';");
 
         var directEstimate = ExtractEstimateRows(directPlan);

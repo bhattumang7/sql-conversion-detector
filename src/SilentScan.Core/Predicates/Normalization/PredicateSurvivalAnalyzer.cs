@@ -4,34 +4,6 @@ using SilentScan.Core.Catalog;
 
 namespace SilentScan.Core.Predicates.Normalization;
 
-/// <summary>
-/// docs/detection-reference.md "Predicate survival (normalization/simplification)": the engine
-/// rewrites, and sometimes eliminates, predicates before sargability is ever considered - a
-/// predicate a scanner flags may never survive to reach the plan in the form flagged, which makes
-/// the finding wrong. This is the missing normalization stage, built the same way the real
-/// optimizer does it: build the set of still-possible values for a column from every literal
-/// comparison touching it, intersect that set across an AND (a real contradiction is exactly the
-/// intersection going empty), union it across an OR (a real tautology is exactly the union
-/// covering every possible value, NULL included). <see cref="FindDeadComparisons"/> returns the
-/// comparison-shaped fragments that live inside a branch proven this way to never contribute a
-/// selected row - callers decline to report a finding whose own site is in that set, the same way
-/// they already decline one that never resolves to a real base column.
-///
-/// Deliberately bounded to what the value-range algebra can prove without guessing: numeric
-/// literals get the full ordered range algebra (<see cref="NumericValueRangeSet"/>) since numeric
-/// ordering is collation-independent; string literals get equality/inequality only (range
-/// operators on strings depend on collation ordering this analyzer does not model) and a
-/// cross-literal equality conflict is only ever concluded when the caller confirms the column's
-/// collation is case-sensitive/binary - two different string literals can otherwise legally
-/// collate equal, so "different text" alone is never proof of "different value." A tautology
-/// conclusion additionally requires the caller to confirm the column is NOT NULL, except for the
-/// one case that needs no such confirmation at all: <c>col IS NULL OR col IS NOT NULL</c>, which
-/// is unconditionally true regardless of nullability since those two predicates are themselves
-/// never UNKNOWN. <c>NOT</c> is treated as a boundary in the tautology direction (this analyzer
-/// does not attempt to prove an expression is always strictly FALSE, only "never TRUE" and "always
-/// TRUE", so it cannot conclude what <c>NOT</c> of an always-FALSE operand would be) but is
-/// followed in the "never true" direction: <c>NOT</c> of a proven tautology is itself proven dead.
-/// </summary>
 public static class PredicateSurvivalAnalyzer
 {
     public readonly record struct ColumnFacts(bool? IsNotNull, bool? IsCaseSensitiveCollation);
@@ -55,27 +27,6 @@ public static class PredicateSurvivalAnalyzer
 
     private enum CmpOp { Eq, Ne, Lt, Le, Gt, Ge }
 
-    // NeverTrue: True-or-Unknown is impossible, the value is False-or-Unknown for every row (drives
-    // "dead": a NeverTrue subtree never contributes a selected row). AlwaysTrue: True for every row,
-    // Unknown is impossible too (the strict tautology direction - this already requires ruling out
-    // NULL, so nothing else needs to distinguish "weak" vs "strict" true). AlwaysFalse: the strict
-    // dual of AlwaysTrue - False for every row, Unknown is impossible too. AlwaysFalse implies
-    // NeverTrue but is a strictly stronger claim, needed only to justify what NOT does: NOT of a
-    // merely-NeverTrue operand is NOT provably anything (e.g. NOT(x=1 AND x=2) is True for every
-    // non-null x but UNKNOWN for a null x, so it is NOT an unconditional tautology on a nullable
-    // column - only AlwaysFalse(x=1 AND x=2), which requires x confirmed NOT NULL, licenses
-    // NOT(...) being AlwaysTrue). All three false means "no conclusion" - the state for any leaf
-    // this analyzer doesn't model (subqueries, LIKE, IN, function calls, ...).
-    //
-    // Pure - no marking here. A node's own NeverTrue/AlwaysTrue is only safe to act on from the
-    // position that actually consumes it (an enclosing AND/OR dropping a conjunct/disjunct, a NOT
-    // flipping it, or the top-level search condition itself) - marking inside Classify itself, as a
-    // side effect of computing a child's verdict for an AND/OR/NOT composition, would mark a
-    // subtree's leaves dead even when the composition ends up NOT actually treating it as dead (the
-    // textbook case: the inner AND of NOT(x=1 AND x=2) is a real contradiction on its own, but NOT
-    // of it is a near-tautology, not a dead branch - marking during the inner AND's own recursive
-    // classification would have marked x=1/x=2 regardless of what NOT then did with that fact).
-    // See <see cref="MarkDead"/> for the separate pass that actually mutates the dead set.
     private static (bool NeverTrue, bool AlwaysTrue, bool AlwaysFalse) Classify(
         BooleanExpression node, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
     {
@@ -94,10 +45,6 @@ public static class PredicateSurvivalAnalyzer
 
                 if (neverTrue)
                 {
-                    // False dominates Unknown in AND: if any conjunct - including the winning side
-                    // of a cross-conjunct contradiction, when its own column is confirmed NOT NULL -
-                    // is strictly False for every row, the whole AND is strictly False too,
-                    // regardless of whether any OTHER conjunct could otherwise be Unknown.
                     var alwaysFalse = verdicts.Any(v => v.AlwaysFalse) || (contradiction && contradictionColumnConfirmedNotNull);
                     return (true, false, alwaysFalse);
                 }
@@ -123,7 +70,6 @@ public static class PredicateSurvivalAnalyzer
             {
                 var (_, yAlwaysTrue, yAlwaysFalse) = Classify(not.Expression, resolveColumnFacts);
 
-                // NOT(AlwaysTrue) is AlwaysFalse (so also NeverTrue); NOT(AlwaysFalse) is AlwaysTrue.
                 return (yAlwaysTrue, yAlwaysFalse, yAlwaysTrue);
             }
 
@@ -176,12 +122,7 @@ public static class PredicateSurvivalAnalyzer
         _ => false,
     };
 
-    /// <summary>The actual mutating pass: marks <paramref name="node"/>'s own leaves dead outright
-    /// when its OWN classification is fully resolved either way (NeverTrue or AlwaysTrue - both mean
-    /// nothing inside it ever meaningfully gates row selection, regardless of what encloses it),
-    /// otherwise recurses structurally to find a nested opportunity a coarser verdict on this whole
-    /// node couldn't see (e.g. one dead disjunct inside an otherwise-live OR).</summary>
-    private static void MarkDead(BooleanExpression node, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts, HashSet<TSqlFragment> dead)
+private static void MarkDead(BooleanExpression node, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts, HashSet<TSqlFragment> dead)
     {
         var (neverTrue, alwaysTrue, _) = Classify(node, resolveColumnFacts);
         if (neverTrue || alwaysTrue)
@@ -215,18 +156,10 @@ public static class PredicateSurvivalAnalyzer
                 break;
 
             case BooleanNotExpression:
-                // Deliberately does NOT recurse into the operand. A NeverTrue-but-not-AlwaysFalse
-                // sub-expression can still change how Unknown propagates once wrapped in NOT (NOT of
-                // "False for non-null x, Unknown for null x" is "True for non-null x, Unknown for
-                // null x" - not equivalent to just discarding the sub-expression), so a nested
-                // opportunity below a NOT this analyzer didn't already resolve at the NOT node's own
-                // level (via Classify's And/Or/Not composition above) is not safe to act on without
-                // a real negation-normal-form rewrite, which this analyzer does not attempt.
                 break;
 
             default:
-                break; // a leaf neither NeverTrue nor AlwaysTrue on its own: nothing to mark.
-        }
+                break;        }
     }
 
     private static List<BooleanExpression> Flatten(BooleanExpression node, BooleanBinaryExpressionType type)
@@ -254,10 +187,7 @@ public static class PredicateSurvivalAnalyzer
         return result;
     }
 
-    /// <summary>A whole subtree proven dead never contributes a selected row, regardless of what's
-    /// nested inside it (including past a NOT boundary) - so every comparison-shaped fragment
-    /// reachable from here is marked, not just the ones this analyzer's own algebra understands.</summary>
-    private static void MarkAllLeavesDead(BooleanExpression node, HashSet<TSqlFragment> dead)
+private static void MarkAllLeavesDead(BooleanExpression node, HashSet<TSqlFragment> dead)
     {
         switch (node)
         {
@@ -284,8 +214,6 @@ public static class PredicateSurvivalAnalyzer
             && TryGetNumericLiteral(between.ThirdExpression) is { } upper
             && lower > upper)
         {
-            // x BETWEEN 10 AND 5 (lower>upper) is Unknown for a null x, False for every non-null x -
-            // strictly False (AlwaysFalse) only once the column is confirmed never null.
             var alwaysFalse = between.FirstExpression is ColumnReferenceExpression colRef
                 && resolveColumnFacts(colRef).IsNotNull == true;
             return (true, false, alwaysFalse);
@@ -294,11 +222,7 @@ public static class PredicateSurvivalAnalyzer
         return (false, false, false);
     }
 
-    /// <summary>Both sides already constants - <c>1 = 2</c> style. A genuinely separate, cheaper
-    /// case from the column-comparison algebra below: no column, no range, just direct evaluation -
-    /// so a constant-false result is unconditionally <c>AlwaysFalse</c>, never merely
-    /// <c>NeverTrue</c> (there is no column, so no row's value could ever make it Unknown).</summary>
-    private static (bool, bool, bool) ClassifyConstantComparison(BooleanComparisonExpression cmp)
+private static (bool, bool, bool) ClassifyConstantComparison(BooleanComparisonExpression cmp)
     {
         var op = ToCmpOp(cmp.ComparisonType);
         if (op is null)
@@ -348,8 +272,7 @@ public static class PredicateSurvivalAnalyzer
     {
         CmpOp.Eq => string.Equals(a, b, StringComparison.Ordinal),
         CmpOp.Ne => !string.Equals(a, b, StringComparison.Ordinal),
-        _ => null, // ordering between string literals is collation-dependent - not modeled
-    };
+        _ => null,    };
 
     private static CmpOp? ToCmpOp(BooleanComparisonType type) => type switch
     {
@@ -359,8 +282,6 @@ public static class PredicateSurvivalAnalyzer
         BooleanComparisonType.LessThanOrEqualTo or BooleanComparisonType.NotGreaterThan => CmpOp.Le,
         BooleanComparisonType.GreaterThan => CmpOp.Gt,
         BooleanComparisonType.GreaterThanOrEqualTo or BooleanComparisonType.NotLessThan => CmpOp.Ge,
-        // LeftOuterJoin/RightOuterJoin (legacy *=) and IsDistinctFrom/IsNotDistinctFrom have their
-        // own NULL semantics this analyzer does not model - declined, not guessed.
         _ => null,
     };
 
@@ -385,8 +306,6 @@ public static class PredicateSurvivalAnalyzer
         IntegerLiteral lit => ParseDecimal(lit.Value),
         NumericLiteral lit => ParseDecimal(lit.Value),
         MoneyLiteral lit => ParseDecimal(lit.Value),
-        // RealLiteral (float/real, approximate binary representation) deliberately excluded - exact
-        // decimal arithmetic over it would itself be a wrong model of the engine's own comparison.
         UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } unary =>
             TryGetNumericLiteral(unary.Expression) is { } v ? -v : null,
         UnaryExpression { UnaryExpressionType: UnaryExpressionType.Positive } unary =>
@@ -426,20 +345,11 @@ public static class PredicateSurvivalAnalyzer
     }
 
     private static (decimal? Numeric, string? Str) TryGetLiteralValue(ScalarExpression expr) =>
-        // A NULL-literal comparison (x = NULL) has ANSI_NULLS-dependent meaning (UNKNOWN under the
-        // standard setting, IS-NULL-equivalent under the legacy OFF setting) that isn't visible from
-        // the expression alone - declined entirely, never folded either way.
         expr is NullLiteral ? (null, null) : (TryGetNumericLiteral(expr), TryGetStringLiteral(expr));
 
     private static bool HasLiteralValue((decimal? Numeric, string? Str) value) => value.Numeric is not null || value.Str is not null;
 
-    /// <summary>True/<c>ColumnConfirmedNotNull</c>: whether the winning contradiction's own column
-    /// is confirmed NOT NULL - see <see cref="Classify"/>'s doc comment on <c>AlwaysFalse</c> for
-    /// why that distinction matters to a caller wrapping this in NOT. <c>IS NULL AND IS NOT NULL</c>
-    /// needs no such confirmation (both are strictly two-valued, never Unknown, regardless of the
-    /// column's real nullability) so it reports <see langword="true"/> unconditionally; every other
-    /// shape genuinely depends on the column never being null to rule out the Unknown case.</summary>
-    private static (bool Found, bool ColumnConfirmedNotNull) DetectContradiction(
+private static (bool Found, bool ColumnConfirmedNotNull) DetectContradiction(
         IReadOnlyList<BooleanExpression> conjuncts, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
     {
         foreach (var leaves in GroupByColumn(conjuncts).Select(group => group.Value))
@@ -496,7 +406,6 @@ public static class PredicateSurvivalAnalyzer
             var notNullSeen = leaves.Any(c => c.IsNotNull);
             if (nullSeen && notNullSeen)
             {
-                // col IS NULL OR col IS NOT NULL - unconditionally true, neither side is ever UNKNOWN.
                 return true;
             }
 
@@ -563,11 +472,7 @@ public static class PredicateSurvivalAnalyzer
 
     private readonly record struct GroupedLeaf(bool IsNull, bool IsNotNull, LiteralConstraint? Constraint, ColumnReferenceExpression ColumnRef);
 
-    /// <summary>Groups the direct (unnested) members of one AND/OR list by the exact column they
-    /// constrain - keyed on the reference's own textual qualifier, never a resolved table identity,
-    /// so two different aliases of the same self-joined table are never conflated (they read as two
-    /// different keys, which only ever costs a missed conclusion, never a wrong one).</summary>
-    private static Dictionary<ColumnKey, List<GroupedLeaf>> GroupByColumn(IReadOnlyList<BooleanExpression> members)
+private static Dictionary<ColumnKey, List<GroupedLeaf>> GroupByColumn(IReadOnlyList<BooleanExpression> members)
     {
         var groups = new Dictionary<ColumnKey, List<GroupedLeaf>>();
 

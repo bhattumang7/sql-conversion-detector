@@ -3,18 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Oracle-confirms the specific claim <see cref="Predicates.AlwaysEncryptedOrderByFinding"/> rests
-/// on: an ORDER BY clause referencing an Always Encrypted column never compiles, for BOTH
-/// DETERMINISTIC and RANDOMIZED encryption types, from a plain (non-Always-Encrypted-enabled)
-/// connection - the same connection shape a real application's non-AE-aware batch tooling would
-/// use. Asserts the specific engine error (Msg 33277, "Encryption scheme mismatch"), not merely
-/// "an exception was thrown" (test-check.md point 6, "right artifact") - a wrong/unrelated
-/// exception (a connection failure, a syntax error from a typo) must not be mistaken for this
-/// claim being confirmed. The same-run negative control (ORDER BY on the plain, non-encrypted
-/// column succeeds with no exception at all) proves the failure is specific to the encrypted
-/// column, not a property of the connection/session/schema generally (test-check.md point 5).
-/// </summary>
 public sealed class AlwaysEncryptedOrderByOracleTests : OracleTestFixture
 {
     private const int EncryptionSchemeMismatchErrorNumber = 33277;

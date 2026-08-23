@@ -3,13 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Verify.Oracle;
 
-/// <summary>
-/// Roadmap Phase E3: oracle-confirms an <see cref="ExpressionDerivedFinding"/> - previously
-/// zero presence in the corpus verify pipeline at all. Same plan-shape signal
-/// <see cref="Tier1Verifier"/> uses (absence of "Index Seek" anywhere in the plan), for the same
-/// reason: an expression-derived column is a computed value by the time the predicate sees it,
-/// never an implicit conversion, so CONVERT_IMPLICIT is not the right signal here either.
-/// </summary>
 public sealed class ExpressionDerivedVerifier
 {
     private readonly PlanXmlCapture _planXmlCapture;
@@ -32,10 +25,6 @@ public sealed class ExpressionDerivedVerifier
                 "No rendered predicate fragment, or the column came from an inline derived table/CTE rather than a real catalog view/TVF.");
         }
 
-        // Resolve the REAL index name(s) behind every indexed underlying base column, so the
-        // plan-shape check below can be scoped to exactly those indexes rather than asking "is
-        // there an Index Seek anywhere in the whole plan" - a plan touching an unrelated indexed
-        // table elsewhere would otherwise flip an unrelated true finding to NotConfirmed.
         var indexNames = new List<string>();
         foreach (var baseColumn in finding.UnderlyingBaseColumns.Where(bc => bc.Indexed))
         {

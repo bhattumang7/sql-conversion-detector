@@ -2,7 +2,6 @@ using SilentScan.Core.Catalog;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>Catalog-only pass, same shape as <see cref="UntrustedConstraintScanner"/> - every FK carrying a non-NoAction delete/update action is flagged once per constraint, regardless of whether any scanned query touches the parent table.</summary>
 public static class CascadingForeignKeyScanner
 {
     public static IReadOnlyList<CascadingForeignKeyFinding> Scan(DatabaseCatalog catalog)

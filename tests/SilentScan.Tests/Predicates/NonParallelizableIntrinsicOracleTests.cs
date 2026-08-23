@@ -3,16 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Forced-serial construct inventory" - oracle-confirms the
-/// general mechanism once (not per finding): each of the nine intrinsic functions/globals in
-/// <c>ForcedSerialScanner</c>'s confirmed list forces a query's plan serial when referenced inside
-/// a query with a real FROM clause
-/// (<c>NonParallelPlanReason="NonParallelizableIntrinsicFunction"</c>). Several commonly-cited
-/// "always serial" intrinsics (<c>@@ROWCOUNT</c>, <c>SCOPE_IDENTITY()</c>) are directly confirmed
-/// NOT to trigger this, proving the scanner's own exclusion of them is grounded in real behavior,
-/// not a guess either way.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class NonParallelizableIntrinsicOracleTests : OracleTestFixture
 {

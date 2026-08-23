@@ -3,12 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second OSS/commercial sweep": TRUNCATE TABLE inside a TRY block
-/// whose CATCH swallows the error. TRY with no matching CATCH is a hard parse error (Msg 102,
-/// oracle-confirmed) - TRY/CATCH are paired grammar, so every fixture here is necessarily a real,
-/// parseable TRY/CATCH pair.
-/// </summary>
 public sealed class TruncateSwallowedScannerTests
 {
     private static IReadOnlyList<TruncateSwallowedFinding> Scan(string sql)

@@ -3,12 +3,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Lineage-metric findings" - "Multi-referenced CTE".
-/// Syntax-only, no catalog/lineage dependency - a standalone scanner since counting references to
-/// a WITH clause's own declared names across sibling AST regions (the main query body, and every
-/// OTHER CTE's own body) is a different traversal shape than any existing per-comparison walk.
-/// </summary>
 public static class MultiReferencedCteScanner
 {
     public static IReadOnlyList<MultiReferencedCteFinding> Scan(SqlParseResult parseResult)

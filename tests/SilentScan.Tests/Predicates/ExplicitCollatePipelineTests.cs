@@ -6,31 +6,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Regression coverage for the explicit-COLLATE sargability rules, all oracle-verified directly
-/// against Docker SQL Server before implementation (compile-only SHOWPLAN_XML probes, per
-/// CLAUDE.md's verification discipline) - and now oracle-confirmed inline per test too, so the
-/// pre-implementation spike can't silently drift from what the shipped code actually classifies:
-///
-/// Rule 1 (<c>col COLLATE X</c>, X differs from the column's own real collation): compiles to
-/// an explicit CONVERT applied to the column itself - structurally identical to
-/// <c>CAST(col AS ...)</c>, reported through the same ExpressionDerivedFinding channel
-/// (<see cref="ScalarExpressionResolver"/>/<c>ApplyExplicitCollate</c>). When X matches the
-/// column's real collation, the engine elides the CONVERT entirely (a single clean Index Seek,
-/// no CONVERT anywhere) - correctly not reported.
-///
-/// Rule 2 (<c>col = literal COLLATE X</c>, X differs from the column's own real collation):
-/// an explicit COLLATE clause has the highest T-SQL coercibility precedence, so the COLUMN
-/// (not the literal) gets CONVERT_IMPLICIT even though nothing about the column's own syntax
-/// changed - ScanForced, never RangeSeek (the dynamic-range-seek optimization is cross-
-/// category-only, never observed for a same-category collation mismatch in any probed shape).
-/// Deliberately narrow: this only fires for a genuine literal on the other side
-/// (<see cref="Rules.VerdictClassifier"/>'s otherIsLiteral parameter) - a real column or a
-/// CAST/CONVERT/function result inheriting a column's collation carries "implicit"
-/// coercibility instead (same tier as a real column), which risks a Msg 468 compile-error
-/// conflict rather than a silent convert; that distinction was not oracle-verified here and is
-/// left Unknown rather than guessed.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ExplicitCollatePipelineTests : OracleTestFixture
 {
@@ -94,19 +69,6 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
         Assert.True(underlying.Indexed);
         Assert.Empty(report.TypedFindings);
 
-        // ExpressionDerivedFinding carries no Verdict of its own to feed
-        // PipelineOracleVerification's TypedPredicateFinding-shaped verifier - the claim under
-        // test is narrower and syntactic: an explicit COLLATE clause on the column produces a
-        // CONVERT applied to Code itself, exactly like CAST(Code AS ...) would. Confirm that
-        // directly against the plan XML rather than forcing this through the typed-finding path.
-        //
-        // This is a plain (explicit) CONVERT, not a CONVERT_IMPLICIT - oracle-captured plan XML
-        // shows <Convert ... Implicit="0"> wrapping the Code ColumnReference here (the literal
-        // side gets Implicit="1" instead, harmlessly, since it has no bearing on seekability).
-        // ConvertImplicitDetector.FindColumnConversions only matches Implicit="1", by design (it
-        // exists to confirm CONVERT_IMPLICIT-driven ScanForced/RangeSeek verdicts) - it would
-        // wrongly report nothing for this genuinely-confirmed-but-differently-shaped case, so
-        // this checks the Convert/ColumnReference relationship directly instead.
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(
             DatabaseName, "SELECT 1 FROM dbo.Customers WHERE Code COLLATE Latin1_General_CI_AS = 'x';");
         Assert.Contains(
@@ -128,9 +90,6 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
         Assert.Equal(1, summary.SeekPreservedCount);
         Assert.Empty(report.TypedFindings);
 
-        // The claim is that the COLLATE clause matching the column's real collation makes the
-        // engine elide the CONVERT entirely - confirm there is genuinely no column-side
-        // CONVERT_IMPLICIT anywhere in the plan, not just that our own classifier says so.
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
         var conversions = SilentScan.Verify.Oracle.ConvertImplicitDetector.FindColumnConversions(planXml);
         Assert.DoesNotContain(conversions, c => string.Equals(c.Column, "Code", StringComparison.OrdinalIgnoreCase));
@@ -163,16 +122,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
         Assert.DoesNotContain(conversions, c => string.Equals(c.Column, "Code", StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>
-    /// Parsed-only, via CatalogBuilder directly - not EngineAuthoritativeScan: every scenario
-    /// below is oracle-verified to be a genuine SQL Server compile failure (Msg 468, "Cannot
-    /// resolve the collation conflict") - deploying it would abort at CREATE TABLE/statement
-    /// compile time, not produce a plan this pass could ever analyze in the first place. These
-    /// tests are exercising THIS PASS's own static prediction of that compile failure from
-    /// parsed text alone, independent of whether the text could ever actually run -
-    /// CatalogBuilder is still a live, used component (DatabaseCatalog.MergeFileModeExtras).
-    /// </summary>
-    private static ScanReport ScanParsedOnly(string sql)
+private static ScanReport ScanParsedOnly(string sql)
     {
         var parseResult = SqlScriptParser.ParseText("collate.sql", sql);
         Assert.Empty(parseResult.Errors);
@@ -183,14 +133,6 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     [Fact]
     public void ColumnVsColumnDifferingCollations_NoExplicitCollateAnywhere_ReportsCollationConflict()
     {
-        // Two real columns with genuinely different native collations and no explicit COLLATE
-        // clause anywhere: real SQL Server refuses to even compile this (Msg 468, "Cannot
-        // resolve the collation conflict") - not a seek-loss verdict at all, so this is a
-        // dedicated CollationConflictFinding rather than a routine Unknown TypedPredicateFinding.
-        // A statement that fails to compile has no plan XML to capture, so there is nothing for
-        // the plan-based oracle to confirm here - the "compile fails" claim itself was the thing
-        // oracle-verified during the original spike (see class doc), not something a per-test
-        // SHOWPLAN_XML probe can re-check (SHOWPLAN_XML compilation would fail identically).
         var report = ScanParsedOnly("""
             CREATE TABLE dbo.LocalCustomers (
                 Email varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
@@ -217,15 +159,6 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     [Fact]
     public void ConvertResultInheritingColumnCollation_VsDifferentlyCollatedColumn_IsOperandClash()
     {
-        // A CAST/CONVERT result with no COLLATE clause of its own inherits its source column's
-        // collation AND that column's coercibility tier ("implicit", per official T-SQL rules -
-        // the same tier a real column carries). Oracle-verified directly (Docker SQL Server):
-        // this exact shape does not compile at all (Msg 468, "Cannot resolve the collation
-        // conflict between SQL_Latin1_General_CP1_CI_AS and Latin1_General_CI_AS") - identically
-        // to two real columns with differing collations and no CONVERT anywhere. This used to be
-        // reported as Unknown (an admitted, unverified guess); it is now a confirmed compile
-        // failure. There is no plan XML for a statement that fails to compile, so nothing for a
-        // per-test SHOWPLAN_XML probe to confirm beyond the sqlcmd compile failure itself.
         var report = ScanParsedOnly("""
             CREATE TABLE dbo.T (Code nvarchar(20) COLLATE Latin1_General_CI_AS NOT NULL, INDEX IX_Code (Code));
             GO
@@ -241,13 +174,6 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     [Fact]
     public void CrossCategoryColumnVsColumn_DifferingCollations_ReportsCollationConflict()
     {
-        // The gap this fix closes: CHAR vs VARCHAR is a different type CATEGORY from each other,
-        // but a genuine collation mismatch does not care about category - oracle-verified
-        // directly (Docker SQL Server): CHAR column vs VARCHAR column with differing collations
-        // raises Msg 468 identically to two same-category columns. Before this fix,
-        // TryRecordCollationConflict's category-equality gate let this fall through to the
-        // type-pair matrix, which reports Char|VarChar's same-collation cell (SeekPreserved) -
-        // a compile error reported as clean.
         var report = ScanParsedOnly("""
             CREATE TABLE dbo.CharSide (Code char(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_Code (Code));
             GO

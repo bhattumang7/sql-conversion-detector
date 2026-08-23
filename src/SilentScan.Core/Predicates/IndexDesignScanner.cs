@@ -5,90 +5,29 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// Catalog-only pass for all fourteen <see cref="IndexDesignFindingKind"/> members - see
-/// <see cref="IndexDesignFinding"/>'s own doc comment for the full scope/precision story. Walks
-/// <see cref="DatabaseCatalog.Tables"/>/<see cref="DatabaseCatalog.ForeignKeys"/> once, no AST, no
-/// query site involved; live-mode only because <see cref="CatalogIndex.IsClustered"/>/
-/// <see cref="CatalogIndex.IsHypothetical"/> are live-only (see their own doc comments) - never
-/// invoked from file-mode <see cref="Reporting.ScanReportBuilder"/>, only from
-/// <c>SilentScan.Live.LiveScanRunner</c> after a real catalog read.
-/// </summary>
 public static class IndexDesignScanner
 {
-    /// <summary>Calibrated against the real distribution of clustered indexes in this project's
-    /// own local production-shaped test database (docs/detection-checklist.md carries the measured
-    /// numbers): of 681 real clustered indexes, only 7 (~1%) exceed 3 key columns - a genuinely
-    /// unusual shape worth flagging, not a routine one.</summary>
-    public const int WideClusteredKeyMaxColumns = 3;
+public const int WideClusteredKeyMaxColumns = 3;
 
-    /// <summary>Placeholder used in every finding message when an index has no name at all
-    /// (a system-generated or otherwise unnamed constraint index) - centralized as a constant
-    /// since this exact literal recurs across nearly every finding message in this scanner.</summary>
-    private const string UnnamedIndexPlaceholder = "<unnamed>";
+private const string UnnamedIndexPlaceholder = "<unnamed>";
 
-    /// <summary>Same calibration pass as <see cref="WideClusteredKeyMaxColumns"/>: of 681 real
-    /// clustered indexes, the average key width was ~15.3 bytes (many single-column
-    /// <c>uniqueidentifier</c> keys sit exactly at 16) and 36 (~5%) exceed 16 bytes - kept at the
-    /// checklist's original proposed threshold since the measured distribution shows it firing on
-    /// a real, non-trivial minority rather than either the routine case or almost nothing.</summary>
-    public const int WideClusteredKeyMaxBytes = 16;
+public const int WideClusteredKeyMaxBytes = 16;
 
-    /// <summary>
-    /// Calibrated against the real distribution of active nonclustered indexes per table in this
-    /// project's own local production-shaped test database (docs/detection-checklist.md carries
-    /// the measured numbers): of 328 tables carrying at least one active nonclustered index, only
-    /// 5 (~1.5%) carry 7 or more - a genuinely unusual shape, not the routine case.
-    /// </summary>
-    public const int ManyNonclusteredIndexesThreshold = 7;
+public const int ManyNonclusteredIndexesThreshold = 7;
 
-    /// <summary>
-    /// The checklist's own stated threshold, kept as proposed after calibration: of 1,227 real
-    /// indexes in the local test database, only 1 (~0.08%) carries 7 or more key columns - fires
-    /// on a genuine outlier, not a routine shape.
-    /// </summary>
-    public const int ManyKeyColumnsThreshold = 7;
+public const int ManyKeyColumnsThreshold = 7;
 
-    /// <summary>The checklist's own stated threshold for a wide table's column count.</summary>
-    public const int WideTableMinColumns = 35;
+public const int WideTableMinColumns = 35;
 
-    /// <summary>The checklist's own stated threshold for a wide table's estimated non-LOB row width.</summary>
-    public const int WideTableMaxNonLobBytes = 2000;
+public const int WideTableMaxNonLobBytes = 2000;
 
-    /// <summary>
-    /// Shared floor for both ratio-based table-shape checks (<see cref="IndexDesignFindingKind.HighNullableColumnRatio"/>/
-    /// <see cref="IndexDesignFindingKind.HighStringColumnRatio"/>) - a 2-column mapping table where
-    /// both columns happen to be nullable/string-typed trivially hits any ratio threshold without
-    /// meaning anything; calibration against the local test database used this same floor.
-    /// </summary>
-    public const int RatioChecksMinColumns = 5;
+public const int RatioChecksMinColumns = 5;
 
-    /// <summary>
-    /// Calibrated against the local test database (docs/detection-checklist.md carries the measured
-    /// numbers): of 835 real tables with at least <see cref="RatioChecksMinColumns"/> columns, 33
-    /// (~3.9%) have 80%+ of their columns nullable - a real minority, not the routine case.
-    /// </summary>
-    public const double HighNullableColumnRatioThreshold = 0.8;
+public const double HighNullableColumnRatioThreshold = 0.8;
 
-    /// <summary>
-    /// Same calibration pass as <see cref="HighNullableColumnRatioThreshold"/>: 9 of 835 tables
-    /// (~1.1%) have 80%+ of their columns string-typed.
-    /// </summary>
-    public const double HighStringColumnRatioThreshold = 0.8;
+public const double HighStringColumnRatioThreshold = 0.8;
 
-    /// <summary>
-    /// docs/detection-checklist.md full-archive practitioner sweep §E "Columnstore index present on
-    /// a table that is also a live DML target of transactional code" - <paramref name="dmlTargetTables"/>
-    /// is the set of table qualified names (ordinal-ignore-case) this scan run found a direct
-    /// INSERT/UPDATE/DELETE/MERGE target somewhere in the scanned corpus (computed once by the
-    /// caller from the same parsed modules the rest of the pipeline already walks, via
-    /// <see cref="DmlTargetTableScanner.Scan"/> - never by this catalog-only scanner itself, which
-    /// has no AST access of its own). <see langword="null"/> (the default) means the caller never
-    /// computed this set at all - e.g. file mode, which never invokes this scanner in the first
-    /// place - and <see cref="IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable"/> is
-    /// correctly never reported rather than treating "no data" as "no DML targets".
-    /// </summary>
-    public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IReadOnlySet<string>? dmlTargetTables = null)
+public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IReadOnlySet<string>? dmlTargetTables = null)
     {
         var defaultTextByColumn = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var expression in catalog.SchemaExpressions)
@@ -106,9 +45,6 @@ public static class IndexDesignScanner
 
         foreach (var table in catalog.Tables)
         {
-            // Only a real base table has physical heap/clustered storage at all - a view, temp
-            // table, table variable, table type, or CLR TVF's return shape either has no storage
-            // of its own or (temp/table-variable) is out of this catalog-only pass's scope.
             if (table.Kind != CatalogTableKind.Table)
             {
                 continue;
@@ -144,9 +80,6 @@ public static class IndexDesignScanner
 
     private static void ScanHeapFindings(CatalogTable table, List<IndexDesignFinding> findings)
     {
-        // A memory-optimized table has no on-disk heap/RID storage at all - the engine requires
-        // at least one HASH or NONCLUSTERED (BW-tree) index and never produces a type=1 CLUSTERED
-        // row for one, so "no clustered index" would misfire as "heap" for every such table.
         if (table.IsMemoryOptimized)
         {
             return;
@@ -161,17 +94,12 @@ public static class IndexDesignScanner
         var activeNonclustered = table.Indexes.Where(i => !i.IsDisabled).ToList();
         if (activeNonclustered.Count == 0)
         {
-            // A heap with ZERO indexes at all - a staging/bulk-load table, often a deliberate
-            // design (docs/detection-checklist.md's own scoping note). Not this finding's target.
             return;
         }
 
         var nonclusteredPrimaryKey = activeNonclustered.FirstOrDefault(i => i.Kind == CatalogIndexKind.PrimaryKey);
         if (nonclusteredPrimaryKey is not null)
         {
-            // The sharper sibling subsumes the general case - the PK's own index IS one of the
-            // "nonclustered indexes present" that would otherwise also qualify, so only the
-            // sharper finding fires, never both for the same underlying cause.
             findings.Add(new IndexDesignFinding(
                 IndexDesignFindingKind.HeapWithNonclusteredPrimaryKey,
                 table.QualifiedName,
@@ -195,9 +123,6 @@ public static class IndexDesignScanner
     private static void ScanClusteringKeyQuality(
         CatalogTable table, Dictionary<string, string> defaultTextByColumn, List<IndexDesignFinding> findings)
     {
-        // The genuine rowstore clustering KEY - never a clustered COLUMNSTORE index, which has no
-        // traditional key/uniquifier concept at all (see CatalogIndex.IsClustered's own doc
-        // comment on why IsClustered alone is the wrong guard here).
         var clusteredIndex = table.Indexes.FirstOrDefault(i => i.IsClustered && !i.IsColumnstore);
         if (clusteredIndex is null || clusteredIndex.KeyColumns.Count == 0)
         {
@@ -236,10 +161,6 @@ public static class IndexDesignScanner
             var columnBytes = column?.Type is { } type ? EstimateColumnKeyBytes(type) : null;
             if (columnBytes is null)
             {
-                // Never guess: if any key column's byte width can't be resolved, the byte-based
-                // half of this check is dropped entirely rather than reporting a lower-bound
-                // total that could understate (never overstate, since it's a lower bound - but a
-                // silently partial number is still not "the total key width" this finding claims).
                 totalBytes = null;
                 break;
             }
@@ -289,17 +210,7 @@ public static class IndexDesignScanner
             table.SourceLine));
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md §A "Duplicate and prefix-subsumed indexes". Only active
-    /// (non-disabled), unfiltered, non-columnstore, non-empty-key indexes are ever compared - a
-    /// filtered index's own predicate text isn't read by this catalog (only <see
-    /// cref="CatalogIndex.IsFiltered"/> is), so two filtered indexes' definitions can never be
-    /// confirmed equal here and are excluded rather than guessed about; a columnstore index has no
-    /// ordered B-tree key the same way. <see cref="CatalogIndex.IsUnique"/> and
-    /// <see cref="CatalogIndex.Kind"/> must both match too - the checklist's own precision guard,
-    /// "a unique index and a non-unique index on the same keys are not the same object".
-    /// </summary>
-    private static void ScanDuplicateAndSubsumedIndexes(CatalogTable table, List<IndexDesignFinding> findings)
+private static void ScanDuplicateAndSubsumedIndexes(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var candidates = table.Indexes
             .Where(i => !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0)
@@ -337,9 +248,6 @@ public static class IndexDesignScanner
             return;
         }
 
-        // Whichever of the pair has the SHORTER key list is the candidate for being subsumed
-        // by the longer one - order the comparison so it only fires once per pair, in the
-        // "shorter is subsumed by longer" direction.
         var (shorter, longer) = a.KeyColumns.Count < b.KeyColumns.Count ? (a, b) : (b, a);
         if (IsProperPrefix(shorter.KeyColumns, longer.KeyColumns)
             && shorter.IncludedColumns.All(c => longer.IncludedColumns.Contains(c, StringComparer.OrdinalIgnoreCase)))
@@ -357,8 +265,7 @@ public static class IndexDesignScanner
     private static bool KeyColumnsEqual(IReadOnlyList<string> a, IReadOnlyList<string> b) =>
         a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>True iff <paramref name="shorter"/> is a non-empty, strictly shorter, ordered prefix of <paramref name="longer"/>.</summary>
-    private static bool IsProperPrefix(IReadOnlyList<string> shorter, IReadOnlyList<string> longer)
+private static bool IsProperPrefix(IReadOnlyList<string> shorter, IReadOnlyList<string> longer)
     {
         if (shorter.Count == 0 || shorter.Count >= longer.Count)
         {
@@ -376,14 +283,7 @@ public static class IndexDesignScanner
         return true;
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md §A "Disabled and hypothetical indexes". Checks
-    /// <see cref="CatalogIndex.IsHypothetical"/> first - Microsoft's own documentation states a
-    /// hypothetical index always carries <see cref="CatalogIndex.IsDisabled"/> = true too, so
-    /// checking disabled-ness first would misreport every hypothetical index as a plain disabled
-    /// one instead.
-    /// </summary>
-    private static void ScanDisabledAndHypotheticalIndexes(CatalogTable table, List<IndexDesignFinding> findings)
+private static void ScanDisabledAndHypotheticalIndexes(CatalogTable table, List<IndexDesignFinding> findings)
     {
         foreach (var index in table.Indexes)
         {
@@ -410,8 +310,7 @@ public static class IndexDesignScanner
         }
     }
 
-    /// <summary>docs/detection-checklist.md §A "Over-indexing": many nonclustered indexes on one table, and any single index with too many key columns.</summary>
-    private static void ScanOverIndexing(CatalogTable table, List<IndexDesignFinding> findings)
+private static void ScanOverIndexing(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var activeNonclustered = table.Indexes.Where(i => !i.IsClustered && !i.IsDisabled).ToList();
         if (activeNonclustered.Count >= ManyNonclusteredIndexesThreshold)
@@ -426,9 +325,6 @@ public static class IndexDesignScanner
                 FindingConfidence.Medium));
         }
 
-        // Never re-reported for the table's own clustered key - WideClusteredKey already covers
-        // that object at its own, tighter 3-column threshold; double-reporting the same physical
-        // index under two kinds would be redundant noise, not two independent findings.
         foreach (var index in table.Indexes)
         {
             if (!index.IsClustered && !index.IsDisabled && !index.IsColumnstore
@@ -446,14 +342,7 @@ public static class IndexDesignScanner
         }
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md §A, the three "lower-precision, listed for completeness"
-    /// table-shape signals: wide table, high nullable-column ratio, high string-column ratio. All
-    /// three require at least <see cref="RatioChecksMinColumns"/> columns before either ratio
-    /// check is even evaluated, so a trivial 2-column table can never trip a ratio threshold
-    /// merely by chance.
-    /// </summary>
-    private static void ScanTableShape(CatalogTable table, List<IndexDesignFinding> findings)
+private static void ScanTableShape(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var columnCount = table.Columns.Count;
         if (columnCount == 0)
@@ -464,10 +353,6 @@ public static class IndexDesignScanner
         var nonLobBytes = 0;
         foreach (var column in table.Columns)
         {
-            // A column whose type never resolved (LOB/MAX, sql_variant, or an unmapped
-            // user-defined type) contributes nothing to this sum rather than a guessed byte count -
-            // the reported total is always a safe lower bound, never an overstatement, so it is
-            // still safe to fire once the resolved portion alone already clears the threshold.
             nonLobBytes += column.Type is { } type ? EstimateColumnKeyBytes(type) ?? 0 : 0;
         }
 
@@ -517,20 +402,7 @@ public static class IndexDesignScanner
         }
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md §A "Unindexed foreign key columns". Groups the flat, per-column-
-    /// pair <see cref="DatabaseCatalog.ForeignKeys"/> list into one entry per real constraint (the
-    /// same grouping <see cref="PartialCompositeForeignKeyJoinScanner.BuildCompositeForeignKeys"/>
-    /// uses for composite FKs, generalized here to single-column FKs too, since a lone unindexed FK
-    /// column is exactly as real a finding as a composite one). A constraint fires when NO active,
-    /// unfiltered, non-columnstore index on the child (parent-side) table has this exact column set
-    /// as its own leading key-column prefix - a composite-aware, order-tolerant-on-the-FK-side
-    /// comparison (the underlying read order of <see cref="ForeignKeyRelationship"/> rows across one
-    /// constraint is not guaranteed, so this deliberately compares column SETS rather than assuming
-    /// a specific pair order), the same shape <see cref="NonUniqueUpdateSourceScanner"/>'s own
-    /// uniqueness check already uses elsewhere in this codebase.
-    /// </summary>
-    private static void ScanUnindexedForeignKeys(DatabaseCatalog catalog, List<IndexDesignFinding> findings)
+private static void ScanUnindexedForeignKeys(DatabaseCatalog catalog, List<IndexDesignFinding> findings)
     {
         var constraints = catalog.ForeignKeys
             .GroupBy(fk => (fk.ConstraintName, fk.ParentTableQualifiedName), fk => fk, TupleComparer.Instance);
@@ -540,8 +412,6 @@ public static class IndexDesignScanner
             var parentTable = catalog.Find(group.Key.ParentTableQualifiedName);
             if (parentTable is null)
             {
-                // The FK's own parent table isn't in this catalog (an unresolvable cross-database
-                // reference, or a table this scan otherwise skipped) - never guess at its indexes.
                 continue;
             }
 
@@ -568,8 +438,7 @@ public static class IndexDesignScanner
         }
     }
 
-    /// <summary>Equality comparer for the <c>(ConstraintName, ParentTableQualifiedName)</c> GroupBy key above - ordinal-ignore-case on both components, matching every other qualified-name comparison in this codebase.</summary>
-    private sealed class TupleComparer : IEqualityComparer<(string ConstraintName, string ParentTableQualifiedName)>
+private sealed class TupleComparer : IEqualityComparer<(string ConstraintName, string ParentTableQualifiedName)>
     {
         public static readonly TupleComparer Instance = new();
 
@@ -583,19 +452,7 @@ public static class IndexDesignScanner
                 obj.ParentTableQualifiedName.ToUpperInvariant());
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md §A "Filtered index whose filter columns are absent from its own
-    /// key + include list". Only evaluated for an index with <see cref="CatalogIndex.IsFiltered"/>
-    /// true and a non-null <see cref="CatalogIndex.FilterDefinition"/> (live-only - see that
-    /// field's own doc comment). The filter text is reparsed as a WHERE search condition through
-    /// the same throwaway-wrapper-statement technique <see cref="SchemaDependencyScanner"/> already
-    /// uses for a CHECK constraint's own definition text - a filter's stored text is always a valid
-    /// boolean predicate on its own (the engine itself stored it that way), so wrapping it under
-    /// <c>WHERE</c> is always the right shape, unlike a computed-column/DEFAULT definition which
-    /// wraps as a bare SELECT-list scalar expression instead. A filter this pass cannot parse is
-    /// left unanalyzed entirely - never guessed at.
-    /// </summary>
-    private static void ScanFilteredIndexColumnCoverage(CatalogTable table, List<IndexDesignFinding> findings)
+private static void ScanFilteredIndexColumnCoverage(CatalogTable table, List<IndexDesignFinding> findings)
     {
         foreach (var index in table.Indexes)
         {
@@ -629,13 +486,7 @@ public static class IndexDesignScanner
         }
     }
 
-    /// <summary>
-    /// Reparses a <c>sys.indexes.filter_definition</c> string (e.g. <c>"([IsActive]=(1))"</c>) as a
-    /// WHERE search condition and returns the distinct column names it references, or
-    /// <see langword="null"/> if the text does not parse cleanly as one - the same "never guess"
-    /// discipline every other reparse in this codebase follows.
-    /// </summary>
-    private static List<string>? TryExtractFilterColumnNames(string filterDefinition)
+private static List<string>? TryExtractFilterColumnNames(string filterDefinition)
     {
         var result = SqlScriptParser.ParseText("filter-definition.sql", $"SELECT 1 WHERE {filterDefinition};");
         if (result.HasErrors
@@ -649,20 +500,7 @@ public static class IndexDesignScanner
         return [.. collector.Names];
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md full-archive practitioner sweep §E, "Filtered index whose
-    /// predicate compares against a variable/parameter, not a literal" - reused by
-    /// <see cref="TypedPredicateExtractor"/> (see <see cref="FilteredIndexParameterMismatchFinding"/>'s
-    /// own doc comment for why that finding lives in its own type rather than here). The optimizer
-    /// can only match a filtered index against a query filtering the SAME column with a LITERAL
-    /// restating this exact filter, so only the simplest, unambiguous shape is extracted: a single
-    /// <c>Column = Literal</c> equality (the shape <c>sys.indexes.filter_definition</c> renders a
-    /// plain <c>WHERE Column = 'Value'</c> filter as, confirmed directly against the standing Docker
-    /// oracle) - <see langword="null"/> for anything else (a multi-predicate filter, a non-equality
-    /// operator, a filter against an expression rather than a bare column) rather than guessing at a
-    /// looser shape this pass hasn't verified the optimizer's own matching rule for.
-    /// </summary>
-    public static (string ColumnName, string LiteralText)? TryExtractSimpleLiteralEqualityFilter(string filterDefinition)
+public static (string ColumnName, string LiteralText)? TryExtractSimpleLiteralEqualityFilter(string filterDefinition)
     {
         var result = SqlScriptParser.ParseText("filter-definition.sql", $"SELECT 1 WHERE {filterDefinition};");
         if (result.HasErrors
@@ -671,10 +509,6 @@ public static class IndexDesignScanner
             return null;
         }
 
-        // sys.indexes.filter_definition always wraps its own predicate in parentheses (e.g.
-        // "([Status]='Active')", confirmed directly against the standing Docker oracle) - strip
-        // any number of nested BooleanParenthesisExpression layers before matching the real shape
-        // underneath, the same way a hand-typed filter with extra parens would still need to.
         var condition = searchCondition;
         while (condition is BooleanParenthesisExpression parenthesized)
         {
@@ -710,16 +544,7 @@ public static class IndexDesignScanner
         }
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md §A "Deprecated LOB column types in the schema" - a plain
-    /// column-type walk, no AST, mirroring <see cref="MaxTypedColumnScanner"/>'s own shape. Splits
-    /// the checklist's single item into two kinds because they are not the same claim: <c>text</c>/
-    /// <c>ntext</c>/<c>image</c> are a genuine functional deprecation (<see
-    /// cref="IndexDesignFindingKind.DeprecatedLobColumnType"/>), <c>timestamp</c> vs. <c>rowversion</c>
-    /// is a naming-only recommendation over the identical underlying type (<see
-    /// cref="IndexDesignFindingKind.TimestampColumnNaming"/>) - see each kind's own doc comment.
-    /// </summary>
-    private static void ScanColumnTypeSignals(CatalogTable table, List<IndexDesignFinding> findings)
+private static void ScanColumnTypeSignals(CatalogTable table, List<IndexDesignFinding> findings)
     {
         foreach (var column in table.Columns)
         {
@@ -749,14 +574,7 @@ public static class IndexDesignScanner
         }
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md §A "float/real as an index key column" - the catalog-only half;
-    /// see <see cref="FloatEqualityFinding"/> for the AST-level, sharper sibling (an actual equality
-    /// predicate against such a column). Fires once per active (non-disabled) index that carries at
-    /// least one float/real key column, listing every such column - not once per column, since the
-    /// index itself is the unit a reader would act on (rebuild it on a different/additional key).
-    /// </summary>
-    private static void ScanFloatOrRealIndexKeyColumns(CatalogTable table, List<IndexDesignFinding> findings)
+private static void ScanFloatOrRealIndexKeyColumns(CatalogTable table, List<IndexDesignFinding> findings)
     {
         foreach (var index in table.Indexes)
         {
@@ -784,12 +602,7 @@ public static class IndexDesignScanner
         }
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md "DBA-script family sweep" §A "Statistics-object flags",
-    /// <c>NO_RECOMPUTE</c> half - see <see cref="IndexDesignFindingKind.NoRecomputeStatistics"/>'s
-    /// own doc comment for why the partitioned-incremental-statistics half is not shipped here.
-    /// </summary>
-    private static void ScanNoRecomputeStatistics(CatalogTable table, List<IndexDesignFinding> findings) =>
+private static void ScanNoRecomputeStatistics(CatalogTable table, List<IndexDesignFinding> findings) =>
         findings.AddRange(table.EffectiveStatistics.Where(s => s.NoRecompute).Select(stat => new IndexDesignFinding(
             IndexDesignFindingKind.NoRecomputeStatistics,
             table.QualifiedName,
@@ -799,34 +612,11 @@ public static class IndexDesignScanner
             table.SourceLine,
             Confidence: FindingConfidence.Medium)));
 
-    /// <summary>
-    /// Confirmed directly against the standing Docker oracle (2026-08-18): the engine's own printed
-    /// warning at CREATE INDEX time states this exact number, verbatim, for a clustered index /
-    /// PRIMARY KEY / UNIQUE constraint's own key: "The maximum key length for a clustered index is
-    /// 900 bytes."
-    /// </summary>
-    public const int ClusteredKeyLimitBytes = 900;
+public const int ClusteredKeyLimitBytes = 900;
 
-    /// <summary>
-    /// Same oracle confirmation as <see cref="ClusteredKeyLimitBytes"/>, for a NONCLUSTERED index's
-    /// own key: "The maximum key length for a nonclustered index is 1700 bytes." - a materially
-    /// different, larger ceiling than the clustered case, so <see
-    /// cref="ScanVariableLengthKeyColumnWidth"/> checks <see cref="Catalog.CatalogIndex.IsClustered"/>
-    /// per index rather than assuming one flat number for every index type.
-    /// </summary>
-    public const int NonclusteredKeyLimitBytes = 1700;
+public const int NonclusteredKeyLimitBytes = 1700;
 
-    /// <summary>
-    /// docs/detection-checklist.md full-archive practitioner sweep §E, "Column too wide to ever be
-    /// an index key" - see <see cref="IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit"/>'s
-    /// own doc comment for the full oracle-verified correction (fixed-length excluded as an
-    /// already-hard-DDL-error case; variable-length only, since CREATE INDEX there only warns and
-    /// the real failure is deferred to a future INSERT/UPDATE). Only active (non-disabled) indexes
-    /// are checked - a disabled index already has its own, separate finding
-    /// (<see cref="IndexDesignFindingKind.DisabledIndex"/>) and cannot fail an INSERT today since it
-    /// serves no query and enforces nothing.
-    /// </summary>
-    private static void ScanVariableLengthKeyColumnWidth(CatalogTable table, List<IndexDesignFinding> findings)
+private static void ScanVariableLengthKeyColumnWidth(CatalogTable table, List<IndexDesignFinding> findings)
     {
         foreach (var index in table.Indexes)
         {
@@ -864,15 +654,7 @@ public static class IndexDesignScanner
         }
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md second full-archive practitioner sweep §G, "Indexes sharing an
-    /// identical key-column list and sort direction but with different, non-overlapping INCLUDE
-    /// sets" - see <see cref="IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly"/>'s own
-    /// doc comment for the precision guards. Candidates are the same active/unfiltered/non-
-    /// columnstore/non-empty-key population <see cref="ScanDuplicateAndSubsumedIndexes"/> already
-    /// uses.
-    /// </summary>
-    private static void ScanMergeableIncludeOnlyIndexes(CatalogTable table, List<IndexDesignFinding> findings)
+private static void ScanMergeableIncludeOnlyIndexes(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var candidates = table.Indexes
             .Where(i => !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0 && i.KeyColumnIsDescending.Count == i.KeyColumns.Count)
@@ -902,10 +684,6 @@ public static class IndexDesignScanner
         var aIncluded = new HashSet<string>(a.IncludedColumns, StringComparer.OrdinalIgnoreCase);
         var bIncluded = new HashSet<string>(b.IncludedColumns, StringComparer.OrdinalIgnoreCase);
 
-        // Identical INCLUDE sets is DuplicateIndex's own territory, not this kind's - and a
-        // subset relationship either way means one index is already SubsumedIndex-eligible
-        // (same key list counts as a trivial "prefix" of itself) - only a genuine
-        // non-overlapping divergence on BOTH sides belongs here.
         if (aIncluded.SetEquals(bIncluded) || aIncluded.IsSubsetOf(bIncluded) || bIncluded.IsSubsetOf(aIncluded))
         {
             return;
@@ -921,13 +699,7 @@ public static class IndexDesignScanner
             table.SourceLine));
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md full-archive practitioner sweep §E, "Columnstore index present on
-    /// a table that is also a live DML target of transactional code" - see
-    /// <see cref="IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable"/>'s own doc comment for
-    /// the oracle-confirmed rowgroup-lock mechanism and the explicit workload-dependent scope limit.
-    /// </summary>
-    private static void ScanColumnstoreOnDmlTargetTable(CatalogTable table, IReadOnlySet<string>? dmlTargetTables, List<IndexDesignFinding> findings)
+private static void ScanColumnstoreOnDmlTargetTable(CatalogTable table, IReadOnlySet<string>? dmlTargetTables, List<IndexDesignFinding> findings)
     {
         if (dmlTargetTables is null || !dmlTargetTables.Contains(table.QualifiedName))
         {
@@ -950,14 +722,7 @@ public static class IndexDesignScanner
             FindingConfidence.Medium));
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md second full-archive practitioner sweep §G, "Monotonically
-    /// increasing clustered key ... with no OPTIMIZE_FOR_SEQUENTIAL_KEY" - see
-    /// <see cref="IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization"/>'s own
-    /// doc comment for the oracle-confirmed feature/flag verification and the explicit
-    /// IDENTITY-only scope limit.
-    /// </summary>
-    private static void ScanMonotonicClusteredKeyMissingSequentialOptimization(CatalogTable table, List<IndexDesignFinding> findings)
+private static void ScanMonotonicClusteredKeyMissingSequentialOptimization(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var clusteredIndex = table.Indexes.FirstOrDefault(i => i.IsClustered && !i.IsColumnstore && !i.IsDisabled);
         if (clusteredIndex is null || clusteredIndex.KeyColumns.Count == 0 || clusteredIndex.OptimizeForSequentialKey)
@@ -981,19 +746,11 @@ public static class IndexDesignScanner
             FindingConfidence.Medium));
     }
 
-    /// <summary>
-    /// docs/detection-checklist.md "Non-aligned index on a partitioned table" - see
-    /// <see cref="IndexDesignFindingKind.NonAlignedPartitionedIndex"/>'s own doc comment for the
-    /// oracle-confirmed catalog shape. The table's own CLUSTERED, non-columnstore index is the only
-    /// alignment reference used - a partitioned heap is out of scope, never guessed at.
-    /// </summary>
-    private static void ScanNonAlignedPartitionedIndex(CatalogTable table, List<IndexDesignFinding> findings)
+private static void ScanNonAlignedPartitionedIndex(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var clusteredIndex = table.Indexes.FirstOrDefault(i => i.IsClustered && !i.IsColumnstore);
         if (clusteredIndex?.PartitionSchemeName is not { } tablePartitionScheme)
         {
-            // Either no clustered index at all (a partitioned heap - out of scope, see this
-            // method's own doc comment) or the table itself isn't partitioned - nothing to check.
             return;
         }
 
@@ -1024,15 +781,7 @@ public static class IndexDesignScanner
         }
     }
 
-    /// <summary>
-    /// Best-effort physical storage size in bytes for one clustered-key column, from the same
-    /// <see cref="SqlType"/> facets this catalog already resolves - the checklist's own "computed
-    /// from the column types we already have," not a fresh catalog read.
-    /// <see langword="null"/> for a type this pass cannot size confidently (a MAX-length string/
-    /// binary - which SQL Server refuses as a key column anyway - <c>sql_variant</c>, or an
-    /// unresolved/user-defined type), never a guessed number.
-    /// </summary>
-    public static int? EstimateColumnKeyBytes(SqlType type)
+public static int? EstimateColumnKeyBytes(SqlType type)
     {
         if (type.IsMax)
         {
@@ -1048,8 +797,6 @@ public static class IndexDesignScanner
             SqlTypeCategory.SmallMoney => 4,
             SqlTypeCategory.Money => 8,
             SqlTypeCategory.Real => 4,
-            // Plain FLOAT with no declared precision resolves to float(53) (8 bytes) - the
-            // engine's own default; float(n) for n <= 24 is stored as 4 bytes.
             SqlTypeCategory.Float => type.Precision is { } p && p <= 24 ? 4 : 8,
             SqlTypeCategory.Decimal => EstimateDecimalBytes(type.Precision),
             SqlTypeCategory.Date => 3,
@@ -1082,14 +829,7 @@ public static class IndexDesignScanner
         _ => baseBytes + 2,
     };
 
-    /// <summary>
-    /// True iff <paramref name="definitionText"/> (a <c>sys.default_constraints.definition</c>
-    /// string like <c>"(newid())"</c>) is exactly a <c>NEWID()</c> call, once whitespace and
-    /// parentheses are stripped - never a substring match, which would also match inside
-    /// <c>"(newsequentialid())"</c> if done carelessly (it does not here: after stripping,
-    /// "newid" vs "newsequentialid" are compared for exact equality, not containment).
-    /// </summary>
-    private static bool IsNewIdDefault(string? definitionText)
+private static bool IsNewIdDefault(string? definitionText)
     {
         if (definitionText is null)
         {

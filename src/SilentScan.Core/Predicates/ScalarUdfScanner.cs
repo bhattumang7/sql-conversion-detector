@@ -7,12 +7,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// The scalar-UDF stream (docs/detection-checklist.md Tier 1 #1) - every finding here needs the
-/// catalog's own <see cref="ScalarUdfInfo"/>. A 2-part function call is only ever a scalar UDF
-/// reference when the catalog says so; a call this scan never saw DDL for, and every built-in
-/// (single-part, null <see cref="FunctionCall.CallTarget"/>) call, never produces a finding.
-/// </summary>
 public static class ScalarUdfScanner
 {
     public static IReadOnlyList<ScalarUdfFinding> Scan(
@@ -25,11 +19,6 @@ public static class ScalarUdfScanner
 
     private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ScalarUdfOrigin> scalarUdfMap) : TSqlFragmentVisitor
     {
-        // (Start, End, Context) - registered before the containing clause's children are
-        // visited, so a FunctionCall found anywhere underneath resolves to the innermost
-        // (shortest) region that contains it. Kind (predicate vs projection) is derived from
-        // Context itself, not tracked separately - Where/JoinOn/Having/MergeOn ARE the predicate
-        // regions.
         private readonly List<(int Start, int End, ScalarUdfContext Context)> _regions = [];
 
         private readonly HashSet<FunctionCall> _claimed = [];
@@ -122,10 +111,6 @@ public static class ScalarUdfScanner
                     break;
             }
 
-            // A TVF-call table reference's own arguments can themselves contain a scalar-UDF
-            // call (FROM dbo.SomeTvf(dbo.fn_Compute(@x))) - that is a genuine per-row
-            // ProjectionInvocation, reached through the ordinary FunctionCall visit below since
-            // this method never claims/skips those argument subtrees.
         }
 
         private void TryEmitNested(string qualifiedName, int line, int column, string fragmentText)
@@ -184,7 +169,6 @@ public static class ScalarUdfScanner
 
         private ScalarUdfContext ResolveContext(FunctionCall node) =>
             ScalarUdfContextRegions.Resolve(_regions, node);
-
 
         private void ClaimNestedFunctionCalls(FunctionCall node)
         {

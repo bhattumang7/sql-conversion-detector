@@ -4,14 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Catalog-only pass (docs/detection-checklist.md Tier 1 "Oversized and MAX-typed parameters":
-/// "a string/binary column declared MAX-typed can never be an index key column at all") - no AST
-/// walking, no predicate site needed. A structural fact SQL Server itself enforces at CREATE
-/// INDEX time (Msg 1919: "Column ... in table ... is of a type that is invalid for use as a key
-/// column in an index"), cited directly rather than through a third party since it's a plain
-/// catalog-metadata property, not a plan-behavior claim needing an oracle probe.
-/// </summary>
 public sealed class MaxTypedColumnScannerTests
 {
     private static IReadOnlyList<MaxTypedColumnFinding> Scan(string sql)
@@ -51,13 +43,7 @@ public sealed class MaxTypedColumnScannerTests
         Assert.Empty(findings);
     }
 
-    /// <summary>
-    /// Oracle-confirmed directly (Docker SQL Server 2022): TEXT/NTEXT/IMAGE are rejected as an
-    /// index KEY column (Msg 1919, same as MAX-typed) AND, unlike MAX-typed columns, also
-    /// rejected as a nonclustered index's INCLUDE column (Msg 1999) - a genuinely stronger, and
-    /// genuinely distinct, restriction from the MAX-typed-column fact.
-    /// </summary>
-    [Theory]
+[Theory]
     [InlineData("TEXT", "text")]
     [InlineData("NTEXT", "ntext")]
     [InlineData("IMAGE", "image")]

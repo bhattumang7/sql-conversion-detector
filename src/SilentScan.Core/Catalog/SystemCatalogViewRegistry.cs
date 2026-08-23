@@ -2,30 +2,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Catalog;
 
-/// <summary>
-/// A curated set of built-in SQL Server system catalog views/compatibility views, every column
-/// name/type verified directly against <c>sys.dm_exec_describe_first_result_set</c> on the
-/// Docker oracle rather than taken from documentation or memory (CLAUDE.md precision discipline:
-/// never guess). Before this existed, any predicate against these - overwhelmingly common in
-/// DBA/admin scripts (this project's own First Responder Kit and Ola Hallengren corpus entries
-/// are built almost entirely out of them, and DNN Platform's incremental upgrade scripts probe
-/// dbo.sysobjects/sys.objects constantly to check "does this object already exist") - resolved as
-/// an unrecognized table reference, both discarding real findings (a predicate like
-/// <c>sys.dm_...</c> comparing an int catalog column against an nvarchar variable is exactly the
-/// bug class this tool exists to find) and inflating the skip ledger's dominant cause across
-/// every corpus repo (an audit finding).
-///
-/// Collation is deliberately left unresolved (null) for every string-family column here - it was
-/// not verified against the oracle, and CLAUDE.md's rule is never to guess one. A predicate
-/// comparing one of these columns still resolves through the normal pipeline; it just can't reach
-/// a collation-dependent verdict, exactly like any other real column with an unpinned collation.
-///
-/// This is a curated allowlist covering the small set of catalog views actually driving the skip
-/// counts in this project's own pinned corpus (sys.objects/sysobjects, sys.indexes/sysindexes,
-/// sys.columns/syscolumns, sys.tables, sys.databases, sys.schemas) - not an attempt at a complete
-/// system-view catalog. A reference to a view not in this table still resolves as "no known DDL"
-/// exactly as before, recorded in the skip ledger rather than guessed.
-/// </summary>
 public static class SystemCatalogViewRegistry
 {
     private static readonly SqlType NVarChar128 = new(SqlTypeCategory.NVarChar, Length: 128);
@@ -217,7 +193,6 @@ public static class SystemCatalogViewRegistry
             ["INFORMATION_SCHEMA.TABLES"] = InformationSchemaTablesColumns,
         };
 
-    /// <summary>The column shape for <paramref name="qualifiedName"/> if it's one of the curated system catalog views, or null (never guessed).</summary>
-    public static IReadOnlyList<(string Name, SqlType Type)>? TryResolve(string qualifiedName) =>
+public static IReadOnlyList<(string Name, SqlType Type)>? TryResolve(string qualifiedName) =>
         ByQualifiedName.GetValueOrDefault(qualifiedName);
 }

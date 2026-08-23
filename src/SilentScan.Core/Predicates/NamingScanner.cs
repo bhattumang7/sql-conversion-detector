@@ -5,15 +5,8 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Naming and identifiers" plus the standalone "redundant
-/// database/schema qualifier" bullet. Fully syntax-only: no <see cref="DatabaseCatalog"/>, no oracle.
-/// </summary>
 public static class NamingScanner
 {
-    // The official T-SQL reserved keyword list (Microsoft Learn, "Reserved Keywords (Transact-SQL)")
-    // - stable, publicly documented, unrelated to any third-party tool. An identifier spelled
-    // identically to one of these needs bracket/quote delimiting on every future reference.
     private static readonly HashSet<string> ReservedKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
         "ADD", "ALL", "ALTER", "AND", "ANY", "AS", "ASC", "AUTHORIZATION", "BACKUP", "BEGIN",
@@ -205,11 +198,6 @@ public static class NamingScanner
 
         private void CheckReservedName(Identifier? identifier, string kindLabel)
         {
-            // No QuoteType condition: T-SQL's own grammar already refuses to parse a true reserved
-            // keyword as an UNQUOTED identifier at all (a script using one that way would already
-            // have failed to parse, never reaching this scanner) - the only way a reserved keyword
-            // ever becomes a real identifier is via bracket/quote delimiting, which is exactly the
-            // case this rule exists to flag as a latent maintainability risk.
             if (identifier is not { } id || !ReservedKeywords.Contains(id.Value))
             {
                 return;
@@ -221,12 +209,6 @@ public static class NamingScanner
                 $"{char.ToUpperInvariant(kindLabel[0])}{kindLabel[1..]} name \"{id.Value}\" is a reserved T-SQL keyword."));
         }
 
-        // Only an explicit "dbo." qualifier is flagged - the overwhelmingly common default schema
-        // and the one this codebase's own SchemaObjectNameHelper.DefaultSchema already treats as
-        // the baseline everywhere else. A qualifier naming any OTHER schema is left alone: whether
-        // it is redundant depends on the connecting principal's own actual default schema, which
-        // this static, no-catalog pass cannot know - flagging it would risk a real false positive
-        // in a multi-schema database, so only the one case provably safe without that knowledge ships.
         private void CheckTypeQualifier(DataTypeReference? dataType)
         {
             if (dataType is not UserDataTypeReference { Name.SchemaIdentifier: { } schema } userType)

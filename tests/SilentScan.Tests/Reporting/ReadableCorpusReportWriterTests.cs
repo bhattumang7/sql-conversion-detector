@@ -6,12 +6,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Reporting;
 
-/// <summary>
-/// The corpus report's rollup table is what answers "which repo do I look at" without reading
-/// five reports first, so it has to carry the facts that decide that: how many findings, and
-/// whether the repo's files actually parsed as T-SQL. A repo below the parse-success bar must be
-/// visibly marked rather than sitting in the table looking like any other row.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ReadableCorpusReportWriterTests
 {
@@ -38,16 +32,11 @@ public sealed class ReadableCorpusReportWriterTests
 
         var alpha = Assert.Single(lines, line => line.StartsWith("  alpha", StringComparison.Ordinal));
 
-        // The row must carry the actual computed parse-success rate for this repo, not merely
-        // the literal word "pass" (which the dialect-check column would show even if the parse
-        // rate column were wrong or blank).
         var expectedParseRate =
             $"{(repos[0].Report.ParseHealth.ParseSuccessRate * 100).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)}%";
         Assert.Contains(expectedParseRate, alpha, StringComparison.Ordinal);
         Assert.Contains("pass", alpha, StringComparison.Ordinal);
 
-        // Each repo's own full report follows that repo's own heading - confirm the finding sits
-        // inside alpha's section specifically, not merely somewhere in the whole document.
         var sectionStart = Array.IndexOf(lines, "alpha");
         Assert.True(sectionStart >= 0, "expected a per-repo heading line for alpha");
         var alphaSection = string.Join('\n', lines.Skip(sectionStart));
@@ -57,10 +46,6 @@ public sealed class ReadableCorpusReportWriterTests
     [Fact]
     public void RepoBelowTheDialectSniffingBar_IsMarkedAndNamed()
     {
-        // A malformed batch is real SQL Server syntax, not just noise ScriptDOM can recover
-        // from - deploying it through the engine would abort deployment outright (ScriptDeployer
-        // has no per-batch try/catch), so this exercises ParseHealthReport directly, the same way
-        // ScanReportBuilder itself does before any catalog/lineage work runs.
         var broken = SqlScriptParser.ParseText("broken.sql", "SELECT FROM WHERE ORDER;");
         var report = ScanReportBuilder.BuildFromParseResults([broken], new DatabaseCatalog());
         var repo = new ReadableCorpusRepo("mysql-ish", report, null);
@@ -68,13 +53,9 @@ public sealed class ReadableCorpusReportWriterTests
         var rendered = ReadableCorpusReportWriter.Write([repo], [], ReadableStyle.Text).ReplaceLineEndings("\n");
         var lines = rendered.Split('\n');
 
-        // The rollup row for this repo must itself carry the BELOW BAR marker - not just have
-        // that text appear somewhere unrelated in the document.
         var row = Assert.Single(lines, line => line.StartsWith("  mysql-ish", StringComparison.Ordinal));
         Assert.Contains("BELOW BAR", row, StringComparison.Ordinal);
 
-        // The explanatory paragraph about the parse-success bar must itself name this repo -
-        // not just exist somewhere alongside an unrelated mention of "mysql-ish".
         var barParagraph = Assert.Single(lines, line => line.Contains("parse-success bar the corpus uses", StringComparison.Ordinal));
         Assert.Contains("mysql-ish", barParagraph, StringComparison.Ordinal);
     }
@@ -101,8 +82,6 @@ public sealed class ReadableCorpusReportWriterTests
         Assert.True(repoHeading >= 0, "expected the repo heading");
         Assert.True(summaryHeading >= 0, "expected the repo's own Summary heading");
 
-        // The per-repo section must sit UNDER the repo heading, which itself must sit under the
-        // document heading - not merely exist somewhere in the document, in any order.
         Assert.True(topHeading < repoHeading, "the corpus heading must outrank the repo heading");
         Assert.True(repoHeading < summaryHeading, "the repo's Summary must be nested under its own repo heading");
     }

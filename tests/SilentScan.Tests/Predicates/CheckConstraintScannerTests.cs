@@ -5,16 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 §A: "CHECK constraint that doesn't account for NULL" /
-/// "CHECK constraint accidentally placed on an IDENTITY column". <see
-/// cref="CatalogCheckConstraint.DefinitionText"/> is only ever populated live - these tests build
-/// the catalog directly, the same "no Docker oracle needed to exercise the scanner's own logic"
-/// shape <c>UntrustedConstraintScannerTests</c>/<c>IndexDesignScannerTests</c>'s
-/// <c>FilterColumnNotInIndex</c> cases already established for a text-reparsing, live-only-input
-/// scanner; the engine mechanics themselves were separately verified against the real standing
-/// Docker oracle (docs/detection-checklist.md carries that evidence).
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class CheckConstraintScannerTests
 {
@@ -44,11 +34,6 @@ public sealed class CheckConstraintScannerTests
     [Fact]
     public void NullableColumn_PredicateWithOrBranchNullGuard_NeverFires()
     {
-        // The textbook fix - CHECK (Price IS NULL OR Price > 0) - oracle-confirmed to genuinely
-        // accept a NULL row while still rejecting a negative one. A guard reachable through an OR
-        // branch must still count as "handled": the inverse of the AND-only-reachable discipline
-        // other scanners in this codebase apply for triggering, deliberately liberal here since
-        // this kind's own risk is the ABSENCE of a guard.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Orders", [Column("Price", isNullable: true)]));
         catalog.AddCheckConstraint(new CatalogCheckConstraint(
@@ -63,8 +48,6 @@ public sealed class CheckConstraintScannerTests
     [Fact]
     public void NullableColumn_PredicateWithIsNotNullGuard_NeverFires()
     {
-        // IS NOT NULL is still a bare IS NULL-family test against the column - it proves the
-        // author was explicitly reasoning about the NULL case, not merely a coincidental omission.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Orders", [Column("Price", isNullable: true)]));
         catalog.AddCheckConstraint(new CatalogCheckConstraint(
@@ -92,9 +75,6 @@ public sealed class CheckConstraintScannerTests
     [Fact]
     public void MultiColumnTableLevelConstraint_OnlyUnguardedNullableColumnFires()
     {
-        // Table-level constraint (sys.check_constraints.parent_column_id = 0 for this shape,
-        // confirmed directly against the oracle) - both columns are referenced, but only the
-        // nullable, unguarded one should fire.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table(
             "dbo", "Orders",
@@ -175,9 +155,6 @@ public sealed class CheckConstraintScannerTests
     [Fact]
     public void UnknownColumnReferencedInDefinition_IsSkippedNotGuessed()
     {
-        // A column the catalog doesn't know about (a computed expression, a typo the engine would
-        // itself reject at DDL time, or simply a column this pass' own catalog build didn't carry
-        // for some other reason) - never guess a nullability/identity verdict for it.
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Orders", []));
         catalog.AddCheckConstraint(new CatalogCheckConstraint(
@@ -186,16 +163,7 @@ public sealed class CheckConstraintScannerTests
         Assert.Empty(CheckConstraintScanner.Scan(catalog));
     }
 
-    /// <summary>
-    /// End-to-end against the real standing Docker oracle (a fresh, disposable database, dropped
-    /// unconditionally afterward) rather than a hand-built catalog - proves the full live-read path
-    /// (<c>LiveCatalogReader</c>'s new <see cref="CatalogCheckConstraint.DefinitionText"/> column,
-    /// through <see cref="CheckConstraintScanner"/>, into the real <see
-    /// cref="SilentScan.Core.Reporting.ScanReport.CheckConstraintFindings"/> stream) works against a real
-    /// <c>sys.check_constraints.definition</c> string, not just the hand-authored text used by the
-    /// catalog-builder tests above.
-    /// </summary>
-    [Fact]
+[Fact]
     public async Task LiveDeployment_NullableColumnCheckWithNoGuard_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(

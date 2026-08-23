@@ -3,14 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability stream": BETWEEN
-/// end-of-period boundary. A runtime DML/query-result behavior, not a query-plan one (like
-/// WriteLossOracleTests, not the compile-only SHOWPLAN_XML oracle every other rule in this
-/// stream uses) - proves the actual row-drop mechanism by inserting a self-authored probe row
-/// right at the edge of the precision gap and reading it back through both the buggy and the
-/// correct query shape.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class TemporalBoundaryPrecisionOracleTests : OracleTestFixture
 {

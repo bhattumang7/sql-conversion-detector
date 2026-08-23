@@ -2,11 +2,6 @@ using SilentScan.Core.Reporting.Readable;
 
 namespace SilentScan.Tests.Reporting;
 
-/// <summary>
-/// The rendering layer on its own. What matters here is that a table stays a table: a cell whose
-/// text contains a pipe or a newline must not shift every later cell one column to the left,
-/// because the result still renders as a valid table and simply says the wrong thing.
-/// </summary>
 public sealed class ReadableDocumentRendererTests
 {
     [Fact]
@@ -51,12 +46,9 @@ public sealed class ReadableDocumentRendererTests
 
         var lines = Lines(ReadableDocumentRenderer.Render(document, ReadableStyle.Text));
 
-        // Two leading spaces, then the widest cell in column one ("much-longer.sql:2"), then the
-        // two-space gap - so every row's second column starts at the same offset.
         const int SecondColumn = 2 + 17 + 2;
         Assert.Equal(["Detail", "------", "short", "x"], lines.Select(line => line[SecondColumn..]));
 
-        // No line carries trailing space: invisible in a terminal, diff noise in a file.
         Assert.All(lines, line => Assert.Equal(line.TrimEnd(), line));
     }
 
@@ -92,8 +84,7 @@ public sealed class ReadableDocumentRendererTests
         Assert.Contains("- one\n- two", rendered, StringComparison.Ordinal);
     }
 
-    /// <summary>Counts the pipes that actually delimit cells - an escaped one is content.</summary>
-    private static int UnescapedPipes(string line) =>
+private static int UnescapedPipes(string line) =>
         line.Where((c, i) => c == '|' && (i == 0 || line[i - 1] != '\\')).Count();
 
     private static string[] Lines(string rendered) =>

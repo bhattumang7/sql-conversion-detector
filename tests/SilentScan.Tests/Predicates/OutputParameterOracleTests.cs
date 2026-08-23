@@ -3,14 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second OSS/commercial sweep": "Output parameter not populated on
-/// every code path" - oracle-confirms the general mechanism once (not per finding, matching this
-/// codebase's own precedent, e.g. <see cref="TransactionHygieneOracleTests"/>): a real executed
-/// procedure whose OUTPUT parameter is never assigned on the path taken leaves the CALLING
-/// session's own variable completely UNCHANGED - not reset to NULL, not defaulted, literally
-/// untouched regardless of what it held before the call.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class OutputParameterOracleTests : OracleTestFixture
 {

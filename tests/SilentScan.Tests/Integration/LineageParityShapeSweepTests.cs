@@ -9,26 +9,9 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Discovery harness for the real-database lineage parity mismatches CLAUDE.md treats as P0
-/// (<c>LiveScanResult.LineageParity.Mismatches</c>, computed by <c>LiveLineageParityChecker</c>
-/// diffing every resolved view/TVF column's inferred type against <c>sys.columns</c>). A live
-/// scan against a real production database surfaced 25 mismatches across seven type-pair
-/// categories (Bit/Int, Int/TinyInt, Int/VarChar, Decimal/Money, Date/DateTime, DateTime/VarChar,
-/// Int/DateTime) with no record of the exact defining views - only the aggregate counts. Rather
-/// than guess at the exact repro from those counts alone, this sweeps a spread of plausible view
-/// shapes per category through the SAME engine-authoritative path a live scan uses
-/// (<see cref="EngineAuthoritativeScan"/> - deploy to Docker, read the real catalog/module text
-/// back, run the unchanged Lineage/Predicates pipeline) and lets the real oracle decide which
-/// shapes actually disagree. A shape that fails here is a genuine reproduction, worth its own
-/// fixture and fix; a shape that passes says nothing about whether some OTHER shape in the same
-/// category still mismatches on the original database - the real confirmation is a fresh
-/// `scan-db` run against that database once every reproduced category here is fixed.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LineageParityShapeSweepTests
 {
-    // ---- Bit <-> Int -------------------------------------------------------------------
 
     [Fact]
     public async Task CoalesceBitColumnWithIntLiteral_NoParityMismatch()
@@ -127,8 +110,6 @@ public sealed class LineageParityShapeSweepTests
         Assert.Empty(result.LineageParity.Mismatches);
     }
 
-    // ---- Int <-> TinyInt ----------------------------------------------------------------
-
     [Fact]
     public async Task SumOfTinyIntColumn_NoParityMismatch()
     {
@@ -196,8 +177,6 @@ public sealed class LineageParityShapeSweepTests
         Assert.Empty(result.LineageParity.Mismatches);
     }
 
-    // ---- Int <-> VarChar ------------------------------------------------------------------
-
     [Fact]
     public async Task IntColumnCastToVarchar_NoParityMismatch()
     {
@@ -252,8 +231,6 @@ public sealed class LineageParityShapeSweepTests
         Assert.Empty(result.LineageParity.Mismatches);
     }
 
-    // ---- Decimal <-> Money ----------------------------------------------------------------
-
     [Fact]
     public async Task MoneyColumnMultipliedByDecimalLiteral_NoParityMismatch()
     {
@@ -306,8 +283,6 @@ public sealed class LineageParityShapeSweepTests
         Assert.Empty(result.LineageParity.Mismatches);
     }
 
-    // ---- Date <-> DateTime ------------------------------------------------------------------
-
     [Fact]
     public async Task DateTimeColumnCastToDate_NoParityMismatch()
     {
@@ -349,8 +324,6 @@ public sealed class LineageParityShapeSweepTests
 
         Assert.Empty(result.LineageParity.Mismatches);
     }
-
-    // ---- DateTime <-> VarChar --------------------------------------------------------------
 
     [Fact]
     public async Task VarcharColumnComparedToDateLiteralInSameView_NoParityMismatch()
@@ -397,8 +370,6 @@ public sealed class LineageParityShapeSweepTests
         Assert.Empty(result.LineageParity.Mismatches);
     }
 
-    // ---- Int <-> DateTime -------------------------------------------------------------------
-
     [Fact]
     public async Task DateDiffOverDateTimeColumnAlongsideRawColumn_NoParityMismatch()
     {
@@ -442,8 +413,6 @@ public sealed class LineageParityShapeSweepTests
 
         Assert.Empty(result.LineageParity.Mismatches);
     }
-
-    // ---- Round 2: more exotic shapes, one per category -------------------------------------
 
     [Fact]
     public async Task NestedCaseOverBitColumnWithIntLiteralBranches_NoParityMismatch()
@@ -719,21 +688,7 @@ public sealed class LineageParityShapeSweepTests
         Assert.Empty(result.LineageParity.Mismatches);
     }
 
-    // ---- Control case: the mismatch mechanism itself --------------------------------------
-
-    /// <summary>
-    /// Every other test in this file asserts <c>Assert.Empty(result.LineageParity.Mismatches)</c>
-    /// on a deliberately-benign shape - proving the mismatch detector stays quiet where it should,
-    /// never that it can fire at all. A detector always returning an empty list (a broken key
-    /// match, a swallowed exception, a query that reads nothing) would pass every one of those 25
-    /// tests. <see cref="EngineAuthoritativeScan"/> has no seam to inject a deliberately-wrong
-    /// inferred type into the real pipeline's own lineage (it runs the unchanged, real inference),
-    /// so this builds a hand-crafted <see cref="LineageCatalog"/> claiming a genuinely INT column
-    /// is VarChar and calls <see cref="LiveLineageParityChecker"/> directly against the same
-    /// deployed-database path - the pattern <see cref="LiveLineageParityCheckerBatchingTests"/>
-    /// already uses for exactly this reason.
-    /// </summary>
-    [Fact]
+[Fact]
     public async Task DeliberatelyWrongInferredType_IsReportedAsAMismatch()
     {
         const string sql = """

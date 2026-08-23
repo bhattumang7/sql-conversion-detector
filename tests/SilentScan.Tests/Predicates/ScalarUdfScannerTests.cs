@@ -5,11 +5,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// The scalar-UDF stream (docs/detection-checklist.md Tier 1 #1) - catalog-gated, direction- and
-/// context-aware detection of scalar UDF calls, mirroring <see cref="TvfFenceScannerTests"/>'s
-/// discipline for the MSTVF-as-fence stream.
-/// </summary>
 public sealed class ScalarUdfScannerTests
 {
     private static IReadOnlyList<ScalarUdfFinding> ScanSql(string sql, int? compatibilityLevel = null)
@@ -56,8 +51,6 @@ public sealed class ScalarUdfScannerTests
     [Fact]
     public void UnregisteredTwoPartCall_NeverFires()
     {
-        // dbo.fn_Unknown was never CREATEd anywhere this scan saw - "never guess" applies exactly
-        // like TvfFenceScanner's own unresolved-name behavior.
         var findings = ScanSql("""
             CREATE TABLE dbo.T (Id INT NOT NULL);
             GO
@@ -203,10 +196,6 @@ public sealed class ScalarUdfScannerTests
             SELECT Id FROM dbo.vw_Computed;
             """);
 
-        // The view's own body also reports its own direct ProjectionInvocation - this pair's own
-        // point is that BOTH exist: the cost is visible to the view's own author and invisible to
-        // everyone who just references the view (matches TvfFenceScannerTests's own discipline
-        // for the analogous MSTVF-as-fence pairing).
         var nested = Assert.Single(findings, f => f.Kind == ScalarUdfFindingKind.NestedUnderViewOrTvf);
         Assert.Equal("dbo.fn_Compute", nested.FunctionQualifiedName);
         Assert.Equal("dbo.vw_Computed", nested.ReferencedObjectQualifiedName);

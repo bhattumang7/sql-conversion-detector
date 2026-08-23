@@ -5,36 +5,11 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Parsing;
 
-/// <summary>Resolves a ScriptDOM <see cref="DataTypeReference"/> (as written in DDL) to a <see cref="SqlType"/>.</summary>
 public static class SqlTypeReferenceResolver
 {
     private const string SysnameTypeName = "sysname";
 
-    /// <param name="dataType">The type as written in DDL.</param>
-    /// <param name="columnCollation">The COLUMN's own COLLATE clause, if any is present on the declaration.</param>
-    /// <param name="typeAliases">
-    /// CREATE TYPE ... FROM aliases discovered elsewhere in the scan, keyed by qualified name - resolves
-    /// <paramref name="dataType"/> through to its underlying built-in type when it references
-    /// one (docs/audit-remediation-plan.md Phase 6.2). Null when the caller has no catalog
-    /// available at this point in the pipeline (an alias reference there still resolves via the
-    /// sysname special-case below, just not via a user-declared alias).
-    /// </param>
-    /// <param name="unsizedStringOrBinaryDefaultLength">
-    /// The length to resolve to when a string/binary-family <paramref name="dataType"/> carries
-    /// no explicit <c>(n)</c> at all - defaults to null (unresolved), correct for a DECLARE/
-    /// column declaration, where T-SQL's own length-1 default is a DIFFERENT number the caller
-    /// (<c>TypedPredicateExtractor.TryAddUnderLengthParameterFinding</c>) already interprets that
-    /// null specially to mean. <c>CAST</c>/<c>CONVERT</c>'s own target
-    /// type is a genuinely different case - docs/detection-checklist.md "Small precise adds",
-    /// "Explicit-length audit of CAST/CONVERT to a string type": an unsized
-    /// <c>CAST(x AS VARCHAR)</c>/<c>CONVERT(VARCHAR, x)</c> silently means 30 characters, oracle-
-    /// confirmed directly (all six string/binary-family types: CHAR/VARCHAR/NCHAR/NVARCHAR/
-    /// BINARY/VARBINARY), never length 1 - <see cref="TypeInference.ExpressionTypeInferencer"/> passes 30
-    /// here specifically for <c>CastCall</c>/<c>ConvertCall</c>, so the existing under-length/
-    /// oversized-parameter comparison logic picks up the real effective length automatically,
-    /// with no new finding type needed.
-    /// </param>
-    public static SqlType? Resolve(
+public static SqlType? Resolve(
         DataTypeReference dataType, Identifier? columnCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null,
         int? unsizedStringOrBinaryDefaultLength = null)
     {
@@ -43,15 +18,6 @@ public static class SqlTypeReferenceResolver
             return ResolveUserType(userType, columnCollation, typeAliases);
         }
 
-        // XML is its own dedicated ScriptDom node (XmlDataTypeReference, carrying an optional
-        // schema collection name), never a SqlDataTypeReference - confirmed directly by parsing
-        // `A XML NULL` and inspecting the resulting DataType node's runtime type. Falling through
-        // to the generic "not a SqlDataTypeReference" null below (the same path Cursor/Table/CLR
-        // UDT types take) meant an XML column's type never actually resolved to
-        // SqlTypeCategory.Xml - VerdictClassifier.IsOutOfModelCategory's Xml case was unreachable
-        // from real DDL, even though it still produced the same safe Unknown verdict by falling
-        // into the "operand-type-unresolved" branch instead of the more specific
-        // "out-of-model-category:Xml" one.
         if (dataType is XmlDataTypeReference)
         {
             return new SqlType(SqlTypeCategory.Xml);
@@ -59,9 +25,6 @@ public static class SqlTypeReferenceResolver
 
         if (dataType is not SqlDataTypeReference sqlDataType)
         {
-            // Table types (ColumnType) and CLR UDTs (assembly-backed types) are out of scope
-            // for v1's type-precedence reasoning; callers should treat this as
-            // SqlTypeCategory.UserDefined.
             return null;
         }
 
@@ -85,16 +48,7 @@ public static class SqlTypeReferenceResolver
     private static bool IsFractionalSecondsFamily(SqlTypeCategory category) => category is
         SqlTypeCategory.Time or SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset;
 
-    /// <summary>
-    /// TIME/DATETIME2/DATETIMEOFFSET's own <c>(n)</c> fractional-seconds-precision parameter -
-    /// previously unresolved entirely (fell into the generic <c>new SqlType(category)</c> branch,
-    /// permanently losing the declared scale). Needed for the BETWEEN end-of-period boundary
-    /// finding (docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability
-    /// stream"): a boundary literal with fewer fractional digits than the column's own declared
-    /// scale silently drops rows in the gap, oracle-confirmed. Defaults to 7 when no explicit
-    /// <c>(n)</c> is given - T-SQL's own default precision for all three types.
-    /// </summary>
-    private static SqlType ResolveFractionalSeconds(SqlTypeCategory category, SqlDataTypeReference sqlDataType)
+private static SqlType ResolveFractionalSeconds(SqlTypeCategory category, SqlDataTypeReference sqlDataType)
     {
         var scale = sqlDataType.Parameters.Count > 0 && sqlDataType.Parameters[0] is IntegerLiteral s
             ? int.Parse(s.Value, CultureInfo.InvariantCulture)
@@ -105,12 +59,6 @@ public static class SqlTypeReferenceResolver
 
     private static SqlType? ResolveUserType(UserDataTypeReference userType, Identifier? columnCollation, IReadOnlyDictionary<string, SqlType>? typeAliases)
     {
-        // sysname is a system-provided alias for nvarchar(128) (SQL Server always parses it as
-        // a UserDataTypeReference, never a built-in SqlDataTypeOption - verified directly
-        // against the parser) - pervasive in admin-script repos for object/schema names, so
-        // this is worth a direct special-case rather than depending on the catalog knowing
-        // about it (docs/audit-remediation-plan.md Phase 6.2, audit finding "sysname...
-        // pervasive in the admin-script repos this study targets").
         if (string.Equals(userType.Name.BaseIdentifier.Value, SysnameTypeName, StringComparison.OrdinalIgnoreCase))
         {
             return ApplyColumnCollation(new SqlType(SqlTypeCategory.NVarChar, Length: 128), columnCollation);
@@ -127,12 +75,7 @@ public static class SqlTypeReferenceResolver
             : null;
     }
 
-    /// <summary>
-    /// A column/variable declared with a string-family alias can still carry its own explicit
-    /// COLLATE clause layered on top (the same as any built-in string type) - the column's own
-    /// collation always wins, matching every other collation resolution in this codebase.
-    /// </summary>
-    private static SqlType ApplyColumnCollation(SqlType type, Identifier? columnCollation) =>
+private static SqlType ApplyColumnCollation(SqlType type, Identifier? columnCollation) =>
         type.IsStringFamily && columnCollation is { Value.Length: > 0 }
             ? type with { Collation = new Collation(columnCollation.Value) }
             : type;

@@ -7,16 +7,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second full-archive practitioner sweep" §G: "View defined with
-/// SELECT * whose compiled column list has gone stale against the base table's current shape" -
-/// see <see cref="StaleSelectStarViewFinding"/> for the full precision story and oracle evidence
-/// (including the confirmed phantom-data-under-a-stale-label mechanism). Structural tests build
-/// the view definition via the real <see cref="ViewDefinitionExtractor"/> (the same code path
-/// production uses) but hand-set the catalog's view-compiled-columns registry directly, since that
-/// registry is live-only by construction; the end-to-end oracle test proves the real
-/// LiveCatalogReader read.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class StaleSelectStarViewScannerTests
 {
@@ -63,8 +53,6 @@ public sealed class StaleSelectStarViewScannerTests
     [Fact]
     public void DropThenAddShiftsIdentity_StillFires()
     {
-        // The confirmed phantom-data shape: same column COUNT, different identity at the same
-        // ordinal position - a naive set-equality check would miss this.
         var view = View("CREATE VIEW dbo.V AS SELECT * FROM dbo.Base;");
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Base", ["Id", "A", "C"]));
@@ -78,7 +66,6 @@ public sealed class StaleSelectStarViewScannerTests
     [Fact]
     public void ViewOverJoin_NeverFires()
     {
-        // Deliberate v1 scope limit - only a single, real, named base table qualifies.
         var view = View("CREATE VIEW dbo.V AS SELECT * FROM dbo.Base b JOIN dbo.Other o ON b.Id = o.Id;");
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Base", ["Id", "A"]));
@@ -90,11 +77,6 @@ public sealed class StaleSelectStarViewScannerTests
     [Fact]
     public void ViewSelectsFromOwnCteSharingNameWithUnrelatedRealTable_NeverMisattributed()
     {
-        // The view's own "FROM Base" refers to its own CTE (itself sourced from dbo.Other), not
-        // the unrelated real dbo.Base - FindSingleBaseTable only inspects the outermost
-        // QueryExpression (never the separate WithCtesAndXmlNamespaces), so a CTE sharing a real
-        // table's bare name must be declined, not resolved against the catalog as if it were that
-        // real table.
         var view = View("CREATE VIEW dbo.V AS WITH Base AS (SELECT Id, X FROM dbo.Other) SELECT * FROM Base;");
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Base", ["Id", "A"]));
@@ -117,8 +99,6 @@ public sealed class StaleSelectStarViewScannerTests
     [Fact]
     public void ViewCompiledColumnsUnknown_NeverGuesses()
     {
-        // File-mode/no live catalog entry - never guessed, matching this codebase's own "never
-        // guess" discipline for a live-only catalog fact.
         var view = View("CREATE VIEW dbo.V AS SELECT * FROM dbo.Base;");
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Base", ["Id", "A"]));
@@ -126,12 +106,7 @@ public sealed class StaleSelectStarViewScannerTests
         Assert.Empty(StaleSelectStarViewScanner.Scan([view], catalog));
     }
 
-    /// <summary>
-    /// End-to-end against the real standing Docker oracle (a fresh, disposable database, dropped
-    /// unconditionally afterward): a base-table ADD COLUMN after the view was created leaves the
-    /// view's own compiled column list stale, exactly as oracle-confirmed manually.
-    /// </summary>
-    [Fact]
+[Fact]
     public async Task LiveDeployment_BaseTableGainsColumnAfterViewCreated_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(

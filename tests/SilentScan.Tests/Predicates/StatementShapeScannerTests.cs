@@ -4,10 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Statement-shape advice". See <see cref="StatementShapeFinding"/>
-/// for which members shipped here vs. were investigated and closed/superseded elsewhere.
-/// </summary>
 public sealed class StatementShapeScannerTests
 {
     private static IReadOnlyList<StatementShapeFinding> Scan(string sql)

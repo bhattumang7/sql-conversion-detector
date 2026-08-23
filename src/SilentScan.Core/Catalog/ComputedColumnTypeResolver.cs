@@ -4,25 +4,9 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Catalog;
 
-/// <summary>
-/// Infers a computed column's type from its defining expression (<c>Total AS (Price * Qty)</c>)
-/// - previously never attempted, so every computed column stayed Unknown forever regardless of
-/// how trivially inferable its expression was. Sibling column references, literals, CAST/
-/// CONVERT, arithmetic, and (via the shared <see cref="TypeInference.ExpressionTypeInferencer"/>, roadmap
-/// Phase B) CASE/COALESCE/NULLIF/IIF are all resolved; an ordinary function call still resolves
-/// null (Unknown) here - a scalar UDF's return-type registry isn't built yet at this point in
-/// CatalogBuilder's pass ordering, and this pass never guesses.
-/// </summary>
 internal static class ComputedColumnTypeResolver
 {
-    /// <summary>
-    /// Resolves up to a fixed point: a computed column's expression may reference another
-    /// computed column (itself resolved this same pass), and ScriptDom preserves declaration
-    /// order regardless of which sibling is referenced. Bounded by column count so a
-    /// self-referential/circular definition (invalid T-SQL, but not this pass's job to reject)
-    /// can never loop.
-    /// </summary>
-    public static List<CatalogColumn> ResolveAll(
+public static List<CatalogColumn> ResolveAll(
         List<CatalogColumn> columns, IReadOnlyDictionary<string, ScalarExpression> computedExpressions, IReadOnlyDictionary<string, SqlType>? typeAliases)
     {
         if (computedExpressions.Count == 0)
@@ -47,8 +31,7 @@ internal static class ComputedColumnTypeResolver
         return columns;
     }
 
-    /// <summary>One fixed-point iteration: resolves every still-untyped computed column whose expression is now resolvable given <paramref name="typesByName"/>. Returns false (and leaves <paramref name="result"/> as the unmodified input) when nothing progressed, so the caller's loop can stop instead of spinning through remaining iterations for no reason.</summary>
-    private static bool TryResolveOnePass(
+private static bool TryResolveOnePass(
         List<CatalogColumn> columns, IReadOnlyDictionary<string, ScalarExpression> computedExpressions,
         Dictionary<string, SqlType?> typesByName, IReadOnlyDictionary<string, SqlType>? typeAliases, out List<CatalogColumn> result)
     {
@@ -78,18 +61,7 @@ internal static class ComputedColumnTypeResolver
         return progressed;
     }
 
-    /// <summary>
-    /// Delegates to the shared <see cref="TypeInference.ExpressionTypeInferencer"/> (roadmap Phase B) for
-    /// every expression shape it owns (arithmetic, CASE/COALESCE/NULLIF/IIF, CAST/CONVERT,
-    /// parenthesis/unary) - the leaf callback resolves a bare sibling-column reference or a
-    /// built-in function call via the same curated <see cref="TypeInference.BuiltinFunctionTypeResolver"/>
-    /// table predicates and lineage both consult, so `Total AS (ISNULL(Price, 0) * Qty)` types
-    /// identically to the same expression appearing in a view's SELECT list or a WHERE clause.
-    /// A scalar UDF call still resolves Unknown here (never guessed): the return-type registry
-    /// isn't built yet at this point in CatalogBuilder's pass ordering, unlike predicates/lineage
-    /// which run after the catalog is complete.
-    /// </summary>
-    private static SqlType? Resolve(
+private static SqlType? Resolve(
         ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases) =>
         TypeInference.ExpressionTypeInferencer.Resolve(expression, e => ResolveLeaf(e, columnTypes, typeAliases), typeAliases);
 

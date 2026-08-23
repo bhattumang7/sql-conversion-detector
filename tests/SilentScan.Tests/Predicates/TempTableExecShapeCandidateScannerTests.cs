@@ -4,11 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Dynamic SQL quality" item 3 - the site-discovery half,
-/// pure AST + catalog, no database round trip. The live-round-trip half
-/// (<c>SilentScan.Live.Catalog.TempTableExecShapeChecker</c>) is covered separately.
-/// </summary>
 public sealed class TempTableExecShapeCandidateScannerTests
 {
     private static IReadOnlyList<TempTableExecShapeCandidate> Scan(string sql)
@@ -100,9 +95,6 @@ public sealed class TempTableExecShapeCandidateScannerTests
     [Fact]
     public void TempTableDeclaredOutsideAnyProcedure_TempTableColumnsIsNullNotGuessed()
     {
-        // A batch-level #temp table has no enclosing proc scope (_currentProcScope stays null for
-        // top-level statements) - the candidate is still reported (the site is real), but with an
-        // honest null TempTableColumns rather than a wrong lookup guessing at some other scope.
         var candidates = Scan("""
             CREATE TABLE #Results (Id INT NOT NULL);
             INSERT INTO #Results EXEC dbo.usp_Callee;
@@ -115,8 +107,6 @@ public sealed class TempTableExecShapeCandidateScannerTests
     [Fact]
     public void UnresolvedTempTable_TempTableColumnsIsNull()
     {
-        // #Results is never CREATEd anywhere this pass can see - reported honestly as
-        // unresolved (null), never guessed at some assumed shape.
         var candidates = Scan("""
             CREATE PROCEDURE dbo.usp_Caller AS
             BEGIN

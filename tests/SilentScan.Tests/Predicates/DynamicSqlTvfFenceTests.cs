@@ -6,13 +6,6 @@ using SilentScan.Core.Predicates.DynamicSqlValue;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// The MSTVF-as-fence stream folds through provably-constant dynamic SQL exactly like the
-/// sargability/typed streams already do (CLAUDE.md's dynamic SQL policy: "run back through the
-/// normal pipeline"), remapped to the fence reference's true source line rather than the EXEC
-/// call site. Docker-free, matching <see cref="DynamicSqlFixtureEndToEndTests"/>'s own reasoning:
-/// the remap machinery itself is provenance-only and already oracle-covered for other streams.
-/// </summary>
 public sealed class DynamicSqlTvfFenceTests
 {
     private const string SchemaSql = """
@@ -67,9 +60,6 @@ public sealed class DynamicSqlTvfFenceTests
         Assert.Equal(TvfFenceFindingKind.Standalone, finding.Kind);
         Assert.Equal("dbo.fn_Fence", finding.FunctionQualifiedName);
         Assert.Equal("app.sql", finding.SourcePath);
-        // The reference sits on the second line of the folded literal (line 5 of app.sql), not
-        // the EXEC call site itself (line 4) - the whole reason this stream needs its own remap
-        // wiring rather than reusing another stream's.
         Assert.Equal(5, finding.Line);
         Assert.NotNull(finding.DynamicSqlCallSite);
         Assert.Equal(4, finding.DynamicSqlCallSite!.Value.Line);
@@ -112,9 +102,6 @@ public sealed class DynamicSqlTvfFenceTests
 
         var extraction = DynamicSqlScannerV2.Scan(parseResult, callGraph: new ProcCallGraph([]));
 
-        // The pre-existing 4-arg overload (no fence map) must keep compiling and behaving
-        // exactly as it did before this stream existed - every caller that doesn't care about
-        // TVF fences (most unit tests) should never have to learn about this parameter.
         var pipeline = DynamicSqlPipeline.Analyze(extraction.AnalyzableScripts, catalog, lineage);
         Assert.Empty(pipeline.TvfFenceFindings);
     }

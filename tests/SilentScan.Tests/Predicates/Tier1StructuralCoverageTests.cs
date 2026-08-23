@@ -5,18 +5,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Regression coverage for three Tier-1 structural holes formerly pinned in
-/// KnownGapCharacterizationTests (function-wrapped column inside an IN predicate, as a BETWEEN
-/// bound, and CAST wrapping an expression that merely contains a column rather than IS one):
-/// NonSargablePredicateScanner previously visited only WHERE/HAVING/JOIN ON comparisons and
-/// BETWEEN's tested value, and matched CAST/CONVERT/arithmetic only against a DIRECT
-/// ColumnReferenceExpression operand. Synthetic scenarios exercising the scanner's traversal
-/// itself, not new rule-correctness fixtures (CLAUDE.md's real-world-sourced fixture rule
-/// applies to tier1/ RULEID_fires/_clean pairs, not to this kind of structural coverage - same
-/// distinction FullPipelineSyntheticMiniProjectTests and
-/// NonSargablePredicateScannerIndexResolutionTests already draw).
-/// </summary>
 public sealed class Tier1StructuralCoverageTests
 {
     private static IReadOnlyList<SargabilityFinding> ScanWithCatalog(string sql)

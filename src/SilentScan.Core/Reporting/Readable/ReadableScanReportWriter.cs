@@ -10,70 +10,41 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Reporting.Readable;
 
-/// <summary>
-/// Turns a <see cref="ScanReport"/> into the human-facing report - the one a reader who does
-/// not want to walk the JSON by hand actually reads. Every finding the JSON carries is here
-/// too; what changes is the shape: findings are grouped by what is wrong with them, each group
-/// is explained once in prose rather than once per row, and each row says where the predicate
-/// is, which base column it lands on, whether that column is indexed, and which view layer
-/// introduced the mismatch.
-///
-/// Sections appear only when they have something to report.
-/// </summary>
 public static class ReadableScanReportWriter
 {
-    /// <summary>Every finding table's first column header - a predicate's source location.</summary>
-    private const string WhereHeader = "Where";
+private const string WhereHeader = "Where";
 
-    /// <summary>Shared across every finding table that has one - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
-    private const string ColumnHeader = "Column";
+private const string ColumnHeader = "Column";
 
-    /// <summary>Shared across every finding table with a module column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
-    private const string ModuleHeader = "Module";
+private const string ModuleHeader = "Module";
 
-    /// <summary>Shared across every finding table with an index-existence column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
-    private const string IndexedHeader = "Indexed";
+private const string IndexedHeader = "Indexed";
 
-    /// <summary>Shared across every finding table with a free-text detail column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
-    private const string DetailHeader = "Detail";
+private const string DetailHeader = "Detail";
 
-    /// <summary>Shared across every constraint-table header - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
-    private const string ConstraintHeader = "Constraint";
+private const string ConstraintHeader = "Constraint";
 
-    /// <summary>Shared across every finding table with a comparison-operator column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
-    private const string OperatorHeader = "Operator";
+private const string OperatorHeader = "Operator";
 
-    /// <summary>Shared across every finding table with a parameter-name column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
-    private const string ParameterHeader = "Parameter";
+private const string ParameterHeader = "Parameter";
 
-    /// <summary>Shared across every finding table with a table-name column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
-    private const string TableHeader = "Table";
+private const string TableHeader = "Table";
 
-    /// <summary>Shared across every finding table with an index-name column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
-    private const string IndexHeader = "Index";
+private const string IndexHeader = "Index";
 
-    /// <summary>Shared across every "we don't have a name for this" fallback string.</summary>
-    private const string UnknownDisplay = "unknown";
+private const string UnknownDisplay = "unknown";
 
     public static string Write(ScanReport report, string title, ReadableStyle style, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief) =>
         ReadableDocumentRenderer.Render(BuildDocument(report, title, pathBase, verbosity), style);
 
-    /// <summary>
-    /// Builds the document for a whole scan, title included. Corpus reports embed a repo's
-    /// sections into a larger document instead - see <see cref="BuildSections"/>.
-    /// </summary>
-    public static ReadableDocument BuildDocument(ScanReport report, string title, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief)
+public static ReadableDocument BuildDocument(ScanReport report, string title, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief)
     {
         List<ReadableBlock> blocks = [new ReadableBlock.Heading(1, title)];
         blocks.AddRange(BuildSections(report, 2, pathBase, verbosity));
         return new ReadableDocument(blocks);
     }
 
-    /// <summary>
-    /// The report body without a title, at a caller-chosen heading level, so one repo's report
-    /// can sit under a corpus-wide heading without its sections outranking it.
-    /// </summary>
-    public static IReadOnlyList<ReadableBlock> BuildSections(ScanReport report, int headingLevel, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief)
+public static IReadOnlyList<ReadableBlock> BuildSections(ScanReport report, int headingLevel, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief)
     {
         ArgumentNullException.ThrowIfNull(report);
 
@@ -187,12 +158,7 @@ public static class ReadableScanReportWriter
         return blocks;
     }
 
-    /// <summary>
-    /// The pointer line a gated coverage/caveat section renders instead of its row table under
-    /// <see cref="ReadableVerbosity.Brief"/> - always names the exact count (never "some", never
-    /// omitted) so brief mode states less DETAIL, never a less honest COUNT.
-    /// </summary>
-    private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
+private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
         new($"{Count(count, noun)} - not listed individually here; re-run with --verbosity full to see each one.");
 
     private static IEnumerable<ReadableBlock> Summary(ScanReport report, int level)
@@ -309,8 +275,6 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Table(["What", "Occurrences", "Distinct"], counts);
         }
 
-        // The base rate. A finding count with no denominator cannot be checked against anything,
-        // and "N found" reads very differently against 60 comparisons than against 60,000.
         yield return new ReadableBlock.Paragraph(
             $"Base rate: {Count(summary.TotalClassified, "column comparison")} classified " +
             $"({summary.DistinctTotalClassified} distinct), of which {summary.SeekPreservedCount} keep their seek. " +
@@ -1279,13 +1243,7 @@ public static class ReadableScanReportWriter
             })]);
     }
 
-    /// <summary>
-    /// The IndexDesign table's own "Index" column renders <see langword="null"/> as "&lt;unnamed&gt;"
-    /// for a real-but-unnamed index object, which would be misleading for the handful of
-    /// <see cref="IndexDesignFindingKind"/> members that are table-granularity facts and never
-    /// carry an index at all - this distinguishes the two rather than showing "&lt;unnamed&gt;" for both.
-    /// </summary>
-    private static bool IsTableLevelIndexDesignKind(IndexDesignFindingKind kind) => kind switch
+private static bool IsTableLevelIndexDesignKind(IndexDesignFindingKind kind) => kind switch
     {
         IndexDesignFindingKind.UnindexedForeignKey
             or IndexDesignFindingKind.ManyNonclusteredIndexes
@@ -2510,13 +2468,7 @@ public static class ReadableScanReportWriter
             })]);
     }
 
-    /// <summary>
-    /// A dropped batch's best-effort object identity - a distinct epistemic category from
-    /// <see cref="ParseFailures"/> (which pinpoints WHERE a parse failed) and from
-    /// <see cref="SkippedConstructs"/> (parsed, recognised, deliberately not analyzed): these
-    /// objects were never parsed at all, so nothing about them was ever examined. Not a finding.
-    /// </summary>
-    private static IEnumerable<ReadableBlock> UnanalyzedObjects(ScanReport report, int level, string? pathBase, ReadableVerbosity verbosity)
+private static IEnumerable<ReadableBlock> UnanalyzedObjects(ScanReport report, int level, string? pathBase, ReadableVerbosity verbosity)
     {
         var unanalyzed = report.ParseHealth.Files.SelectMany(f => f.UnanalyzedBatches).ToList();
         if (unanalyzed.Count == 0)
@@ -2590,25 +2542,14 @@ public static class ReadableScanReportWriter
     {
         var location = $"{Relative(sourcePath, pathBase)}:{line.ToString(CultureInfo.InvariantCulture)}";
 
-        // The call site is worth saying only when it is somewhere else: a finding remapped back
-        // onto the EXEC line it came from would otherwise read "x.sql:69 (in dynamic SQL run at
-        // x.sql:69)", which tells the reader nothing they cannot see.
         var withCallSite = dynamicSqlCallSite is { } span && (span.SourcePath != sourcePath || span.Line != line)
             ? $"{location} (in dynamic SQL run at {Relative(span.SourcePath, pathBase)}:{span.Line.ToString(CultureInfo.InvariantCulture)})"
             : location;
 
-        // A finding resting on a dynamic-SQL fold that had to assume a value (a symbolic
-        // placeholder) is never High - said plainly here rather than only in the JSON/SARIF, so a
-        // reader of the human-facing report cannot mistake it for an ordinary, fully-proven one.
         return confidence == FindingConfidence.High ? withCallSite : $"{withCallSite} [{confidence.ToString().ToUpperInvariant()} CONFIDENCE]";
     }
 
-    /// <summary>
-    /// Trims the scan root off a path so the report reads as repo-relative. Only an exact
-    /// directory-boundary prefix is trimmed - a base of <c>/src/app</c> must not turn
-    /// <c>/src/application/x.sql</c> into <c>lication/x.sql</c>.
-    /// </summary>
-    private static string Relative(string path, string? pathBase)
+private static string Relative(string path, string? pathBase)
     {
         if (string.IsNullOrEmpty(pathBase))
         {
@@ -2642,13 +2583,7 @@ public static class ReadableScanReportWriter
         _ => UnknownDisplay,
     };
 
-    /// <summary>
-    /// Answers the question a reader has as soon as they see a finding on a column they never
-    /// wrote a predicate against: which layer put the wrong type in front of the base column.
-    /// Depth alone says a view is involved; the provenance origin says which file and line
-    /// introduced the cast or expression.
-    /// </summary>
-    private static string DescribeOrigin(PredicateOperand.Column column, string? pathBase)
+private static string DescribeOrigin(PredicateOperand.Column column, string? pathBase)
     {
         if (column.Depth == 0)
         {
@@ -2684,12 +2619,7 @@ public static class ReadableScanReportWriter
         _ => null,
     };
 
-    /// <summary>
-    /// Formats a rate as a percentage without going through "P1", whose invariant-culture form
-    /// puts a space before the sign ("100.0 %") - correct for that culture, and wrong-looking in
-    /// every report this tool writes.
-    /// </summary>
-    internal static string Percent(double rate) =>
+internal static string Percent(double rate) =>
         $"{(rate * 100).ToString("0.0", CultureInfo.InvariantCulture)}%";
 
     private static string Count(int value, string noun) =>

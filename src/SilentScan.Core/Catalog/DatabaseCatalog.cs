@@ -4,10 +4,8 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Catalog;
 
-/// <summary>One scalar parameter of a CREATE/ALTER PROCEDURE, in declaration order - <paramref name="Type"/> is null when the parameter's own DataType couldn't be resolved, never guessed.</summary>
 public sealed record ProcedureParameterInfo(string Name, SqlType? Type, bool IsOutput);
 
-/// <summary>All tables/views/temp tables/table variables discovered across a scanned folder (Pass 1 output).</summary>
 public sealed class DatabaseCatalog
 {
     private readonly Dictionary<string, CatalogTable> _tablesByQualifiedName =
@@ -36,8 +34,6 @@ public sealed class DatabaseCatalog
 
     private readonly List<TemporalTablePair> _temporalTablePairs = [];
 
-    // Keyed by the UPPERCASE-normalized scheme name (T-SQL identifiers are case-insensitive by
-    // default collation) - avoids needing a custom tuple IEqualityComparer for a two-field key.
     private readonly Dictionary<(string SchemeName, int PartitionNumber), string> _partitionFilegroupsBySchemeAndNumber = [];
 
     private readonly Dictionary<string, IReadOnlyList<CatalogIndex>> _indexedViewIndexesByQualifiedName =
@@ -67,313 +63,114 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, IReadOnlyList<ProcedureParameterInfo>> _procedureParametersByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>SQL Server forbids chaining (a synonym's target can't itself be a synonym), but a corpus can contain a broken/legacy script that does it anyway - bounds the walk so a real or accidental cycle can never loop instead of resolving.</summary>
-    private const int MaxSynonymHops = 8;
+private const int MaxSynonymHops = 8;
 
     public IReadOnlyCollection<CatalogTable> Tables => _tablesByQualifiedName.Values;
 
-    /// <summary>
-    /// CREATE TYPE ... FROM aliases discovered across every scanned file, keyed by qualified
-    /// name (docs/audit-remediation-plan.md Phase 6.2) - lets a column/variable/CAST target
-    /// declared with a user-defined alias resolve through to the real underlying type instead
-    /// of staying permanently UNKNOWN.
-    /// </summary>
-    public IReadOnlyDictionary<string, SqlType> TypeAliases => _typeAliasesByQualifiedName;
+public IReadOnlyDictionary<string, SqlType> TypeAliases => _typeAliasesByQualifiedName;
 
     public void AddTypeAlias(string qualifiedName, SqlType underlyingType) =>
         _typeAliasesByQualifiedName[qualifiedName] = underlyingType;
 
-    /// <summary>
-    /// A scalar UDF's <c>RETURNS &lt;type&gt;</c>, keyed by the function's own qualified name -
-    /// lets a predicate comparing a column against <c>dbo.SomeFunction(...)</c> type the
-    /// function side instead of falling to Unknown for lack of any type at all (the single
-    /// highest-value gap the construct coverage audit called out). Stored even when the return
-    /// type itself couldn't be resolved (null), mirroring how an unresolvable column type is
-    /// still recorded as Type=null rather than left absent - "we saw this function and could
-    /// not type it" is a different, honest state from "we never saw this function".
-    /// </summary>
-    public void AddScalarFunctionReturnType(string qualifiedName, SqlType? returnType) =>
+public void AddScalarFunctionReturnType(string qualifiedName, SqlType? returnType) =>
         _scalarFunctionReturnTypesByQualifiedName[qualifiedName] = returnType;
 
-    /// <summary>DROP FUNCTION on a scalar UDF - the counterpart to AddScalarFunctionReturnType, so a dropped-and-never-recreated function stops offering a stale return type to any later predicate that happens to reference the same name.</summary>
-    public void RemoveScalarFunctionReturnType(string qualifiedName) =>
+public void RemoveScalarFunctionReturnType(string qualifiedName) =>
         _scalarFunctionReturnTypesByQualifiedName.Remove(qualifiedName);
 
-    /// <summary>True only when a CREATE/ALTER FUNCTION with this qualified name was seen with a scalar (non-table) return type - a table-valued function or an unseen name both return false, so a caller can distinguish "not a scalar UDF" from "a scalar UDF whose type didn't resolve".</summary>
-    public bool TryGetScalarFunctionReturnType(string qualifiedName, out SqlType? returnType) =>
+public bool TryGetScalarFunctionReturnType(string qualifiedName, out SqlType? returnType) =>
         _scalarFunctionReturnTypesByQualifiedName.TryGetValue(qualifiedName, out returnType);
 
-    /// <summary>
-    /// Records which flavour of table-valued function a qualified name is - the one fact the
-    /// MSTVF-as-fence stream cannot get from the call site, since <c>FROM dbo.fn(@x)</c> reads
-    /// identically for an inline TVF (harmless, expanded like a view) and a multi-statement one
-    /// (an optimization fence with a fabricated cardinality estimate). Absence is meaningful and
-    /// must stay absent: a name this scan never saw as a function is NOT reported as anything,
-    /// per the "never guess" rule - see <see cref="TryGetTableValuedFunctionKind"/>.
-    /// </summary>
-    public void AddTableValuedFunctionKind(string qualifiedName, TableValuedFunctionKind kind) =>
+public void AddTableValuedFunctionKind(string qualifiedName, TableValuedFunctionKind kind) =>
         _tableValuedFunctionKindsByQualifiedName[qualifiedName] = kind;
 
-    /// <summary>DROP FUNCTION on a TVF - the counterpart to <see cref="AddTableValuedFunctionKind"/>, so a dropped-and-never-recreated function stops claiming a kind for any later reference that happens to reuse its name.</summary>
-    public void RemoveTableValuedFunctionKind(string qualifiedName) =>
+public void RemoveTableValuedFunctionKind(string qualifiedName) =>
         _tableValuedFunctionKindsByQualifiedName.Remove(qualifiedName);
 
-    /// <summary>
-    /// True only when a table-valued function with this qualified name was seen (live:
-    /// <c>sys.objects.type</c> in <c>('IF','TF','FT')</c>; file mode: its parsed <c>RETURNS</c>
-    /// clause). False means "this scan does not know that name to be a TVF" - which covers both a
-    /// scalar UDF and a name whose DDL was never read, and must never be treated as "therefore
-    /// inline, therefore harmless."
-    /// </summary>
-    public bool TryGetTableValuedFunctionKind(string qualifiedName, out TableValuedFunctionKind kind) =>
+public bool TryGetTableValuedFunctionKind(string qualifiedName, out TableValuedFunctionKind kind) =>
         _tableValuedFunctionKindsByQualifiedName.TryGetValue(qualifiedName, out kind);
 
-    /// <summary>
-    /// The scalar-UDF stream's own metadata for a function - T-SQL vs CLR, schemabinding,
-    /// engine-reported inlineability, a static blocker-scan explanation, and CLR data access.
-    /// Independent of, and merged separately from, <see cref="AddScalarFunctionReturnType"/>
-    /// (the return-type registry has its own older consumers this one must not disturb). A live
-    /// re-registration (e.g. a later merge overlaying engine-authoritative flags) replaces the
-    /// whole record rather than patching individual fields, since <see cref="MergeFileModeExtras"/>
-    /// only ever contributes a record for a name live mode never independently populated.
-    /// </summary>
-    public void AddScalarUdfInfo(string qualifiedName, ScalarUdfInfo info) =>
+public void AddScalarUdfInfo(string qualifiedName, ScalarUdfInfo info) =>
         _scalarUdfInfoByQualifiedName[qualifiedName] = info;
 
-    /// <summary>DROP FUNCTION on a scalar UDF - the counterpart to <see cref="AddScalarUdfInfo"/>.</summary>
-    public void RemoveScalarUdfInfo(string qualifiedName) =>
+public void RemoveScalarUdfInfo(string qualifiedName) =>
         _scalarUdfInfoByQualifiedName.Remove(qualifiedName);
 
-    /// <summary>
-    /// True only when a scalar UDF with this qualified name was seen. False covers both a
-    /// table-valued function and a name this scan never read DDL for - never treated as "not a
-    /// UDF at all, therefore safe to ignore" by a caller that already knows it's looking at a
-    /// function call, since a genuine miss here just means "this scan doesn't know", not "this
-    /// isn't a scalar UDF".
-    /// </summary>
-    public bool TryGetScalarUdfInfo(string qualifiedName, out ScalarUdfInfo? info) =>
+public bool TryGetScalarUdfInfo(string qualifiedName, out ScalarUdfInfo? info) =>
         _scalarUdfInfoByQualifiedName.TryGetValue(qualifiedName, out info);
 
-    /// <summary>
-    /// Records one computed column/DEFAULT/CHECK constraint's own definition text, keyed by
-    /// nothing but appended to a flat list - unlike every other registry here, this one is never
-    /// looked up by name; a single post-catalog pass (<see cref="Predicates.SchemaDependencyScanner"/>)
-    /// walks every entry once, after every scalar UDF in the whole catalog is known, exactly
-    /// mirroring how live mode reads these definitions as plain text with no earlier phase to
-    /// register into.
-    /// </summary>
-    public void AddSchemaExpression(SchemaExpressionReference reference) => _schemaExpressions.Add(reference);
+public void AddSchemaExpression(SchemaExpressionReference reference) => _schemaExpressions.Add(reference);
 
     public IReadOnlyList<SchemaExpressionReference> SchemaExpressions => _schemaExpressions;
 
-    /// <summary>
-    /// Foreign-key column pairs. Per CLAUDE.md's "everything goes via the database" rule, this is
-    /// populated ONLY by <c>LiveCatalogReader</c> reading <c>sys.foreign_key_columns</c> live -
-    /// file mode (<c>CatalogBuilder</c>) deliberately does not parse <c>FOREIGN KEY</c> DDL, since
-    /// replicating the engine's own constraint-resolution semantics (ALTER-added constraints,
-    /// multi-batch definitions) is exactly the "reinventing the database-project wheel" CLAUDE.md
-    /// warns against. Always empty for a file-mode scan.
-    /// </summary>
-    public void AddForeignKey(ForeignKeyRelationship relationship) => _foreignKeys.Add(relationship);
+public void AddForeignKey(ForeignKeyRelationship relationship) => _foreignKeys.Add(relationship);
 
     public IReadOnlyList<ForeignKeyRelationship> ForeignKeys => _foreignKeys;
 
-    /// <summary>CHECK constraints, live from <c>sys.check_constraints</c> only - same "engine-authoritative, never parsed from DDL" reasoning as <see cref="ForeignKeys"/>. Always empty for a file-mode scan.</summary>
-    public void AddCheckConstraint(CatalogCheckConstraint constraint) => _checkConstraints.Add(constraint);
+public void AddCheckConstraint(CatalogCheckConstraint constraint) => _checkConstraints.Add(constraint);
 
     public IReadOnlyList<CatalogCheckConstraint> CheckConstraints => _checkConstraints;
 
-    /// <summary>Row-Level Security predicate bindings, live from <c>sys.security_policies</c>/<c>sys.security_predicates</c> only - same "engine-authoritative, never parsed from DDL" reasoning as <see cref="ForeignKeys"/>/<see cref="CheckConstraints"/>. Always empty for a file-mode scan.</summary>
-    public void AddSecurityPredicate(CatalogSecurityPredicate predicate) => _securityPredicates.Add(predicate);
+public void AddSecurityPredicate(CatalogSecurityPredicate predicate) => _securityPredicates.Add(predicate);
 
     public IReadOnlyList<CatalogSecurityPredicate> SecurityPredicates => _securityPredicates;
 
-    /// <summary>Trigger firing-order state, live from <c>sys.triggers</c>/<c>sys.trigger_events</c> only - same "engine-authoritative, never parsed from DDL" reasoning as <see cref="ForeignKeys"/>/<see cref="CheckConstraints"/> (<c>sp_settriggerorder</c>'s own pin state has no DDL representation to replay). Always empty for a file-mode scan.</summary>
-    public void AddTriggerEvent(CatalogTriggerEvent triggerEvent) => _triggerEvents.Add(triggerEvent);
+public void AddTriggerEvent(CatalogTriggerEvent triggerEvent) => _triggerEvents.Add(triggerEvent);
 
     public IReadOnlyList<CatalogTriggerEvent> TriggerEvents => _triggerEvents;
 
-    /// <summary>
-    /// A system-versioned temporal table's own current-table/history-table pairing, read live from
-    /// <c>sys.tables.temporal_type</c>/<c>history_table_id</c> only (docs/detection-checklist.md
-    /// "Temporal table history-side index gap") - same "engine-authoritative, never parsed from
-    /// DDL" reasoning as <see cref="ForeignKeys"/>/<see cref="CheckConstraints"/>: file mode has no
-    /// parsed representation of <c>WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = ...))</c> at all
-    /// (<c>SystemCatalogViewRegistry</c> only models <c>sys.tables</c>' own columns, never DDL
-    /// clause parsing for this feature), so this is always empty for a file-mode scan. Both the
-    /// current table AND its history table are otherwise ordinary <see cref="CatalogTable"/> rows
-    /// already carrying their own real <see cref="CatalogTable.Indexes"/> (both come back from the
-    /// same plain <c>sys.tables</c>/<c>sys.indexes</c> read every other table does - a history table
-    /// is not a distinct catalog object kind, just a table with <c>temporal_type = 1</c>) - this
-    /// registry supplies only the missing fact those two rows can't carry on their own: which table
-    /// is which side of which pair.
-    /// </summary>
-    public void AddTemporalTablePair(TemporalTablePair pair) => _temporalTablePairs.Add(pair);
+public void AddTemporalTablePair(TemporalTablePair pair) => _temporalTablePairs.Add(pair);
 
     public IReadOnlyList<TemporalTablePair> TemporalTablePairs => _temporalTablePairs;
 
-    /// <summary>
-    /// A partition scheme's own static boundary-to-filegroup assignment (<c>sys.destination_data_spaces</c>
-    /// joined off <c>sys.partition_schemes</c>/<c>sys.filegroups</c>) - a database-wide, schema-
-    /// definition fact independent of any one table (multiple partitioned tables commonly share
-    /// the same scheme), so this is a flat side-registry rather than folded into
-    /// <see cref="CatalogTable"/> the same way <see cref="TemporalTablePairs"/> is. Oracle-
-    /// confirmed (2026-08-21) as the source <c>ALTER TABLE ... SWITCH PARTITION</c>'s own per-
-    /// partition filegroup-mismatch check (errors 4938/4939) needs - see
-    /// <c>Predicates.QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch</c>'s
-    /// own doc comment. Live-only; always empty for a file-mode scan (partition scheme filegroup
-    /// assignment is never replayed from parsed DDL, the same DDL-fidelity reasoning every other
-    /// live-only fact in this codebase already gives).
-    /// </summary>
-    public void AddPartitionFilegroup(string schemeName, int partitionNumber, string filegroupName) =>
+public void AddPartitionFilegroup(string schemeName, int partitionNumber, string filegroupName) =>
         _partitionFilegroupsBySchemeAndNumber[(schemeName.ToUpperInvariant(), partitionNumber)] = filegroupName;
 
-    /// <summary>The filegroup a given partition scheme's given partition number resolves to, or null if unknown (an unpartitioned scan, file mode, or a scheme/number this registry never saw).</summary>
-    public string? FindPartitionFilegroup(string schemeName, int partitionNumber) =>
+public string? FindPartitionFilegroup(string schemeName, int partitionNumber) =>
         _partitionFilegroupsBySchemeAndNumber.GetValueOrDefault((schemeName.ToUpperInvariant(), partitionNumber));
 
-    /// <summary>
-    /// An indexed view's own clustered/nonclustered index shape, keyed by the view's qualified
-    /// name - populated ONLY by <c>LiveCatalogReader</c> reading <c>sys.indexes</c> joined
-    /// against <c>sys.views</c> (a view is never a <see cref="CatalogTable"/> in this codebase's
-    /// model - it is resolved through lineage as a <see cref="Lineage.ResolvedRelation"/> - so an
-    /// indexed view needs this narrow side-registry rather than being folded into <see
-    /// cref="Tables"/>, the same way <see cref="ForeignKeys"/> is kept as a flat side-registry
-    /// rather than attached to a table). Always empty for a file-mode scan: replicating
-    /// <c>CREATE INDEX ... ON aView</c> DDL resolution ourselves is exactly the "reinventing the
-    /// database-project wheel" CLAUDE.md warns against, and the object being indexed at all is
-    /// itself the fact this exists to record.
-    /// </summary>
-    public void AddIndexedView(string qualifiedName, IReadOnlyList<CatalogIndex> indexes) =>
+public void AddIndexedView(string qualifiedName, IReadOnlyList<CatalogIndex> indexes) =>
         _indexedViewIndexesByQualifiedName[qualifiedName] = indexes;
 
     public bool IsIndexedView(string qualifiedName) => _indexedViewIndexesByQualifiedName.ContainsKey(qualifiedName);
 
-    /// <summary>
-    /// A view's own <c>sys.columns</c> row set, in column-ordinal order, keyed by the view's
-    /// qualified name (docs/detection-checklist.md "Second full-archive practitioner sweep" §G:
-    /// "View defined with SELECT * whose compiled column list has gone stale against the base
-    /// table's current shape"). This is the engine's real, currently-cached column list for the
-    /// view object - frozen at <c>CREATE</c>/<c>ALTER</c>/<c>sp_refreshview</c> time, exactly the
-    /// same freezing <see cref="Predicates.SelectStarViewFinding"/> already documents - not a
-    /// re-derivation of what the view's <c>SELECT *</c> text would expand to today. Populated
-    /// ONLY by <c>LiveCatalogReader</c> (same live-only reasoning as the indexed-view
-    /// registrations just above): a file-mode reparse of <c>CREATE VIEW ... SELECT *</c> would
-    /// always expand against whatever base-table shape the SAME parse pass just inferred, so
-    /// staleness is structurally impossible to observe from file text alone - this concept only
-    /// exists once there is a real engine-compiled snapshot to compare against a real engine-
-    /// current base table shape. Always empty for a file-mode scan.
-    /// </summary>
-    public void AddViewCompiledColumns(string qualifiedName, IReadOnlyList<string> columnNames) =>
+public void AddViewCompiledColumns(string qualifiedName, IReadOnlyList<string> columnNames) =>
         _viewCompiledColumnsByQualifiedName[qualifiedName] = columnNames;
 
     public bool TryGetViewCompiledColumns(string qualifiedName, out IReadOnlyList<string> columnNames) =>
         _viewCompiledColumnsByQualifiedName.TryGetValue(qualifiedName, out columnNames!);
 
-    /// <summary>
-    /// A module's own <c>sys.sql_modules.uses_quoted_identifier</c> flag, baked in wholesale at
-    /// CREATE/ALTER compile time (a mid-body <c>SET QUOTED_IDENTIFIER</c> statement has no
-    /// bearing on this - the catalog flag is the one the engine actually compiled the module
-    /// under). Always empty for a file-mode scan - there is no live <c>sys.sql_modules</c> row to
-    /// read the flag from; file-mode DDL never states an intended compile-time QUOTED_IDENTIFIER
-    /// setting the way a live database's own catalog does.
-    /// </summary>
-    public void AddModuleUsesQuotedIdentifier(string qualifiedName, bool usesQuotedIdentifier) =>
+public void AddModuleUsesQuotedIdentifier(string qualifiedName, bool usesQuotedIdentifier) =>
         _moduleUsesQuotedIdentifierByQualifiedName[qualifiedName] = usesQuotedIdentifier;
 
     public bool TryGetModuleUsesQuotedIdentifier(string qualifiedName, out bool usesQuotedIdentifier) =>
         _moduleUsesQuotedIdentifierByQualifiedName.TryGetValue(qualifiedName, out usesQuotedIdentifier);
 
-    /// <summary>
-    /// A module's own <c>sys.sql_modules.uses_ansi_nulls</c> flag - same shape and same reasoning
-    /// as <see cref="AddModuleUsesQuotedIdentifier"/>, baked in wholesale at CREATE/ALTER compile
-    /// time. Oracle-confirmed directly (docs/detection-checklist.md Tier 1 "SET options that
-    /// silently disable plan features"): ANSI_NULLS OFF, like QUOTED_IDENTIFIER OFF, makes a
-    /// filtered index/indexed view the module touches unusable by the optimizer.
-    /// </summary>
-    public void AddModuleUsesAnsiNulls(string qualifiedName, bool usesAnsiNulls) =>
+public void AddModuleUsesAnsiNulls(string qualifiedName, bool usesAnsiNulls) =>
         _moduleUsesAnsiNullsByQualifiedName[qualifiedName] = usesAnsiNulls;
 
     public bool TryGetModuleUsesAnsiNulls(string qualifiedName, out bool usesAnsiNulls) =>
         _moduleUsesAnsiNullsByQualifiedName.TryGetValue(qualifiedName, out usesAnsiNulls);
 
-    /// <summary>
-    /// A module's own <c>sys.sql_modules.is_recompiled</c> flag - true only for a routine authored
-    /// with <c>WITH RECOMPILE</c> (docs/detection-checklist.md "Small precise adds"). Every
-    /// execution compiles a fresh plan and discards it rather than caching it, invisible to any
-    /// monitoring that reads the plan cache (<c>sys.dm_exec_cached_plans</c>/<c>sys.dm_exec_query_stats</c>)
-    /// - the module's own cost never accumulates there at all. Baked in at CREATE/ALTER time, same
-    /// shape as <see cref="AddModuleUsesQuotedIdentifier"/>. Always empty for a file-mode scan -
-    /// there is no live <c>sys.sql_modules</c> row to read the flag from.
-    /// </summary>
-    public void AddModuleIsRecompiled(string qualifiedName, bool isRecompiled) =>
+public void AddModuleIsRecompiled(string qualifiedName, bool isRecompiled) =>
         _moduleIsRecompiledByQualifiedName[qualifiedName] = isRecompiled;
 
     public bool TryGetModuleIsRecompiled(string qualifiedName, out bool isRecompiled) =>
         _moduleIsRecompiledByQualifiedName.TryGetValue(qualifiedName, out isRecompiled);
 
-    /// <summary>
-    /// A module's own <c>sys.sql_modules.uses_database_collation</c> flag - true for a
-    /// schema-bound module (an indexed view, a schema-bound function, or a check
-    /// constraint/computed column expression) whose own compiled plan resolved a string
-    /// comparison or sort by implicitly falling back to the CURRENT database's default collation,
-    /// with no explicit <c>COLLATE</c> clause pinning it (docs/detection-checklist.md "Small
-    /// precise adds"). Baked in at CREATE/ALTER time; a later <c>ALTER DATABASE ... COLLATE</c>
-    /// changes what the module actually compares against without the module's own text ever
-    /// changing - oracle-confirmed directly (Docker instance): SQL Server accepts a schema-bound
-    /// object with an implicit database-collation dependency, and <c>ALTER DATABASE</c> is not
-    /// blocked by its existence, so the object's real string-comparison behavior silently follows
-    /// the database's collation wherever it is moved to next. Always empty for a file-mode scan -
-    /// there is no live <c>sys.sql_modules</c> row to read the flag from.
-    /// </summary>
-    public void AddModuleUsesDatabaseCollation(string qualifiedName, bool usesDatabaseCollation) =>
+public void AddModuleUsesDatabaseCollation(string qualifiedName, bool usesDatabaseCollation) =>
         _moduleUsesDatabaseCollationByQualifiedName[qualifiedName] = usesDatabaseCollation;
 
     public bool TryGetModuleUsesDatabaseCollation(string qualifiedName, out bool usesDatabaseCollation) =>
         _moduleUsesDatabaseCollationByQualifiedName.TryGetValue(qualifiedName, out usesDatabaseCollation);
 
-    /// <summary>
-    /// A module's own <c>sys.sql_modules.is_schema_bound</c> flag, for ANY module kind (view,
-    /// function, trigger) - not to be confused with <see cref="ScalarUdfInfo.IsSchemaBound"/>,
-    /// which only ever exists for a scalar UDF. Read purely so <see
-    /// cref="Predicates.ModuleCompileFlagScanner"/> can EXCLUDE a schema-bound module from its own
-    /// <c>uses_database_collation</c> finding (oracle-confirmed: schema-binding sets that flag
-    /// unconditionally, regardless of whether the module touches string data at all, so it carries
-    /// no differentiating signal there - see <see cref="Predicates.ModuleCompileFlagFinding"/>'s
-    /// own doc comment). Always empty for a file-mode scan.
-    /// </summary>
-    public void AddModuleIsSchemaBound(string qualifiedName, bool isSchemaBound) =>
+public void AddModuleIsSchemaBound(string qualifiedName, bool isSchemaBound) =>
         _moduleIsSchemaBoundByQualifiedName[qualifiedName] = isSchemaBound;
 
     public bool TryGetModuleIsSchemaBound(string qualifiedName, out bool isSchemaBound) =>
         _moduleIsSchemaBoundByQualifiedName.TryGetValue(qualifiedName, out isSchemaBound);
 
-    /// <summary>
-    /// A CREATE/ALTER PROCEDURE's own declared parameter list, in declaration order, keyed by the
-    /// procedure's qualified name - the foundation the procedure call graph (<see
-    /// cref="Predicates.ProcCallGraphBuilder"/>) matches an <c>EXEC</c> call site's positional and
-    /// named arguments against. Registered even when a parameter's type couldn't be resolved
-    /// (null), matching the same "we saw this and could not type it" honesty
-    /// <see cref="AddScalarFunctionReturnType"/> already follows for functions. A table-valued
-    /// parameter is deliberately excluded here - it has no scalar SqlType to seed anything with,
-    /// and is already registered separately as a scoped table (<see cref="AddOrReplace(CatalogTable, string?)"/>).
-    /// </summary>
-    /// <summary>
-    /// A parameterless registration never overwrites an ALREADY-registered non-empty one for the
-    /// same qualified name - real corpus shape (<see cref="DynamicSqlTempTableDiscovery"/>): its
-    /// own synthetic <c>CREATE PROCEDURE [schema].[name] AS BEGIN ... END</c> wrapper, reusing a
-    /// REAL procedure's own qualified name/scope so a dynamic-SQL-constructed temp table resolves
-    /// under the right scope, is built with NO parameter list at all (it only ever wraps a folded
-    /// CREATE TABLE snippet) and runs through this same CatalogBuilder pass a second time, AFTER
-    /// the real procedure's own full body already registered its true parameter list correctly -
-    /// without this guard, that second, parameter-less pass silently clobbers every later EXEC
-    /// call-graph edge's own argument-to-formal matching down to zero formals, discarding the
-    /// procedure's real parameters entirely (surfaced as widespread false "variable-not-in-scope"
-    /// findings for genuine, correctly-declared parameters). A GENUINE parameterless procedure
-    /// registering 0 params for the first time, or re-registering the SAME 0, is unaffected -
-    /// this only ever blocks a 0-length list from replacing a already-known non-0-length one.
-    /// </summary>
-    public void AddProcedureParameters(string qualifiedName, IReadOnlyList<ProcedureParameterInfo> parameters)
+public void AddProcedureParameters(string qualifiedName, IReadOnlyList<ProcedureParameterInfo> parameters)
     {
         if (parameters.Count == 0 && _procedureParametersByQualifiedName.TryGetValue(qualifiedName, out var existing) && existing.Count > 0)
         {
@@ -383,27 +180,16 @@ public sealed class DatabaseCatalog
         _procedureParametersByQualifiedName[qualifiedName] = parameters;
     }
 
-    /// <summary>True only when a CREATE/ALTER PROCEDURE with this qualified name was seen - an unregistered/unresolvable callee (a system proc, or a name this scan never saw) returns false rather than an empty list, so a caller can tell "no parameters" apart from "unknown procedure".</summary>
-    public bool TryGetProcedureParameters(string qualifiedName, out IReadOnlyList<ProcedureParameterInfo> parameters) =>
+public bool TryGetProcedureParameters(string qualifiedName, out IReadOnlyList<ProcedureParameterInfo> parameters) =>
         _procedureParametersByQualifiedName.TryGetValue(qualifiedName, out parameters!);
 
-    /// <summary>Registers <c>CREATE SYNONYM name FOR target</c> - a pure name-&gt;name mapping, so it belongs in the same phase type aliases do (nothing else needs to have been resolved first).</summary>
-    public void AddSynonym(string qualifiedName, string targetQualifiedName) =>
+public void AddSynonym(string qualifiedName, string targetQualifiedName) =>
         _synonymTargetsByQualifiedName[qualifiedName] = targetQualifiedName;
 
-    /// <summary><c>DROP SYNONYM</c> - matches CatalogBuilder's single-phase, file-order-is-declaration-order treatment of every other name-only mapping.</summary>
-    public void RemoveSynonym(string qualifiedName) =>
+public void RemoveSynonym(string qualifiedName) =>
         _synonymTargetsByQualifiedName.Remove(qualifiedName);
 
-    /// <summary>
-    /// Walks a chain of synonyms to the real name a FROM-clause reference ultimately means -
-    /// <paramref name="qualifiedName"/> unchanged if it isn't a synonym at all. Real SQL Server
-    /// never chains synonyms, but this pass doesn't reject the DDL that tries to; a cycle or a
-    /// chain longer than <see cref="MaxSynonymHops"/> returns the ORIGINAL input rather than a
-    /// partially-walked name, so the caller's ordinary "no known DDL" path reports it honestly
-    /// instead of resolving to a guess.
-    /// </summary>
-    public string ResolveSynonymName(string qualifiedName)
+public string ResolveSynonymName(string qualifiedName)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var current = qualifiedName;
@@ -421,122 +207,30 @@ public sealed class DatabaseCatalog
         return current;
     }
 
-    /// <summary>
-    /// The name of the database this catalog was actually built against - set by
-    /// <c>LiveCatalogReader</c> from the live connection's own <c>SqlConnection.Database</c> for
-    /// a <c>scan-db</c> run; left null for a file-mode/corpus scan, where there is no single
-    /// "current database" the parsed DDL was deployed under in the same sense. Used only to
-    /// recognize a THREE-PART reference that names THIS SAME database by its own full name
-    /// (<see cref="Find(string)"/>) - never to resolve a reference to a genuinely different
-    /// database, which stays correctly unresolvable (no second connection, per CLAUDE.md hard
-    /// scope).
-    /// </summary>
-    public string? CurrentDatabaseName { get; set; }
+public string? CurrentDatabaseName { get; set; }
 
     public Collation? DefaultCollation { get; set; }
 
-    /// <summary>
-    /// tempdb's own server-level collation - a real SQL Server's tempdb frequently differs from
-    /// a user database's collation (it's set once at instance install time, not per-database), so
-    /// a #temp table or table variable's columns should default to THIS, not
-    /// <see cref="DefaultCollation"/>. Null (the default) falls back to <see cref="DefaultCollation"/>
-    /// exactly like before this property existed - set only when a manifest/CLI value actually
-    /// supplies one, never guessed.
-    /// </summary>
-    public Collation? TempdbCollation { get; set; }
+public Collation? TempdbCollation { get; set; }
 
-    /// <summary>The collation a temp table/table variable's columns should default to - <see cref="TempdbCollation"/> when known, else <see cref="DefaultCollation"/> (today's behavior, preserved when tempdb's own collation was never supplied).</summary>
-    public Collation? EffectiveTempdbCollation => TempdbCollation ?? DefaultCollation;
+public Collation? EffectiveTempdbCollation => TempdbCollation ?? DefaultCollation;
 
-    /// <summary>
-    /// The connected database's own <c>sys.databases.compatibility_level</c> - live-mode only
-    /// (<c>LiveCatalogReader</c> populates it from a real metadata read; a file-mode scan has no
-    /// live database to ask, so this stays null, the same "live-only, never guessed" shape as
-    /// <see cref="TempdbCollation"/>). Needed by <see cref="Predicates.QueryAntiPatternScanner"/>'s
-    /// own <see cref="Predicates.QueryAntiPatternFindingKind.TableVariableLowCompatEstimate"/> kind
-    /// - oracle-confirmed (docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §B)
-    /// that a table variable's cardinality estimate is fixed at exactly 1 row below compatibility
-    /// level 150 (SQL Server 2019's deferred-compilation fix), regardless of how the variable was
-    /// populated, and is NOT fixed at 1 - deferred compilation genuinely resolves it to the real
-    /// row count - at level 150+ for the shapes this project directly verified (populated once
-    /// before first use in the same batch; populated as a table-valued parameter by the caller
-    /// before EXEC).
-    /// </summary>
-    public int? CompatibilityLevel { get; set; }
+public int? CompatibilityLevel { get; set; }
 
-    /// <summary>
-    /// The connected database's own <c>sys.databases.is_recursive_triggers_on</c> - live-mode
-    /// only, same "live-only, never guessed" shape as <see cref="CompatibilityLevel"/>. T-SQL
-    /// silently no-ops a trigger's own direct self-recursion (an INSERT/UPDATE/DELETE inside a
-    /// trigger targeting the exact table the trigger itself fires on) unless this database option
-    /// is ON - so <see cref="Predicates.TriggerCorrectnessScanner"/>'s own
-    /// <see cref="Predicates.TriggerCorrectnessFindingKind.DirectRecursiveTrigger"/> kind only
-    /// fires when this is provably true; null (file-mode, or a live scan that never read it) means
-    /// the finding stays unreported rather than overclaiming a risk that may not be live.
-    /// </summary>
-    public bool? IsRecursiveTriggersEnabled { get; set; }
+public bool? IsRecursiveTriggersEnabled { get; set; }
 
-    /// <summary>
-    /// The connected SERVER's own <c>sys.configurations</c> <c>'nested triggers'</c> option
-    /// (<c>value_in_use</c>) - live-mode only, same "live-only, never guessed" shape as
-    /// <see cref="IsRecursiveTriggersEnabled"/>, but deliberately a SEPARATE property: this is a
-    /// server-wide setting, not a per-database one, and governs a materially different mechanism.
-    /// <see cref="IsRecursiveTriggersEnabled"/> (database-level <c>RECURSIVE_TRIGGERS</c>) only
-    /// gates a trigger recursively invoking ITSELF (directly, or indirectly through a chain that
-    /// loops back to the same trigger) - oracle-confirmed directly (Docker instance, disposable
-    /// scratch database) that a DML statement inside one trigger firing a SECOND trigger on a
-    /// DIFFERENT table is controlled by this server-level option instead: with it OFF (default is
-    /// ON), a table-A trigger's own write to table B still fires table B's trigger (that first hop
-    /// is the ORIGINAL statement's own top-level trigger firing, always allowed), but table B's
-    /// trigger writing back to table A does NOT cascade into table A's trigger a second time; with
-    /// it ON, the cascade continues for real and is capped only by the engine's hard 32-level
-    /// nesting ceiling (oracle-confirmed: <c>Msg 217, Maximum stored procedure, function, trigger,
-    /// or view nesting level exceeded (limit 32)</c>). So
-    /// <see cref="Predicates.TriggerCorrectnessScanner"/>'s cross-table cycle kind gates on THIS
-    /// property being live-confirmed <c>true</c>, never on <see cref="IsRecursiveTriggersEnabled"/>
-    /// - null (file-mode, or a live scan that never read it) means the finding stays unreported
-    /// rather than overclaiming a risk that may not be live.
-    /// </summary>
-    public bool? IsNestedTriggersEnabled { get; set; }
+public bool? IsNestedTriggersEnabled { get; set; }
 
     public bool? IsAutoCreateStatsOn { get; set; }
 
-    /// <summary>Everything Pass 1 saw but could not resolve into catalog data - never silently dropped.</summary>
-    public SkipLedger Skipped { get; } = new();
+public SkipLedger Skipped { get; } = new();
 
-    /// <summary>
-    /// Stores a real table under its bare qualified name. A temp table or table variable
-    /// declared inside a procedure/function body should use
-    /// <see cref="AddOrReplace(CatalogTable, string?)"/> with that procedure's name as the
-    /// scope, so two procedures' same-named-but-differently-shaped temp objects (a very common
-    /// real-world pattern) don't clobber each other (docs/audit-remediation-plan.md Phase 2.5).
-    /// </summary>
-    public void AddOrReplace(CatalogTable table) => AddOrReplace(table, scope: null);
+public void AddOrReplace(CatalogTable table) => AddOrReplace(table, scope: null);
 
-    /// <summary>
-    /// Stores <paramref name="table"/> under a key scoped to <paramref name="scope"/> (typically
-    /// the qualified name of the enclosing procedure/function/trigger a temp table or table
-    /// variable was declared in) when <paramref name="scope"/> is non-null; otherwise behaves
-    /// like the unscoped overload. Real persistent tables are never scoped - only
-    /// <see cref="CatalogTableKind.TemporaryTable"/>/<see cref="CatalogTableKind.TableVariable"/>
-    /// objects are, since only those can legitimately collide by name across procedures.
-    /// </summary>
-    public void AddOrReplace(CatalogTable table, string? scope) =>
+public void AddOrReplace(CatalogTable table, string? scope) =>
         _tablesByQualifiedName[Key(table.QualifiedName, scope)] = table;
 
-    /// <summary>
-    /// Looks up a real table by its bare qualified name - never scoped. When the direct lookup
-    /// misses and <paramref name="qualifiedName"/> carries a three-part database prefix that
-    /// case-insensitively matches <see cref="CurrentDatabaseName"/> (e.g. real corpus code
-    /// self-referencing its own database by full name - <c>SchemaObjectNameHelper.Qualify</c>
-    /// always keeps a database qualifier distinct from a bare name, since db.dbo.T and dbo.T
-    /// must never collapse into the same catalog key for a GENUINELY different database), retries
-    /// with that prefix stripped - the underlying table IS this same catalog's own entry, just
-    /// named more explicitly than usual. A prefix that does NOT match stays unresolved: this is
-    /// deliberately never a heuristic "assume it's probably us" - only an exact, known match to
-    /// the database this catalog was actually built against ever gets stripped.
-    /// </summary>
-    public CatalogTable? Find(string qualifiedName)
+public CatalogTable? Find(string qualifiedName)
     {
         if (_tablesByQualifiedName.TryGetValue(qualifiedName, out var table))
         {
@@ -548,25 +242,13 @@ public sealed class DatabaseCatalog
             : null;
     }
 
-    /// <summary>
-    /// Looks up a temp table/table variable, trying <paramref name="scope"/>-qualified first
-    /// (the common case: referenced from within the same procedure that declared it) and
-    /// falling back to the batch-level unscoped entry (a temp object declared and used outside
-    /// any procedure, or - conservatively - one this pass couldn't determine a scope for).
-    /// </summary>
-    public CatalogTable? Find(string qualifiedName, string? scope)
+public CatalogTable? Find(string qualifiedName, string? scope)
     {
         if (scope is not null && _tablesByQualifiedName.TryGetValue(Key(qualifiedName, scope), out var scoped))
         {
             return scoped;
         }
 
-        // A table variable (@t) is strictly proc-local in real SQL Server - it never crosses a
-        // procedure boundary the way a #temp table can (FromScopeResolver's own doc comment).
-        // Falling back to the unscoped batch-level entry here would match a DIFFERENT proc's own
-        // @t of the same name (or a stale batch-level DECLARE), silently inheriting the wrong
-        // shape - a scope miss for a table variable must stay unresolved, never guessed from an
-        // unrelated declaration that merely happens to share the name.
         if (qualifiedName.StartsWith('@'))
         {
             return null;
@@ -575,20 +257,7 @@ public sealed class DatabaseCatalog
         return Find(qualifiedName);
     }
 
-    /// <summary>
-    /// Same lookup as <see cref="Find(string, string?)"/>, but for a caller that's about to
-    /// mutate the result and write it back (ALTER TABLE ADD/ALTER/DROP COLUMN, CREATE/DROP/ALTER
-    /// INDEX, sp_rename) - it also reports the scope the match was ACTUALLY found under, which is
-    /// not always <paramref name="scope"/> itself. A #temp table declared outside any procedure
-    /// and later altered from inside one (a real, common pattern - a batch builds #t, then calls a
-    /// procedure that further mutates it) is found via the unscoped fallback even though the
-    /// caller's own current scope is non-null; writing the mutation back under that caller's scope
-    /// instead of the scope it was actually stored under creates a stray, wrongly-scoped duplicate
-    /// while leaving the one true entry silently stale. The caller must always re-store using
-    /// <c>ActualScope</c>, never <paramref name="scope"/> or a value re-derived from the table's
-    /// own <see cref="CatalogTable.Kind"/> alone.
-    /// </summary>
-    public (CatalogTable? Table, string? ActualScope) FindForMutation(string qualifiedName, string? scope)
+public (CatalogTable? Table, string? ActualScope) FindForMutation(string qualifiedName, string? scope)
     {
         if (scope is not null && _tablesByQualifiedName.TryGetValue(Key(qualifiedName, scope), out var scoped))
         {
@@ -609,17 +278,7 @@ public sealed class DatabaseCatalog
         return qualifiedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? qualifiedName[prefix.Length..] : null;
     }
 
-    /// <summary>
-    /// DROP TABLE/VIEW-as-table/etc. and the "remove the old key" half of sp_rename - removes
-    /// whichever entry <paramref name="scope"/>-qualified lookup would have found (falling back
-    /// to the unscoped key, matching <see cref="Find(string, string?)"/>'s own fallback), so a
-    /// dropped-and-never-recreated object stops offering a stale definition to any later
-    /// predicate that references its name (docs/audit-remediation-plan.md Phase 2.5 successor:
-    /// catalog lifecycle). A target this pass never cataloged in the first place is a silent
-    /// no-op here - the caller is responsible for ledgering that case if it cares (the same
-    /// division of responsibility RemoveSynonym and RemoveScalarFunctionReturnType already use).
-    /// </summary>
-    public void Remove(string qualifiedName, string? scope)
+public void Remove(string qualifiedName, string? scope)
     {
         if (scope is not null)
         {
@@ -632,31 +291,7 @@ public sealed class DatabaseCatalog
     private static string Key(string qualifiedName, string? scope) =>
         scope is null ? qualifiedName : $"{scope}::{qualifiedName}";
 
-    /// <summary>
-    /// Roadmap Phase C2 (live catalog parity): live-mode's catalog comes straight from engine
-    /// metadata (<c>LiveCatalogReader</c>), which knows nothing about temp tables/table
-    /// variables/TVP shapes, a scalar UDF's return type, or a procedure's own declared parameter
-    /// list - those exist only as text inside a module body, which the live pass DOES parse (for
-    /// predicate analysis) but never previously fed through <see cref="CatalogBuilder"/> at all.
-    /// Merges exactly what a <see cref="CatalogBuilder"/> pass over those SAME parsed module
-    /// bodies can contribute that engine metadata cannot: <see cref="CatalogTableKind.TemporaryTable"/>/
-    /// <see cref="CatalogTableKind.TableVariable"/>/<see cref="CatalogTableKind.TableType"/>
-    /// entries, scalar-UDF return types, scalar-UDF metadata (schemabinding/inlineability/CLR
-    /// data access, field-merged rather than replaced - see the loop below), and procedure
-    /// parameter lists (the roadmap "trace
-    /// provably-constant dynamic SQL across proc-call edges" item's own
-    /// <see cref="Predicates.ProcCallGraphBuilder"/> depends entirely on
-    /// <see cref="TryGetProcedureParameters"/> to match an EXEC call site's arguments against a
-    /// callee's formal parameters - without this merge, every engine-authoritative scan silently
-    /// had zero call-graph edges, since nothing ever populated this dictionary for it at all).
-    /// Real <see cref="CatalogTableKind.Table"/> entries from <paramref name="fileModeCatalog"/>
-    /// are deliberately never merged - live's own engine-read tables are authoritative and must
-    /// never be overwritten by a DDL-text guess (module bodies contain no CREATE TABLE for a real
-    /// persistent table anyway, so this filter is a safety net, not something expected to
-    /// actually trigger). Type aliases are likewise skipped - live already reads those straight
-    /// from <c>sys.types</c>, a stronger source than re-deriving them from parsed text.
-    /// </summary>
-    public void MergeFileModeExtras(DatabaseCatalog fileModeCatalog)
+public void MergeFileModeExtras(DatabaseCatalog fileModeCatalog)
     {
         foreach (var (key, table) in fileModeCatalog._tablesByQualifiedName)
         {
@@ -676,10 +311,6 @@ public sealed class DatabaseCatalog
             AddProcedureParameters(qualifiedName, parameters);
         }
 
-        // TryAdd, not assignment: unlike the entries above, live mode DOES read TVF kinds
-        // straight from sys.objects, and that answer is authoritative. A parsed RETURNS clause
-        // only ever fills a name the engine never reported (a module body's own text in a
-        // file-mode-only scan), and must never overwrite the engine's own classification.
         foreach (var (qualifiedName, kind) in fileModeCatalog._tableValuedFunctionKindsByQualifiedName)
         {
             _tableValuedFunctionKindsByQualifiedName.TryAdd(qualifiedName, kind);
@@ -696,13 +327,6 @@ public sealed class DatabaseCatalog
                 : fileInfo;
         }
 
-        // Every catalog.Skipped.Record call site in CatalogBuilder - including
-        // WarnIfCaseSensitive, whose entire purpose is telling a reader this scan's own
-        // ordinal-ignore-case name matching is unreliable against a case-sensitive catalog
-        // collation - was previously dead in live/corpus mode: this merge never touched Skipped,
-        // so the live catalog's own ledger stayed permanently empty regardless of what the
-        // file-mode build (CatalogBuilder.Build, run over the same post-deployment module text
-        // just above) recorded.
         Skipped.AddRange(fileModeCatalog.Skipped.Entries);
     }
 }

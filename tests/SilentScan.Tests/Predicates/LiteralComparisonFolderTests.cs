@@ -39,11 +39,6 @@ public sealed class LiteralComparisonFolderTests
     [InlineData("SELECT 1 WHERE 'abc' <> 'xyz';")]
     public void TryFoldComparison_DistinctStringLiterals_NeverFolds(string sql)
     {
-        // A case-insensitive collation is not the risk here (the two strings are already
-        // ordinally different) - but nothing pins down what collation-aware equality WOULD say
-        // for two different strings in general, so this folder only ever asserts equality/
-        // inequality of BYTE-IDENTICAL literals and declines everything else - see this type's
-        // own doc comment on EvaluateExactStringMatch.
         var comparison = ExtractComparison(sql);
 
         var result = LiteralComparisonFolder.TryFoldComparison(comparison.FirstExpression, comparison.SecondExpression, comparison.ComparisonType);
@@ -54,7 +49,6 @@ public sealed class LiteralComparisonFolderTests
     [Fact]
     public void TryFoldComparison_StringLiteralsDifferingOnlyByCase_DoesNotFold()
     {
-        // A case-insensitive collation could make these compare equal at runtime - never guess.
         var comparison = ExtractComparison("SELECT 1 WHERE 'abc' = 'ABC';");
 
         var result = LiteralComparisonFolder.TryFoldComparison(comparison.FirstExpression, comparison.SecondExpression, comparison.ComparisonType);

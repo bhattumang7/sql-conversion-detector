@@ -4,12 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §B "Query anti-patterns
-/// still unbuilt" - fire/near-miss coverage for every <see cref="QueryAntiPatternFindingKind"/>.
-/// See <see cref="QueryAntiPatternFinding"/> for each kind's own scope/precision story and oracle
-/// evidence.
-/// </summary>
 public sealed class QueryAntiPatternScannerTests
 {
     private const string Ddl =
@@ -53,8 +47,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariablePspSkip);
     }
 
-    // --- TableVariableLowCompatEstimate -----------------------------------------------------
-
     [Fact]
     public void TableVariableAsJoinSource_BelowCompat150_Fires()
     {
@@ -88,8 +80,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariableLowCompatEstimate);
     }
 
-    // --- TableVariableStaleEstimateInLoop ----------------------------------------------------
-
     [Fact]
     public void TableVariableReadAndWrittenInSameLoop_UnknownCompat_Fires()
     {
@@ -118,8 +108,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void TableVariableReadAndWrittenInSameLoop_BelowCompat150_ReportsOnlyLowCompatKind()
     {
-        // Below compat 150 the stronger, always-1-row claim already covers the same site - the
-        // stale-in-loop kind deliberately declines to double-report it.
         var findings = Scan(
             "DECLARE @t TABLE (Id INT); DECLARE @i INT = 0; DECLARE @c INT; "
             + "WHILE @i < 5 BEGIN "
@@ -130,8 +118,6 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariableStaleEstimateInLoop);
     }
-
-    // --- RbarSingleRowLoopDml -----------------------------------------------------------------
 
     [Fact]
     public void WhileLoopUpdateKeyedToLoopVariable_Fires()
@@ -180,8 +166,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.RbarSingleRowLoopDml);
     }
 
-    // --- GlobalCursorDeclaration ---------------------------------------------------------------
-
     [Fact]
     public void CursorDeclaredWithoutLocal_Fires()
     {
@@ -206,8 +190,6 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.GlobalCursorDeclaration);
     }
-
-    // --- CountStarVariableExistenceCheck --------------------------------------------------------
 
     [Fact]
     public void CountStarAssignedThenComparedToZeroInNextStatement_Fires()
@@ -235,8 +217,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void InlineCountStarScalarSubquery_NeverFires()
     {
-        // Oracle-confirmed the optimizer already rewrites this form into an EXISTS-equivalent
-        // short-circuiting plan - flagging it would be a false claim.
         var findings = Scan("IF (SELECT COUNT(*) FROM dbo.Big WHERE Col = 'x') > 0 SELECT 1;");
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.CountStarVariableExistenceCheck);
@@ -260,8 +240,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.CountStarVariableExistenceCheck);
     }
 
-    // --- NonAggregateHavingPredicate -----------------------------------------------------------
-
     [Fact]
     public void HavingConditionOnGroupByKeyOnly_Fires()
     {
@@ -282,8 +260,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void HavingConditionMixingKeyAndAggregate_FiresForTheKeyOnlyBranch()
     {
-        // A conjunctive HAVING can be split at its own AND boundary - the Col = 'x' branch alone
-        // is still a correct, independent move to WHERE regardless of the aggregate sibling.
         var findings = Scan("SELECT Col, COUNT(*) FROM dbo.Big GROUP BY Col HAVING Col = 'x' AND COUNT(*) > 1;");
 
         var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.NonAggregateHavingPredicate);
@@ -293,8 +269,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void HavingConditionOredWithAggregate_NeverFires()
     {
-        // Never descends through OR - a condition reachable only through an OR branch does not
-        // unconditionally qualify (the same AND-only discipline NonUniqueUpdateSourceScanner uses).
         var findings = Scan("SELECT Col, COUNT(*) FROM dbo.Big GROUP BY Col HAVING Col = 'x' OR COUNT(*) > 1;");
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.NonAggregateHavingPredicate);
@@ -307,8 +281,6 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.NonAggregateHavingPredicate);
     }
-
-    // --- UnionOfProvablyDisjointBranches --------------------------------------------------------
 
     [Fact]
     public void UnionOfTwoDistinctLiteralEqualityBranches_Fires()
@@ -359,8 +331,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnionOfProvablyDisjointBranches);
     }
 
-    // --- DistinctMaskingJoinFanout ---------------------------------------------------------------
-
     [Fact]
     public void SelectDistinctJoinOnNonUniqueColumn_Fires()
     {
@@ -393,8 +363,6 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.DistinctMaskingJoinFanout);
     }
-
-    // --- UnqualifiedTableReference ----------------------------------------------------------------
 
     [Fact]
     public void UnqualifiedTableReferenceResolvingToRealTable_Fires()
@@ -437,8 +405,6 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnqualifiedTableReference);
     }
-
-    // --- MERGE hazards: MergeMissingHoldlock / MergeNonUniqueUsingSource / MergeUnconditionalDelete -
 
     [Fact]
     public void MergeTargetWithNoHoldlockHint_Fires()
@@ -528,8 +494,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeUnconditionalDelete);
     }
 
-    // --- RecursiveCteMissingMaxRecursion ------------------------------------------------------------
-
     [Fact]
     public void RecursiveCteWithNoMaxRecursionOption_Fires()
     {
@@ -559,8 +523,6 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion);
     }
-
-    // --- UnboundedTableWrite -------------------------------------------------------------------
 
     [Fact]
     public void UpdateWithNoWhereNoTop_Fires()
@@ -595,8 +557,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnboundedTableWrite);
     }
 
-    // --- LinkedServerOrCrossDatabaseReference -------------------------------------------------
-
     [Fact]
     public void FourPartLinkedServerReference_Fires()
     {
@@ -609,7 +569,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void ThreePartReference_FileMode_NeverFires()
     {
-        // File mode has no known "current database" to compare against - never guessed.
         var findings = Scan("SELECT Id FROM OtherDb.dbo.T;");
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference);
@@ -632,8 +591,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void ThreePartReference_LiveMode_SystemDatabase_NeverFires()
     {
-        // master/tempdb/msdb/model - overwhelmingly a metadata/catalog-view read in real corpus
-        // code, not a genuine cross-database business predicate - excluded on purpose.
         var result = SqlScriptParser.ParseText("test.sql", $"{Ddl}\nGO\nSELECT object_id FROM tempdb.sys.objects;");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         var catalog = CatalogBuilder.Build([result]);
@@ -656,12 +613,6 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference);
     }
-
-    // --- MultiRowInsertIgnoreDupKeyDrop -----------------------------------------------------
-    // CatalogIndex.IgnoreDupKey is live-only (never set by CatalogBuilder from DDL text, same
-    // discipline as IsClustered/OptimizeForSequentialKey) - these tests build the catalog from
-    // DDL first, then AddOrReplace the target table with an index carrying the flag directly,
-    // the same pattern TemporalTableHistoryIndexGapScannerTests already uses for a live-only fact.
 
     private static DatabaseCatalog CatalogWithCouponTable(bool ignoreDupKey)
     {
@@ -700,8 +651,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void SingleRowInsert_IntoIgnoreDupKeyUniqueIndex_NeverFires()
     {
-        // A single row can't collide with itself, and whether it collides with an EXISTING row
-        // is a data question this pass cannot see - left unanalyzed rather than guessed at.
         var findings = ScanCoupon(
             "INSERT INTO dbo.Coupon (Code, Pct) VALUES ('SAVE10', 10);",
             ignoreDupKey: true);
@@ -712,8 +661,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void MultiRowInsert_IntoOrdinaryUniqueIndex_NeverFires()
     {
-        // Same multi-row shape, but the unique index does NOT carry IGNORE_DUP_KEY - a duplicate
-        // here raises a real error instead of silently vanishing, so this is not the hazard.
         var findings = ScanCoupon(
             "INSERT INTO dbo.Coupon (Code, Pct) VALUES ('SAVE10', 10), ('SAVE20', 20), ('SAVE10', 15);",
             ignoreDupKey: false);
@@ -724,8 +671,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void MultiRowInsertSelect_IntoIgnoreDupKeyUniqueIndex_NeverFires()
     {
-        // INSERT ... SELECT: this pass cannot prove the SELECT returns more than one row, and
-        // guessing would violate this project's precision discipline - left unanalyzed.
         var findings = ScanCoupon(
             "CREATE TABLE dbo.CouponSource (Code VARCHAR(20) NOT NULL, Pct INT NOT NULL); "
             + "INSERT INTO dbo.Coupon (Code, Pct) SELECT Code, Pct FROM dbo.CouponSource;",
@@ -733,8 +678,6 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MultiRowInsertIgnoreDupKeyDrop);
     }
-
-    // --- AlterTableSwitchColumnMismatch -----------------------------------------------------
 
     private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitch(string ddl, string switchSql)
     {
@@ -816,12 +759,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch);
     }
 
-    // --- AlterTableSwitchIndexMismatch ------------------------------------------------------
-    // IsClustered/IncludedColumns/KeyColumnIsDescendingRaw are live-only (never set by
-    // CatalogBuilder from DDL text) - these tests build the catalog from DDL first, then
-    // AddOrReplace each table with its indexes carrying the live-only facts directly, the same
-    // pattern CatalogWithCouponTable above already uses.
-
     private static DatabaseCatalog CatalogWithSwitchTables(
         IReadOnlyList<CatalogIndex> sourceIndexes, IReadOnlyList<CatalogIndex> targetIndexes)
     {
@@ -893,8 +830,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_SourceHasExtraIndexTargetLacks_NeverFires()
     {
-        // Oracle-confirmed (2026-08-21): only a TARGET index missing from the source matters -
-        // the reverse (source has more indexes than the target) raises nothing at all.
         var findings = ScanSwitchIndexes(
             sourceIndexes: [new CatalogIndex("IX_SwSrc_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"], IncludedColumns: [])],
             targetIndexes: []);
@@ -911,12 +846,6 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch);
     }
-
-    // --- AlterTableSwitchConstraintMismatch -------------------------------------------------
-    // CheckConstraints/ForeignKeys are live-only (never populated by CatalogBuilder from DDL
-    // text) - these tests build the catalog from DDL first, then add constraints directly via
-    // DatabaseCatalog.AddCheckConstraint/AddForeignKey, the same live-only-fact pattern used
-    // above.
 
     private static DatabaseCatalog CatalogWithSwitchConstraints(
         IReadOnlyList<CatalogCheckConstraint> checkConstraints, IReadOnlyList<ForeignKeyRelationship> foreignKeys)
@@ -979,8 +908,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_SourceHasExtraCheckConstraintTargetLacks_NeverFires()
     {
-        // Same asymmetric direction as the index-set check - a source-only constraint with no
-        // target counterpart raises nothing at all (oracle-confirmed 2026-08-21).
         var findings = ScanSwitchConstraints(
             checkConstraints: [new CatalogCheckConstraint("CK_SwSrc", "dbo.SwSrc", IsNotTrusted: false, IsDisabled: false, DefinitionText: "([RegionId]>(0))")],
             foreignKeys: []);
@@ -1047,8 +974,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch);
     }
 
-    // --- AlterTableSwitchTargetOnlyIndexRestriction ------------------------------------------
-
     private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitchTargetOnlyIndexes(
         IReadOnlyList<CatalogIndex> sourceIndexes, IReadOnlyList<CatalogIndex> targetIndexes)
     {
@@ -1072,8 +997,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_SourceHasXmlIndexTargetDoesNot_NeverFires()
     {
-        // Oracle-confirmed (2026-08-21): the source table is explicitly allowed to carry an
-        // XML/spatial index - only the target is restricted.
         var findings = ScanSwitchTargetOnlyIndexes(
             sourceIndexes: [new CatalogIndex("PXML_SwSrc", CatalogIndexKind.Index, IsUnique: false, KeyColumns: [], IncludedColumns: [], IsXmlIndex: true)],
             targetIndexes: []);
@@ -1140,11 +1063,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchFullTextIndexRestriction);
     }
 
-    // --- AlterTableSwitchFilegroupMismatch --------------------------------------------------
-    // FilegroupName/FilegroupIsReadOnly are live-only (never set by CatalogBuilder from DDL text)
-    // - built the same way as CatalogWithSwitchTables above, but overriding the table records
-    // themselves rather than just their indexes.
-
     private static DatabaseCatalog CatalogWithSwitchFilegroups(
         string? sourceFilegroup, bool sourceReadOnly, string? targetFilegroup, bool targetReadOnly)
     {
@@ -1196,14 +1114,10 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_PartitionedTableUnknownFilegroup_NeverFires()
     {
-        // FilegroupName is only ever populated for a non-partitioned table - null on either side
-        // is declined, never guessed at.
         var findings = ScanSwitchFilegroups(null, sourceReadOnly: false, "FG_Orders", targetReadOnly: false);
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch);
     }
-
-    // --- AlterTableSwitchTemporalMismatch ---------------------------------------------------
 
     private static DatabaseCatalog CatalogWithSwitchTemporal(bool sourceIsTemporal, bool targetIsTemporal)
     {
@@ -1267,8 +1181,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchTemporalMismatch);
     }
 
-    // --- AlterTableSwitchRuleConstraint ------------------------------------------------------
-
     private static DatabaseCatalog CatalogWithSwitchRuleConstraint(bool sourceHasRule, bool targetHasRule)
     {
         var ddl = "CREATE TABLE dbo.SwSrc (Id INT NOT NULL); CREATE TABLE dbo.SwTgt (Id INT NOT NULL);";
@@ -1315,8 +1227,6 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchRuleConstraint);
     }
 
-    // --- AlterTableSwitchCdcPartitionSwitch --------------------------------------------------
-
     private static DatabaseCatalog CatalogWithSwitchCdc(bool sourceDisallowed, bool targetDisallowed)
     {
         var ddl = "CREATE TABLE dbo.SwSrc (Id INT NOT NULL); CREATE TABLE dbo.SwTgt (Id INT NOT NULL);";
@@ -1362,9 +1272,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_NoPartitionNumber_CdcDisallowedNeverFires()
     {
-        // Oracle-confirmed (2026-08-21): the engine forces the flag back to 1 for a non-
-        // partitioned table regardless of what was requested - a plain whole-table SWITCH (no
-        // partition number in the syntax at all) can never be the hazard this error models.
         var findings = ScanSwitchCdc(
             "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;",
             sourceDisallowed: false, targetDisallowed: true);
@@ -1381,8 +1288,6 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchCdcPartitionSwitch);
     }
-
-    // --- AlterTableSwitchPartitionFilegroupMismatch ------------------------------------------
 
     private static DatabaseCatalog CatalogWithSwitchPartitionFilegroups(
         string? sourceScheme, string? targetScheme, IEnumerable<(string Scheme, int PartitionNumber, string Filegroup)> mappings)
@@ -1457,8 +1362,6 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_BothNonPartitioned_PartitionFilegroupCheckNeverFires()
     {
-        // No partition number named at all - the whole-table filegroup check already covers
-        // this shape (error 4940), not this one.
         var findings = ScanSwitchPartitionFilegroups(
             "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;",
             sourceScheme: null, targetScheme: null, mappings: []);

@@ -5,13 +5,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Verify.Commands;
 
-/// <summary>
-/// `silentscan-verify generate-type-matrix` — regenerates the checked-in oracle-probed
-/// type-pair matrix that
-/// `SilentScan.Core.Rules.TypePairMatrix` loads at runtime. Run this after upgrading the Docker
-/// SQL Server image, since the matrix records empirical facts about a specific optimizer build,
-/// not something derivable from the T-SQL precedence list alone.
-/// </summary>
 public static class GenerateTypeMatrixCommand
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

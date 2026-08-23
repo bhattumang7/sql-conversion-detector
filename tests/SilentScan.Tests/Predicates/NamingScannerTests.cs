@@ -3,10 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Naming and identifiers" plus the standalone "redundant
-/// database/schema qualifier" bullet. Fully syntax-only, no oracle needed.
-/// </summary>
 public sealed class NamingScannerTests
 {
     private static IReadOnlyList<NamingFinding> Scan(string sql)
@@ -149,9 +145,6 @@ public sealed class NamingScannerTests
     [Fact]
     public void NonDboSchemaTypeQualifier_NeverFiresRedundantQualifier()
     {
-        // A qualifier naming a schema OTHER than dbo is left alone - this static pass cannot know
-        // whether that schema is the connection's own actual default, so flagging it would risk a
-        // real false positive in a multi-schema database.
         var findings = Scan("DECLARE @p custom.MyType;");
 
         Assert.DoesNotContain(findings, f => f.Kind == NamingFindingKind.RedundantTypeQualifier);

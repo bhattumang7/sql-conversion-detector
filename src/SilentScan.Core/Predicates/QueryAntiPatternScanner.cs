@@ -8,12 +8,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §B "Query anti-patterns
-/// still unbuilt" - one scanner, one visitor, the eight <see cref="QueryAntiPatternFindingKind"/>
-/// members that survived precision scrutiny. See <see cref="QueryAntiPatternFinding"/> for each
-/// kind's own scope/precision story and oracle evidence.
-/// </summary>
 public static class QueryAntiPatternScanner
 {
     private static readonly HashSet<string> CountStarFunctionNames = new(StringComparer.OrdinalIgnoreCase)
@@ -29,10 +23,6 @@ public static class QueryAntiPatternScanner
 
     public static IReadOnlyList<QueryAntiPatternFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        // Pre-pass: every CTE name declared ANYWHERE in the script, before the real traversal
-        // below ever reports a bare-reference finding - a CTE declared later in the same batch
-        // than a use-site referencing the identical name is a real (if rare) shape, and this
-        // scanner must never false-fire on it just because of traversal order.
         var cteNameCollector = new Visitor.CteNameCollector();
         parseResult.Fragment.Accept(cteNameCollector);
 
@@ -61,10 +51,6 @@ public static class QueryAntiPatternScanner
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-        // Real per-statement CTE scope (Phase 1.5 "one binder"), for InspectDistinctJoinFanout's
-        // own base-table resolution only - unrelated to cteNames above, which stays a deliberately
-        // name-only, file-wide pre-pass for a different check (forward-reference safety, see Scan's
-        // own comment) and is not itself a resolution bypass.
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteScopeStack = new();
 
         private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
@@ -139,8 +125,6 @@ public static class QueryAntiPatternScanner
             base.ExplicitVisit(node);
         }
 
-        // --- Table variable as a query source (kinds 1 & 2) -----------------------------------
-
         public override void ExplicitVisit(FromClause node)
         {
             foreach (var tableReference in node.TableReferences)
@@ -172,12 +156,6 @@ public static class QueryAntiPatternScanner
             base.ExplicitVisit(node);
         }
 
-        // --- Unqualified table reference (kind 9) / linked-server & cross-database reference
-        // (kind 13) - shared table-reference-site inspection, called from every real query site:
-        // FROM/JOIN (above) plus INSERT/UPDATE/DELETE/MERGE targets and MERGE's own USING source
-        // (below). Deliberately never inspects a CREATE statement's own defining name - that is a
-        // materially different claim already shipped as NamingFindingKind.UnqualifiedCreate. -----
-
         public override void ExplicitVisit(InsertStatement node)
         {
             InspectSiteIfNamedTable(node.InsertSpecification.Target);
@@ -207,8 +185,6 @@ public static class QueryAntiPatternScanner
             base.ExplicitVisit(node);
         }
 
-        // --- ALTER TABLE ... SWITCH source/target column-shape mismatch (kind 14) -------------
-
         public override void ExplicitVisit(AlterTableSwitchStatement node)
         {
             InspectAlterTableSwitchColumnMismatch(node);
@@ -223,8 +199,6 @@ public static class QueryAntiPatternScanner
             InspectAlterTableSwitchFullTextIndexRestriction(node);
             base.ExplicitVisit(node);
         }
-
-        // --- Recursive CTE with no MAXRECURSION option (kind 11) --------------------------------
 
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -246,8 +220,6 @@ public static class QueryAntiPatternScanner
             base.ExplicitVisit(node);
         }
 
-        // --- Cursor declared without LOCAL (kind 4) --------------------------------------------
-
         public override void ExplicitVisit(DeclareCursorStatement node)
         {
             InspectCursorGlobalness(node.CursorDefinition, node.Name.Value, node.StartLine, node.StartColumn);
@@ -264,8 +236,6 @@ public static class QueryAntiPatternScanner
             base.ExplicitVisit(node);
         }
 
-        // --- COUNT(*) assigned to a variable, then compared only to zero (kind 5) --------------
-
         public override void ExplicitVisit(StatementList node)
         {
             InspectCountStarExistenceSequence(node.Statements);
@@ -278,8 +248,6 @@ public static class QueryAntiPatternScanner
             _tableVariableNames.Clear();
             base.ExplicitVisit(node);
         }
-
-        // --- Non-aggregate predicate in HAVING that belongs in WHERE (kind 6) ------------------
 
         public override void ExplicitVisit(QuerySpecification node)
         {
@@ -296,17 +264,11 @@ public static class QueryAntiPatternScanner
             base.ExplicitVisit(node);
         }
 
-        // --- UNION of provably disjoint branches (kind 7) --------------------------------------
-
         public override void ExplicitVisit(BinaryQueryExpression node)
         {
             if (node.BinaryQueryExpressionType == BinaryQueryExpressionType.Union && !node.All
                 && !_consumedUnionChainNodes.Contains(node))
             {
-                // A chain of more than two UNION branches nests as BinaryQueryExpression inside
-                // BinaryQueryExpression - mark every nested union node BEFORE the traversal
-                // reaches them via base.ExplicitVisit below, so the same multi-way union is
-                // inspected exactly once, at its own outermost node, never once per nesting level.
                 MarkNestedUnionChain(node.FirstQueryExpression, _consumedUnionChainNodes);
                 MarkNestedUnionChain(node.SecondQueryExpression, _consumedUnionChainNodes);
                 InspectUnionDisjointness(node);
@@ -372,8 +334,6 @@ public static class QueryAntiPatternScanner
                 FindingConfidence.Medium));
         }
 
-        // --- Linked-server 4-part name / cross-database reference (kind 13) --------------------
-
         private void InspectLinkedServerOrCrossDatabase(NamedTableReference named)
         {
             var schemaObject = named.SchemaObject;
@@ -394,23 +354,12 @@ public static class QueryAntiPatternScanner
 
             if (SystemDatabaseNames.Contains(database.Value))
             {
-                // master/tempdb/msdb/model - a genuinely different database context by name, but
-                // a reference to one of these is almost always a metadata/catalog-view read
-                // (tempdb.sys.objects, master.dbo.syslockinfo) or a tempdb-qualified temp-object
-                // reference, not a real cross-database business predicate with a meaningful
-                // remote-statistics-availability story - real-corpus-measured against the local
-                // test database (docs/detection-checklist.md), where exactly this shape accounted
-                // for 14 of an initial 43 raw hits before this exclusion. Flagging it would dilute
-                // the real signal without being false, so it's declined on purpose, not missed.
                 return;
             }
 
             if (catalog.CurrentDatabaseName is not { Length: > 0 } currentDatabase
                 || string.Equals(database.Value, currentDatabase, StringComparison.OrdinalIgnoreCase))
             {
-                // File-mode (no known current database) or self-referencing 3-part name pointing
-                // back at the very database this catalog was built against - never guessed either
-                // way, matching DatabaseCatalog.Find's own "only an exact, known match" discipline.
                 return;
             }
 
@@ -420,8 +369,6 @@ public static class QueryAntiPatternScanner
                 $"'{database.Value}.{schemaObject.SchemaIdentifier?.Value}.{schemaObject.BaseIdentifier.Value}' references a different database than the one this scan connected to ('{currentDatabase}').",
                 FindingConfidence.Medium));
         }
-
-        // --- Multi-row INSERT into a table with an IGNORE_DUP_KEY unique index (kind 14) --------
 
         private void InspectMultiRowInsertIgnoreDupKey(InsertStatement node)
         {
@@ -719,7 +666,6 @@ public static class QueryAntiPatternScanner
 
             if (source.FilegroupName is null || target.FilegroupName is null)
             {
-                // Never populated for a partitioned table (or a file-mode scan) - declined, not guessed.
                 return;
             }
 
@@ -781,8 +727,6 @@ public static class QueryAntiPatternScanner
         {
             if (node.SourcePartitionNumber is null && node.TargetPartitionNumber is null)
             {
-                // Never fires without a real partition number - the engine forces the flag back
-                // to 1 for a non-partitioned table regardless of what was requested.
                 return;
             }
 
@@ -819,9 +763,6 @@ public static class QueryAntiPatternScanner
         {
             if (node.SourcePartitionNumber is null && node.TargetPartitionNumber is null)
             {
-                // Both non-partitioned - the whole-table filegroup check (error 4940) already
-                // covers this shape; this check is specifically about a partition NUMBER's own
-                // filegroup, which only applies when at least one side names one.
                 return;
             }
 
@@ -853,8 +794,6 @@ public static class QueryAntiPatternScanner
         {
             if (partitionNumberExpression is null)
             {
-                // Non-partitioned side - the whole table's own filegroup (null for a partitioned
-                // table or an unresolved fact, never guessed at).
                 return table.FilegroupName;
             }
 
@@ -951,8 +890,6 @@ public static class QueryAntiPatternScanner
             }
         }
 
-        // --- UPDATE/DELETE with no WHERE and no TOP (kind 12) -----------------------------------
-
         private void InspectUnboundedWrite(WhereClause? where, TopRowFilter? top, TSqlStatement node)
         {
             if (where is not null || top is not null)
@@ -967,8 +904,6 @@ public static class QueryAntiPatternScanner
                 $"{verb} with no WHERE clause and no TOP - a whole-table write with no row-limiting mechanism at all. A deliberate full-table maintenance statement is a legitimate reason this fires; verify intent before treating this as a bug.",
                 FindingConfidence.Medium));
         }
-
-        // --- MERGE hazards (kinds 10, 11) -------------------------------------------------------
 
         private void InspectMergeHazards(MergeSpecification spec)
         {
@@ -1143,18 +1078,13 @@ public static class QueryAntiPatternScanner
             }
         }
 
-        /// <summary>Walks a loop body WITHOUT descending into a nested <c>WHILE</c>'s own body - a
-        /// nested loop's own reads/writes are a materially different site, inspected separately
-        /// when that nested <see cref="WhileStatement"/> is visited on its own.</summary>
-        private sealed class LoopWriteAndReadCollector(
+private sealed class LoopWriteAndReadCollector(
             List<VariableTableReference> readSites,
             HashSet<string> writtenVariables,
             HashSet<string> knownTableVariables) : TSqlFragmentVisitor
         {
             public override void ExplicitVisit(WhileStatement node)
             {
-                // Deliberately does not call base.ExplicitVisit - stops descent into the nested
-                // loop's own body.
             }
 
             public override void ExplicitVisit(FromClause node)
@@ -1209,8 +1139,6 @@ public static class QueryAntiPatternScanner
             }
         }
 
-        // --- Row-by-row single-row DML in a WHILE loop (kind 3) --------------------------------
-
         private void InspectRbarSingleRowLoopDml(WhileStatement node)
         {
             var assignedVariables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1229,9 +1157,7 @@ public static class QueryAntiPatternScanner
             }
         }
 
-        /// <summary>True when <paramref name="where"/> is a single, top-level equality between a
-        /// column and one of <paramref name="loopVariables"/> - AND-flattened, never through OR.</summary>
-        private static string? SingleVariableEqualityColumn(WhereClause? where, HashSet<string> loopVariables)
+private static string? SingleVariableEqualityColumn(WhereClause? where, HashSet<string> loopVariables)
         {
             if (where?.SearchCondition is not BooleanComparisonExpression { ComparisonType: BooleanComparisonType.Equals } cmp)
             {
@@ -1262,8 +1188,6 @@ public static class QueryAntiPatternScanner
         {
             public override void ExplicitVisit(WhileStatement node)
             {
-                // Stops descent into a nested loop's own body - see the analogous note on
-                // LoopWriteAndReadCollector above.
             }
 
             public override void ExplicitVisit(UpdateStatement node)
@@ -1472,9 +1396,6 @@ public static class QueryAntiPatternScanner
             }
         }
 
-        // --- DISTINCT masking a join fan-out (kind 8, reuses NonUniqueUpdateSourceScanner's
-        // composite-uniqueness catalog check) ---------------------------------------------------
-
         private void InspectDistinctJoinFanout(
             QuerySpecification node, Dictionary<string, ScopeEntry> byAlias,
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
@@ -1577,8 +1498,6 @@ public static class QueryAntiPatternScanner
             var literalTexts = equalities.Select(e => LiteralText(e.Literal)).ToList();
             if (literalTexts.Any(t => t is null) || literalTexts.Distinct(StringComparer.OrdinalIgnoreCase).Count() != literalTexts.Count)
             {
-                // Either a non-literal comparand this pass won't reason about, or two branches
-                // share the same literal (not provably disjoint - could be a genuine overlap).
                 return;
             }
 
@@ -1589,11 +1508,7 @@ public static class QueryAntiPatternScanner
                 FindingConfidence.Medium));
         }
 
-        /// <summary>Flattens a chain of plain (non-ALL) UNION nodes into its leaf
-        /// <see cref="QuerySpecification"/> branches - null when any branch is itself an EXCEPT/
-        /// INTERSECT/UNION ALL, or not a plain query specification at all (a materially different
-        /// shape this pass declines rather than guesses at).</summary>
-        private static List<QuerySpecification>? FlattenUnionBranches(QueryExpression expression)
+private static List<QuerySpecification>? FlattenUnionBranches(QueryExpression expression)
         {
             switch (expression)
             {
@@ -1659,9 +1574,6 @@ public static class QueryAntiPatternScanner
             _ => null,
         };
 
-        // --- Shared syntax-only helpers (RawColumnReferenceCollector, ColumnNameIfQualifiedByAlias)
-        // live in ColumnAliasHelpers - base-table resolution itself goes through
-        // FromScopeResolver (Phase 1.5 "one binder"), above.
     }
 
 }

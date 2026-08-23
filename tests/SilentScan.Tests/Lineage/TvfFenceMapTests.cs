@@ -4,12 +4,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Tests.Lineage;
 
-/// <summary>
-/// <see cref="TvfFenceMap"/> is the depth/origin machinery <see cref="Predicates.TvfFenceScanner"/>
-/// leans on for the nested "permissions function wrapped in a view" case - covered end to end via
-/// fixtures in <c>TvfFenceScannerTests</c> for the one-layer case; this covers the multi-layer
-/// depth/origin arithmetic directly, which a single fixture pair can't exercise as clearly.
-/// </summary>
 public sealed class TvfFenceMapTests
 {
     private static (DatabaseCatalog Catalog, IReadOnlyList<ViewDefinition> Views) Build(string sql)
@@ -53,8 +47,6 @@ public sealed class TvfFenceMapTests
         var outer = Assert.Contains("dbo.vw_Outer", map);
         Assert.Equal("dbo.fn_Fence", outer.FunctionQualifiedName);
         Assert.Equal(2, outer.Depth);
-        // Origin stays fixed at the layer that actually names the fencing function, not wherever
-        // it was last inherited from - vw_Outer's own body never mentions fn_Fence at all.
         Assert.Equal(inner.OriginSourcePath, outer.OriginSourcePath);
         Assert.Equal(inner.OriginLine, outer.OriginLine);
     }
@@ -97,10 +89,6 @@ public sealed class TvfFenceMapTests
     [Fact]
     public void CteSharingATvfFencingViewsName_DoesNotFalselyInheritTheFence()
     {
-        // The gap this fix closes: a CTE named the same as dbo.vw_Fenced (a real view that
-        // fences an MSTVF) used to be indistinguishable from a genuine reference to that view -
-        // dbo.vw_Coincidence would have falsely inherited the fence via a same-named CTE it
-        // never actually references.
         var (catalog, views) = Build("""
             CREATE FUNCTION dbo.fn_Fence()
             RETURNS @T TABLE (Id INT)

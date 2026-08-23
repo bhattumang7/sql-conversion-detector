@@ -7,29 +7,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
-/// <summary>
-/// The one dataflow engine for every T-SQL control-flow construct - IF, WHILE, TRY/CATCH,
-/// BEGIN/END, GOTO/LABEL, BREAK/CONTINUE all lower to blocks and edges in the SAME graph, solved
-/// by the SAME fixpoint, joined by the SAME <see cref="SqlTextValue.Join"/> operation. Replaces
-/// the old scanner's split design, where this exact block/fixpoint machinery existed but ran
-/// ONLY for a GOTO-bearing scope - every other scope used separate, hand-written
-/// <c>HandleIf</c>/<c>HandleWhile</c>/<c>HandleTryCatch</c> methods, each with its own merge
-/// logic. <see cref="SqlTextValue.Join"/> already merges two same-guard branches into one
-/// <see cref="TemplatePiece.Choice"/> internally when BOTH sides resolve to a real value, so an
-/// IF's join block just needs to look up which guard text governs it for that case - no separate
-/// machinery required. When only ONE side resolves (the other taints - a genuinely common shape:
-/// "if X, append known text; else, read from a table"), <see cref="SqlTextValue.Join"/> itself
-/// stays branch-agnostic (it has no notion of "then" vs "else"), so THIS class applies
-/// <see cref="SqlTextValue.WithGuardedAlternative"/> separately, in <see cref="ApplyGuardedAlternativeFixup"/> -
-/// the one place branch identity (<see cref="_thenPredecessorByJoinBlock"/>) is still known,
-/// preserving the old scanner's own guarded-alternatives capability without baking
-/// branch-awareness into the general-purpose <see cref="SqlTextValue.Join"/> that every OTHER
-/// join point (loop back-edges, TRY/CATCH, GOTO convergence) also uses.
-/// <see cref="TSqlStatement"/>s this class does not itself understand (everything except IF/
-/// WHILE/TRY-CATCH/BEGIN-END/GOTO/LABEL/BREAK/CONTINUE) are handed to the caller-supplied
-/// leaf-compiler constructor delegate as opaque leaf steps - see
-/// docs/dynamic-sql-rebuild-plan.md §4 for the transfer-function side of this split.
-/// </summary>
 public sealed class DynamicSqlCfg
 {
     private const int MaxFixpointRounds = 50;
@@ -56,24 +33,7 @@ public sealed class DynamicSqlCfg
     private readonly Dictionary<int, SourceSpan> _blockSpan = [];
     private SourceSpan _defaultSpan;
 
-    /// <param name="sourcePath">The file this scope's statements came from - used to build a <see cref="SourceSpan"/> for a block whose own triggering statement isn't otherwise available.</param>
-    /// <param name="cap">The per-join assembly cap forwarded to every <see cref="SqlTextValue.Join"/> call - the same <c>MaxAssembliesPerVariable</c> the old scanner used.</param>
-    /// <param name="compileLeaf">Compiles one non-control-flow statement into a step - invoked with <c>emit: false</c> during the fixpoint (side effects like EXEC emission suppressed) and once more with <c>emit: true</c> once state has stabilized.</param>
-    /// <param name="callerSeededVariableNames">
-    /// Formal parameter names this scope's OWN seed populated from a genuine caller-supplied
-    /// literal argument (<see cref="DynamicSqlTransfer.SeedFromSingleEdge"/> - never a local
-    /// DECLARE initializer, a default value, or test scaffolding). The ONLY thing this set gates:
-    /// <see cref="ApplyConstantConditionPruning"/> refuses to prune an IF whose condition doesn't
-    /// reference at least one of these names, even when the condition is otherwise fully provable
-    /// (e.g. <c>IF 1 = 1</c>, or <c>DECLARE @mode INT = 0; IF @mode = 0</c>) - both are real,
-    /// sound, always-true facts about THIS proc's own code, but proving them isn't this feature's
-    /// job: real corpus code uses that exact idiom as deliberate always-run wrapper boilerplate,
-    /// and pruning it changes behavior for a huge, untargeted swath of ordinary branches having
-    /// nothing to do with the caller-driven bitmask-flag idiom this feature actually targets.
-    /// Defaults to empty (a trigger body, or any scope with no formal parameters at all, never
-    /// prunes anything - unchanged from before this feature existed).
-    /// </param>
-    public DynamicSqlCfg(
+public DynamicSqlCfg(
         string sourcePath, int cap, Func<TSqlStatement, IReadOnlyList<string>, Action<Dictionary<string, SqlTextValue>, bool>> compileLeaf,
         IReadOnlySet<string>? callerSeededVariableNames = null)
     {
@@ -83,25 +43,13 @@ public sealed class DynamicSqlCfg
         _callerSeededVariableNames = callerSeededVariableNames ?? NoCallerSeededVariableNames;
     }
 
-    /// <summary>
-    /// Solves <paramref name="statements"/> to the state every fall-through exit point converges
-    /// to - what a caller reads a scope's OWN final variable states back from (e.g. an OUTPUT
-    /// parameter's value at the end of a procedure body). RETURN and an unconditional GOTO each
-    /// end their own block with no fallthrough successor, so they contribute nothing to the
-    /// result - exiting through either one never reaches a scope's own implicit end.
-    /// </summary>
-    public Dictionary<string, SqlTextValue> Solve(IList<TSqlStatement> statements, Dictionary<string, SqlTextValue> initialSeed)
+public Dictionary<string, SqlTextValue> Solve(IList<TSqlStatement> statements, Dictionary<string, SqlTextValue> initialSeed)
     {
         _defaultSpan = statements.Count > 0 ? Span(statements[0]) : new SourceSpan(_sourcePath, 1, 1);
 
         PreRegisterLabels(statements);
         var entryBlock = NewBlock();
         var exitBlocks = new List<int>();
-        // The ONE place a fallthrough (as opposed to RETURN) completion adds to exitBlocks - see
-        // BuildSequence's own doc comment for why it must not do this itself on every recursive
-        // call (a THEN/ELSE/TRY/CATCH/loop body's own fallthrough is not a scope-level exit; it
-        // is only ever consumed via BuildSequence's return value, by BuildIf/BuildWhile/
-        // BuildTryCatch wiring it into their own join block).
         if (BuildSequence(statements, entryBlock, exitBlocks, new Stack<(int Header, int After)>(), NoActiveGuards) is { } scopeFallthrough)
         {
             exitBlocks.Add(scopeFallthrough);
@@ -156,14 +104,6 @@ public sealed class DynamicSqlCfg
 
         var working = new Dictionary<string, SqlTextValue>(merged, StringComparer.OrdinalIgnoreCase);
 
-        // BEFORE this block's own steps run, not after: BuildSequence keeps appending whatever
-        // statements FOLLOW an IF as steps on that SAME join block (no new block boundary), so a
-        // statement immediately after the IF - `SET @x = @x + '...'`, or the EXEC itself - reads
-        // straight out of `working`. Fixing it up only AFTER the steps ran would be one statement
-        // too late: the very first following statement would already have consumed the
-        // un-recovered value. Only in the final pass: by then the fixpoint has already fully
-        // converged, so both predecessors' own outStates entries (read here, however this block's
-        // own index relates to either of them) are already STABLE values.
         if (emit && _guardTextByJoinBlock.ContainsKey(index))
         {
             ApplyGuardedAlternativeFixup(index, working, outStates);
@@ -178,33 +118,7 @@ public sealed class DynamicSqlCfg
         return working;
     }
 
-    /// <summary>
-    /// Restores the old scanner's guarded-alternatives capability, generalized beyond its
-    /// original single case. Reads both predecessors' OWN raw values directly - never
-    /// <paramref name="working"/>'s already-merged result for the key, which can ALREADY be a
-    /// generic typed <see cref="HoleKind.WidenedChoice"/> hole or a live
-    /// <see cref="TemplatePiece.Choice"/> rather than <see cref="SqlTextValue.Tainted"/>
-    /// (<see cref="SqlTextValue.Join"/>'s own uniform-declared-type/Choice-merge recovery fires
-    /// whenever both branches resolve to real Templates - the overwhelmingly common case for one
-    /// variable reassigned on both sides of the SAME IF - which would otherwise pre-empt this
-    /// fixup entirely). Three cases: (1) exactly one branch resolves and the other is
-    /// <see cref="SqlTextValue.Tainted"/> - OVERRIDES <paramref name="working"/> with a fresh
-    /// Tainted carrying the known branch as a <see cref="GuardedAlternative"/>, so an EXEC fed
-    /// this value can recover the exact known text instead of an unresolvable placeholder; (2)
-    /// the THEN branch resolves (regardless of what the ELSE branch or the general Join produced)
-    /// - its own value is ALSO attached as a GuardedAlternative directly onto whatever
-    /// <paramref name="working"/> already is (a live Choice, a widened Hole, ...), so a LATER
-    /// EXEC guarded by the EXACT SAME predicate text can narrow straight to it even when the
-    /// overall merged value is perfectly usable on its own; (3) either branch's OWN value already
-    /// carries GuardedAlternatives from a NESTED join (an "ELSE IF" chain's own inner guard) -
-    /// Join never carries these forward on its own (a freshly merged value starts with none), so
-    /// they are re-attached here, letting a later EXEC narrow against a guard several IF/ELSE-IF
-    /// arms back. All three are additive, side-channel-only (see <see cref="SqlTextValue.GuardedAlternatives"/>) -
-    /// see <see cref="DynamicSqlTransfer"/>'s own EmitScriptsOrFinding for the consuming side:
-    /// narrowing only actually happens when a LATER EXEC's own active guard stack exactly matches
-    /// one of these tags (soundness-first exact-text matching, never implication).
-    /// </summary>
-    private void ApplyGuardedAlternativeFixup(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
+private void ApplyGuardedAlternativeFixup(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
     {
         var hasThen = _thenPredecessorByJoinBlock.TryGetValue(joinBlock, out var thenPredecessor);
         var hasElse = _elsePredecessorByJoinBlock.TryGetValue(joinBlock, out var elsePredecessor);
@@ -221,18 +135,6 @@ public sealed class DynamicSqlCfg
             var thenValue = thenState.GetValueOrDefault(key);
             var elseValue = elseState.GetValueOrDefault(key);
 
-            // Nothing diverged for this variable at THIS join: either one side never even set it
-            // (never live on the other branch - see MergeStateInto's own doc comment, not a
-            // divergence), or both branches agree completely (Join's own StructurallyEqual
-            // shortcut already returned the shared value unchanged, so `working[key]` already
-            // equals it exactly - attaching it to itself as its own alternative is pure
-            // redundancy). This is the OVERWHELMING common case across the many non-dynamic-SQL
-            // variables a large real-world proc tracks (most IF statements don't touch most
-            // variables), so skipping it here - rather than doing WithGuardedAlternative/
-            // propagation work per key regardless of whether anything actually diverged - is
-            // what keeps this fixup's cost proportional to ACTUAL divergence instead of
-            // O(tracked variables x IF joins): a real corpus repo with a genuinely huge proc
-            // (thousands of DECLAREs/IFs) blew this up to tens of GB before this early-out.
             if (thenValue is null || elseValue is null || SqlTextValue.StructurallyEqual(thenValue, elseValue))
             {
                 continue;
@@ -257,50 +159,18 @@ public sealed class DynamicSqlCfg
                 current = SqlTextValue.WithGuardedAlternative(current, guardText, thenTemplateBothResolved);
             }
 
-            // elseValue's own nested alternatives apply FIRST, thenValue's SECOND (so thenValue
-            // wins a guard-text collision) - the common real shape motivating this ordering is an
-            // unconditional-no-else `IF g SET @x = f(@x)` where BOTH branches trace back to the
-            // SAME ancestor guard's alternative (elseValue = the pre-@x-assignment snapshot,
-            // thenValue = that snapshot after f's own transfer function ran on top of it, e.g. a
-            // trim - see ExpressionEvaluator.TryTrimThroughAlternatives): thenValue's copy is
-            // strictly more refined/up to date for that guard, never less correct, so it must not
-            // be clobbered back to the pre-transfer value by applying elseValue's copy last.
             current = PropagateNestedGuardedAlternatives(current, elseValue);
             current = PropagateNestedGuardedAlternatives(current, thenValue);
             working[key] = current;
         }
     }
 
-    /// <summary>Re-attaches any GuardedAlternatives <paramref name="branchValue"/> already carries (from a NESTED join further up an "ELSE IF" chain) onto <paramref name="current"/> - see <see cref="ApplyGuardedAlternativeFixup"/>'s own doc comment, case 3.</summary>
-    private static SqlTextValue PropagateNestedGuardedAlternatives(SqlTextValue current, SqlTextValue? branchValue) =>
+private static SqlTextValue PropagateNestedGuardedAlternatives(SqlTextValue current, SqlTextValue? branchValue) =>
         branchValue?.GuardedAlternatives is { Count: > 0 } nested
             ? nested.Aggregate(current, (value, alt) => SqlTextValue.WithGuardedAlternative(value, alt.GuardText, alt.Value))
             : current;
 
-    /// <summary>
-    /// The real-corpus counterpart to <see cref="ApplyGuardedAlternativeFixup"/>: report procs
-    /// across this whole corpus gate huge swaths of their own dynamic-SQL construction behind a
-    /// bitmask-flag guard fed by a genuine caller argument - <c>IF (@RowControlBits &amp;
-    /// @RCB_MASK_X) = @RCB_MASK_X</c> - where @RowControlBits is a caller-seeded literal (see
-    /// <see cref="DynamicSqlTransfer.SeedFromSingleEdge"/>) and @RCB_MASK_X a local DECLARE'd
-    /// integer constant. Unlike a value-level guard (which only ever gets a recoverable
-    /// ALTERNATIVE via the fixup above, still leaving the merged Join a widened Choice/Tainted
-    /// for anything the branches actually disagree on), a condition this engine can PROVE true or
-    /// false is a much stronger fact: only ONE branch is a real runtime outcome at all, so the
-    /// OTHER branch's contribution to the ordinary Join is not a genuine alternative to preserve.
-    /// Gated on <see cref="_callerSeededVariableNames"/> (<see cref="ConditionReferencesACallerSeededVariable"/>)
-    /// on purpose: proving <c>IF 1 = 1</c> or a purely local <c>DECLARE @mode INT = 0; IF @mode =
-    /// 0</c> is equally sound in isolation, but real code (and this project's own test suite)
-    /// uses exactly that idiom as deliberate always-run wrapper boilerplate having nothing to do
-    /// with a real caller-driven branch - pruning those too would change behavior for a huge,
-    /// untargeted swath of ordinary branches for no real gain. When
-    /// <see cref="TryFoldBooleanCondition"/> proves the predicate's value AND the corresponding
-    /// branch actually has a live predecessor (an always-RETURNing THEN with the condition proven
-    /// true correctly declines here too, matching <see cref="TryBuildEqualityGuardedReturnNarrowingStep"/>'s
-    /// same reasoning), every variable's value is overwritten with EXACTLY that one predecessor's
-    /// own raw state, discarding the other side's contribution entirely rather than merging it.
-    /// </summary>
-    private void ApplyConstantConditionPruning(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
+private void ApplyConstantConditionPruning(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
     {
         if (!_conditionByJoinBlock.TryGetValue(joinBlock, out var condition)
             || !ConditionReferencesACallerSeededVariable(condition)
@@ -330,16 +200,7 @@ public sealed class DynamicSqlCfg
         }
     }
 
-    /// <summary>
-    /// True the moment ANY <see cref="VariableReference"/> anywhere in <paramref name="condition"/>
-    /// names a formal parameter this scope's own seed populated from a genuine caller-supplied
-    /// literal argument - see <see cref="ApplyConstantConditionPruning"/>'s own doc comment for
-    /// why this gate exists at all. A condition mixing a caller-seeded variable with a purely
-    /// local one (the real corpus idiom: <c>@RowControlBits &amp; @RCB_MASK_X</c>) still counts -
-    /// only ONE operand needs to trace back to the caller for the whole branch to be a genuine,
-    /// caller-driven decision rather than boilerplate.
-    /// </summary>
-    private bool ConditionReferencesACallerSeededVariable(BooleanExpression condition)
+private bool ConditionReferencesACallerSeededVariable(BooleanExpression condition)
     {
         if (_callerSeededVariableNames.Count == 0)
         {
@@ -351,16 +212,7 @@ public sealed class DynamicSqlCfg
         return collector.Names.Any(_callerSeededVariableNames.Contains);
     }
 
-    /// <summary>
-    /// Evaluates a boolean condition to a definite true/false using ONLY
-    /// <see cref="ExpressionEvaluator.FoldInteger"/>-provable operands - AND/OR combine their two
-    /// sides with proper short-circuit soundness (an AND is provably false the instant EITHER
-    /// side is provably false, even if the other side can't be evaluated at all; symmetrically
-    /// for OR and true), so a condition with one foldable and one genuinely-unknown side can still
-    /// resolve when that's enough to decide the whole thing. Returns null - never a guess -
-    /// the moment neither of those short-circuit rules applies and something remains unresolved.
-    /// </summary>
-    private bool? TryFoldBooleanCondition(BooleanExpression predicate, Dictionary<string, SqlTextValue> state) => predicate switch
+private bool? TryFoldBooleanCondition(BooleanExpression predicate, Dictionary<string, SqlTextValue> state) => predicate switch
     {
         BooleanParenthesisExpression paren => TryFoldBooleanCondition(paren.Expression, state),
         BooleanNotExpression not when TryFoldBooleanCondition(not.Expression, state) is { } inner => !inner,
@@ -436,8 +288,7 @@ public sealed class DynamicSqlCfg
         }
     }
 
-    /// <summary>States are stable now - re-run once more with emission enabled. Same inputs, same steps, so this reproduces the exact same outputs; the only difference is that emission-gated side effects (EXEC/output-summary recording) are no longer suppressed.</summary>
-    private void RunFinalPass(int entryBlock, Dictionary<string, SqlTextValue> initialSeed, List<int>[] predecessors, Dictionary<string, SqlTextValue>?[] outStates, bool emit)
+private void RunFinalPass(int entryBlock, Dictionary<string, SqlTextValue> initialSeed, List<int>[] predecessors, Dictionary<string, SqlTextValue>?[] outStates, bool emit)
     {
         for (var i = 0; i < _blocks.Count; i++)
         {
@@ -520,16 +371,6 @@ public sealed class DynamicSqlCfg
                 : bValue;
         }
 
-        // A variable A has but B doesn't (declared only on A's path) is exactly as unresolved on
-        // B's path as an explicit Tainted would be - Join already treats "missing" and "declared
-        // fresh on one branch only" identically by simply keeping A's own value unmerged here,
-        // matching the old scanner's TryMergeFreshlyDeclaredInOneBranchOnly for the common case
-        // where the fresh declaration's own type recovers a typed Hole on the OTHER path only
-        // if a later read joins it against something else - this method itself does not need to
-        // manufacture that Hole, since a variable A has but B doesn't was never live on B's path
-        // to begin with (T-SQL requires DECLARE before any read, so it's structurally unreadable
-        // there) and reaching this point with mismatched keys just means "B's path never touched
-        // it" - keeping A's value is correct, not a widening.
         return merged;
     }
 
@@ -571,37 +412,7 @@ public sealed class DynamicSqlCfg
     private static IList<TSqlStatement> NormalizeToStatementList(TSqlStatement statement) =>
         statement is BeginEndBlockStatement block ? block.StatementList.Statements : [statement];
 
-    /// <summary>
-    /// Recognizes the narrow, no-ELSE <c>IF LEN(x) &gt; 0 SET x = SUBSTRING(x, ...)</c> idiom (a
-    /// common "strip a fixed number of characters, but only when there's enough length to do so"
-    /// guard wrapped around one of <see cref="ExpressionEvaluator"/>'s own already-sound trim
-    /// folds - e.g. stripping a trailing separator left by repeated concatenation) and compiles
-    /// it as ONE unconditional step instead of a real branch. This is necessary because
-    /// <see cref="BuildIf"/>'s ordinary join unions the THEN branch's (correctly trimmed) result
-    /// with the implicit ELSE branch's (x's own UNCHANGED, still-untrimmed) result - sound in
-    /// general (both are real, independently-possible runtime outcomes), but NOT here: the exact
-    /// same "does x have enough trailing/leading literal content" test decides BOTH whether the
-    /// guard is true AND whether the trim fold itself succeeds (see
-    /// <see cref="ExpressionEvaluator.TryTrimThroughAlternatives"/>'s own "drop-too-short-
-    /// alternative" policy), so joining them produces stale untrimmed duplicates of every
-    /// already-correctly-trimmed candidate rather than two genuinely different outcomes -
-    /// confirmed against a real corpus site where this collapsed 31 candidate scripts (16
-    /// still carrying the untrimmed trailing comma, all failing to parse) down to the 15 that
-    /// were already correct.
-    /// </summary>
-    /// <remarks>
-    /// Falls back to x's own PRIOR value - never inventing a value, never assuming the guard was
-    /// true when the trim fold itself can't prove it - whenever that fold declines, which keeps
-    /// this sound even when the trim can't be resolved (x stays exactly what it would have been
-    /// had this whole IF been skipped, matching the guard-false outcome). Deliberately narrow:
-    /// the THEN statement must be exactly one <c>SET</c> assigning a <c>SUBSTRING(x, ..., LEN(x)
-    /// [-k])</c> call BACK onto the SAME variable x that the guard's own <c>LEN(...)</c> tests -
-    /// this is what guarantees the trim-succeeds/guard-true correlation this bypass relies on.
-    /// Anything else (an ELSE branch, a BEGIN/END body with more than one statement, a different
-    /// RHS shape, a guard testing a different variable) returns null and falls back to the
-    /// ordinary branch/join construction, completely unchanged.
-    /// </remarks>
-    private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildSelfTrimBypassStep(IfStatement ifStatement, IReadOnlyList<string> activeGuards)
+private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildSelfTrimBypassStep(IfStatement ifStatement, IReadOnlyList<string> activeGuards)
     {
         if (ifStatement.ElseStatement is not null
             || NormalizeToStatementList(ifStatement.ThenStatement) is not [SetVariableStatement setVar]
@@ -621,13 +432,6 @@ public sealed class DynamicSqlCfg
             var prior = state.GetValueOrDefault(name);
             compiledStep(state, emit);
 
-            // Only revert a genuine LOSS: a fully-known prior Template collapsing to a Tainted
-            // decline (the trim couldn't find any literal content to trim, i.e. x's prior value
-            // was already empty - matching the guard-false outcome exactly). When prior was
-            // ALREADY Tainted, the compiled step's own TryTrimThroughAlternatives fallback (which
-            // also trims through a Tainted value's own GuardedAlternatives) may have refined it -
-            // e.g. narrowing a stale untrimmed GuardedAlternative to a trimmed one - and that
-            // refinement must be kept, not discarded back to the stale prior.
             if (prior is SqlTextValue.Template && state.TryGetValue(name, out var after) && after is SqlTextValue.Tainted)
             {
                 state[name] = prior;
@@ -635,17 +439,7 @@ public sealed class DynamicSqlCfg
         };
     }
 
-    /// <summary>
-    /// True for exactly the three SUBSTRING(x, start, length) shapes <see cref="ExpressionEvaluator.Fold"/>
-    /// already recognizes as sound self-trims of <paramref name="variableName"/>: <c>SUBSTRING(x, n, LEN(x))</c>
-    /// (leading trim, n &gt;= 1), <c>SUBSTRING(x, 0, LEN(x))</c> (drop the last character), and
-    /// <c>SUBSTRING(x, 1, LEN(x) - k)</c> (trailing trim - the idiom real corpus code overwhelmingly
-    /// uses to strip a trailing separator). Deliberately checks only the STRUCTURAL shape, not the
-    /// concrete start/count values - <see cref="ExpressionEvaluator"/>'s own fold re-validates those
-    /// (e.g. that <c>n &gt;= 1</c>) when the compiled step actually runs, and any shape it declines
-    /// falls back to x's prior value exactly like every other decline this bypass handles.
-    /// </summary>
-    private static bool MatchesRecognizedTrimShape(ScalarExpression startExpr, ScalarExpression thirdArg, string variableName) =>
+private static bool MatchesRecognizedTrimShape(ScalarExpression startExpr, ScalarExpression thirdArg, string variableName) =>
         IsSelfLenReference(thirdArg, variableName)
         || (thirdArg is BinaryExpression { BinaryExpressionType: BinaryExpressionType.Subtract, FirstExpression: var lenSide }
             && IsSelfLenReference(lenSide, variableName)
@@ -675,25 +469,7 @@ public sealed class DynamicSqlCfg
 
     private static readonly Dictionary<string, SqlTextValue> EmptyLiteralFoldState = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Recognizes the "parameter validation" idiom real corpus procs use to narrow an input
-    /// parameter to one exact, known literal for the rest of the routine: <c>IF x &lt;&gt; 'literal'
-    /// BEGIN RAISERROR(...) RETURN ... END</c> (a guard clause rejecting any other value, found
-    /// via dbo.spRelationshipReconcileSharedTripByOdometer's own <c>@SourceTable</c> validation).
-    /// Ordinarily this scanner never narrows a variable's value from a comparison - a T-SQL IF
-    /// doesn't literally assign anything - but THIS shape is different: <see cref="BuildIf"/>'s
-    /// own reachability computation (not re-derived here - read directly off
-    /// <see cref="_thenPredecessorByJoinBlock"/>, the exact ground truth it already computed) can
-    /// prove the THEN branch never reaches the join at all (it always exits the routine via
-    /// RETURN), so the ONLY way execution reaches anything AFTER the IF is via the guard's
-    /// predicate being FALSE - which for <c>x &lt;&gt; 'literal'</c> means x provably EQUALS
-    /// 'literal' downstream, a hard fact, not a guess. Applies regardless of whether an explicit
-    /// ELSE exists (same argument holds either way) or which operand order the literal appears in.
-    /// Deliberately does NOT re-run <see cref="BuildSequence"/> on the THEN body itself to check
-    /// this (that would double-register its blocks/labels) - it reads the fact BuildIf already
-    /// established as a side effect of building the real branch.
-    /// </summary>
-    private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildEqualityGuardedReturnNarrowingStep(IfStatement ifStatement, int joinBlock)
+private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildEqualityGuardedReturnNarrowingStep(IfStatement ifStatement, int joinBlock)
     {
         if (!_thenPredecessorByJoinBlock.ContainsKey(joinBlock)
             && TryGetSelfEqualityGuard(ifStatement.Predicate, out var variableName, out var literalExpression))
@@ -736,34 +512,13 @@ public sealed class DynamicSqlCfg
         return false;
     }
 
-    /// <summary>
-    /// Links <paramref name="statements"/> into the block graph starting at <paramref
-    /// name="current"/>, returning the block execution falls through to afterward, or null when
-    /// this sequence can never fall through (RETURN, an unconditional GOTO, or every branch of
-    /// its last construct exits some other way). Deliberately does NOT add its own fallthrough
-    /// block to <paramref name="exitBlocks"/> - only a RETURN does that, since RETURN is the one
-    /// way execution can leave the CURRENT scope from PARTWAY through a nested THEN/ELSE/TRY/
-    /// CATCH/loop body. An ordinary fallthrough completion is never itself a scope-level exit: it
-    /// is consumed ONLY via this method's own return value, by whichever caller invoked it
-    /// (<see cref="BuildIf"/>/<see cref="BuildWhile"/>/<see cref="BuildTryCatch"/> wiring it into
-    /// their own join block, or <see cref="Solve"/> itself for the outermost call). Adding it to
-    /// the shared <paramref name="exitBlocks"/> list here too - which an earlier version of this
-    /// class did - double-counts every nested branch's own fallthrough as an INDEPENDENT
-    /// scope-level exit, corrupting <see cref="MergeExitStates"/>'s result with stale,
-    /// already-superseded intermediate states once the branch's value has moved on past its own
-    /// join point.
-    /// </summary>
-    private int? BuildSequence(IList<TSqlStatement> statements, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
+private int? BuildSequence(IList<TSqlStatement> statements, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
     {
         var reachable = true;
         foreach (var statement in statements)
         {
             if (!reachable)
             {
-                // Dead code unless a label here makes it reachable via GOTO - resume building
-                // into a fresh, currently-unlinked block so a label buried inside still gets its
-                // own contents populated correctly, without spuriously wiring it as a successor
-                // of whatever came before.
                 current = NewBlock();
                 reachable = true;
             }
@@ -831,16 +586,7 @@ public sealed class DynamicSqlCfg
         return reachable ? current : null;
     }
 
-    /// <summary>
-    /// Wraps <see cref="BuildIf"/> with the two narrow, self-contained recognizers that bypass or
-    /// augment its ordinary branch/join construction - <see cref="TryBuildSelfTrimBypassStep"/>
-    /// (compiles a self-guarded SUBSTRING trim as one unconditional step instead of a real
-    /// branch) and <see cref="TryBuildEqualityGuardedReturnNarrowingStep"/> (adds a value-
-    /// narrowing step after an ordinary guard-clause IF whose THEN branch always RETURNs).
-    /// Factored out of <see cref="BuildSequence"/>'s own switch purely to keep that method's
-    /// cognitive complexity within the Sonar gate - no behavioral difference from inlining it.
-    /// </summary>
-    private int BuildIfWithNarrowingBypasses(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
+private int BuildIfWithNarrowingBypasses(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
     {
         if (TryBuildSelfTrimBypassStep(ifStatement, activeGuards) is { } bypassStep)
         {
@@ -873,7 +619,6 @@ public sealed class DynamicSqlCfg
         }
         else
         {
-            // No ELSE: the condition being false falls straight through from the IF's own block.
             elseExit = current;
         }
 
@@ -926,21 +671,7 @@ public sealed class DynamicSqlCfg
         return after;
     }
 
-    /// <summary>
-    /// A variable both (1) self-referentially reassigned somewhere inside this loop's own body
-    /// (<c>SET @x += ...</c> or <c>SET @x = @x + ...</c>) and (2) read by an EXEC/sp_executesql
-    /// call somewhere inside the SAME body is a genuine unbounded accumulator this scanner
-    /// cannot enumerate: this dataflow engine tracks per-round STATE, never trip counts, so
-    /// nothing here bounds how many times the loop actually runs - each additional run appends
-    /// more text, and a fixpoint over that shape either never converges or converges to an
-    /// arbitrary intermediate snapshot purely as an artifact of how many rounds
-    /// <see cref="RunFixpoint"/> happens to take, neither of which is a sound answer for what the
-    /// variable could ever actually hold. Detected structurally (self-reference + a same-body
-    /// EXEC), not by inspecting string content - consistent with CLAUDE.md's "no heuristic
-    /// string guessing": this looks at program STRUCTURE, the same way every other shape in this
-    /// class (IF/TRY-CATCH/GOTO) is recognized syntactically rather than guessed.
-    /// </summary>
-    private static HashSet<string> FindUnboundedAccumulators(WhileStatement whileStatement)
+private static HashSet<string> FindUnboundedAccumulators(WhileStatement whileStatement)
     {
         var selfAccumulating = new SelfAccumulatingVariableCollector();
         whileStatement.Statement.Accept(selfAccumulating);
@@ -956,18 +687,7 @@ public sealed class DynamicSqlCfg
         return selfAccumulating.Names;
     }
 
-    /// <summary>
-    /// Forces every name in <paramref name="names"/> to a fresh <see cref="SqlTextValue.Tainted"/>
-    /// carrying the "while-loop-body:cardinality-cap" reason as the FIRST step of the loop body's
-    /// own entry block, on every fixpoint round (both suppressed and the final emitting pass) -
-    /// this both makes the loop's own EXEC read decline with the correct, specific reason and
-    /// keeps the value stable across rounds (a repeated identical Tainted trivially satisfies
-    /// <see cref="StatesEqual"/>, so this cannot itself prevent the surrounding fixpoint from
-    /// converging), rather than letting the ordinary Join/Widen machinery either race to
-    /// <see cref="MaxFixpointRounds"/> or accidentally stabilize on an arbitrary
-    /// under-cap intermediate snapshot.
-    /// </summary>
-    private Action<Dictionary<string, SqlTextValue>, bool> SeedUnboundedAccumulatorTaint(IReadOnlyCollection<string> names, WhileStatement whileStatement)
+private Action<Dictionary<string, SqlTextValue>, bool> SeedUnboundedAccumulatorTaint(IReadOnlyCollection<string> names, WhileStatement whileStatement)
     {
         var span = Span(whileStatement);
         var captured = names.ToArray();
@@ -1039,16 +759,8 @@ public sealed class DynamicSqlCfg
         var catchEntry = NewBlock();
         _blocks[current].Successors.Add(tryEntry);
 
-        // CATCH only runs if TRY throws mid-way, so how far TRY got is unknowable - an edge
-        // straight from the PRE-TRY block, never from any point inside TRY itself.
         _blocks[current].Successors.Add(catchEntry);
 
-        // T-SQL locals are batch/proc scoped, not block-scoped: a variable DECLAREd only inside
-        // TRY (the classic "log the dynamic SQL that just failed" pattern) is still legal to
-        // reference from CATCH, since storage for every local is allocated at parse time
-        // regardless of whether the DECLARE line itself ever ran. Seeded as its own step on
-        // catchEntry - prepended before BuildSequence appends CATCH's own statements below, so it
-        // runs before anything that might reference the name.
         _blocks[catchEntry].Steps.Add(SeedTryOnlyDeclarations(tryCatch));
 
         var tryExit = BuildSequence(tryCatch.TryStatements.Statements, tryEntry, exitBlocks, loopStack, activeGuards);
@@ -1070,16 +782,7 @@ public sealed class DynamicSqlCfg
         return join;
     }
 
-    /// <summary>
-    /// Every DECLARE anywhere inside the TRY block (at any nesting depth - a batch-scoped local
-    /// declared inside a nested IF/WHILE within TRY is still visible from CATCH) whose type
-    /// resolves, seeded as a typed <see cref="HoleKind.TryOnlyDeclaration"/> placeholder the
-    /// moment CATCH's own state doesn't already have an entry for that name - i.e. only when
-    /// nothing outside TRY (a pre-TRY DECLARE, or an outer-scope formal parameter) already
-    /// provides one. An untyped DECLARE (its <see cref="TypeInference.SqlType"/> didn't resolve) is left
-    /// exactly as unseeded as it always was; this only recovers the case the old scanner recovered.
-    /// </summary>
-    private Action<Dictionary<string, SqlTextValue>, bool> SeedTryOnlyDeclarations(TryCatchStatement tryCatch)
+private Action<Dictionary<string, SqlTextValue>, bool> SeedTryOnlyDeclarations(TryCatchStatement tryCatch)
     {
         var collector = new DeclareVariableCollector();
         foreach (var statement in tryCatch.TryStatements.Statements)

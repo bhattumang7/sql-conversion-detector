@@ -8,14 +8,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Exercises <see cref="LineageParityChecker"/> directly against the real oracle with
-/// hand-built <see cref="LineageCatalog"/>s - CLAUDE.md Verify workflow's "diff inferred view
-/// column types/collations against sys.columns; any mismatch is a P0 lineage bug," extended
-/// (an audit finding) to cover every provenance kind <see
-/// cref="ColumnProvenanceAnalysis.TryGetScalarType"/> resolves a type for, and to diff
-/// length/precision/scale, not just category/collation.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LineageParityCheckerTests : IAsyncLifetime
 {
@@ -77,8 +69,6 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     [Fact]
     public async Task CheckAsync_BaseColumnWrongLength_ReportsLengthMismatch()
     {
-        // A category+collation match with the WRONG length: the previous diff would have
-        // passed this clean. VARCHAR(50) inferred, but the view's real column is VARCHAR(20).
         var lineage = Catalog(
             "dbo.vw_Orders", "OrderCode",
             new ColumnProvenance.BaseColumn("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 50, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"))));
@@ -94,10 +84,6 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     [Fact]
     public async Task CheckAsync_CastProvenanceMatchesRealView_NoMismatch()
     {
-        // Coverage this gate didn't have before: a Cast-provenance column (not a BaseColumn
-        // passthrough) is now checked too, using the CAST's own explicit target type. Collation
-        // is the source column's own (SQL_Latin1_General_CP1_CI_AS) - CAST-to-string propagates
-        // the input's collation in the real engine, verified directly against the oracle.
         var lineage = Catalog(
             "dbo.vw_CastOrders", "OrderCode",
             new ColumnProvenance.Cast(
@@ -129,12 +115,6 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     [Fact]
     public async Task CheckAsync_SqlVariantBaseColumnMatchesRealCatalog_NoMismatch()
     {
-        // sys.types.name for SQL_VARIANT is "sql_variant" (with an underscore) - the checker's
-        // own category comparison previously compared against SqlTypeCategory.SqlVariant's bare
-        // enum name ("SqlVariant"), which can never match "sql_variant" case-insensitively (the
-        // underscore is a real character difference, not a casing one) - a false "category"
-        // mismatch on every real SQL_VARIANT column, exactly the false-positive class this
-        // gate's own doc comment warns about.
         var lineage = Catalog(
             "dbo.vw_VariantOrders", "Attribute",
             new ColumnProvenance.BaseColumn("dbo.Orders", "Attribute", new SqlType(SqlTypeCategory.SqlVariant)));
@@ -147,14 +127,6 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     [Fact]
     public async Task CheckAsync_ExpressionProvenanceWithNoInferredType_SkipsRatherThanGuessing()
     {
-        // The checker's own behavior given an ALREADY-null InferredType (constructed directly
-        // here, bypassing ScalarExpressionResolver, to isolate the checker from what actually
-        // types today) - never guessed at, exactly like the pre-existing Unknown/disagreeing-
-        // Union case. NOT a live example of an untyped expression: Pass 2's own
-        // BuiltinFunctionTypeResolver already types UPPER/LOWER/LTRIM/RTRIM/REVERSE/REPLACE/
-        // LEFT/RIGHT/SUBSTRING/STUFF/MIN/MAX/SUM/AVG/DATEADD (oracle-verified) - an expression
-        // this pass genuinely still can't type looks more like FORMAT(...) (locale/format-
-        // string rendering, deliberately never modeled - real guess risk).
         var lineage = Catalog(
             "dbo.vw_ExprOrders", "OrderCode",
             new ColumnProvenance.Expression(
@@ -187,11 +159,6 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     [Fact]
     public async Task CheckAsync_NullInferredCollation_SkipsFacetRatherThanReportingMismatch()
     {
-        // An unpinned repo's column carries Collation=null on purpose (VerdictClassifier's
-        // never-guess contract) - sys.columns always reports a real, resolved collation for
-        // every string column regardless, so this must never be compared as a mismatch (an
-        // audit finding: this previously flagged every unpinned repo's every string column,
-        // burying real lineage bugs under 47-of-48 false positives on the DNN Platform corpus).
         var lineage = Catalog(
             "dbo.vw_Orders", "OrderCode",
             new ColumnProvenance.BaseColumn("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: null)));
@@ -216,8 +183,6 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
 
         var mismatches = await _checker.CheckAsync(DatabaseName, lineage);
 
-        // sys.columns.max_length for NVARCHAR(30) is 60 (bytes) - a naive raw-byte comparison
-        // against our own character-count Length=30 would falsely report a mismatch here.
         Assert.Empty(mismatches);
     }
 }

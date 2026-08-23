@@ -3,17 +3,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Small precise adds" - two independent <c>sys.sql_modules</c>
-/// catalog flags, same shape as <see cref="SetOptionScanner"/>'s own module-level (catalog-flag)
-/// half: no AST walk, no precision guard needed (the flag alone is the whole fact), <see
-/// cref="ModuleCompileFlagFinding.Line"/>/<see cref="ModuleCompileFlagFinding.Column"/> point at
-/// the module's own CREATE/ALTER statement. Live-mode only - <see
-/// cref="DatabaseCatalog.TryGetModuleIsRecompiled"/>/<see
-/// cref="DatabaseCatalog.TryGetModuleUsesDatabaseCollation"/> are populated only by
-/// <c>LiveScanRunner</c>, so a file-mode scan never produces a finding here, exactly like <see
-/// cref="SetOptionScanner"/>.
-/// </summary>
 public static class ModuleCompileFlagScanner
 {
     public static IReadOnlyList<ModuleCompileFlagFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)

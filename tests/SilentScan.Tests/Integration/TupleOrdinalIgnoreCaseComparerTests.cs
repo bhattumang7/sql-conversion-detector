@@ -2,13 +2,6 @@ using SilentScan.Live;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// The gap this fix closes: LiveScanRunner's own workload-finding dedup key used the default
-/// (ordinal, case-SENSITIVE) tuple comparer, unlike every other identifier map in this codebase
-/// (DatabaseCatalog's own dictionaries are all OrdinalIgnoreCase) - a casing difference between
-/// the module-body pass's own table/column name and the live plan cache's own would miss the
-/// match and publish a duplicate workload finding for an already-reported column.
-/// </summary>
 public sealed class TupleOrdinalIgnoreCaseComparerTests
 {
     [Fact]

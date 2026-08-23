@@ -17,7 +17,6 @@ public sealed class IndexAccessDetectorTests
     [Fact]
     public void HasIndexSeek_RealSeekPlanFragment_ReturnsTrue()
     {
-        // Captured from a live probe: SELECT Id FROM dbo.T WHERE Col = 5 against an index on Col.
         var xml = Wrap("""
             <RelOp PhysicalOp="Index Seek" LogicalOp="Index Seek">
               <IndexScan>
@@ -32,9 +31,6 @@ public sealed class IndexAccessDetectorTests
     [Fact]
     public void HasIndexSeek_RealScanPlanFragmentAgainstSameIndex_ReturnsFalse()
     {
-        // Captured from a live probe: the int -> varchar -> int round-trip case. SQL Server
-        // chose to scan the SAME index (cheaper than a clustered scan) rather than seek it -
-        // proving the index name alone isn't enough; PhysicalOp must be checked too.
         var xml = Wrap("""
             <RelOp PhysicalOp="Index Scan" LogicalOp="Index Scan">
               <IndexScan Ordered="0">

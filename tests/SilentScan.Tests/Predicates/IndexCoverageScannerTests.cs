@@ -4,12 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §B "Index-coverage shapes" -
-/// fire/near-miss coverage for <see cref="IndexCoverageFindingKind.KeyLookupProneIndex"/>. See
-/// <see cref="IndexCoverageFinding"/> for the plan-XML oracle evidence (a real Docker probe, not
-/// reproduced here - this file exercises the static AST+catalog claim only).
-/// </summary>
 public sealed class IndexCoverageScannerTests
 {
     private const string Ddl =
@@ -54,7 +48,6 @@ public sealed class IndexCoverageScannerTests
     [Fact]
     public void QueryOnlyReferencingIndexedColumn_NeverFires()
     {
-        // Nothing beyond the key column itself is ever read - no residual column to look up.
         var findings = Scan("SELECT A FROM dbo.T WHERE A = 5;");
 
         Assert.Empty(findings);
@@ -63,9 +56,6 @@ public sealed class IndexCoverageScannerTests
     [Fact]
     public void TwoCandidateIndexesForSameLeadingColumn_NeverFires()
     {
-        // Precision guard: a real alternative access path exists (IX_T3_A_2 also leads with A) -
-        // this pass cannot know which one the optimizer would pick, so it declines rather than
-        // guess which index's own coverage story to report.
         var findings = Scan("SELECT Id, A, B FROM dbo.T3 WHERE A = 5;");
 
         Assert.Empty(findings);

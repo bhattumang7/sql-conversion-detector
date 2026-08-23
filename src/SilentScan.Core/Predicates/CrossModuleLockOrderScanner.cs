@@ -5,19 +5,9 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §D "Cross-module analysis" -
-/// see <see cref="CrossModuleLockOrderFinding"/> for the full precision story, oracle evidence,
-/// and the explicit v1 scope-down (top-level procedures' own direct bodies only, no call-graph
-/// traversal). This is a WHOLE-SCAN pass, not a per-file one: the same table pair must be seen
-/// written in opposite order by two DIFFERENT procedures, which can live in different files.
-/// </summary>
 public static class CrossModuleLockOrderScanner
 {
-    /// <summary>One top-level procedure's own direct write order: every base table its own body
-    /// writes inside an explicit transaction, first-occurrence line only, in the order first
-    /// written.</summary>
-    private sealed record ProcedureWriteOrder(
+private sealed record ProcedureWriteOrder(
         string ProcedureQualifiedName, string SourcePath, int ProcedureLine, IReadOnlyList<(string TableQualifiedName, int Line)> Writes);
 
     public static IReadOnlyList<CrossModuleLockOrderFinding> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog)
@@ -37,9 +27,6 @@ public static class CrossModuleLockOrderScanner
             {
                 if (string.Equals(procedures[i].ProcedureQualifiedName, procedures[j].ProcedureQualifiedName, StringComparison.OrdinalIgnoreCase))
                 {
-                    // Same procedure name seen twice (e.g. a re-declared/duplicate CREATE across
-                    // files this scan doesn't try to disambiguate) - comparing it against itself
-                    // is not a cross-module claim.
                     continue;
                 }
 
@@ -70,14 +57,9 @@ public static class CrossModuleLockOrderScanner
                 var bYIndex = IndexOfTable(b.Writes, tableY.TableQualifiedName);
                 if (bXIndex < 0 || bYIndex < 0 || bXIndex < bYIndex)
                 {
-                    // b doesn't write both tables within its own explicit transaction, or writes
-                    // them in the SAME relative order as a - not an inconsistency.
                     continue;
                 }
 
-                // a writes tableX then tableY; b writes tableY then tableX - opposite order,
-                // confirmed. Canonicalize which table is "first"/"second" so the same pair always
-                // produces the same finding shape regardless of scan/enumeration order.
                 if (string.CompareOrdinal(tableX.TableQualifiedName, tableY.TableQualifiedName) <= 0)
                 {
                     yield return new CrossModuleLockOrderFinding(
@@ -109,15 +91,7 @@ public static class CrossModuleLockOrderScanner
         return -1;
     }
 
-    /// <summary>
-    /// Scoped to top-level <c>CREATE/ALTER/CREATE OR ALTER PROCEDURE</c> only (the v1 scope-down -
-    /// see <see cref="CrossModuleLockOrderFinding"/>'s own doc comment). Tracks an open-transaction
-    /// depth exactly like <see cref="WaitForScanner"/>'s own established convention (BEGIN TRAN
-    /// increments, COMMIT/ROLLBACK decrements; a structural, straight-line-reading-order signal,
-    /// not real control-flow analysis) purely to gate which DML targets count as "inside an
-    /// explicit transaction."
-    /// </summary>
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
     {
         public List<ProcedureWriteOrder> Orderings { get; } = [];
 
@@ -141,17 +115,6 @@ public static class CrossModuleLockOrderScanner
 
         public override void ExplicitVisit(CommitTransactionStatement node)
         {
-            // Sonar (S2583) reports this guard as always false. That is a false positive: Sonar's
-            // intraprocedural symbolic-execution engine only sees _openTransactionDepth's declared
-            // default (0) at method entry - it has no way to know the field is also mutated by the
-            // ExplicitVisit(BeginTransactionStatement) override above, which the ScriptDom traversal
-            // framework invokes as an independent callback, not through any call chain reachable
-            // from this method. In real T-SQL, this guard is reachable and load-bearing: a procedure
-            // whose COMMIT/ROLLBACK count exceeds its BEGIN TRANSACTION count (a common defensive
-            // pattern, e.g. an unconditional COMMIT after an already-closed conditional transaction)
-            // would otherwise drive the counter negative, desynchronizing it from the real nesting
-            // depth and corrupting the "inside an explicit transaction" gate RecordWrite relies on
-            // for every write that follows.
 #pragma warning disable S2583
             if (_openTransactionDepth > 0)
             {
@@ -164,10 +127,6 @@ public static class CrossModuleLockOrderScanner
 
         public override void ExplicitVisit(RollbackTransactionStatement node)
         {
-            // Same Sonar (S2583) false positive as ExplicitVisit(CommitTransactionStatement) above,
-            // for the identical reason: this guard is reachable once BeginTransactionStatement has
-            // run first, which Sonar's intraprocedural analysis cannot see across sibling visitor
-            // callbacks. See that method's own comment for the full explanation.
 #pragma warning disable S2583
             if (_openTransactionDepth > 0)
             {
@@ -209,14 +168,6 @@ public static class CrossModuleLockOrderScanner
 
             statementList?.AcceptChildren(this);
 
-            // Sonar (S2583) reports this as always false, for the same reason as the two guards
-            // above: AcceptChildren dispatches back into this same visitor's ExplicitVisit(Insert/
-            // Update/Delete/MergeStatement) overrides, which call RecordWrite and mutate _writes as
-            // a side effect - Sonar's intraprocedural analysis has no visibility into that indirect,
-            // framework-driven callback chain, so it only ever sees _writes as the empty list just
-            // assigned above. In real T-SQL, a procedure body with two or more direct table writes
-            // genuinely populates _writes past this point, and this guard is what decides whether
-            // that procedure's write order is worth reporting at all.
 #pragma warning disable S2583
             if (_writes.Count >= 2)
             {
@@ -227,20 +178,7 @@ public static class CrossModuleLockOrderScanner
             _writes = null;
         }
 
-        /// <summary>
-        /// Only a direct <see cref="NamedTableReference"/> target resolving to a real base table
-        /// counts - never a view (writing through a view is not a direct target this pass can
-        /// prove locks the underlying table the same way), never a temp table/table variable
-        /// (private per session, cannot deadlock across sessions), and only while inside an
-        /// explicit transaction the procedure's own body opened. First occurrence per table wins -
-        /// a later re-write of the same table doesn't change which table was locked FIRST. An
-        /// unqualified target sharing its name with one of the statement's own CTEs (legal for
-        /// UPDATE/DELETE/MERGE against a simple, updatable CTE) is declined rather than resolved
-        /// against the catalog - see <see cref="DmlTargetTableScanner"/>'s own identical fix for
-        /// why: a CTE is never schema-qualified, so it always shadows a same-named real base table
-        /// for this statement's own lifetime.
-        /// </summary>
-        private void RecordWrite(TableReference? target, int line, WithCtesAndXmlNamespaces? withCtes)
+private void RecordWrite(TableReference? target, int line, WithCtesAndXmlNamespaces? withCtes)
         {
             if (_writes is null || _openTransactionDepth == 0 || target is not NamedTableReference named)
             {

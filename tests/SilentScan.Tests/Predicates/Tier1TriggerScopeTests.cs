@@ -3,16 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Regression coverage for Tier-1's missing trigger overrides (ConstructCoverage.json-adjacent
-/// gap: NonSargablePredicateScanner had CreateProcedureStatement/CreateFunctionStatement
-/// overrides but no CreateTriggerStatement/AlterTriggerStatement/CreateOrAlterTriggerStatement
-/// counterparts, unlike TypedPredicateExtractor which has all three). Before this fix, a
-/// function-wrapped or leading-wildcard predicate inside a trigger body resolved under no scope
-/// key at all in Tier-1 (a #temp table declared there wouldn't resolve), and inserted/deleted
-/// were never visible to Tier-1 regardless of scope, only to the typed pass. Runs through
-/// ScanReportBuilder, the same entry point production uses.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class Tier1TriggerScopeTests
 {
@@ -43,8 +33,6 @@ public sealed class Tier1TriggerScopeTests
         Assert.Equal("dbo.Orders", finding.TableQualifiedName);
         Assert.Equal("Code", finding.ColumnName);
 
-        // inserted/deleted are a version-store rowset with no index of their own, even though
-        // the real table column IS indexed - Tier-1 must not inherit the real table's index.
         Assert.False(finding.Indexed);
     }
 

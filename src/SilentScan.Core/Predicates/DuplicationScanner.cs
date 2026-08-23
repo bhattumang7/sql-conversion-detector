@@ -7,28 +7,13 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Dead and duplicated code" - see <see cref="DuplicationFinding"/>
-/// for the full scope, precision-guard, and severity documentation.
-/// </summary>
 public static class DuplicationScanner
 {
-    /// <summary>A comment shorter than this (after stripping delimiters and surrounding
-    /// whitespace) never qualifies as "commented-out code" regardless of parse success - a
-    /// two-word comment that happens to parse as a degenerate single-identifier statement is
-    /// noise, not a real code block.</summary>
-    private const int MinCommentedCodeLength = 12;
+private const int MinCommentedCodeLength = 12;
 
-    /// <summary>A string literal must recur at least this many times within one module to be
-    /// reported - three is the smallest count that distinguishes "a real repeated magic value"
-    /// from two independent, coincidental uses of a common short string.</summary>
-    private const int DuplicatedLiteralThreshold = 3;
+private const int DuplicatedLiteralThreshold = 3;
 
-    /// <summary>A literal shorter than this (its raw quoted content) is excluded from the
-    /// duplicated-literal check even at the threshold above - '', ' ', '%', 'Y'/'N' flags and
-    /// similar single-character values are extremely common, low-value repeats, not the "magic
-    /// string that should be a constant" case this rule targets.</summary>
-    private const int MinDuplicatedLiteralLength = 3;
+private const int MinDuplicatedLiteralLength = 3;
 
     public static IReadOnlyList<DuplicationFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
@@ -50,13 +35,7 @@ public static class DuplicationScanner
         ];
     }
 
-    /// <summary>Walks the raw token stream (bounded to this fragment's own
-    /// FirstTokenIndex/LastTokenIndex - see <see cref="CodeMetricScanner"/>'s own doc comment for
-    /// the real bug that bounding avoids) for comment tokens whose stripped content reparses as a
-    /// plausible T-SQL batch - the same "reparse through the real parser, trust nothing else"
-    /// discipline <see cref="SchemaDependencyScanner"/> already established for a definition's own
-    /// text, applied here to a comment's own text instead.</summary>
-    private static void ScanComments(SqlParseResult parseResult, List<DuplicationFinding> findings)
+private static void ScanComments(SqlParseResult parseResult, List<DuplicationFinding> findings)
     {
         var fragment = parseResult.Fragment;
         if (fragment.ScriptTokenStream is null || fragment.LastTokenIndex < fragment.FirstTokenIndex)
@@ -108,31 +87,14 @@ public static class DuplicationScanner
         return text;
     }
 
-    /// <summary>Real T-SQL statement-starting keywords - a comment must begin with one of these
-    /// (case-insensitive, as its own first word) before its reparse result is trusted at all. This
-    /// guard is load-bearing, not a nicety: T-SQL's grammar accepts a bare "EXEC" keyword being
-    /// OMITTED the moment a plain identifier appears where a statement is expected (`word1 word2`
-    /// parses cleanly as an implicit `EXECUTE word1 word2`) - discovered directly against the
-    /// local test database's own real comments, where an entirely ordinary two-word prose comment
-    /// (`/* Distance Factor */`) reparsed with zero errors purely because of this shorthand, not
-    /// because it was ever real code. Requiring an explicit leading keyword closes that hole
-    /// without narrowing real coverage - genuine commented-out T-SQL essentially always starts
-    /// with one of these.</summary>
-    private static readonly HashSet<string> RealStatementKeywords = new(StringComparer.OrdinalIgnoreCase)
+private static readonly HashSet<string> RealStatementKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
         "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "TRUNCATE",
         "DECLARE", "SET", "IF", "WHILE", "BEGIN", "PRINT", "RETURN", "THROW", "RAISERROR",
         "EXEC", "EXECUTE", "CREATE", "ALTER", "DROP", "WITH", "GRANT", "REVOKE", "DENY", "USE",
     };
 
-    /// <summary>Reparses the stripped comment text AS A BATCH, never wrapped in an artificial
-    /// SELECT the way <see cref="SchemaDependencyScanner"/> wraps an expression - a bare
-    /// SELECT-wrap would make almost any short phrase "parse" as a column-alias expression, which
-    /// would defeat the whole point of this precision guard. A clean parse producing at least one
-    /// real statement is necessary but NOT sufficient (see <see cref="RealStatementKeywords"/>'s
-    /// own doc comment for why) - the comment's own first word must also be a real statement
-    /// keyword.</summary>
-    private static bool LooksLikeCode(string strippedText)
+private static bool LooksLikeCode(string strippedText)
     {
         var firstWord = strippedText.TrimStart().Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries) is [var word, ..]
             ? word
@@ -166,38 +128,14 @@ public static class DuplicationScanner
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-        /// <summary>
-        /// Real per-statement CTE scope (Phase 1.5 "one binder") - a QuerySpecification has no
-        /// direct access to its enclosing SelectStatement's WithCtesAndXmlNamespaces, so this is
-        /// captured on the way down and consulted from ExplicitVisit(QuerySpecification), matching
-        /// every other migrated scanner's own precedent.
-        /// </summary>
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteScopeStack = new();
+private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteScopeStack = new();
 
         private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
             new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
 
-        /// <summary>
-        /// Nearest-enclosing-statement resolved FROM scope, alias to <see cref="ScopeEntry"/> -
-        /// pushed on entering a QuerySpecification/UPDATE/DELETE's own FROM scope (via
-        /// <see cref="Lineage.FromScopeResolver"/>, Phase 1.5 "one binder"), popped on exit.
-        /// Deliberately shallow beyond that (no view/derived-table resolution, no outer-scope
-        /// fallback for a correlated subquery) - a reference this can't resolve is left
-        /// unresolved, never guessed at, matching <see cref="CanClaimTautologyOrContradiction"/>'s
-        /// own "stay quiet" contract when nullability can't be proven.
-        /// </summary>
-        private readonly Stack<IReadOnlyDictionary<string, ScopeEntry>> _tableScopeStack = new();
+private readonly Stack<IReadOnlyDictionary<string, ScopeEntry>> _tableScopeStack = new();
 
-        /// <summary>Tracks every IfStatement reached as a PRIOR IfStatement's own ElseStatement -
-        /// the default top-down traversal will visit these nodes again on its own once we recurse
-        /// into them, and they must not be re-analyzed as a fresh chain start (that would re-walk
-        /// and re-report a strict suffix of the same chain this method already covered in full).
-        /// Populated before <c>base.ExplicitVisit</c> descends into the chain, so the check at the
-        /// top of the next visit always sees an up-to-date set.</summary>
-        private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqualityComparer.Instance);
-
-        // All ExplicitVisit overloads are kept contiguous here; see each named check method below
-        // (grouped by feature, with its own section comment) for what each one actually does.
+private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqualityComparer.Instance);
 
         public override void ExplicitVisit(CreateProcedureStatement node)
         {
@@ -287,10 +225,6 @@ public static class DuplicationScanner
 
         public override void ExplicitVisit(AssignmentSetClause node)
         {
-            // Compare the FULL rendered text of both sides (including any table alias) - a
-            // multi-table `UPDATE t SET t.Col = s.Col FROM t JOIN s ON ...` renders "t.Col" and
-            // "s.Col" as textually distinct, so it correctly never fires; only a genuine
-            // same-alias-or-unqualified self-reference does.
             if (node.Column is { } column && node.NewValue is ColumnReferenceExpression)
             {
                 var columnText = FragmentTextRenderer.Render(column);
@@ -308,9 +242,6 @@ public static class DuplicationScanner
         {
             var body = node.Statement is BeginEndBlockStatement block ? block.StatementList.Statements : [node.Statement];
 
-            // An arbitrary GOTO/label target inside the loop body can make an apparently-
-            // unconditional exit not actually reached on every path - decline entirely rather than
-            // guess, the same discipline DeadCodeScanner applies to its own reachability walk.
             var gotoCollector = new GotoLabelCollector();
             foreach (var statement in body)
             {
@@ -390,10 +321,6 @@ public static class DuplicationScanner
 
         public override void ExplicitVisit(BinaryExpression node)
         {
-            // Subtract/Divide/Modulo are always a fixed degenerate result (0, 1-or-error, 0-or-
-            // error) regardless of the shared operand's own value - Add/Multiply are deliberately
-            // excluded, see DuplicationFinding's own doc comment (x+x doubling, x*x squaring are
-            // both legitimate, commonly-intended patterns).
             if (node.BinaryExpressionType is BinaryExpressionType.Subtract or BinaryExpressionType.Divide or BinaryExpressionType.Modulo
                 && !BothLiterals(node.FirstExpression, node.SecondExpression)
                 && SameText(node.FirstExpression, node.SecondExpression))
@@ -416,11 +343,6 @@ public static class DuplicationScanner
 
         public override void ExplicitVisit(BooleanNotExpression node)
         {
-            // `NOT (x)` parses the parenthesized operand as a BooleanParenthesisExpression
-            // wrapping the real inner expression - unwrap it before pattern-matching, or every
-            // parenthesized NOT (the overwhelmingly common way NOT is actually written, since a
-            // bare `NOT x = y` is itself ambiguous/rare) would silently never match either check
-            // below.
             var inner = Unwrap(node.Expression);
             if (inner is BooleanNotExpression)
             {
@@ -456,10 +378,7 @@ public static class DuplicationScanner
             base.ExplicitVisit(node);
         }
 
-        /// <summary>Deliberately scoped to IIF specifically, and only a DIRECT nesting in the
-        /// immediate Then/Else branch - see <see cref="DuplicationFindingKind.NestedConditionalExpression"/>'s
-        /// own doc comment for why CASE-inside-CASE is excluded.</summary>
-        public override void ExplicitVisit(IIfCall node)
+public override void ExplicitVisit(IIfCall node)
         {
             if (node.ThenExpression is IIfCall)
             {
@@ -479,25 +398,7 @@ public static class DuplicationScanner
                 ? $"{schema.Value}.{name.BaseIdentifier.Value}"
                 : name.BaseIdentifier.Value;
 
-        // --- Identical binary operands: column-nullability gate ---
-
-        /// <summary>
-        /// The "always true/false" claim this rule makes is only sound under two-valued logic - a
-        /// nullable operand makes <c>x = x</c> (or any other comparison of <c>x</c> against
-        /// itself) evaluate to UNKNOWN, not TRUE, whenever <c>x</c> is NULL at runtime, and
-        /// <c>Col = Col</c> on a nullable column is the idiomatic defensive NULL filter, not a
-        /// mistake (2026-08 audit: this scanner asserted the tautology unconditionally, including
-        /// on nullable columns, where "remove the redundant comparison" changes the result set).
-        /// Scoped to COLUMN operands specifically, per the decided fix: a non-column operand
-        /// (a local variable, a function call, an arbitrary expression) keeps the prior
-        /// unconditional behavior unchanged - this scanner has never tracked variable nullability
-        /// and extending the same NOT-NULL proof requirement there would silently suppress every
-        /// existing variable-vs-itself finding for a case the audit never flagged. A column this
-        /// shallow scope can't resolve at all (view/CTE/derived-table/ambiguous/no catalog entry)
-        /// is treated the SAME as a nullable one - "never fires without proof", not "fires unless
-        /// disproven".
-        /// </summary>
-        private bool CanClaimTautologyOrContradiction(ScalarExpression expression)
+private bool CanClaimTautologyOrContradiction(ScalarExpression expression)
         {
             if (expression is not ColumnReferenceExpression columnRef)
             {
@@ -527,30 +428,15 @@ public static class DuplicationScanner
                 return CatalogColumnOf(scope.Values.Single(), columnName);
             }
 
-            // Unqualified column with more than one table in scope is genuinely ambiguous from
-            // this shallow resolver's own point of view - never guess which table it binds to.
             return null;
         }
 
-        /// <summary>
-        /// A view/derived-table entry is out of this scanner's shallow scope by design (see
-        /// <see cref="_tableScopeStack"/>'s own doc comment) - CatalogColumn only exists for a real
-        /// base table, never guessed at for anything ScopeEntry.IsViewLayer marks.
-        /// </summary>
-        private CatalogColumn? CatalogColumnOf(ScopeEntry entry, string columnName) =>
+private CatalogColumn? CatalogColumnOf(ScopeEntry entry, string columnName) =>
             !entry.IsViewLayer && entry.Relation.QualifiedName is { } qualifiedName
                 ? catalog.Find(qualifiedName)?.FindColumn(columnName)
                 : null;
 
-        // --- Single-iteration loop ---
-
-        /// <summary>True iff every path through this straight-line sequence unconditionally hits
-        /// a BREAK/RETURN/THROW before falling off the end - the same terminality-walk shape
-        /// <see cref="DeadCodeScanner"/>'s own ReachabilityWalker uses, with BREAK additionally
-        /// counted as terminal (it exits the loop, which is exactly the fact this check needs) and
-        /// a NESTED WHILE's own BREAK never counting toward the OUTER loop's terminality (it exits
-        /// only the inner loop).</summary>
-        private static bool AlwaysExitsLoop(IList<TSqlStatement> statements) =>
+private static bool AlwaysExitsLoop(IList<TSqlStatement> statements) =>
             statements.Any(StatementAlwaysExits);
 
         private static bool StatementAlwaysExits(TSqlStatement statement) => statement switch
@@ -564,8 +450,6 @@ public static class DuplicationScanner
             TryCatchStatement tryCatch =>
                 AlwaysExitsLoop(tryCatch.TryStatements.Statements) && AlwaysExitsLoop(tryCatch.CatchStatements.Statements),
 
-            // A nested WHILE/cursor loop's own BREAK exits only that inner loop, never the outer
-            // one this check is analyzing - do not recurse into it for this purpose.
             _ => false,
         };
 
@@ -582,19 +466,10 @@ public static class DuplicationScanner
 
             public override void ExplicitVisit(WhileStatement node)
             {
-                // Deliberately empty: a nested WHILE's own body is a separate loop with its own
-                // reachability question - its GOTOs/labels do not disqualify the OUTER loop's
-                // analysis, so we intentionally do not recurse into it.
             }
         }
 
-        // --- Identical binary operands / always-true-or-false literal comparison ---
-
-        /// <summary>Only asserts a truth value where collation cannot change the answer - see
-        /// <see cref="DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison"/>'s own doc
-        /// comment for the full collation-safety reasoning. Evaluation itself is shared with
-        /// <see cref="TypedPredicateExtractor"/> via <see cref="LiteralComparisonFolder"/>.</summary>
-        private void CheckAlwaysTrueOrFalseLiteralComparison(BooleanComparisonExpression node)
+private void CheckAlwaysTrueOrFalseLiteralComparison(BooleanComparisonExpression node)
         {
             if (LiteralComparisonFolder.TryFoldComparison(node.FirstExpression, node.SecondExpression, node.ComparisonType) is { } value)
             {
@@ -608,30 +483,10 @@ public static class DuplicationScanner
         private static bool SameText(TSqlFragment first, TSqlFragment second) =>
             string.Equals(FragmentTextRenderer.Render(first), FragmentTextRenderer.Render(second), StringComparison.OrdinalIgnoreCase);
 
-        // --- Repeated unary operator ---
-
         private static BooleanExpression Unwrap(BooleanExpression expression) =>
             expression is BooleanParenthesisExpression parenthesis ? Unwrap(parenthesis.Expression) : expression;
 
-        // --- Negated comparison written as the negation of its opposite ---
-
-        /// <summary>
-        /// NOT (x &gt; y) and x &lt;= y are provably equivalent under T-SQL's three-valued logic,
-        /// not just when both operands are non-NULL: whenever either operand is NULL, "x &gt; y"
-        /// evaluates to UNKNOWN, and NOT UNKNOWN is ALSO UNKNOWN - the same UNKNOWN that "x &lt;= y"
-        /// itself produces for the identical NULL operand, since the "opposite" operator pairing
-        /// used here (&gt;/&lt;=, &lt;/&gt;=, =/&lt;&gt;) is exactly the boolean-complement pairing at the
-        /// two-valued level, and NOT's only effect on UNKNOWN is to leave it UNKNOWN. A WHERE
-        /// clause (or any other boolean context) treats UNKNOWN identically to FALSE either way,
-        /// so the two forms are indistinguishable in every real query result, with no nullability
-        /// guard needed - unlike almost every other rewrite-suggestion elsewhere in this codebase,
-        /// this one needs no catalog-provable-NOT-NULL guard because the equivalence never breaks.
-        /// The identical reasoning covers NOT (x IS NULL) vs x IS NOT NULL, which ScriptDom itself
-        /// already parses as two syntactically different shapes (a BooleanNotExpression wrapping a
-        /// BooleanIsNullExpression, vs BooleanIsNullExpression.IsNot=true directly) rather than one
-        /// normalized form.
-        /// </summary>
-        private void CheckNegatedComparison(BooleanNotExpression node, BooleanExpression inner)
+private void CheckNegatedComparison(BooleanNotExpression node, BooleanExpression inner)
         {
             switch (inner)
             {
@@ -656,8 +511,6 @@ public static class DuplicationScanner
             _ => null,
         };
 
-        // --- IF/ELSE IF chain analysis: duplicate conditions, branch-body identity, collapsible nesting ---
-
         private void AnalyzeIfChain(IfStatement root)
         {
             var (branches, finalElseBody) = CollectIfChainBranches(root);
@@ -671,10 +524,7 @@ public static class DuplicationScanner
             }
         }
 
-        /// <summary>Walks the ELSE-IF chain rooted at <paramref name="root"/>, registering every
-        /// continuation IfStatement in <see cref="_ifChainContinuations"/> so the default traversal
-        /// never re-analyzes a strict suffix of this same chain as a fresh chain start.</summary>
-        private (List<(BooleanExpression Condition, TSqlStatement Body)> Branches, TSqlStatement? FinalElseBody) CollectIfChainBranches(IfStatement root)
+private (List<(BooleanExpression Condition, TSqlStatement Body)> Branches, TSqlStatement? FinalElseBody) CollectIfChainBranches(IfStatement root)
         {
             var branches = new List<(BooleanExpression Condition, TSqlStatement Body)>();
             var current = root;
@@ -692,9 +542,7 @@ public static class DuplicationScanner
             }
         }
 
-        /// <summary>Every later branch's condition compared against every earlier one in the same
-        /// chain (full rendered-text structural equality).</summary>
-        private void CheckDuplicateSiblingConditions(List<(BooleanExpression Condition, TSqlStatement Body)> branches)
+private void CheckDuplicateSiblingConditions(List<(BooleanExpression Condition, TSqlStatement Body)> branches)
         {
             for (var i = 1; i < branches.Count; i++)
             {
@@ -710,10 +558,7 @@ public static class DuplicationScanner
             }
         }
 
-        /// <summary>Compares every real body, INCLUDING the final ELSE (when present) as just
-        /// another branch with no condition of its own - needs at least two bodies total to
-        /// compare against each other.</summary>
-        private void CheckIfChainBranchBodyIdentity(IfStatement root, List<(BooleanExpression Condition, TSqlStatement Body)> branches, TSqlStatement? finalElseBody)
+private void CheckIfChainBranchBodyIdentity(IfStatement root, List<(BooleanExpression Condition, TSqlStatement Body)> branches, TSqlStatement? finalElseBody)
         {
             var allBodies = branches.Select(b => b.Body).ToList();
             if (finalElseBody is not null)
@@ -750,9 +595,7 @@ public static class DuplicationScanner
             }
         }
 
-        /// <summary>An IF with no ELSE whose entire THEN body is a single nested IF, also with no
-        /// ELSE - semantically identical to one IF combining both conditions with AND.</summary>
-        private void CheckCollapsibleNestedIf(IfStatement node)
+private void CheckCollapsibleNestedIf(IfStatement node)
         {
             if (node.ElseStatement is not null)
             {
@@ -771,8 +614,6 @@ public static class DuplicationScanner
                 Add(DuplicationFindingKind.CollapsibleNestedIf, null, node, FindingConfidence.Medium);
             }
         }
-
-        // --- CASE expression analysis: duplicate WHEN conditions, branch-result identity ---
 
         private void CheckCaseDuplicateWhenConditions(IList<SearchedWhenClause> whens)
         {
@@ -822,14 +663,7 @@ public static class DuplicationScanner
             }
         }
 
-        // --- Redundant / mutually-exclusive AND-combined numeric bounds ---
-
-        /// <summary>Scoped to IF/WHILE conditions only (not WHERE clauses) - this codebase's
-        /// existing predicate/sargability streams already deeply cover WHERE-clause AND-chains for
-        /// a different purpose (seek/scan verdicts, catch-all predicates); this control-flow-
-        /// adjacent Tier 4 stream targets a distinct, narrower "this specific comparison adds or
-        /// removes nothing once ANDed with a sibling" structural claim instead.</summary>
-        private void CheckAndChainBounds(BooleanExpression condition)
+private void CheckAndChainBounds(BooleanExpression condition)
         {
             var conjuncts = FlattenAnd(condition);
             if (conjuncts.Count < 2)
@@ -877,8 +711,6 @@ public static class DuplicationScanner
             }
             else if (later.Interval.IsSubsetOf(earlier.Interval))
             {
-                // earlier is the looser bound - it adds nothing once ANDed with the stricter
-                // later, so the LOOSER condition is the redundant one.
                 Add(DuplicationFindingKind.RedundantAndCondition, earlier.Operand, earlier.Fragment, FindingConfidence.Medium);
             }
             else if (earlier.Interval.IsSubsetOf(later.Interval))
@@ -908,11 +740,7 @@ public static class DuplicationScanner
             return result;
         }
 
-        /// <summary>Extracts (operand text, comparison operator, literal value) from a single
-        /// comparison where exactly one side is a numeric literal and the other is anything else -
-        /// a literal-on-the-left form (<c>5 &gt; x</c>) is mirrored to the equivalent operand-
-        /// relative operator (<c>x &lt; 5</c>) so both spellings compare uniformly.</summary>
-        private static (string OperandText, BooleanComparisonType Op, decimal Literal)? TryExtractNumericBound(BooleanExpression expression)
+private static (string OperandText, BooleanComparisonType Op, decimal Literal)? TryExtractNumericBound(BooleanExpression expression)
         {
             if (expression is not BooleanComparisonExpression comparison)
             {
@@ -940,12 +768,7 @@ public static class DuplicationScanner
             return null;
         }
 
-        /// <summary>
-        /// Deliberately narrower than <see cref="LiteralComparisonFolder.TryFoldToNumeric"/> - a
-        /// direct literal only, no one-level arithmetic folding, so this redundant-bound check's
-        /// behavior is unaffected by that folder's broader scope.
-        /// </summary>
-        private static decimal? TryGetDirectNumericLiteralValue(ScalarExpression expression) => expression switch
+private static decimal? TryGetDirectNumericLiteralValue(ScalarExpression expression) => expression switch
         {
             IntegerLiteral integer when decimal.TryParse(integer.Value, out var value) => value,
             NumericLiteral numeric when decimal.TryParse(numeric.Value, out var value) => value,
@@ -961,11 +784,7 @@ public static class DuplicationScanner
             var other => other,
         };
 
-        /// <summary>A half-open/closed numeric interval representing one comparison bound
-        /// (<c>x &gt; 5</c> ⇒ (5, exclusive, +∞)), used to classify a pair of AND-combined bounds
-        /// on the same operand as redundant (one subsumes the other) or mutually exclusive (their
-        /// ranges cannot both hold).</summary>
-        private readonly record struct NumericBound(decimal? Lower, bool LowerInclusive, decimal? Upper, bool UpperInclusive)
+private readonly record struct NumericBound(decimal? Lower, bool LowerInclusive, decimal? Upper, bool UpperInclusive)
         {
             public static NumericBound? FromComparison(BooleanComparisonType comparisonType, decimal literal) => comparisonType switch
             {
@@ -1078,8 +897,6 @@ public static class DuplicationScanner
                 return (a, aInc && bInc);
             }
         }
-
-        // --- Duplicated string literals ---
 
         private void CheckStringLiterals(StatementList? statementList)
         {

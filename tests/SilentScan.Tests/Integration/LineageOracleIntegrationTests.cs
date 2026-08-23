@@ -5,17 +5,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// End-to-end regression test for the Phase 0 spike, automated: deploys the lineage probe
-/// schema (DDL only, tables stay empty per CLAUDE.md's "Corpus DML/procs are NEVER executed
-/// anywhere") to the Docker SQL Server oracle, confirms sys.columns propagates the base
-/// table's varchar/SQL_* collation through two view layers unchanged, and confirms a
-/// SELF-AUTHORED probe under SHOWPLAN_XML shows CONVERT_IMPLICIT on the base column.
-///
-/// Requires the docker-compose SQL Server (docs/local-dev.md) to be running; there is no
-/// mock or skip path here per CLAUDE.md's testing-standards note that unit tests are not
-/// sufficient and this class of behavior needs a real integration test.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LineageOracleIntegrationTests : IAsyncLifetime
 {
@@ -77,11 +66,6 @@ public sealed class LineageOracleIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task PlanXml_Probe_NeverExecutesAgainstData()
     {
-        // The schema fixture never inserts rows, so a genuine row count of 0 after
-        // capturing a plan is only meaningful proof of compile-only behavior if the probe
-        // could plausibly have produced output otherwise. Confirmed independently of the
-        // two tests above so a future regression to SET STATISTICS XML (which executes)
-        // fails loudly here too, rather than only showing up as a data-shape surprise later.
         var capture = new PlanXmlCapture(_options);
         await capture.CaptureAsync(DatabaseName, "SELECT OrderId FROM dbo.Orders WHERE OrderId = 1;");
 

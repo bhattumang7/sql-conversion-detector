@@ -3,14 +3,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Forced-serial construct inventory" - fully syntax-only, no
-/// <see cref="Catalog.DatabaseCatalog"/> needed: every trigger this scanner reports is visible from
-/// the AST alone. Three independent, oracle-confirmed mechanisms
-/// (<see cref="ForcedSerialFindingKind"/>), one visitor, one full-corpus pass - matching
-/// <see cref="SetOptionScanner"/>'s own "one scanner, many Kind values" shape for a multi-sub-
-/// trigger inventory stream.
-/// </summary>
 public static class ForcedSerialScanner
 {
     private static readonly HashSet<string> NonParallelizableIntrinsicFunctionNames = new(StringComparer.OrdinalIgnoreCase)
@@ -157,12 +149,6 @@ public static class ForcedSerialScanner
         {
             var kinds = definition.Options.Select(o => o.OptionKind).ToHashSet();
 
-            // Oracle-confirmed (NonParallelPlanReason="NoParallelFastForwardCursor"): FAST_FORWARD
-            // itself, or the equivalent bare FORWARD_ONLY READ_ONLY lacking an explicit
-            // STATIC/KEYSET/DYNAMIC, forces the cursor's own defining query serial - the OPPOSITE
-            // of "cursor without LOCAL FAST_FORWARD" as a risk shape. STATIC/KEYSET/DYNAMIC
-            // cursors (with or without FORWARD_ONLY/READ_ONLY) were oracle-checked and do NOT
-            // trigger this mechanism, so they are never matched here.
             var hasExplicitType = kinds.Contains(CursorOptionKind.Static) || kinds.Contains(CursorOptionKind.Keyset) || kinds.Contains(CursorOptionKind.Dynamic);
             var fires = kinds.Contains(CursorOptionKind.FastForward)
                 || (kinds.Contains(CursorOptionKind.ForwardOnly) && kinds.Contains(CursorOptionKind.ReadOnly) && !hasExplicitType);

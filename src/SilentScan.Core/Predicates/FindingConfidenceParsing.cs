@@ -1,12 +1,5 @@
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// The <c>--confidence</c> flag's parsing, shared by every CLI entry point that lets a caller
-/// widen a scan/verify past High (<c>SilentScan.Cli</c>'s scan-db/scan-corpus-live,
-/// <c>SilentScan.Verify</c>'s verify-corpus) - kept in Core rather than duplicated per project
-/// since both already depend on Core and the string-to-enum mapping is exactly the same choice
-/// either way: get it wrong in one place and both tools drift out of sync on what "medium" means.
-/// </summary>
 public static class FindingConfidenceParsing
 {
     public const string OptionDescription =

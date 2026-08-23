@@ -5,7 +5,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>docs/detection-checklist.md Tier 2 "Lineage-metric findings" - "Post-expansion join width". Catalog/lineage-only ranking of an exact structural fact (gap between written and expanded base-table count) - no oracle needed for the counting mechanism itself; the separate "optimizer gives up exhaustive search past N" absolute threshold is deliberately not claimed (see the finding's own doc comment).</summary>
 public sealed class PostExpansionJoinWidthScannerTests
 {
     private static IReadOnlyList<PostExpansionJoinWidthFinding> Scan(string ddl, string probe)
@@ -73,7 +72,6 @@ public sealed class PostExpansionJoinWidthScannerTests
             """,
             "SELECT Id FROM dbo.vTwo;");
 
-        // written=1, expanded=2, gap=1 - below the MinimumGap=3 threshold.
         Assert.Empty(findings);
     }
 
@@ -103,10 +101,6 @@ public sealed class PostExpansionJoinWidthScannerTests
     [Fact]
     public void TwoWideningQueriesOnTheSameLine_HaveDistinctColumns()
     {
-        // Two sibling FROM clauses sharing the same SourcePath, Line and ModuleQualifiedName
-        // (top-level batch, no enclosing module) - the exact shape that made
-        // ScanReportBuilder's OrderBy chain nondeterministic before Column joined it, since
-        // Line alone can't tell these two findings apart.
         var findings = Scan(FiveTableFanOutDdl, "SELECT Id FROM dbo.vWide UNION ALL SELECT Id FROM dbo.vWide;");
 
         Assert.Equal(2, findings.Count);

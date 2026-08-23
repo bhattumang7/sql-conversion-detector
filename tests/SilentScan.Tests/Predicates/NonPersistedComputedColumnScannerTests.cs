@@ -4,13 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Catalog-only pass (docs/detection-checklist.md "Schema-scan UDF and computed-column findings":
-/// "non-persisted computed column, independent of whether it references a UDF") - a plain
-/// sys.computed_columns.is_persisted / DDL-PERSISTED-keyword read, no AST walking of query sites,
-/// no oracle needed (recomputation-on-every-read is definitionally true for a non-persisted
-/// computed column, the same way MaxTypedColumnScanner's own structural facts need none).
-/// </summary>
 public sealed class NonPersistedComputedColumnScannerTests
 {
     private static IReadOnlyList<NonPersistedComputedColumnFinding> Scan(string sql)
@@ -52,8 +45,6 @@ public sealed class NonPersistedComputedColumnScannerTests
     [Fact]
     public void PersistedAndIndexedComputedColumn_NeverFires()
     {
-        // A persisted computed column has already paid its recompute cost at write time,
-        // regardless of whether it's also indexed - indexing is orthogonal to this rule.
         var findings = Scan(
             """
             CREATE TABLE dbo.Orders (Qty INT NOT NULL, Price MONEY NOT NULL, Total AS (Qty * Price) PERSISTED);

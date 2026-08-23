@@ -7,15 +7,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Tests.Catalog;
 
-/// <summary>
-/// Regression coverage for synonym resolution (formerly pinned in
-/// KnownGapCharacterizationTests.Synonym_IsNeverResolved_QueryThroughItYieldsNoTypedFinding):
-/// CREATE SYNONYM is a pure name-&gt;name mapping (DatabaseCatalog.AddSynonym/ResolveSynonymName),
-/// canonicalized at every FROM-clause reference before the catalog/view lookup
-/// (FromScopeResolver), so a query through a synonym resolves - and reports - exactly like the
-/// real base object, not the synonym name. Runs through <see cref="ScanReportBuilder"/>, the
-/// same entry point production uses.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class SynonymResolutionTests
 {
@@ -50,9 +41,6 @@ public sealed class SynonymResolutionTests
     [Fact]
     public async Task SynonymForView_Resolves_EvenThoughViewsAreNeverInDatabaseCatalog()
     {
-        // The hardest case: a view is not in DatabaseCatalog at all (only LineageCatalog knows
-        // about it), so a synonym pointing at one can only ever resolve through the
-        // resolvedViews dictionary lookup, not catalog.Find - both must be canonicalized.
         var report = await Scan("""
             CREATE TABLE dbo.Inventory (Sku varchar(40) NOT NULL, INDEX IX_Sku (Sku));
             GO
@@ -72,9 +60,6 @@ public sealed class SynonymResolutionTests
     [Fact]
     public async Task ViewDefinedOverSynonymForAnotherView_GetsACorrectDependencyEdge()
     {
-        // Without threading synonym resolution into ViewDependencyGraph's own dependency-edge
-        // collection, topological order could resolve vOuter before vInner and vOuter's Sku
-        // column would degrade to Unknown regardless of the FromScopeResolver fix above.
         var report = await Scan("""
             CREATE TABLE dbo.Inventory (Sku varchar(40) NOT NULL, INDEX IX_Sku (Sku));
             GO
@@ -109,19 +94,7 @@ public sealed class SynonymResolutionTests
         Assert.Contains(report.SkippedConstructs, s => s.Reason.Contains("dbo.Stock", StringComparison.Ordinal) && s.Reason.Contains("has no known DDL", StringComparison.Ordinal));
     }
 
-    /// <summary>
-    /// Builds straight from parsed text via <see cref="CatalogBuilder"/>, never through
-    /// <see cref="EngineAuthoritativeScan"/> - the two scenarios below are deliberately
-    /// undeployable T-SQL (a real synonym cycle, a synonym targeting a linked server that does
-    /// not exist), so a real SQL Server predictably REJECTS creating them outright (verified
-    /// directly: "Synonym chaining is not allowed" / the linked server does not exist) rather
-    /// than silently accepting and letting this pass's own cycle/ledger-safety logic run at
-    /// all. These two are testing THIS PASS's own resilience to text a real corpus script might
-    /// contain and ScriptDom parses fine, independent of whether that text could ever actually
-    /// deploy - CatalogBuilder is still a live, used component (DatabaseCatalog.MergeFileModeExtras),
-    /// so exercising it directly here is not testing a deleted code path.
-    /// </summary>
-    private static ScanReport ScanParsedOnly(string sql)
+private static ScanReport ScanParsedOnly(string sql)
     {
         var parseResult = SqlScriptParser.ParseText("synonym.sql", sql);
         Assert.Empty(parseResult.Errors);
@@ -132,10 +105,6 @@ public sealed class SynonymResolutionTests
     [Fact]
     public void SynonymCycle_FallsBackToTheOriginalNameRatherThanLooping()
     {
-        // Invalid T-SQL (a real synonym can't target another synonym at all), but this pass
-        // must never loop on a corpus script that tries it anyway - a cycle resolves to the
-        // ORIGINAL input name, which then takes the ordinary honestly-ledgered "no known DDL"
-        // path rather than a guess.
         var report = ScanParsedOnly("""
             CREATE SYNONYM dbo.A FOR dbo.B;
             GO
@@ -151,9 +120,6 @@ public sealed class SynonymResolutionTests
     [Fact]
     public void FourPartLinkedServerSynonym_IsLedgeredNotMisregistered()
     {
-        // SchemaObjectNameHelper.Qualify silently drops ServerIdentifier - registering this
-        // under "otherdb.dbo.RemoteInventory" (dropping "linkedserver") could alias an
-        // unrelated LOCAL object sharing that same three-part tail. Must ledger, never register.
         var report = ScanParsedOnly("""
             CREATE SYNONYM dbo.RemoteStock FOR linkedserver.otherdb.dbo.RemoteInventory;
             GO

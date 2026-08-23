@@ -6,26 +6,6 @@ using SilentScan.Core.Predicates.Normalization;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Catch-all / kitchen-sink predicates" - a standalone
-/// scanner, not folded into <see cref="TypedPredicateExtractor"/>'s per-comparison walk: the
-/// catch-all shape spans a whole <c>BooleanBinaryExpression{Or}</c> combining two SIBLING boolean
-/// expressions (an equality and an IS NULL check), a genuinely different traversal shape than
-/// <c>TryAddFinding</c>'s one-comparison-at-a-time walk - the same reasoning <see
-/// cref="PartialCompositeForeignKeyJoinScanner"/> already documents for why it's a separate
-/// scanner rather than bolted onto the existing predicate walk.
-///
-/// Deliberately base-table-only, like <see cref="PartialCompositeForeignKeyJoinScanner"/>: column
-/// resolution goes through <see cref="FromScopeResolver"/> with no VIEW/temp-table scoping (empty
-/// resolved-views map, null ledger/proc scope) - a known v1 scope limit, not a silently-missed
-/// case. CTE shadowing is resolved properly, though, not left to this limit: a CTE is never
-/// schema-qualified, so it always shadows a same-named real base table for its statement's own
-/// lifetime, and resolving through the catalog instead (cteRelations always null, pre-fix)
-/// silently matched a CTE-shadowed reference against an unrelated real table sharing its name
-/// (2026-08 audit). Formal-parameter/RECOMPILE-guard tracking is this scanner's own copy of
-/// the identical logic <see cref="TypedPredicateExtractor"/> uses for the same purpose - a
-/// separate visitor over the same AST, so it cannot share that class's private state.
-/// </summary>
 public static class CatchAllPredicateScanner
 {
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
@@ -133,10 +113,6 @@ public static class CatchAllPredicateScanner
             base.ExplicitVisit(node);
             _statementHasOptionRecompile = previous;
 
-            // MERGE's own ON clause is a genuine catch-all site too, in principle, but its scope
-            // resolution (FromScopeResolver.ResolveForMerge) and raw SearchCondition shape differ
-            // enough from every other statement kind that covering it precisely needs its own
-            // dedicated work - out of v1 scope, a known limitation, not silently missed.
         }
 
         private void VisitProcedureOrFunctionBody(IList<ProcedureParameter> parameters, bool hasWithRecompile, TSqlFragment node)
@@ -205,8 +181,7 @@ public static class CatchAllPredicateScanner
                 baseColumn.Type?.Collation?.IsCaseSensitive);
         }
 
-        /// <summary>Flattens every top-level OR-connected fragment reachable without crossing an AND - <c>(A OR B) AND (C OR D)</c> yields two independent 2-fragment groups, never one flat 4-fragment group (mixing them would let a fragment from one AND-branch pair with an unrelated fragment from another).</summary>
-        private static IEnumerable<IReadOnlyList<BooleanExpression>> FlattenOr(BooleanExpression expression)
+private static IEnumerable<IReadOnlyList<BooleanExpression>> FlattenOr(BooleanExpression expression)
         {
             switch (expression)
             {
@@ -276,10 +251,6 @@ public static class CatchAllPredicateScanner
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
             IReadOnlySet<TSqlFragment> dead)
         {
-            // Match every (equality, IS NULL) pair sharing the same parameter name - a chain of
-            // several independent catch-all clauses ORed together (`Col = @p OR @p IS NULL OR
-            // Col2 = @q OR @q IS NULL`) yields one finding per matched pair, not one for the
-            // whole chain.
             var isNullVariables = orLeaves
                 .OfType<BooleanIsNullExpression>()
                 .Where(n => !n.IsNot)

@@ -1,19 +1,5 @@
 namespace SilentScan.Core.Predicates.Normalization;
 
-/// <summary>
-/// The set of numeric values a column could still hold given every literal comparison seen so far
-/// - a sorted list of disjoint intervals over the non-null domain, plus a separate NULL-
-/// admissibility flag. This is the same shape the real query optimizer keeps per column while it
-/// folds a predicate: build the set from one comparison, then <see cref="Intersect"/> it against
-/// every AND-sibling's own set (a comparison is never true for a NULL value, so intersecting any
-/// ordinary comparison always drops <see cref="NullPossible"/> - only IS NULL re-admits it) or
-/// <see cref="Union"/> it against every OR-sibling's own set. <see cref="IsEmpty"/> after
-/// intersecting a whole conjunction is exactly "this AND can never be satisfied" - a real
-/// contradiction, derived from the values involved, not a text-pattern guess. <see cref="HasFullCoverage"/>
-/// after unioning a whole disjunction is exactly "every non-null value satisfies at least one
-/// disjunct" - the numeric half of a real tautology (the caller still has to reason about NULL
-/// separately, since that depends on the column's own nullability, not on this set).
-/// </summary>
 internal sealed class NumericValueRangeSet
 {
     private readonly record struct Range(decimal? Lower, bool LowerInclusive, decimal? Upper, bool UpperInclusive);
@@ -28,13 +14,11 @@ internal sealed class NumericValueRangeSet
         NullPossible = nullPossible;
     }
 
-    /// <summary>No constraint applied yet: every non-null value is still possible, and so is NULL.</summary>
-    public static NumericValueRangeSet Universal { get; } = new([new Range(null, true, null, true)], nullPossible: true);
+public static NumericValueRangeSet Universal { get; } = new([new Range(null, true, null, true)], nullPossible: true);
 
     public bool IsEmpty => _ranges.Count == 0 && !NullPossible;
 
-    /// <summary>Every non-null value is covered by at least one range - the numeric half of a tautology.</summary>
-    public bool HasFullCoverage => _ranges is [{ Lower: null, Upper: null }];
+public bool HasFullCoverage => _ranges is [{ Lower: null, Upper: null }];
 
     public static NumericValueRangeSet ForEquals(decimal value) => new([new Range(value, true, value, true)], nullPossible: false);
 
@@ -49,11 +33,9 @@ internal sealed class NumericValueRangeSet
 
     public static NumericValueRangeSet ForGreaterThanOrEqual(decimal value) => new([new Range(value, true, null, true)], nullPossible: false);
 
-    /// <summary>IS NULL: no non-null value satisfies it, but NULL itself does.</summary>
-    public static NumericValueRangeSet ForIsNull() => new([], nullPossible: true);
+public static NumericValueRangeSet ForIsNull() => new([], nullPossible: true);
 
-    /// <summary>IS NOT NULL: every non-null value is still possible, NULL is not.</summary>
-    public static NumericValueRangeSet ForIsNotNull() => new([new Range(null, true, null, true)], nullPossible: false);
+public static NumericValueRangeSet ForIsNotNull() => new([new Range(null, true, null, true)], nullPossible: false);
 
     public NumericValueRangeSet Intersect(NumericValueRangeSet other)
     {

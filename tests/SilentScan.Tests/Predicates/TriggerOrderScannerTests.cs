@@ -3,13 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Catalog-only pass (see <see cref="TriggerOrderFinding"/>'s own doc comment for the oracle-
-/// confirmed firing rule). <see cref="DatabaseCatalog.TriggerEvents"/> is only ever populated by
-/// live mode (<see cref="SilentScan.Verify.Catalog.LiveCatalogReader"/>) - these tests build the
-/// catalog directly to exercise the scanner's own grouping/pin logic without needing the Docker
-/// oracle for every case.
-/// </summary>
 public sealed class TriggerOrderScannerTests
 {
     private static CatalogTriggerEvent Event(
@@ -35,8 +28,6 @@ public sealed class TriggerOrderScannerTests
     [Fact]
     public void ThreeTriggers_FirstAndLastPinned_MiddleSingleton_NeverFires()
     {
-        // First + one unpinned + Last leaves a middle set of exactly one - fully determined order,
-        // not an ambiguity.
         var catalog = new DatabaseCatalog();
         catalog.AddTriggerEvent(Event("trg1", "dbo.T", "INSERT", isFirst: true));
         catalog.AddTriggerEvent(Event("trg2", "dbo.T", "INSERT"));
@@ -114,9 +105,6 @@ public sealed class TriggerOrderScannerTests
     [Fact]
     public void DifferentEvents_AnalyzedIndependently()
     {
-        // Two INSERT triggers (ambiguous) and one lone UPDATE trigger (never ambiguous by
-        // itself) on the same table - the UPDATE trigger must not pollute the INSERT group's own
-        // middle-set count or vice versa.
         var catalog = new DatabaseCatalog();
         catalog.AddTriggerEvent(Event("trg1", "dbo.T", "INSERT"));
         catalog.AddTriggerEvent(Event("trg2", "dbo.T", "INSERT"));

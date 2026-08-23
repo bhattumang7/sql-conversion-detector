@@ -8,17 +8,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// End-to-end tests for <see cref="DynamicSqlPipeline"/>: real ScriptDOM parses feeding a real
-/// DynamicSqlScannerV2 extraction into the real catalog/lineage/predicate pipeline,
-/// checking that findings inside a folded dynamic SQL string land back on their true source
-/// line - including the two cases that break naive index math: a literal spanning multiple
-/// source lines, and one containing an escaped quote. Verdict-bearing (ScanForced) findings are
-/// additionally confirmed against the real oracle (CLAUDE.md: verify the real thing) - the
-/// dynamic-SQL folding/remapping machinery is provenance-only, so the same
-/// dbo.T/dbo.vw_T schema deployed below serves every test in this class regardless of how many
-/// EXEC/sp_executesql layers the predicate was folded through to reach it.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class DynamicSqlPipelineTests : OracleTestFixture
 {
@@ -69,13 +58,11 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
 
         var dynamicFinding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.AnalyzedLiteral, dynamicFinding.Outcome);
-        Assert.Equal(4, dynamicFinding.Line); // the EXEC( call site itself
-
+        Assert.Equal(4, dynamicFinding.Line);
         var typedFinding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
         Assert.Equal("app.sql", typedFinding.SourcePath);
-        Assert.Equal(5, typedFinding.Line); // "WHERE Col = ..." is on the second source line
-        Assert.NotNull(typedFinding.DynamicSqlCallSite);
+        Assert.Equal(5, typedFinding.Line);        Assert.NotNull(typedFinding.DynamicSqlCallSite);
         Assert.Equal(4, typedFinding.DynamicSqlCallSite!.Value.Line);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
@@ -85,11 +72,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ExecOfLiteralPredicateWithOptionalFilterFragmentAppended_PartiallyAnalyzesAndRemapsTheKnownPredicate_OracleConfirmed()
     {
-        // @Extra stands for a whole optional trailing clause (empty at the defensive-coding
-        // baseline, or " AND ..." when a caller opts in) spliced in AFTER a complete, real
-        // predicate - eliding it to a single space still leaves a valid, fully-known statement,
-        // so the real predicate ahead of it must still be found, typed, and correctly remapped,
-        // not silently dropped just because something AFTER it was unknowable.
         var (catalog, lineage) = BuildCatalog();
 
         var appSql =
@@ -112,13 +94,11 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var dynamicFinding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.PartiallyAnalyzed, dynamicFinding.Outcome);
         Assert.Equal("optional-fragment-elided", dynamicFinding.Reason);
-        Assert.Equal(6, dynamicFinding.Line); // the EXEC( call site itself
-
+        Assert.Equal(6, dynamicFinding.Line);
         var typedFinding2 = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.ScanForced, typedFinding2.Verdict);
         Assert.Equal("app.sql", typedFinding2.SourcePath);
-        Assert.Equal(5, typedFinding2.Line); // "WHERE Col = ..." is on the second source line
-        Assert.NotNull(typedFinding2.DynamicSqlCallSite);
+        Assert.Equal(5, typedFinding2.Line);        Assert.NotNull(typedFinding2.DynamicSqlCallSite);
         Assert.Equal(6, typedFinding2.DynamicSqlCallSite!.Value.Line);
 
         var results2 = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding2]);
@@ -128,12 +108,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ExecOfVariableDivergingAcrossIfElseIfBranches_BothBranchesScanForced_OracleConfirmed()
     {
-        // The dispatch shape a real proc uses: @sql is set to a DIFFERENT literal predicate in
-        // each of an IF/ELSE-IF chain's branches (no final ELSE - a third, uncovered @mode value
-        // leaves @sql at its genuinely unknown prior state), then one unconditional EXEC runs
-        // after the chain. Both covered branches carry their own real implicit-conversion defect
-        // (varchar column vs an nvarchar literal) - this must reach ScanForced for BOTH, oracle
-        // confirmed, not decline the whole call site as an undifferentiated divergence.
         var (catalog, lineage) = BuildCatalog();
 
         var appSql = """
@@ -156,16 +130,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var extraction = DynamicSqlScannerV2.Scan(parseResult);
         Assert.Empty(extraction.Findings);
 
-        // Three assemblies now, not two: the unrecognized proc call (`EXEC dbo.usp_Unknown @sql
-        // OUTPUT`) no longer blanket-taints @sql - its declared type (NVARCHAR(MAX)) is known, so
-        // it degrades to a typed hole instead (DynamicSqlTransfer's HavocOrTaint helper), and the
-        // THIRD, uncovered dispatch path (neither @mode=1 nor @mode=2) now correctly surfaces its
-        // own typed-hole assembly rather than being silently invisible the way it was under the
-        // old engine (where the unknown proc call fully tainted @sql, so that path could never
-        // contribute a script at all). This is a genuine completeness improvement, not a false
-        // positive: the pipeline reports it as its own honest Unanalyzable finding below (a
-        // placeholder alone is "symbolic-value-not-positionable:whole-statement" - there is no
-        // surrounding literal SQL text to locate a predicate in), never as a fabricated verdict.
         Assert.Equal(3, extraction.AnalyzableScripts.Count);
 
         var result = DynamicSqlPipeline.Analyze(extraction.AnalyzableScripts, catalog, lineage);
@@ -174,12 +138,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         Assert.Single(result.Findings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable && f.Reason == "symbolic-value-not-positionable:whole-statement");
         Assert.Equal(2, result.Findings.Count(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral));
 
-        // Both COVERED branches carry the SAME shape of defect (Col vs an nvarchar literal) -
-        // dedup collapses them to one TypedPredicateFinding, exactly like two Tier1 findings from
-        // different assemblies of the same call site already collapse (DedupeTier1 above). The
-        // proof that BOTH branches were actually analyzed, rather than the call site declining
-        // outright, is extraction.AnalyzableScripts.Count == 3 and extraction.Findings being
-        // empty, both asserted above.
         var typedFinding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
         Assert.Equal("Col", typedFinding.Column.ColumnName);
@@ -192,19 +150,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ExecBuiltFromSelectAssignmentSourceColumn_UsedInPredicate_ScanForced_OracleConfirmed()
     {
-        // Proves the SELECT @var = expr FROM table placeholder machinery (already unit-tested in
-        // DynamicSqlScannerTests for the "known shape, unknown value" case) reaches a real,
-        // oracle-confirmed verdict when the source column's own placeholder is spliced into an
-        // actual predicate, not just that the SELECT-assignment call site becomes analyzable in
-        // isolation. Deliberately reuses dbo.T as its own source table (varchar(10)) rather than
-        // introducing a second table this class's shared schema doesn't deploy.
-        //
-        // DynamicSqlTransfer.TryCompileSelectAssignmentFromSingleKnownTable (fed the catalog
-        // DynamicSqlScannerV2.Scan now threads into TransferContext) recognizes the "exactly one
-        // catalog-known table, literal-concatenated-with-that-table's-own-column" shape and
-        // splices Col's own catalog type in as a typed RowDependentColumn hole positioned exactly
-        // where it appears in the surrounding known SQL text, instead of collapsing the whole
-        // @sql value to one opaque untyped placeholder.
         var (catalog, lineage) = BuildCatalog();
 
         var appSql = """
@@ -238,14 +183,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ExecBuiltFromCursorFetchedNvarcharVariable_UsedInPredicate_ScanForced_OracleConfirmed()
     {
-        // Proves the cursor/FETCH placeholder machinery doesn't just make a call site
-        // ANALYZABLE (the shape asserted by DynamicSqlScannerTests) but that a real
-        // implicit-conversion defect built from a FETCH-sourced value actually reaches a
-        // verdict: @Value is FETCHed into an nvarchar local every loop iteration (a genuinely
-        // unknown, row-dependent value, but a HARD-typed one per its own DECLARE), then folded
-        // into the SAME nvarchar-literal-wrapped-placeholder shape the proc-param-no-caller
-        // tests above already prove sound - Col (VARCHAR/SQL_*) vs an NVARCHAR value is a
-        // genuine column-side conversion regardless of which mechanism supplied the placeholder.
         var (catalog, lineage) = BuildCatalog();
 
         var appSql = """
@@ -317,10 +254,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_SpExecuteSqlWithDeclaredNvarcharParam_VarcharColumn_ScanForced_OracleConfirmed()
     {
-        // Tier B: the classic ORM-generated shape - sp_executesql's own params declaration
-        // string is exact, better type info than most static SQL gets. Col is
-        // VARCHAR/SQL_* collation, @DisplayName is declared nvarchar - column-side
-        // conversion, so ScanForced, exactly like the same predicate written statically.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -347,8 +280,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public void Analyze_SpExecuteSqlWithoutParamsDeclaration_UndeclaredParameterIsUnknownNotGuessed()
     {
-        // No second argument at all - CLAUDE.md's "never guess": @DisplayName's type is
-        // unknowable, so the predicate reports Unknown rather than assuming a match.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -367,9 +298,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public void Analyze_SpExecuteSqlWithNonLiteralParamsDeclaration_FallsBackToNoDeclaredTypes()
     {
-        // @paramsDecl is a proc PARAMETER, not a local straight-line DECLARE, so Tier C
-        // correctly can't fold it either - this is the genuine "we can't know the declared
-        // types" case, distinct from a foldable local variable.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -391,9 +319,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_TierCAccumulatedAcrossMultipleSourceLines_RemapsFindingToAssigningLine_OracleConfirmed()
     {
-        // Tier C's folded text is stitched from segments scattered across several DECLARE/SET
-        // statements at different source lines - the finding it produces must land on the
-        // specific line that contributed the offending text, not the EXEC call site.
         var (catalog, lineage) = BuildCatalog();
 
         var appSql =
@@ -416,21 +341,18 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
 
         var dynamicFinding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.AnalyzedLiteral, dynamicFinding.Outcome);
-        Assert.Equal(6, dynamicFinding.Line); // the EXEC( call site
-
+        Assert.Equal(6, dynamicFinding.Line);
         var typedFinding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
         Assert.Equal("app.sql", typedFinding.SourcePath);
-        Assert.Equal(5, typedFinding.Line); // the SET statement that contributed "WHERE Col = ..."
-        Assert.NotNull(typedFinding.DynamicSqlCallSite);
+        Assert.Equal(5, typedFinding.Line);        Assert.NotNull(typedFinding.DynamicSqlCallSite);
         Assert.Equal(6, typedFinding.DynamicSqlCallSite!.Value.Line);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
-    /// <summary>Wraps <paramref name="sql"/> as the literal argument of one more level of EXEC('...'), escaping embedded quotes - builds an N-level-nested dynamic SQL chain without hand-deriving the quote-doubling at each level.</summary>
-    private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'", "''", StringComparison.Ordinal)}')";
+private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'", "''", StringComparison.Ordinal)}')";
 
     private static string NestExecChain(string innermostSql, int levels)
     {
@@ -450,10 +372,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [InlineData(5)]
     public async Task Analyze_NestedExecChainWithinDepthLimit_FullyResolvesToScanForced_OracleConfirmed(int levels)
     {
-        // Answers "how about 2/3/4/5 levels of recursion": each level is EXEC('...') wrapping
-        // the next, with the real implicit-conversion predicate at the innermost level. All
-        // of these are within MaxNestingDepth (5) and must fully resolve - not just detect
-        // that dynamic SQL exists N levels down, but actually reparse and analyze it.
         var (catalog, lineage) = BuildCatalog();
 
         var innermost = "SELECT Col FROM dbo.T WHERE Col = N'x'";
@@ -464,7 +382,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var topLevelScript = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         var result = DynamicSqlPipeline.Analyze([topLevelScript], catalog, lineage);
 
-        // One AnalyzedLiteral DynamicSqlFinding per EXEC level in the chain.
         Assert.Equal(levels, result.Findings.Count(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral));
         Assert.DoesNotContain(result.Findings, f => f.Outcome != DynamicSqlOutcome.AnalyzedLiteral);
         Assert.All(result.Findings, f => Assert.Equal("app.sql", f.SourcePath));
@@ -476,8 +393,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         Assert.NotNull(typedFinding.DynamicSqlCallSite);
         Assert.Equal("app.sql", typedFinding.DynamicSqlCallSite!.Value.SourcePath);
 
-        // The nesting depth is purely a provenance/remapping concern - the underlying comparison
-        // the oracle probes is the same "Col = N'x'" against dbo.T at every depth in this theory.
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
     }
@@ -485,9 +400,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public void Analyze_NestedExecChain_RemapsTier1AndExpressionDerivedFindingsToo()
     {
-        // The remap path for Tier1/expression-derived findings produced at a nested level is
-        // separate code from the typed-predicate path exercised above - cover it directly
-        // with a 2-level chain whose innermost query hits both.
         var (catalog, lineage) = BuildCatalog();
 
         var innermostTier1 = "SELECT Col FROM dbo.T WHERE YEAR(CreatedAt) = 2020";
@@ -519,8 +431,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public void Analyze_NestedExecChainBeyondDepthLimit_ReportsMaxDepthExceededNotSilentlyDropped()
     {
-        // One level past MaxNestingDepth (5) - CLAUDE.md's "no silent truncation": the
-        // analysis must stop, but it must say so, with a real remapped source location.
         var (catalog, lineage) = BuildCatalog();
 
         var innermost = "SELECT Col FROM dbo.T WHERE Col = N'x'";
@@ -535,8 +445,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, depthExceeded.Outcome);
         Assert.Equal("app.sql", depthExceeded.SourcePath);
 
-        // The 5 levels that WERE within the limit still resolved normally; only the 6th was
-        // declined - the whole chain isn't thrown away just because it goes one level too deep.
         Assert.Equal(5, result.Findings.Count(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral));
         Assert.Empty(result.TypedFindings);
     }
@@ -563,13 +471,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public void Analyze_UnsubstitutedTemplatePlaceholderInLiteral_ReportsDistinctReasonNotRawParseError()
     {
-        // A source-level templating convention (e.g. a build/deploy step that stamps a token
-        // like $Signature$ into a script before it ever reaches SQL Server) can leave a literal
-        // fragment holding a token that was never substituted for this particular call site.
-        // ScriptDOM has no idea this is a template artifact - it just sees invalid syntax - but
-        // reporting the raw parser error ("Incorrect syntax near '$Signature$'") reads as this
-        // scanner failing to parse ordinary T-SQL, when the actual, more useful diagnosis is
-        // "this script was never fully instantiated".
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText("app.sql", "EXEC('UPDATE dbo.Foo SET Col = $Signature$ WHERE Id = 1');");
@@ -607,10 +508,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_LiteralWithCte_ResolvesCteColumnThroughToBaseTable_OracleConfirmed()
     {
-        // A reparsed dynamic-SQL fragment goes through the identical TypedPredicateExtractor
-        // visitor and CteResolver static SQL uses (docs/coverage-remediation-plan.md Phase
-        // 4.3) - there is no separate CTE-handling code path for dynamic SQL, so this was true
-        // by construction before this test existed. It just wasn't checked.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -634,15 +531,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_LiteralThroughTwoNestedViewLayers_ResolvesToBaseColumnAtDepthTwo_ScanForced_OracleConfirmed()
     {
-        // Proves the full chain in one shot: normal SQL -> dynamic SQL (a provably-constant
-        // EXEC literal) -> a view (vw_T_L2) -> a second, nested view it's built on (vw_T_L1) ->
-        // the real base table column (dbo.T.Col). The reparsed dynamic-SQL fragment is handed
-        // the SAME LineageCatalog static SQL uses (DynamicSqlPipeline.ProcessScript), and
-        // LineageResolver resolves views transitively regardless of how many layers sit between
-        // - this is the first test that exercises both mechanisms TOGETHER rather than each in
-        // isolation (see DynamicSqlPipelineTests.Analyze_LiteralWithCte_... for dynamic SQL with
-        // no view layer, and ScanReportBuilderSharedLineageTests for nested views with no
-        // dynamic SQL).
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -657,8 +545,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         Assert.Equal("dbo.T", typedFinding.Column.TableQualifiedName);
         Assert.Equal("Col", typedFinding.Column.ColumnName);
         Assert.True(typedFinding.Column.Indexed);
-        Assert.Equal(2, typedFinding.Column.Depth); // vw_T_L2 -> vw_T_L1 -> dbo.T: two view layers
-        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.Equal(2, typedFinding.Column.Depth);        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
@@ -667,9 +554,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public void Analyze_LiteralWithCteShadowingRealTable_ResolvesToCteNotTheTable()
     {
-        // CTE names shadow catalog objects within their statement's scope (audit-remediation-
-        // plan.md Phase 2.4) - proving that shadowing rule also holds inside dynamic SQL, not
-        // just static SQL.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -680,28 +564,12 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
 
-        // The CTE's Col is an expression (CAST), not the base dbo.T.Col - so it must not resolve
-        // to a BaseColumn typed finding at all; it can only ever surface (if anywhere) as an
-        // expression-derived finding, never as a direct column-side verdict against dbo.T.
         Assert.Empty(result.TypedFindings);
     }
 
-    /// <summary>
-    /// A proc parameter with no known caller (see DynamicSqlScannerV2's
-    /// BuildParameterSeed) folds to a symbolic placeholder rather than tainting - these three
-    /// tests are the oracle proof that the resulting Medium-confidence finding is sound, not
-    /// merely plausible. Each parses/scans with an explicitly empty <see cref="ProcCallGraph"/>
-    /// so the parameter genuinely has zero known call sites, matching the real-world shape a
-    /// public entry-point procedure has.
-    /// </summary>
-    [Fact]
+[Fact]
     public async Task Analyze_ProcParamNoKnownCaller_PlaceholderInsideNvarcharLiteral_ScanForced_OracleConfirmed()
     {
-        // The literal @Value is concatenated into has its own DATA "N" character right
-        // before the escaped quote (not a type-marker prefix - CLAUDE.md's own rule that only the
-        // REASSEMBLED text's quoting determines a literal's type, never the outer NVARCHAR
-        // variable that built it) - so the reparsed predicate is Col (VARCHAR/SQL_*) vs an
-        // NVARCHAR literal: a genuine column-side conversion, ScanForced.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -728,12 +596,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_PlaceholderInsideVarcharLiteral_SeekPreserved_OracleConfirmed()
     {
-        // The direction control for the test above: identical shape, identical @Value declared
-        // type (NVARCHAR(10)), but the reassembled text's own quoting has no embedded "N" this
-        // time - Col (VARCHAR) vs a VARCHAR literal matches exactly, so the seek is preserved.
-        // Proves the verdict comes from the GENERATED SQL's own quoting, never from @Value's
-        // declared type - a future contributor "helpfully" typing the placeholder from the
-        // DECLARE instead of the generated text would make this test ScanForced and fail.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -759,11 +621,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_PlaceholderTokenLengthDiffers_SameConfirmedVerdict()
     {
-        // The placeholder token embeds its own origin (line/column) - moving the DECLARE onto a
-        // much later line changes the token's TEXT LENGTH (more digits) without changing anything
-        // about the predicate's shape. Conversion direction is category-driven (VARCHAR vs
-        // NVARCHAR), never length-driven, so the confirmed verdict must be identical to the
-        // shorter-token test above.
         var (catalog, lineage) = BuildCatalog();
 
         var padding = new string('\n', 50);
@@ -785,17 +642,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
-    /// <summary>
-    /// WP2's own oracle proof: before this change, wrapping a placeholder in a KNOWN builtin
-    /// (UPPER/CAST/...) refused the whole EXEC outright ("symbolic-value-in-function-argument"),
-    /// even though - for the QUOTED-position case these two tests exercise - the eventual
-    /// verdict is driven entirely by the REASSEMBLED text's own literal quoting (see
-    /// DynamicSqlPipeline.TryParseAndClassify's Quoted-classification comment), never by the
-    /// placeholder's own type. So the placeholder's transferred type doesn't change WHICH verdict
-    /// comes out here - what these prove is that the mechanism reaches a real, oracle-confirmed
-    /// finding at all instead of tainting the whole call site to Unanalyzable.
-    /// </summary>
-    [Fact]
+[Fact]
     public async Task Analyze_ProcParamNoKnownCaller_UpperOfPlaceholderInsideVarcharLiteral_SeekPreserved_OracleConfirmed()
     {
         var (catalog, lineage) = BuildCatalog();
@@ -823,9 +670,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_CastOfPlaceholderInsideNvarcharLiteral_ScanForced_OracleConfirmed()
     {
-        // Exercises the OTHER code path through TryTransferPlaceholderThroughFunction - CAST's
-        // explicitTargetType parameter, not the PlaceholderTypeTransfer registry lookup UPPER
-        // above goes through.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -851,11 +695,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_NCharCrLfAndCoalesceSplicedIntoLiteral_ScanForced_OracleConfirmed()
     {
-        // Corpus-measured (WWI's DeactivateTemporalTablesBeforeDataLoad.sql): dynamic SQL built
-        // with an NCHAR(13)+NCHAR(10) CRLF constant spliced between statement fragments, plus a
-        // COALESCE(known-constant, fallback) feeding the predicate's own literal value - both
-        // previously unfoldable, both provably reduce to a fixed value here. Col is VARCHAR/
-        // SQL_* collation compared against an N'...' literal - genuine column-side conversion.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -883,10 +722,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_NewIdCastToStringInPredicate_ScanForced_OracleConfirmed()
     {
-        // Proves NEWID()'s own placeholder-origination (not a value TRANSFERRED through a
-        // function like the proc-param tests above, but one that ORIGINATES from NEWID() itself)
-        // reaches a real oracle-confirmed verdict when it lands in an actual predicate, not just
-        // that a NEWID-built call site becomes analyzable in isolation.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -912,8 +747,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_GetDateConvertedToStringInPredicate_ScanForced_OracleConfirmed()
     {
-        // Same placeholder-origination proof as NEWID above, extended to GETDATE() - its
-        // datetime return type is a hard guarantee even though the actual timestamp isn't.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -939,10 +772,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_CatchBlockReferencesVariableDeclaredOnlyInTry_ScanForced_OracleConfirmed()
     {
-        // Proves the TRY-only-declaration placeholder (seeded into the CATCH walk itself, not
-        // just at the join point afterward) reaches a real, oracle-confirmed verdict when spliced
-        // into an actual predicate - the classic "retry/log using the same filter value" pattern -
-        // not just that the CATCH block's own call site becomes analyzable in isolation.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -967,12 +796,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
 
         var result = DynamicSqlPipeline.Analyze(extraction.AnalyzableScripts, catalog, lineage);
 
-        // Two genuinely distinct call sites (the TRY's own EXEC and the CATCH's own EXEC are
-        // different statements at different lines) - PreferBestConfidencePerKey's dedup is
-        // scoped PER call site, so both survive as their own findings rather than collapsing:
-        // the TRY-side script is a full literal (High confidence); the CATCH-side script carries
-        // the seeded placeholder (Medium) - both must independently reach ScanForced for the
-        // SAME underlying defect.
         Assert.Equal(2, result.TypedFindings.Count);
         Assert.All(result.TypedFindings, f =>
         {
@@ -989,11 +812,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_MixedIdentifierAndQuotedPlaceholdersInOneStatement_ScanForced_OracleConfirmed()
     {
-        // Per-occurrence placeholder position proof, not per-statement shape: @LogTableName's
-        // placeholder sits entirely inside QUOTENAME's own identifier (never resolves to a real
-        // table, contributes nothing), while @Value's placeholder sits quoted inside N'''...''' -
-        // a genuine varchar-column-vs-nvarchar-literal comparison against the REAL dbo.T table,
-        // in the very same statement.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -1023,13 +841,6 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_SymbolicColumnNameInOrderByPosition_StillFindsUnrelatedLiteralWherePredicate_ScanForced_OracleConfirmed()
     {
-        // A symbolic value can sit in a position this scanner has no dedicated handling for at
-        // all (here, an ORDER BY column name, built from a caller-supplied SYSNAME parameter) -
-        // that placeholder can never resolve against the real catalog (it's an invented token),
-        // so it is simply an unresolvable column reference the ordinary extractor already skips
-        // safely, exactly like any other unrecognized identifier. It must never cost the WHOLE
-        // call site its analysis: the real, fully-literal WHERE predicate earlier in the SAME
-        // statement still has to be found, typed, and oracle-confirmed.
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(

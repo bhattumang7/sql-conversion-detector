@@ -4,13 +4,6 @@ using SilentScan.Core.Reporting.Sarif;
 
 namespace SilentScan.Tests.Reporting;
 
-/// <summary>
-/// Pins <see cref="RuleDocSite"/>'s slugging contract: every catalog rule maps to a distinct,
-/// stably-formatted page, and every SARIF rule (including confidence-suffixed variants) carries
-/// a <c>helpUri</c> pointing at that same page. A rule-ID rename that would silently break a
-/// published link shows up here as a slug collision or a mismatched URI, not as a 404 someone
-/// finds later.
-/// </summary>
 public sealed partial class RuleDocSiteTests
 {
     [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]

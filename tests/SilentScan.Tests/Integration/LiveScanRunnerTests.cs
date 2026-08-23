@@ -5,14 +5,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// End-to-end proof that <see cref="LiveScanRunner"/> reproduces the flagship implicit-
-/// conversion bug through nothing but a live connection string - no DDL files, no manifest, no
-/// pinned --collation: the view/procedure bodies come from <c>sys.sql_modules</c>, the catalog
-/// (including the base table's collation and the fact that OrderCode is indexed) comes from
-/// engine metadata, and the resulting ScanForced finding is oracle-confirmed against the same
-/// real plan XML every other verdict-bearing test in this suite is held to.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LiveScanRunnerTests : OracleTestFixture
 {
@@ -65,10 +57,6 @@ public sealed class LiveScanRunnerTests : OracleTestFixture
     [Fact]
     public async Task RunAsync_EncryptedProcedure_IsReportedUnanalyzableNotSilentlyDropped()
     {
-        // sys.sql_modules.definition is genuinely NULL for a WITH ENCRYPTION module - there is
-        // no T-SQL body to recover from metadata at all (unlike a corpus file this project just
-        // chose not to parse). This must surface as an accounted-for gap, never a module that
-        // silently vanishes from the module count with no trace.
         const string encryptedProcSql = """
             CREATE PROCEDURE dbo.usp_EncryptedLookup WITH ENCRYPTION AS
                 SELECT OrderId FROM dbo.Orders WHERE OrderCode = 'x';
@@ -77,7 +65,6 @@ public sealed class LiveScanRunnerTests : OracleTestFixture
 
         var result = await LiveScanRunner.RunAsync(Options.BuildConnectionString(DatabaseName));
 
-        // The two plaintext modules from the class-level Ddl are unaffected.
         Assert.Equal(2, result.ModulesAnalyzed);
 
         var unanalyzable = Assert.Single(result.UnanalyzableModules, m => m.ObjectName == "usp_EncryptedLookup");
@@ -88,9 +75,6 @@ public sealed class LiveScanRunnerTests : OracleTestFixture
     [Fact]
     public async Task RunAsync_NumberedProcedureBodyBeyondFirst_IsReportedUnanalyzableNotSilentlyDropped()
     {
-        // sys.sql_modules only ever holds a numbered procedure's body #1 text - body #2 is real,
-        // callable T-SQL (EXEC dbo.usp_Numbered;2) that this pass has no path to read at all, and
-        // must not silently vanish with no trace the way it did before this fix.
         const string numberedProcSql = """
             CREATE PROCEDURE dbo.usp_Numbered;1 AS SELECT OrderId FROM dbo.Orders WHERE OrderCode = 'x';
             GO
@@ -100,8 +84,6 @@ public sealed class LiveScanRunnerTests : OracleTestFixture
 
         var result = await LiveScanRunner.RunAsync(Options.BuildConnectionString(DatabaseName));
 
-        // Body #1 reads normally through sys.sql_modules like any other procedure, alongside the
-        // two plaintext modules from the class-level Ddl.
         Assert.Equal(3, result.ModulesAnalyzed);
 
         var unanalyzable = Assert.Single(result.UnanalyzableModules, m => m.ObjectName.StartsWith("usp_Numbered;", StringComparison.Ordinal));

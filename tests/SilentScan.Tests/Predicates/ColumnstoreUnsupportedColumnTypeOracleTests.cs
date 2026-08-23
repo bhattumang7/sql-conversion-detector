@@ -3,13 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-reference.md Appendix 8 - oracle-confirms the real DDL-time failure
-/// <see cref="ColumnstoreUnsupportedColumnTypeFinding"/> rests on: a SQL_VARIANT column
-/// participating in a columnstore index does not deploy, ever, regardless of whether any query
-/// references it. Real DDL execution against the standing Docker instance, not a documentation
-/// claim taken on faith.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ColumnstoreUnsupportedColumnTypeOracleTests : OracleTestFixture
 {

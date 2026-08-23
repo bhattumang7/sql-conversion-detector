@@ -5,12 +5,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §C "Trigger correctness".
-/// One scanner, one visitor scoped per <c>CREATE/ALTER/CREATE OR ALTER TRIGGER</c> body - see
-/// <see cref="TriggerCorrectnessFinding"/> for each kind's own precision story and oracle
-/// evidence.
-/// </summary>
 public static class TriggerCorrectnessScanner
 {
     private static readonly HashSet<string> PseudoTableNames = new(StringComparer.OrdinalIgnoreCase) { "inserted", "deleted" };
@@ -49,10 +43,6 @@ public static class TriggerCorrectnessScanner
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(name);
 
-            // The overwhelmingly common `AS BEGIN ... END` shape wraps the whole body in one
-            // BeginEndBlockStatement - unwrap it exactly like ProcCallGraphBuilder's own
-            // VisitScopedBody, so "the trigger's own top-level statements" is the real statement
-            // list, not a one-element wrapper.
             var topLevelStatements = statementList?.Statements is [BeginEndBlockStatement singleBlock]
                 ? singleBlock.StatementList.Statements
                 : statementList?.Statements;
@@ -78,15 +68,10 @@ public static class TriggerCorrectnessScanner
                 InspectUpdateFunctionWithoutValueComparison(qualifiedName, statementList);
             }
 
-            // Predicate/lineage-level pieces of this codebase already resolve inserted/deleted
-            // scope for typed predicate work; this scanner stays a pure AST/catalog pass and does
-            // not need that machinery for any of its own seven kinds.
         }
 
         private static bool IsLogonTrigger(TriggerStatementBody node) =>
             node.TriggerActions is { } actions && actions.Any(a => a.TriggerActionType == TriggerActionType.LogOn);
-
-        // --- Multi-row-unsafe single-row assignment (kinds 1 & 2) -------------------------------
 
         private void InspectMultiRowUnsafeAssignments(string triggerQualifiedName, IList<TSqlStatement> statements)
         {
@@ -117,15 +102,7 @@ public static class TriggerCorrectnessScanner
             }
         }
 
-        /// <summary>
-        /// Recognizes <c>SELECT @v = col FROM inserted/deleted</c> (a top-level
-        /// <see cref="SelectSetVariable"/> element) and the structurally identical scalar-subquery
-        /// form assigned via <c>SET</c> or a <c>DECLARE</c> initializer - returns the single
-        /// assigned variable's name, or null when the statement isn't this shape at all, assigns
-        /// more than one variable, or the assigned expression is an aggregate (a real, well-defined
-        /// single value regardless of row count).
-        /// </summary>
-        private static string? TryGetUnsafeAssignedVariable(TSqlStatement statement) => statement switch
+private static string? TryGetUnsafeAssignedVariable(TSqlStatement statement) => statement switch
         {
             SelectStatement { QueryExpression: QuerySpecification { SelectElements: [SelectSetVariable { AssignmentKind: AssignmentKind.Equals } setVar] } spec }
                 when IsUnsafeSourceQuery(spec) && !IsAggregateExpression(setVar.Expression)
@@ -157,34 +134,16 @@ public static class TriggerCorrectnessScanner
         private static bool SelectListIsAggregateOnly(QuerySpecification spec) =>
             spec.SelectElements is [SelectScalarExpression { Expression: { } expr }] && IsAggregateExpression(expr);
 
-        /// <summary>
-        /// True when <paramref name="expression"/> is a direct aggregate function call
-        /// (<c>COUNT(*)</c>, <c>MAX(col)</c>, ...) - a real, well-defined single value regardless
-        /// of how many rows the source has, so assigning it from inserted/deleted with no WHERE/TOP
-        /// is not the unsafe shape this scanner targets.
-        /// </summary>
-        private static bool IsAggregateExpression(ScalarExpression expression) =>
+private static bool IsAggregateExpression(ScalarExpression expression) =>
             expression is FunctionCall call && AggregateFunctionNames.Contains(call.FunctionName.Value);
 
-        /// <summary>
-        /// True when <paramref name="spec"/>'s own FROM clause is exactly the bare inserted/deleted
-        /// pseudo-table (no join, no derived table, no alias-qualified schema), with no WHERE and
-        /// no TOP - the shape that reads an unspecified single row when more than one is present.
-        /// </summary>
-        private static bool IsUnsafeSourceQuery(QuerySpecification spec) =>
+private static bool IsUnsafeSourceQuery(QuerySpecification spec) =>
             spec.WhereClause is null
             && spec.TopRowFilter is null
             && spec.FromClause is { TableReferences: [NamedTableReference { SchemaObject.SchemaIdentifier: null } named] }
             && PseudoTableNames.Contains(named.SchemaObject.BaseIdentifier.Value);
 
-        /// <summary>
-        /// The line of the FIRST subsequent top-level statement (never descending into an
-        /// IF/WHILE/TRY branch - this scan has no fold-state to trace a value across a branch it
-        /// can't cheaply prove) that is an UPDATE/DELETE against a real target whose WHERE clause
-        /// is EXACTLY one top-level equality between a column and <paramref name="variableName"/> -
-        /// or null when no such statement is found before the trigger body ends.
-        /// </summary>
-        private static int? FindStraightLineKeyedDmlUse(IList<TSqlStatement> statements, int startIndex, string variableName)
+private static int? FindStraightLineKeyedDmlUse(IList<TSqlStatement> statements, int startIndex, string variableName)
         {
             for (var i = startIndex; i < statements.Count; i++)
             {
@@ -211,8 +170,6 @@ public static class TriggerCorrectnessScanner
                 || (cmp.SecondExpression is ColumnReferenceExpression && cmp.FirstExpression is VariableReference v2
                     && string.Equals(v2.Name, variableName, StringComparison.OrdinalIgnoreCase)));
 
-        // --- No early-out for the zero-row case (kind 3) ----------------------------------------
-
         private void InspectMissingEarlyOut(string triggerQualifiedName, TriggerStatementBody node, IList<TSqlStatement> statements)
         {
             var guardCollector = new EarlyOutGuardCollector();
@@ -233,14 +190,7 @@ public static class TriggerCorrectnessScanner
                 FindingConfidence.Low));
         }
 
-        /// <summary>
-        /// Looks for <c>IF NOT EXISTS (SELECT ... FROM inserted/deleted ...)</c> or
-        /// <c>IF @@ROWCOUNT = 0</c> anywhere in the trigger body, at any nesting depth - a
-        /// structural presence check, not a position check (CLAUDE.md precision-over-recall: this
-        /// kind is explicitly advisory, so a guard found anywhere in the body is accepted rather
-        /// than second-guessing whether it sits early enough to matter).
-        /// </summary>
-        private sealed class EarlyOutGuardCollector : TSqlFragmentVisitor
+private sealed class EarlyOutGuardCollector : TSqlFragmentVisitor
         {
             public bool Found { get; private set; }
 
@@ -270,17 +220,7 @@ public static class TriggerCorrectnessScanner
                 && PseudoTableNames.Contains(named.SchemaObject.BaseIdentifier.Value);
         }
 
-        // --- INSTEAD OF INSERT filtered re-insert, no reject path (kind 5) ----------------------
-
-        /// <summary>
-        /// Fires when this <c>INSTEAD OF INSERT</c> trigger's own body re-inserts a WHERE/join-
-        /// filtered SUBSET of <c>inserted</c> into a real base table, with no companion signal for
-        /// the rows the filter excludes anywhere in the body (a second top-level INSERT - a
-        /// rejects/audit table is the common real shape - or a <c>RAISERROR</c>/<c>THROW</c> at any
-        /// depth). See <see cref="TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath"/>
-        /// for the oracle evidence.
-        /// </summary>
-        private void InspectInsteadOfInsertFilteredReinsert(string triggerQualifiedName, TriggerStatementBody node, IList<TSqlStatement> topLevelStatements)
+private void InspectInsteadOfInsertFilteredReinsert(string triggerQualifiedName, TriggerStatementBody node, IList<TSqlStatement> topLevelStatements)
         {
             if (node.TriggerType != TriggerType.InsteadOf
                 || node.TriggerActions is not { } actions
@@ -301,8 +241,6 @@ public static class TriggerCorrectnessScanner
                 return;
             }
 
-            // A companion top-level INSERT (any target - a rejects/audit table is the common real
-            // shape) means the excluded rows ARE handled somewhere, just not by this statement.
             var hasCompanionInsert = topLevelStatements.OfType<InsertStatement>().Count() > filteredInserts.Count;
             var hasRaiseErrorOrThrow = ContainsRaiseErrorOrThrow(topLevelStatements);
 
@@ -321,15 +259,7 @@ public static class TriggerCorrectnessScanner
             }
         }
 
-        /// <summary>
-        /// True when <paramref name="spec"/>'s own FROM clause references the bare <c>inserted</c>
-        /// pseudo-table (directly, or as one side of a join) AND the source is genuinely filtered -
-        /// either a <c>WHERE</c> clause, or a join itself (an INNER/CROSS join against inserted
-        /// inherently narrows to matching rows even with no WHERE at all). A bare
-        /// <c>SELECT * FROM inserted</c> with neither is the normal, complete re-insert shape and
-        /// must never fire.
-        /// </summary>
-        private static bool IsFilteredReinsertFromInserted(QuerySpecification spec)
+private static bool IsFilteredReinsertFromInserted(QuerySpecification spec)
         {
             if (spec.FromClause is not { TableReferences: { Count: > 0 } tableReferences })
             {
@@ -369,17 +299,7 @@ public static class TriggerCorrectnessScanner
             public override void ExplicitVisit(ThrowStatement node) => Found = true;
         }
 
-        // --- UPDATE(column) with no value comparison (kind 6) -----------------------------------
-
-        /// <summary>
-        /// Fires on every <c>UPDATE(column)</c> call (<see cref="UpdateCall"/> - a dedicated
-        /// ScriptDom boolean-function node, not an ordinary <see cref="FunctionCall"/>) found
-        /// anywhere in the trigger body's own <c>IF</c> predicates whose SAME predicate expression
-        /// contains no genuine value-change comparison for that exact column - see
-        /// <see cref="TriggerCorrectnessFindingKind.UpdateFunctionWithoutValueComparison"/> for the
-        /// oracle evidence, including the near-miss guard shape this must never flag.
-        /// </summary>
-        private void InspectUpdateFunctionWithoutValueComparison(string triggerQualifiedName, StatementList statementList)
+private void InspectUpdateFunctionWithoutValueComparison(string triggerQualifiedName, StatementList statementList)
         {
             var collector = new IfPredicateCollector();
             statementList.Accept(collector);
@@ -406,16 +326,7 @@ public static class TriggerCorrectnessScanner
             }
         }
 
-        /// <summary>
-        /// True when <paramref name="predicate"/> contains, anywhere within it (including inside an
-        /// <c>EXISTS</c> subquery's own WHERE/join, the real-world shape this was oracle-confirmed
-        /// against), a comparison between two column references that BOTH name
-        /// <paramref name="columnName"/> - the precise signature of a genuine before/after
-        /// value-change guard (<c>i.Col &lt;&gt; d.Col</c>) as opposed to an unrelated join-key
-        /// comparison (e.g. an <c>i.Id = d.Id</c> correlation) that happens to also compare two
-        /// columns but not THIS one.
-        /// </summary>
-        private static bool HasSameColumnValueComparison(BooleanExpression predicate, string columnName)
+private static bool HasSameColumnValueComparison(BooleanExpression predicate, string columnName)
         {
             var collector = new SameColumnComparisonCollector(columnName);
             predicate.Accept(collector);
@@ -459,16 +370,7 @@ public static class TriggerCorrectnessScanner
                 && string.Equals(last.Value, columnName, StringComparison.OrdinalIgnoreCase);
         }
 
-        // --- Logon trigger gating on HOST_NAME() (kind 7) ---------------------------------------
-
-        /// <summary>
-        /// Fires on any <c>IF</c> in a <c>FOR LOGON</c> trigger's own body whose predicate feeds
-        /// <c>HOST_NAME()</c> into a conditional that reaches a <c>ROLLBACK</c> - the standard
-        /// logon-trigger deny mechanism. See
-        /// <see cref="TriggerCorrectnessFindingKind.LogonTriggerHostNameGate"/> for the oracle
-        /// evidence that this value is genuinely client-supplied and trivially spoofable.
-        /// </summary>
-        private void InspectLogonTriggerHostNameGate(string triggerQualifiedName, StatementList statementList)
+private void InspectLogonTriggerHostNameGate(string triggerQualifiedName, StatementList statementList)
         {
             var collector = new HostNameGateCollector();
             statementList.Accept(collector);
@@ -534,16 +436,10 @@ public static class TriggerCorrectnessScanner
             public override void ExplicitVisit(RollbackTransactionStatement node) => Found = true;
         }
 
-        // --- Direct self-recursion (kind 4) -----------------------------------------------------
-
         private void InspectDirectRecursion(string triggerQualifiedName, TriggerStatementBody node, SchemaObjectName targetTableName, StatementList? statementList)
         {
             if (catalog.IsRecursiveTriggersEnabled != true || statementList is null)
             {
-                // Live-mode-only, gated strictly on a live-confirmed TRUE - file-mode (null) and a
-                // live-confirmed FALSE both mean this specific recursion path is a structural
-                // no-op, so never overclaim a risk that is not actually live (see
-                // DatabaseCatalog.IsRecursiveTriggersEnabled's own doc comment).
                 return;
             }
 

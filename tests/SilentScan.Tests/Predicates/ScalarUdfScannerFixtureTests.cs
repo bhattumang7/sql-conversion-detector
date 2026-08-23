@@ -5,11 +5,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Every rule fixture here is a real-world-sourced repro (see file header comments for
-/// citations) per CLAUDE.md's "no invented corpus" rule, matching the discipline
-/// <see cref="TvfFenceScannerTests"/> already follows for the MSTVF-as-fence stream.
-/// </summary>
 public sealed class ScalarUdfScannerFixtureTests
 {
     private static readonly string FixturesDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "scalar_udf");
@@ -70,8 +65,6 @@ public sealed class ScalarUdfScannerFixtureTests
         Assert.Equal("dbo.discount_price", nested.FunctionQualifiedName);
         Assert.Equal(1, nested.Depth);
 
-        // The view's own body also reports its own direct call - both are real, distinct claims
-        // (visible to the view's own author vs invisible to every consumer of the view).
         Assert.Contains(findings, f => f.Kind == ScalarUdfFindingKind.ProjectionInvocation);
     }
 

@@ -10,8 +10,6 @@ public sealed class LineageResolverTests
 {
     private static (DatabaseCatalog Catalog, LineageCatalog Lineage) Build(params string[] batches)
     {
-        // Every CREATE VIEW/FUNCTION must be the only statement in its batch, so callers
-        // pass one statement per array element and this joins them with GO separators.
         var sql = string.Join("\nGO\n", batches);
         var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
@@ -40,10 +38,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_CastOfStringColumnToStringType_PropagatesSourceCollation()
     {
-        // Verified against the real oracle: CAST(varcharCol AS NVARCHAR(n)) with no explicit
-        // COLLATE keeps the SOURCE column's own collation, not a null/database-default one -
-        // T-SQL has no inline COLLATE syntax inside a CAST's target type at all. Before this
-        // fix, every CAST-to-string column reported Collation=null regardless.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT CAST(OrderCode AS NVARCHAR(50)) AS OrderCodeWide FROM dbo.Orders;");
@@ -58,9 +52,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_CastOfNonStringColumnToStringType_LeavesCollationNull()
     {
-        // A non-string source (INT) has no collation to propagate - real SQL Server applies
-        // the database's own default collation here, which this pass has no reliable way to
-        // know at this point, so it stays Unknown (null) rather than a guess.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT CAST(OrderId AS NVARCHAR(20)) AS OrderIdText FROM dbo.Orders;");
@@ -82,7 +73,6 @@ public sealed class LineageResolverTests
         var view = lineage.Find("dbo.vw_L2")!;
         var cast = Assert.IsType<ColumnProvenance.Cast>(view.FindColumn("OrderIdText")!.Provenance);
 
-        // The CAST is introduced in vw_L1; vw_L2 reads it through one more view layer.
         Assert.Equal(SqlTypeCategory.VarChar, cast.ExplicitType.Category);
         Assert.Equal(1, cast.Depth);
         Assert.NotNull(cast.OriginSourcePath);
@@ -106,21 +96,12 @@ public sealed class LineageResolverTests
         Assert.Equal("dbo.Orders", baseColumn.TableQualifiedName);
         Assert.Equal("SQL_Latin1_General_CP1_CI_AS", baseColumn.Type!.Collation!.Name);
 
-        // vw_L1 reads the base table directly (not a view layer); vw_L2..vw_L5 each read
-        // through one more view layer, so vw_L5's column crosses 4 view-layer boundaries.
         Assert.Equal(4, baseColumn.Depth);
     }
 
     [Fact]
     public void Resolve_UnionBranchesWithMismatchedColumnCounts_DegradesToUnknownAndLedgers()
     {
-        // The bug this closes: a position-based Zip over two UNION branches with different
-        // column counts used to silently truncate to the shorter branch's length, dropping the
-        // longer branch's extra columns with no trace at all (worse than LineageResolver's own
-        // explicit-column-list Zip, which already degrades to Unknown + ledger on a count
-        // mismatch). `SELECT * FROM dbo.Missing` over an unresolvable table resolves to zero
-        // columns (ResolveStar's own documented behavior), so pairing it against a genuine
-        // 2-column SELECT is a reliable way to force the mismatch.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.OrdersReal (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
             """
@@ -204,9 +185,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_BuiltinFixedReturnTypeFunctionCallInSelectList_ResolvesInferredType()
     {
-        // YEAR() is a curated fixed-return-type builtin (BuiltinFunctionTypeResolver) -
-        // ScalarExpressionResolver now types it the same way TypedPredicateExtractor and
-        // ComputedColumnTypeResolver do, rather than always falling to Unknown.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (CreatedAt DATETIME2 NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT YEAR(CreatedAt) AS CreatedYear FROM dbo.Orders;");
@@ -221,8 +199,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_MinOfTinyIntColumn_OracleVerified_PreservesExactArgumentType()
     {
-        // Oracle-verified: MIN(TinyIntCol) returns tinyint - unlike SUM/AVG below, MIN/MAX never
-        // widen an integer-family argument.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (Qty TINYINT NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT MIN(Qty) AS MinQty FROM dbo.Orders;");
@@ -249,8 +225,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_SumOfTinyIntColumn_OracleVerified_WidensToInt()
     {
-        // Oracle-verified: SUM(TinyIntCol) returns int, not tinyint - SQL Server widens SUM/AVG's
-        // integer-family argument to avoid overflow, unlike MIN/MAX which preserve it exactly.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (Qty TINYINT NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT SUM(Qty) AS TotalQty FROM dbo.Orders;");
@@ -277,8 +251,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_SumOfMoneyColumn_OracleVerified_PreservesMoneyCategory()
     {
-        // Distinguishes the widening rule from a blanket "always Int": non-integer categories
-        // (money/decimal/float/real) pass through SUM/AVG unchanged.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (Total MONEY NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT SUM(Total) AS TotalSum FROM dbo.Orders;");
@@ -292,9 +264,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_DateAddOnDateColumn_OracleVerified_TakesThirdArgumentType()
     {
-        // Oracle-verified: DATEADD(day, 1, DateCol) returns date, matching its THIRD argument
-        // (the date expression, index 2) - not its datepart keyword at index 0, and not a fixed
-        // type the way GETDATE()/YEAR() are.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (StartDate DATE NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT DATEADD(day, 1, StartDate) AS NextDate FROM dbo.Orders;");
@@ -308,10 +277,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_DateAddDayTruncationIdiom_OracleVerified_ResolvesToDateTimeNotInt()
     {
-        // Oracle-verified: DATEADD(day, DATEDIFF(day, 0, x), 0) - the common date-truncation
-        // idiom - returns datetime, NOT the literal `0` third argument's own Int category. A
-        // naive argument-passthrough rule mistyped this exact shape as Int in a real production
-        // database, producing a live lineage-parity mismatch.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (Placed DATETIME NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT DATEADD(day, DATEDIFF(day, 0, Placed), 0) AS PlacedDate FROM dbo.Orders;");
@@ -325,10 +290,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_DateAddOnStringLiteralBaseDate_OracleVerified_ResolvesToDateTimeNotVarChar()
     {
-        // Oracle-verified: DATEADD(hour, n, '12/30/1899') - a string-literal base date, the
-        // shape behind a real "minutes since midnight" time-of-day idiom - returns datetime, NOT
-        // the literal's own VarChar category. The same shape mistyped as VarChar in a real
-        // production database, producing another live lineage-parity mismatch.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Shifts (StartMinuteOfDay INT NOT NULL);",
             "CREATE VIEW dbo.vw_Shifts AS SELECT DATEADD(minute, StartMinuteOfDay, '12/30/1899') AS StartAsTime FROM dbo.Shifts;");
@@ -342,9 +303,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ScalarUdfCallInSelectList_ResolvesToExpressionWithNoInferredType()
     {
-        // A scalar UDF is not in the curated builtin table and is out of scope for this pass
-        // (lineage does not maintain a scalar-UDF return-type registry) - it must stay Unknown,
-        // never guessed.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (CreatedAt DATETIME2 NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT dbo.fn_FormatDate(CreatedAt) AS CreatedLabel FROM dbo.Orders;");
@@ -410,13 +368,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_InlineTvfCallingAnotherInlineTvf_DeclaredOuterFirst_StillResolvesToBaseColumn()
     {
-        // FROM dbo.fn_Inner(...) inside an inline TVF's own SELECT is a
-        // SchemaObjectFunctionTableReference, not a NamedTableReference -
-        // ViewDependencyGraph.TableReferenceCollector only matched the latter, so no dependency
-        // edge existed between the two TVFs (coverage-remediation-plan.md Phase 3.5). Declaring
-        // the outer function BEFORE the inner one in source order is what actually exercises
-        // this: without the edge, topological order has no reason to visit fn_Inner first, and
-        // fn_Outer's column would degrade to Unknown depending on traversal order.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE FUNCTION dbo.fn_Outer() RETURNS TABLE AS RETURN SELECT Col FROM dbo.fn_Inner();",
@@ -486,11 +437,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ExplicitViewColumnListCountMismatch_DegradesEveryColumnToUnknownRatherThanMisattributing()
     {
-        // The bug this guards: `SELECT *` over a table with no known DDL resolves to zero
-        // columns, so a 3-name explicit column list zipped positionally against a 1-column
-        // resolved SELECT would silently shift names onto the WRONG table's provenance - a
-        // real type attached to the wrong base column, not just an Unknown. Any count mismatch
-        // must degrade every column instead of guessing an alignment.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Known (KnownCol INT NOT NULL);",
             "CREATE VIEW dbo.vw_Mismatched (A, B, C) AS SELECT * FROM dbo.Unknown, dbo.Known;");
@@ -503,10 +449,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_DuplicateFromAliasAcrossSchemas_ResolvesAmbiguousRatherThanLastWins()
     {
-        // `FROM dbo.T JOIN audit.T ON ...` is legal T-SQL - both leaves expose the same
-        // unqualified name "T". Silently letting the second overwrite the first in the alias
-        // map would make every `T.Col` reference resolve against whichever leaf was flattened
-        // last, a wrong-base-column risk identical in kind to the column-list case above.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.T (Col INT NOT NULL);",
             "CREATE SCHEMA audit;",
@@ -537,13 +479,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ViewRedefinedAcrossFiles_LastDefinitionWinsRatherThanCrashing()
     {
-        // Regression test for a real crash found scanning DNN Platform's corpus during the
-        // Phase 4 pilot: incremental upgrade scripts each re-issue CREATE VIEW for the same
-        // object across a project's version history, so ViewDependencyGraph.TopologicalSort
-        // saw the same qualified name twice and threw ArgumentException("An item with the
-        // same key has already been added"). Real deployments apply scripts in order, so the
-        // last CREATE is the one that's actually live - matches CatalogBuilder's
-        // AddOrReplace semantics for tables.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL, Notes VARCHAR(100) NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT OrderId, OrderCode FROM dbo.Orders;",
@@ -557,11 +492,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_CteShadowsRealTableOfSameName_ResolvesToCte()
     {
-        // docs/audit-remediation-plan.md Phase 2.4: a CTE named the same as a real table is a
-        // DIFFERENT object for the lifetime of the statement - before the fix, FromScopeResolver
-        // had no concept of CTEs at all, so "Orders" here would have resolved through the
-        // catalog to the real dbo.Orders table, producing wrong provenance (Int, not the CTE's
-        // actual VarChar OrderCode-as-Id shape).
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
             """
@@ -581,8 +511,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_NearMissWithoutCte_StillResolvesToRealTable()
     {
-        // The sibling of the shadowing test above: with no WITH clause at all, "Orders" must
-        // still resolve to the real table exactly as before.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
             "CREATE VIEW dbo.vw_NoCte AS SELECT OrderCode AS Id FROM dbo.Orders;");
@@ -633,13 +561,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_RecursiveCte_AnchorTypeIsUsedDirectly_IndexClaimDropped()
     {
-        // Resolving a recursive CTE's own final output as if visible to its recursive member
-        // would be a guess - only the anchor (non-self-referencing) branch is resolved. But
-        // T-SQL enforces (Msg 240) that the recursive member's column types match the anchor's
-        // exactly, so the anchor's type IS the CTE's type by engine guarantee, not an
-        // unverified guess - no Union-with-Unknown wrapper (that made every predicate through
-        // any recursive CTE unclassifiable). The anchor's BaseColumn index claim IS downgraded
-        // to Declared: a recursive CTE materializes through a spool, not a direct index access.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Employees (EmployeeId INT NOT NULL, ManagerId INT NULL);",
             """
@@ -680,10 +601,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_AlterView_RedefinesTheViewResolvedFromCreate()
     {
-        // ALTER VIEW is a distinct ScriptDOM node type from CreateViewStatement - previously
-        // invisible to lineage entirely (coverage-remediation-plan.md Phase 2.1). "Last
-        // definition in source order wins" (ViewDependencyGraph.TopologicalSort) means the
-        // ALTER's body, not the CREATE's, is what the view resolves to.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE VIEW dbo.vw_T AS SELECT Col FROM dbo.T;",
@@ -726,10 +643,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ClrTableValuedFunction_ResolvesDeclaredReturnShapeLikeAnMstvf()
     {
-        // A CLR TVF still declares its RETURNS TABLE(...) column list in the script even though
-        // the body is EXTERNAL NAME - unlike a CLR scalar function, there's no missing type
-        // information here, so this resolves through the exact same path as an ordinary
-        // multi-statement TVF, not a gap.
         var (catalog, lineage) = Build("CREATE FUNCTION dbo.fn_Clr() RETURNS TABLE (Col INT NOT NULL) AS EXTERNAL NAME MyAssembly.[MyClass].[MyMethod];");
 
         var relation = lineage.AllRelations["dbo.fn_Clr"];
@@ -778,15 +691,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_FourPartLinkedServerReference_NeverCollidesWithLocalTableOfSameTail()
     {
-        // The gap this fix closes: SchemaObjectNameHelper.Qualify only reads Database/Schema/
-        // Base, silently dropping ServerIdentifier - a genuine local OtherDb.dbo.Orders and a
-        // remote LinkedSrv.OtherDb.dbo.Orders reference used to collapse to the identical catalog
-        // key "OtherDb.dbo.Orders", so the view below would have silently inherited the LOCAL
-        // table's columns instead of staying honestly unresolved. CREATE TABLE itself can never
-        // carry a database qualifier (T-SQL requires USE first), so the "local" side of the
-        // collision is a same-database table that a genuinely local three-part reference resolves
-        // correctly - proving the remote reference is NOT quietly treated as the same three-part
-        // shape once the server part is dropped.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
             "CREATE VIEW dbo.vw_Local AS SELECT OrderId FROM dbo.Orders;",
@@ -802,11 +706,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ScalarSubqueryInSelectList_DoesNotAttributeInnerScopeColumnToOuterTable()
     {
-        // The gap this fix closes: a bare "Amount" reference strictly inside the nested subquery
-        // (dbo.Payments' own column) used to resolve against the OUTER query's FROM scope
-        // instead, since CollectColumnInputs walked the whole expression tree with no subquery
-        // boundary. dbo.Orders also declares its own Amount column specifically so a wrong
-        // attribution would have a real (wrong) base column to land on rather than failing loudly.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, Amount DECIMAL(9,2) NOT NULL);",
             "CREATE TABLE dbo.Payments (PaymentId INT NOT NULL, Amount DECIMAL(9,2) NOT NULL);",
@@ -816,9 +715,6 @@ public sealed class LineageResolverTests
         var view = lineage.Find("dbo.vw_OrdersWithPaymentTotal")!;
         var total = view.FindColumn("Total")!;
 
-        // Never attributes the subquery's own Amount column to dbo.Orders - the whole point of
-        // this fix. Whatever the resulting provenance IS (Unknown, or an Expression with zero
-        // resolved inputs), it must not name dbo.Orders as an underlying base column.
         var underlyingTables = ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(total.Provenance)
             .Select(bc => bc.TableQualifiedName)
             .ToList();
@@ -828,10 +724,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_CteSharingTheEnclosingViewsOwnName_NeverRecordsAFalseSelfCycle()
     {
-        // The gap this fix closes: a CTE named identically to the enclosing view used to be
-        // indistinguishable from a genuine self-reference - ViewDependencyGraph.
-        // FindReferencedViewNames recorded a self-edge, poisoning dbo.Foo to a false cycle
-        // (Unknown provenance) even though the view never actually references itself.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
             "CREATE VIEW dbo.Foo AS WITH Foo AS (SELECT OrderId FROM dbo.Orders) SELECT OrderId FROM Foo;");
@@ -844,11 +736,6 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ParenthesizedRecursiveCte_ResolvesAnchorColumnsInsteadOfZero()
     {
-        // The gap this fix closes: "WITH c AS ((SELECT ... UNION ALL SELECT ... FROM c))" parses
-        // its QueryExpression as QueryParenthesisExpression wrapping the real
-        // BinaryQueryExpression - ResolveRecursiveAnchor's own type check missed this exact
-        // wrapper (QueryExpressionResolver.Resolve already unwraps it one file over), so an
-        // otherwise perfectly ordinary parenthesized recursive CTE resolved to zero columns.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Categories (CategoryCode VARCHAR(20) NOT NULL, ParentCode VARCHAR(20) NULL);",
             """

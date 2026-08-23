@@ -2,11 +2,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Core.Reporting;
 
-/// <summary>
-/// Aggregates <see cref="DynamicSqlFinding"/>s into the "X% of dynamic SQL call sites we could
-/// (not) analyze" figure CLAUDE.md's dynamic SQL policy requires the study to report - computed
-/// once here rather than by hand, so every corpus rerun reports it the same way.
-/// </summary>
 public sealed record DynamicSqlSummary(
     int TotalCallSites,
     int AnalyzedCount,
@@ -15,16 +10,10 @@ public sealed record DynamicSqlSummary(
     IReadOnlyDictionary<string, int> UnanalyzableReasonCounts,
     int PartiallyAnalyzedCount = 0)
 {
-    /// <summary>Fraction of call sites proved constant and fully analyzed (Tiers A/B/C) - 0 for an empty corpus, never a division-by-zero surprise.</summary>
-    public double AnalyzedFraction => TotalCallSites == 0 ? 0d : (double)AnalyzedCount / TotalCallSites;
+public double AnalyzedFraction => TotalCallSites == 0 ? 0d : (double)AnalyzedCount / TotalCallSites;
 
     public static DynamicSqlSummary From(IReadOnlyList<DynamicSqlFinding> findings)
     {
-        // Branch-fold coverage (roadmap "trace dynamic SQL across IF/ELSE/TRY-CATCH branches")
-        // can report several AnalyzedLiteral findings for ONE call site - one per possible
-        // constant assembly, all sharing the same (SourcePath, Line, Column). Counting by
-        // distinct call site rather than by raw finding keeps "% of call sites analyzed" honest
-        // - a site with three assemblies must count once here, not three times.
         var analyzedSites = new HashSet<(string SourcePath, int Line, int Column)>();
         var unanalyzableSites = new HashSet<(string SourcePath, int Line, int Column)>();
         var innerParseFailedSites = new HashSet<(string SourcePath, int Line, int Column)>();

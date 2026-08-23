@@ -70,9 +70,6 @@ public sealed class RepoVerificationSummaryConfidenceTests
         };
         var summary = Summary(confirmed);
 
-        // The raw list still legitimately reports 2 - that's not what must never appear. What
-        // must never appear is a *combined confidence* total standing in for the two distinct
-        // claims a High and a Medium confirmation actually make.
         Assert.Equal(2, summary.Confirmed.Count);
         Assert.Equal(new ConfidenceTally(High: 1, Medium: 1, Low: 0), summary.ConfirmedByConfidence);
         Assert.Equal(1, summary.ConfirmedByConfidence.High);

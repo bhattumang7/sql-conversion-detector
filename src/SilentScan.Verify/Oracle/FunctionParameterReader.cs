@@ -5,18 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Verify.Oracle;
 
-/// <summary>
-/// Resolves a scalar/table-valued function's own parameter list from <c>sys.parameters</c> -
-/// needed because a finding whose column lives on an inline or multi-statement TVF
-/// (First Responder Kit's <c>#missing_index_pretty</c>-adjacent shapes, DNN Platform's
-/// <c>SplitStrings_CTE</c>/<c>ConvertListToTable</c>) cannot be probed by referencing the
-/// function's bare name the way an ordinary table can: SQL Server rejects <c>SELECT 1 FROM
-/// dbo.SplitStrings_CTE WHERE ...</c> outright with "Parameters were not supplied," a compile
-/// error this scanner's own classification never depended on. Returns null for an ordinary table
-/// (zero sys.parameters rows) so a caller can tell "not a function, needs no arguments" apart
-/// from "a function with zero parameters" (an empty, non-null list) without a separate existence
-/// check.
-/// </summary>
 public sealed class FunctionParameterReader
 {
     private readonly SqlServerOptions _options;
@@ -29,12 +17,6 @@ public sealed class FunctionParameterReader
     public async Task<IReadOnlyList<SqlType>?> TryGetParameterTypesAsync(
         string database, string qualifiedName, CancellationToken cancellationToken = default)
     {
-        // sys.parameters has no collation_name column (unlike sys.columns) - a synthesized
-        // probe argument is a dummy placeholder never itself compared against anything, so its
-        // exact collation has no bearing on the CONVERT_IMPLICIT signal the probe is checking for
-        // the FINDING's own column; passed as null to LiveTypeMapper.BuildType below, which just
-        // omits an explicit COLLATE clause - syntactically valid, and irrelevant to a value never
-        // compared against anything.
         const string sql = """
             SELECT ty.name AS type_name, p.max_length, p.precision, p.scale
             FROM sys.parameters p
@@ -65,12 +47,6 @@ public sealed class FunctionParameterReader
                 var type = LiveTypeMapper.BuildType(typeName, maxLength, precision, scale, collationName: null);
                 if (type is null)
                 {
-                    // A parameter type this scanner has no rendering for at all (xml, CLR UDT,
-                    // ...) - the whole function can't be probed with a synthesized argument list,
-                    // same as any other "not enough type information" case elsewhere in this
-                    // codebase. Still drains the reader (keeps looping) rather than returning
-                    // mid-iteration - MARS is off, so an open reader blocks the query this
-                    // method's own caller needs run on the SAME connection right below.
                     allTypesRendered = false;
                 }
                 else
@@ -85,20 +61,12 @@ public sealed class FunctionParameterReader
             return null;
         }
 
-        // The reader above is fully disposed by this point (its own `await using` block scope
-        // already ended) - MARS is off by default, so a second command on the SAME connection
-        // would otherwise fail with "There is already an open DataReader."
         return types.Count == 0 && !await IsKnownObjectAsync(connection, qualifiedName, cancellationToken)
             ? null
             : types;
     }
 
-    /// <summary>
-    /// Distinguishes "genuinely a zero-parameter function" from "not a function at all" (an
-    /// ordinary table) - both produce zero sys.parameters rows, but only the first should still
-    /// be probed as a function call.
-    /// </summary>
-    private static async Task<bool> IsKnownObjectAsync(SqlConnection connection, string qualifiedName, CancellationToken cancellationToken)
+private static async Task<bool> IsKnownObjectAsync(SqlConnection connection, string qualifiedName, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT type FROM sys.objects WHERE object_id = OBJECT_ID(@objectName);";

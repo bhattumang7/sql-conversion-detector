@@ -4,13 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Task-comment tracking" and "Non-ANSI and deprecated
-/// spellings". Fully syntax-only, no catalog. Oracle-verified separately (Docker instance) for the
-/// "= NULL"/"&lt;&gt; NULL" silent always-false trap and the still-parses-on-the-current-engine
-/// claims for the deprecated-but-not-removed forms - see <see cref="DeprecatedSyntaxFinding"/>'s own
-/// doc comment.
-/// </summary>
 public sealed class DeprecatedSyntaxScannerTests
 {
     private static IReadOnlyList<DeprecatedSyntaxFinding> Scan(string sql)
@@ -92,13 +85,7 @@ public sealed class DeprecatedSyntaxScannerTests
         Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
     }
 
-    /// <summary>
-    /// Under ANSI_NULLS OFF (baked in at CREATE/ALTER time from sys.sql_modules.uses_ansi_nulls),
-    /// "= NULL" behaves as "IS NULL" and genuinely matches NULL rows - the finding's core claim
-    /// (a silent always-false trap) would be actively wrong for this module, so it must be
-    /// suppressed rather than fired unconditionally.
-    /// </summary>
-    [Fact]
+[Fact]
     public void EqualsNull_ModuleUsesAnsiNullsOff_Suppressed()
     {
         var result = SqlScriptParser.ParseText("test.sql", "CREATE PROCEDURE dbo.usp_Find AS SELECT * FROM dbo.T WHERE Col = NULL;");
@@ -127,9 +114,6 @@ public sealed class DeprecatedSyntaxScannerTests
     [Fact]
     public void EqualsNull_ModuleFlagUnresolved_StillFires()
     {
-        // No catalog entry for this module at all (file-mode scanning, or a live catalog lookup
-        // miss) - the documented majority-case default (ANSI_NULLS ON) applies, not a
-        // speculative suppression.
         var result = SqlScriptParser.ParseText("test.sql", "CREATE PROCEDURE dbo.usp_Find AS SELECT * FROM dbo.T WHERE Col = NULL;");
         Assert.False(result.HasErrors);
 

@@ -3,30 +3,6 @@ using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Reporting;
 
-/// <summary>
-/// Counts every column-vs-other comparison Pass 3/4 classified, by verdict, BEFORE
-/// <see cref="ScanReportBuilder"/> drops <see cref="Verdict.SeekPreserved"/> findings from
-/// <see cref="ScanReport.TypedFindings"/>. Without this, a report has no denominator: it can
-/// say "N ScanForced findings" but never "N ScanForced out of M comparisons classified", which
-/// is the base rate an honest prevalence claim actually needs. SeekPreserved findings
-/// themselves are still discarded (CLAUDE.md: only actionable findings are worth carrying
-/// individually) - only their count survives, here.
-///
-/// Also carries the DISTINCT count for each actionable verdict, and for the classified
-/// population as a whole (<see cref="TypedFindingDeduplicator"/>): a corpus that re-issues the
-/// same CREATE PROCEDURE across many incremental upgrade scripts (DNN Platform's 291
-/// .SqlDataProvider files being the concrete case that surfaced this) produces one raw finding
-/// per textual occurrence, which inflates a prevalence count against "how many distinct bugs
-/// exist" by however many times the repo's own history happened to repeat that file. Both
-/// numbers are kept - occurrence count is still real data (it says something about how deeply
-/// the bug is baked into the repo's history) - but a study reporting prevalence should lead with
-/// the distinct count, and <see cref="DistinctTotalClassified"/> exists so that rate ("N distinct
-/// findings out of M classified") is computed on the SAME basis on both sides: dividing a
-/// deduplicated numerator (DistinctScanForcedCount) by a non-deduplicated denominator
-/// (TotalClassified) is its own kind of false claim - the denominator inflates by the exact same
-/// repeated-CREATE mechanism the numerator was deduplicated specifically to correct for (an
-/// audit finding).
-/// </summary>
 public sealed record TypedPredicateSummary(
     int TotalClassified,
     int SeekPreservedCount,

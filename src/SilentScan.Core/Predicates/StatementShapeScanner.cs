@@ -5,10 +5,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Statement-shape advice" - see <see cref="StatementShapeFinding"/>
-/// for which members shipped here vs. were investigated and closed/superseded elsewhere.
-/// </summary>
 public static class StatementShapeScanner
 {
     public static IReadOnlyList<StatementShapeFinding> Scan(SqlParseResult parseResult)
@@ -26,9 +22,7 @@ public static class StatementShapeScanner
         ];
     }
 
-    /// <summary>Catalog-only: every base table with no PRIMARY KEY constraint, once per table -
-    /// mirrors <see cref="MaxTypedColumnScanner"/>'s own "walk the catalog directly, no AST" shape.</summary>
-    public static IReadOnlyList<StatementShapeFinding> ScanCatalog(DatabaseCatalog catalog)
+public static IReadOnlyList<StatementShapeFinding> ScanCatalog(DatabaseCatalog catalog)
     {
         var findings = new List<StatementShapeFinding>();
 
@@ -36,8 +30,6 @@ public static class StatementShapeScanner
         {
             if (table.Kind != CatalogTableKind.Table)
             {
-                // Temp tables, table variables, table types, and CLR TVF return shapes never
-                // carry a real PRIMARY KEY story the same way a persisted base table does.
                 continue;
             }
 

@@ -4,23 +4,12 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Reporting;
 
-/// <summary>
-/// Before this, DynamicSqlSummary was only ever computed by VerifyCorpusCommand - a plain
-/// `scan`/`scan-corpus` run carried the raw DynamicSqlFindings list with no rollup anywhere in
-/// its own output, so the "X% of dynamic SQL call sites we could not analyze" figure CLAUDE.md's
-/// dynamic SQL policy requires had to be hand-counted from the finding list (an audit finding).
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ScanReportBuilderDynamicSqlSummaryTests
 {
     [Fact]
     public async Task BuildFromParseResults_MixOfAnalyzedAndUnanalyzableCallSites_PopulatesSummary()
     {
-        // Both EXEC statements have to live inside a real module body - a bare top-level EXEC
-        // isn't captured by sys.sql_modules at all, so under the engine-authoritative pipeline
-        // (module text read back from the server, not parsed straight off disk) a call site
-        // outside any CREATE PROCEDURE/FUNCTION/TRIGGER would never reach the dynamic SQL
-        // scanner in the first place.
         var report = await EngineAuthoritativeScan.ScanAsync(
             """
             CREATE TABLE dbo.T (Col INT NOT NULL);

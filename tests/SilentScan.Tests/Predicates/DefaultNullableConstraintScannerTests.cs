@@ -5,13 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second full-archive practitioner sweep" §G: "Column carries a
-/// DEFAULT constraint and is still nullable" - see <see cref="DefaultNullableConstraintFinding"/>
-/// for the full precision story and oracle evidence. Mirrors <see
-/// cref="CheckConstraintScannerTests"/>'s own shape: hand-built-catalog unit tests for the
-/// scanner's own logic, plus an end-to-end live-oracle test proving the real deployment path.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class DefaultNullableConstraintScannerTests
 {
@@ -80,12 +73,7 @@ public sealed class DefaultNullableConstraintScannerTests
         Assert.Empty(DefaultNullableConstraintScanner.Scan(catalog));
     }
 
-    /// <summary>
-    /// End-to-end against the real standing Docker oracle (a fresh, disposable database, dropped
-    /// unconditionally afterward): a NULL supplied explicitly bypasses the default entirely, and
-    /// this is the shape actually flagged.
-    /// </summary>
-    [Fact]
+[Fact]
     public async Task LiveDeployment_NullableColumnWithDefault_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(

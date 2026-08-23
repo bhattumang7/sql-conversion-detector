@@ -1,19 +1,9 @@
 namespace SilentScan.Core.Reporting.RuleDocs;
 
-/// <summary>
-/// The rule-id -&gt; <see cref="RuleDocContent"/> lookup <see cref="RulePageHtmlWriter"/> draws
-/// from. Each entry's actual prose lives in its own file/class under a per-family subfolder here
-/// (e.g. <c>RuleDocs/Tier1/FunctionWrappedColumn.cs</c>) so it can run as long as the rule
-/// genuinely needs and be edited independently of every other rule's content; this file is only
-/// the wiring list. A rule with no entry here simply gets no rich content on its page - the short
-/// <see cref="RuleCatalog"/> rationale still renders, never a fabricated substitute. Populated
-/// family-by-family (docs/detection-checklist.md's "Per-rule pages" item).
-/// </summary>
 public static class RuleDocCatalog
 {
     public static IReadOnlyDictionary<string, RuleDocContent> ByRuleId { get; } = new Dictionary<string, RuleDocContent>(StringComparer.Ordinal)
     {
-        // Tier1
         [Tier1.FunctionWrappedColumn.RuleId] = Tier1.FunctionWrappedColumn.Content,
         [Tier1.CastOrConvertOnColumn.RuleId] = Tier1.CastOrConvertOnColumn.Content,
         [Tier1.ColumnArithmetic.RuleId] = Tier1.ColumnArithmetic.Content,
@@ -23,17 +13,14 @@ public static class RuleDocCatalog
         [Tier1.DateFunctionOnColumn.RuleId] = Tier1.DateFunctionOnColumn.Content,
         [Tier1.CharindexOrLeftOnColumn.RuleId] = Tier1.CharindexOrLeftOnColumn.Content,
 
-        // Verdict
         [Verdict.ScanForced.RuleId] = Verdict.ScanForced.Content,
         [Verdict.RangeSeek.RuleId] = Verdict.RangeSeek.Content,
 
-        // WriteLoss
         [WriteLoss.UnicodeReplacement.RuleId] = WriteLoss.UnicodeReplacement.Content,
         [WriteLoss.ApproximateTruncation.RuleId] = WriteLoss.ApproximateTruncation.Content,
         [WriteLoss.NumericScaleNarrowing.RuleId] = WriteLoss.NumericScaleNarrowing.Content,
         [WriteLoss.TemporalPrecisionLoss.RuleId] = WriteLoss.TemporalPrecisionLoss.Content,
 
-        // Correctness / DML / Join / Predicate (single-rule families)
         [Correctness.NotInNullableSubquery.RuleId] = Correctness.NotInNullableSubquery.Content,
         [Correctness.NonUniqueUpdateSource.RuleId] = Correctness.NonUniqueUpdateSource.Content,
         [Correctness.TemporalBoundaryPrecision.RuleId] = Correctness.TemporalBoundaryPrecision.Content,
@@ -44,26 +31,21 @@ public static class RuleDocCatalog
         [Index.KeyLookupProneIndex.RuleId] = Index.KeyLookupProneIndex.Content,
         [Predicate.StringConcatNull.RuleId] = Predicate.StringConcatNull.Content,
 
-        // Naming
         [Naming.ReservedKeywordAsIdentifier.RuleId] = Naming.ReservedKeywordAsIdentifier.Content,
         [Naming.SpPrefixOnUserRoutine.RuleId] = Naming.SpPrefixOnUserRoutine.Content,
         [Naming.UnqualifiedCreate.RuleId] = Naming.UnqualifiedCreate.Content,
         [Naming.RedundantTypeQualifier.RuleId] = Naming.RedundantTypeQualifier.Content,
 
-        // SessionDate
         [SessionDate.SetDateFormat.RuleId] = SessionDate.SetDateFormat.Content,
         [SessionDate.SetDateFirst.RuleId] = SessionDate.SetDateFirst.Content,
 
-        // Hint
         [Hint.IndexDoesNotExist.RuleId] = Hint.IndexDoesNotExist.Content,
         [Hint.HintedIndexNotSeekable.RuleId] = Hint.HintedIndexNotSeekable.Content,
 
-        // WindowFrame
         [WindowFrame.ExplicitRangeFrame.RuleId] = WindowFrame.ExplicitRangeFrame.Content,
         [WindowFrame.ImplicitDefaultRangeFrame.RuleId] = WindowFrame.ImplicitDefaultRangeFrame.Content,
         [Query.BareTopNoOrderBy.RuleId] = Query.BareTopNoOrderBy.Content,
 
-        // QueryAntiPattern
         [QueryAntiPattern.TableVariablePspSkip.RuleId] = QueryAntiPattern.TableVariablePspSkip.Content,
         [QueryAntiPattern.TableVariableLowCompatEstimate.RuleId] = QueryAntiPattern.TableVariableLowCompatEstimate.Content,
         [QueryAntiPattern.TableVariableStaleEstimateInLoop.RuleId] = QueryAntiPattern.TableVariableStaleEstimateInLoop.Content,
@@ -92,7 +74,6 @@ public static class RuleDocCatalog
         [QueryAntiPattern.AlterTableSwitchPartitionFilegroupMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchPartitionFilegroupMismatch.Content,
         [QueryAntiPattern.AlterTableSwitchFullTextIndexRestriction.RuleId] = QueryAntiPattern.AlterTableSwitchFullTextIndexRestriction.Content,
 
-        // TriggerCorrectness / ForcedSerial / CrossModule / Trigger
         [TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.RuleId] = TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.Content,
         [TriggerCorrectness.MultiRowUnsafeKeyedDml.RuleId] = TriggerCorrectness.MultiRowUnsafeKeyedDml.Content,
         [TriggerCorrectness.NoEarlyOutForEmptyInvocation.RuleId] = TriggerCorrectness.NoEarlyOutForEmptyInvocation.Content,
@@ -106,7 +87,6 @@ public static class RuleDocCatalog
         [CrossModule.InconsistentLockOrder.RuleId] = CrossModule.InconsistentLockOrder.Content,
         [Trigger.MultiHopRecursionCycle.RuleId] = Trigger.MultiHopRecursionCycle.Content,
 
-        // TvfFence / ScalarUdf / Catalog-drift / CallGraph / Predicates (multi-rule families)
         [TvfFence.CorrelatedApply.RuleId] = TvfFence.CorrelatedApply.Content,
         [TvfFence.NestedUnderViewOrTvf.RuleId] = TvfFence.NestedUnderViewOrTvf.Content,
         [TvfFence.FromOrJoin.RuleId] = TvfFence.FromOrJoin.Content,
@@ -129,7 +109,6 @@ public static class RuleDocCatalog
         [Predicates.XmlOperandNotComparable.RuleId] = Predicates.XmlOperandNotComparable.Content,
         [Predicates.LegacyLobOperandNotComparable.RuleId] = Predicates.LegacyLobOperandNotComparable.Content,
 
-        // Catalog constraints / Predicates estimate family
         [Catalog.UntrustedForeignKey.RuleId] = Catalog.UntrustedForeignKey.Content,
         [Catalog.UntrustedCheckConstraint.RuleId] = Catalog.UntrustedCheckConstraint.Content,
         [Catalog.CheckConstraintNullNotHandled.RuleId] = Catalog.CheckConstraintNullNotHandled.Content,
@@ -143,30 +122,24 @@ public static class RuleDocCatalog
         [Predicates.UnderLengthParameter.RuleId] = Predicates.UnderLengthParameter.Content,
         [Predicates.AnsiPaddingMismatch.RuleId] = Predicates.AnsiPaddingMismatch.Content,
 
-        // View
         [View.TopPercentOrderByNeverLimits.RuleId] = View.TopPercentOrderByNeverLimits.Content,
         [View.OrderByNotGuaranteedToConsumer.RuleId] = View.OrderByNotGuaranteedToConsumer.Content,
 
-        // TempTable
         [TempTable.UnindexedJoinOperand.RuleId] = TempTable.UnindexedJoinOperand.Content,
         [TempTable.UnindexedWhereFilter.RuleId] = TempTable.UnindexedWhereFilter.Content,
 
-        // Identity
         [Identity.RangeNearExhaustion.RuleId] = Identity.RangeNearExhaustion.Content,
         [Identity.SeedOrIncrementAnomaly.RuleId] = Identity.SeedOrIncrementAnomaly.Content,
 
-        // Declaration
         [Declaration.UndersizedColumn.RuleId] = Declaration.UndersizedColumn.Content,
         [Declaration.UndersizedVariableOrParameter.RuleId] = Declaration.UndersizedVariableOrParameter.Content,
 
-        // Security
         [Security.HardCodedCredential.RuleId] = Security.HardCodedCredential.Content,
         [Security.HardCodedIpAddress.RuleId] = Security.HardCodedIpAddress.Content,
         [Security.WeakHashAlgorithm.RuleId] = Security.WeakHashAlgorithm.Content,
         [Security.WeakHashAlgorithmInSensitiveContext.RuleId] = Security.WeakHashAlgorithmInSensitiveContext.Content,
         [Security.UnprovableDynamicSqlText.RuleId] = Security.UnprovableDynamicSqlText.Content,
 
-        // ControlFlow
         [ControlFlow.CursorFetchColumnCountMismatch.RuleId] = ControlFlow.CursorFetchColumnCountMismatch.Content,
         [ControlFlow.EmptyCatchBlock.RuleId] = ControlFlow.EmptyCatchBlock.Content,
         [ControlFlow.TriggerEmitsOutput.RuleId] = ControlFlow.TriggerEmitsOutput.Content,
@@ -181,7 +154,6 @@ public static class RuleDocCatalog
         [ControlFlow.TruncateSwallowed.RuleId] = ControlFlow.TruncateSwallowed.Content,
         [ControlFlow.OutputParameter.RuleId] = ControlFlow.OutputParameter.Content,
 
-        // StatementShape
         [StatementShape.InsertWithoutColumnList.RuleId] = StatementShape.InsertWithoutColumnList.Content,
         [StatementShape.OrdinalOrderBy.RuleId] = StatementShape.OrdinalOrderBy.Content,
         [StatementShape.TopWithoutOrderBy.RuleId] = StatementShape.TopWithoutOrderBy.Content,
@@ -189,7 +161,6 @@ public static class RuleDocCatalog
         [StatementShape.MissingSetNocountOn.RuleId] = StatementShape.MissingSetNocountOn.Content,
         [StatementShape.BareSelectStar.RuleId] = StatementShape.BareSelectStar.Content,
 
-        // Database
         [Database.PageVerifyNotChecksum.RuleId] = Database.PageVerifyNotChecksum.Content,
         [Database.AutoShrinkOn.RuleId] = Database.AutoShrinkOn.Content,
         [Database.AutoCloseOn.RuleId] = Database.AutoCloseOn.Content,
@@ -201,14 +172,12 @@ public static class RuleDocCatalog
         [Database.CompatibilityLevelBehindEngineDefault.RuleId] = Database.CompatibilityLevelBehindEngineDefault.Content,
         [Database.SpatialPersistedComputedColumnCompatibilityChange.RuleId] = Database.SpatialPersistedComputedColumnCompatibilityChange.Content,
 
-        // Lineage
         [Lineage.ExpressionDerivedColumn.RuleId] = Lineage.ExpressionDerivedColumn.Content,
         [Lineage.MultiReferencedCte.RuleId] = Lineage.MultiReferencedCte.Content,
         [Lineage.NestedViewDepth.RuleId] = Lineage.NestedViewDepth.Content,
         [Lineage.PostExpansionJoinWidth.RuleId] = Lineage.PostExpansionJoinWidth.Content,
         [Lineage.SelectStarView.RuleId] = Lineage.SelectStarView.Content,
 
-        // DynamicSql
         [DynamicSql.Analyzed.RuleId] = DynamicSql.Analyzed.Content,
         [DynamicSql.Unanalyzable.RuleId] = DynamicSql.Unanalyzable.Content,
         [DynamicSql.InnerParseFailed.RuleId] = DynamicSql.InnerParseFailed.Content,
@@ -218,7 +187,6 @@ public static class RuleDocCatalog
         [DynamicSql.TempTableExecShapeColumnCountMismatch.RuleId] = DynamicSql.TempTableExecShapeColumnCountMismatch.Content,
         [DynamicSql.TempTableExecShapeColumnTypeMismatch.RuleId] = DynamicSql.TempTableExecShapeColumnTypeMismatch.Content,
 
-        // Rest of catalog / predicate singles
         [Catalog.CascadingForeignKey.RuleId] = Catalog.CascadingForeignKey.Content,
         [Catalog.NonPersistedComputedColumn.RuleId] = Catalog.NonPersistedComputedColumn.Content,
         [Catalog.TemporalTableHistoryIndexGap.RuleId] = Catalog.TemporalTableHistoryIndexGap.Content,
@@ -227,7 +195,6 @@ public static class RuleDocCatalog
         [Predicate.TryCastComputedColumn.RuleId] = Predicate.TryCastComputedColumn.Content,
         [Predicate.AggregateDivisionColumnstore.RuleId] = Predicate.AggregateDivisionColumnstore.Content,
 
-        // IndexDesign (batch 1 of 2)
         [IndexDesign.HeapWithNonclusteredIndexes.RuleId] = IndexDesign.HeapWithNonclusteredIndexes.Content,
         [IndexDesign.HeapWithNonclusteredPrimaryKey.RuleId] = IndexDesign.HeapWithNonclusteredPrimaryKey.Content,
         [IndexDesign.NonUniqueClusteredIndex.RuleId] = IndexDesign.NonUniqueClusteredIndex.Content,

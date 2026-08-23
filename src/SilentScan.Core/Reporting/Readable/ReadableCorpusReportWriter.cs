@@ -2,19 +2,8 @@ using System.Globalization;
 
 namespace SilentScan.Core.Reporting.Readable;
 
-/// <summary>One scanned repo's input to the corpus report.</summary>
-/// <param name="Name">The manifest entry's name.</param>
-/// <param name="Report">That repo's scan report.</param>
-/// <param name="PathBase">The repo's clone root, trimmed off finding paths so they read as repo-relative.</param>
 public sealed record ReadableCorpusRepo(string Name, ScanReport Report, string? PathBase = null);
 
-/// <summary>
-/// Renders a whole corpus run: one comparison table across every repo, then each repo's full
-/// report underneath. The table is the point - it is what answers "which repo should I look at"
-/// without reading five reports first - so it leads with the distinct finding counts, the parse
-/// rate, and whether the repo cleared the dialect-sniffing bar that decides whether its numbers
-/// mean anything at all.
-/// </summary>
 public static class ReadableCorpusReportWriter
 {
     public static string Write(
@@ -83,13 +72,7 @@ public static class ReadableCorpusReportWriter
         ];
     }
 
-    /// <summary>
-    /// Shows both numbers whenever they differ. A repo that re-issues the same procedure across
-    /// many upgrade scripts produces one occurrence per copy, so the occurrence count says how
-    /// deeply the bug is baked into its history while the distinct count is the one a prevalence
-    /// claim can be built on - collapsing them to either single number loses a real fact.
-    /// </summary>
-    private static string Occurrences(int occurrences, int distinct) =>
+private static string Occurrences(int occurrences, int distinct) =>
         occurrences == distinct
             ? occurrences.ToString(CultureInfo.InvariantCulture)
             : $"{occurrences.ToString(CultureInfo.InvariantCulture)} ({distinct.ToString(CultureInfo.InvariantCulture)} distinct)";

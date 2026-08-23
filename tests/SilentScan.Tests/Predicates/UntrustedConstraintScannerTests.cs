@@ -3,12 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Lineage-metric findings": "Untrusted (WITH NOCHECK) FK/
-/// CHECK constraints". <see cref="DatabaseCatalog.ForeignKeys"/>/<see cref="DatabaseCatalog.CheckConstraints"/>
-/// are only ever populated by live mode - these tests build the catalog directly, the same
-/// pattern <c>CrossTableTypeDriftScannerTests</c> already uses for the same reason.
-/// </summary>
 public sealed class UntrustedConstraintScannerTests
 {
     private static CatalogTable Table(string schema, string name) =>

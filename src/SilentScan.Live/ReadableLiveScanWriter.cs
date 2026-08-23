@@ -5,32 +5,17 @@ using SilentScan.Verify.Catalog;
 
 namespace SilentScan.Live;
 
-/// <summary>
-/// Renders a live-database scan for a reader. The findings themselves are laid out exactly as
-/// a file scan's are (<see cref="ReadableScanReportWriter"/>); what live mode adds on top is
-/// everything that decides whether those findings can be trusted at all - what the connection
-/// actually saw, whether the pipeline's inferred view types matched the server's own metadata,
-/// which modules had no readable T-SQL body, and, when asked for, which findings the plan cache
-/// shows converting right now.
-/// </summary>
 public static class ReadableLiveScanWriter
 {
     private const string ColumnHeading = "Column";
 
-    /// <summary>
-    /// Names the scanned target for the report heading, from the connection string's server and
-    /// database only - never the whole connection string, which would put any credentials in it
-    /// into a report written to a file and handed to someone else.
-    /// </summary>
-    public static string DescribeTarget(string connectionString)
+public static string DescribeTarget(string connectionString)
     {
         try
         {
             var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
             if (string.IsNullOrEmpty(builder.DataSource))
             {
-                // Nothing recognisable to name it by - including when the string parsed but held
-                // no server at all. Naming it generically beats echoing back whatever was passed.
                 return string.IsNullOrEmpty(builder.InitialCatalog) ? "the connected database" : builder.InitialCatalog;
             }
 
@@ -59,8 +44,7 @@ public static class ReadableLiveScanWriter
         return ReadableDocumentRenderer.Render(new ReadableDocument(blocks), style);
     }
 
-    /// <summary>Mirrors <c>ReadableScanReportWriter</c>'s own brief-mode pointer line - same wording contract, kept local since this writer's gated sections are live-scan-specific.</summary>
-    private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
+private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
         new($"{count.ToString(CultureInfo.InvariantCulture)} {noun}{(count == 1 ? string.Empty : "s")} - not listed individually here; re-run with --verbosity full to see each one.");
 
     private static IEnumerable<ReadableBlock> Connection(LiveScanResult result)
@@ -87,9 +71,6 @@ public static class ReadableLiveScanWriter
 
         if (parity.Mismatches.Count > 0)
         {
-            // Never gated by verbosity, even in Brief - this is a P0 bug in THIS tool's own
-            // inference, not a coverage caveat about the scanned database, and it is the only
-            // category that fails the scan (see the exit-code comment in ScanDbCommand).
             yield return new ReadableBlock.Heading(2, $"Column types this tool got wrong ({parity.Mismatches.Count})");
             yield return new ReadableBlock.Paragraph(
                 "Verified against the type the server computes for this object right now (sys.dm_exec_describe_first_result_set), not against its cached sys.columns metadata, so this is a genuine inference bug in this tool. Every finding below that touches one of these columns rests on a type the pipeline got wrong - read them as suspect until this is fixed. This is the only category that fails the scan.");
@@ -188,15 +169,7 @@ public static class ReadableLiveScanWriter
         }
     }
 
-    /// <summary>
-    /// Roadmap Phase D: conversions the live plan cache confirms are actually running right now
-    /// for a (table, column) pair no module body produced a static finding for at all - the
-    /// dominant real-world case being ad-hoc, parameterized application-side SQL (an ORM, a
-    /// hand-written data-access layer) that was never a stored procedure. These carry no source
-    /// file/line - the query text that produced them was never scanned, only its plan - so they
-    /// are reported by table/column and observed cost instead.
-    /// </summary>
-    private static IEnumerable<ReadableBlock> WorkloadFindings(LiveScanResult result)
+private static IEnumerable<ReadableBlock> WorkloadFindings(LiveScanResult result)
     {
         if (result.WorkloadFindings.Count == 0)
         {

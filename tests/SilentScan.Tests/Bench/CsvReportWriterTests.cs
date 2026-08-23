@@ -4,11 +4,6 @@ using SilentScan.Core.Rules;
 
 namespace SilentScan.Tests.Bench;
 
-/// <summary>
-/// Pins the exact CSV shape the published study's charts read - lowercase booleans and "\n"
-/// line endings regardless of platform, not bool.ToString()'s "True"/"False" or
-/// AppendLine's platform-dependent Environment.NewLine.
-/// </summary>
 public sealed class CsvReportWriterTests
 {
     [Fact]

@@ -3,12 +3,6 @@ using SilentScan.Core.Reporting.Readable;
 
 namespace SilentScan.Cli.Commands;
 
-/// <summary>
-/// The output formats every scan command accepts, and the one place a rendered report is
-/// actually delivered. <see cref="Text"/> is the default: the JSON is complete but is a poor
-/// thing to read, and a reader looking for what to fix should not have to walk it. The machine
-/// formats are unchanged and still one flag away.
-/// </summary>
 internal enum ReportFormat
 {
     Text,
@@ -17,7 +11,6 @@ internal enum ReportFormat
     Sarif,
 }
 
-/// <summary>The report-shaping flags every scan command's own <c>RunAsync</c> takes together - bundled into one value so a caller doesn't add a bare parameter for every new flag (format, then confidence, then whatever comes next) and blow through Sonar's per-method parameter budget.</summary>
 internal readonly record struct ReportOptions(string Format, string Confidence, string? OutputPath, string Verbosity);
 
 internal static class ReportOutput
@@ -86,12 +79,7 @@ internal static class ReportOutput
     internal static string UnknownVerbosityMessage(string verbosity) =>
         $"error: unknown --verbosity '{verbosity}' (expected 'brief' or 'full')";
 
-    /// <summary>
-    /// Sends a rendered report to its destination. Returns false, having explained itself on
-    /// <paramref name="stderr"/>, when a --output path could not be written - a report the user
-    /// asked to keep and that silently went nowhere is worse than no report at all.
-    /// </summary>
-    internal static bool Emit(string content, string? outputPath, TextWriter stdout, TextWriter stderr)
+internal static bool Emit(string content, string? outputPath, TextWriter stdout, TextWriter stderr)
     {
         if (outputPath is null)
         {
@@ -109,8 +97,6 @@ internal static class ReportOutput
             return false;
         }
 
-        // Confirmation goes to stderr, not stdout: stdout is what a caller redirects or pipes,
-        // and this line is not part of the report.
         stderr.WriteLine($"wrote report to {outputPath}");
         return true;
     }

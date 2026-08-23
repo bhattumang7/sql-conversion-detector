@@ -3,11 +3,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Small precise adds": RANGE instead of ROWS in window-function
-/// frames. Fully syntax-only, single-visitor scan matching <see cref="ForcedSerialScanner"/>'s own
-/// "one scanner, many Kind values" shape.
-/// </summary>
 public static class WindowFrameScanner
 {
     public static IReadOnlyList<WindowFrameFinding> Scan(SqlParseResult parseResult)
@@ -34,9 +29,6 @@ public static class WindowFrameScanner
             {
                 if (node.WindowFrameClause is null)
                 {
-                    // No explicit frame clause with an ORDER BY present - T-SQL silently defaults
-                    // this to RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW, oracle-confirmed
-                    // to carry the same measured cost as an explicit RANGE frame.
                     Findings.Add(new WindowFrameFinding(
                         WindowFrameFindingKind.ImplicitDefaultRangeFrame, sourcePath, node.StartLine, node.StartColumn));
                 }

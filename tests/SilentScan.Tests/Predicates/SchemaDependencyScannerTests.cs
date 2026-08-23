@@ -4,11 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// The catalog-only half of the scalar-UDF stream (docs/detection-checklist.md Tier 1 #1) - a
-/// computed column, DEFAULT, or CHECK constraint definition that calls a scalar UDF poisons
-/// every query touching the table, detected from the catalog alone with no query-site AST.
-/// </summary>
 public sealed class SchemaDependencyScannerTests
 {
     private static readonly string FixturesDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "scalar_udf");

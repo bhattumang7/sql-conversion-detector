@@ -4,13 +4,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.TypeInference;
 
-/// <summary>
-/// Direct unit tests against the shared expression engine, isolated from any pass-specific
-/// column/scope resolution: <paramref name="resolveLeaf"/> is a hand-built stub mapping bare
-/// identifier names to types, exercising exactly the recursive/combination logic this class
-/// owns. Oracle-verified typing claims (CASE/COALESCE/IIF merge by precedence; NULLIF always
-/// returns expr1's own type) are documented on the class itself - see its remarks.
-/// </summary>
 public sealed class ExpressionTypeInferencerTests
 {
     private static readonly SqlType IntType = new(SqlTypeCategory.Int);
@@ -31,8 +24,7 @@ public sealed class ExpressionTypeInferencerTests
         return ((SelectScalarExpression)spec.SelectElements[0]).Expression;
     }
 
-    /// <summary>Resolves a bare column reference like "IntCol" to a stub type by name - anything else falls through to null (this class's tests never need variables/functions).</summary>
-    private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> typesByName) =>
+private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> typesByName) =>
         expression is ColumnReferenceExpression { MultiPartIdentifier.Identifiers: [.., { } last] }
             ? typesByName.GetValueOrDefault(last.Value)
             : null;
@@ -75,9 +67,6 @@ public sealed class ExpressionTypeInferencerTests
     [Fact]
     public void Resolve_SearchedCase_OracleVerified_MergesBranchesByPrecedence()
     {
-        // Oracle-verified: CASE WHEN 1=1 THEN IntCol ELSE DecCol END resolves DECIMAL against
-        // the real server, not INT - the branches merge by T-SQL data type precedence exactly
-        // like a binary operator, not "whichever branch executes."
         var typesByName = new Dictionary<string, SqlType?> { ["IntCol"] = IntType, ["DecCol"] = DecimalType };
 
         var result = Resolve("CASE WHEN 1 = 1 THEN IntCol ELSE DecCol END", typesByName);
@@ -102,16 +91,12 @@ public sealed class ExpressionTypeInferencerTests
 
         var result = Resolve("COALESCE(VarcharCol, NVarcharCol)", typesByName);
 
-        // Oracle-verified: COALESCE(varcharCol, nvarcharCol) resolves NVARCHAR - nvarchar wins
-        // T-SQL precedence over varchar.
         Assert.Equal(SqlTypeCategory.NVarChar, result!.Category);
     }
 
     [Fact]
     public void Resolve_Coalesce_OneUnresolvableBranch_NullsWholeResult()
     {
-        // A branch this pass can't type might be the actual precedence winner - never guess
-        // from only the branches it COULD type.
         var typesByName = new Dictionary<string, SqlType?> { ["IntCol"] = IntType };
 
         Assert.Null(Resolve("COALESCE(IntCol, UnknownCol)", typesByName));
@@ -130,9 +115,6 @@ public sealed class ExpressionTypeInferencerTests
     [Fact]
     public void Resolve_NullIf_OracleVerified_AlwaysReturnsFirstExpressionType_NotPrecedenceMerge()
     {
-        // Oracle-verified: NULLIF(intCol, decCol) resolves INT, NOT the DECIMAL a CASE/COALESCE/
-        // IIF merge of the same two types would produce - NULLIF is documented, and confirmed
-        // against the real server, to always return expr1's own type regardless of expr2.
         var typesByName = new Dictionary<string, SqlType?> { ["IntCol"] = IntType, ["DecCol"] = DecimalType };
 
         var result = Resolve("NULLIF(IntCol, DecCol)", typesByName);
@@ -153,10 +135,6 @@ public sealed class ExpressionTypeInferencerTests
     [Fact]
     public void Resolve_SearchedCase_OracleVerified_BareNullBranchIsIgnoredNotMergeed()
     {
-        // Oracle-verified: CASE WHEN 1=1 THEN NULL ELSE IntCol END resolves INT against the real
-        // server - an untyped NULL branch has no type of its own to merge into the precedence
-        // winner, so it must be ignored entirely rather than nulling the whole result the way an
-        // actually-unresolvable branch (a column this pass can't type) still correctly does.
         var typesByName = new Dictionary<string, SqlType?> { ["IntCol"] = IntType };
 
         var result = Resolve("CASE WHEN 1 = 1 THEN NULL ELSE IntCol END", typesByName);
@@ -187,11 +165,6 @@ public sealed class ExpressionTypeInferencerTests
     [Fact]
     public void Resolve_Coalesce_OneUnresolvableNonNullBranch_StillNullsWholeResult()
     {
-        // Distinguishes "bare NULL literal, safely ignorable" from "a real branch this pass
-        // just couldn't type" (UnknownCol) - the latter must still null the whole result,
-        // exactly as Resolve_Coalesce_OneUnresolvableBranch_NullsWholeResult already covers for
-        // two real columns. Re-asserted here alongside the NULL-handling change to prove the
-        // NULL special-case didn't accidentally widen into "ignore anything unresolvable."
         var typesByName = new Dictionary<string, SqlType?> { ["IntCol"] = IntType };
 
         Assert.Null(Resolve("COALESCE(NULL, IntCol, UnknownCol)", typesByName));
@@ -200,13 +173,6 @@ public sealed class ExpressionTypeInferencerTests
     [Fact]
     public void Resolve_SearchedCase_OracleVerified_SameCategoryDifferingLength_WidensToTheLonger()
     {
-        // Oracle-verified (sys.dm_exec_describe_first_result_set): CASE WHEN 1=1 THEN
-        // Nvarchar10Col ELSE Nvarchar20Col END resolves nvarchar(20) against the real server -
-        // the WIDER of the two same-category branches, never just whichever branch this pass
-        // happened to resolve first (the real bug this test guards: DNN Platform's
-        // vw_Profile.PropertyValue - CASE WHEN PropertyText IS NULL THEN PropertyValue ELSE
-        // PropertyText END - mixed nvarchar(3750) with nvarchar(MAX) and was inferred as
-        // nvarchar(3750), a genuine mismatch against the real deployed column).
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["Nvarchar10Col"] = new SqlType(SqlTypeCategory.NVarChar, Length: 10),
@@ -236,8 +202,6 @@ public sealed class ExpressionTypeInferencerTests
     [Fact]
     public void Resolve_SearchedCase_OracleVerified_OneBranchIsMax_ResultIsMaxRegardlessOfPosition()
     {
-        // Oracle-verified: whichever side is MAX, the CASE result is nvarchar(max) - never the
-        // OTHER (fixed-length) branch's own length.
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["Nvarchar10Col"] = new SqlType(SqlTypeCategory.NVarChar, Length: 10),
@@ -254,8 +218,6 @@ public sealed class ExpressionTypeInferencerTests
     [Fact]
     public void Resolve_SearchedCase_OracleVerified_SameCategorySameLength_PreservesTheLength()
     {
-        // Regression guard: the widening fix must not perturb the (dominant, already-correct)
-        // same-length case.
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")),
@@ -270,9 +232,6 @@ public sealed class ExpressionTypeInferencerTests
     [Fact]
     public void Resolve_StringConcatenation_OracleVerified_SumsLengthsRatherThanMax()
     {
-        // Oracle-verified directly (Docker, sys.columns.max_length off a SELECT ... INTO probe):
-        // varchar(10) + varchar(15) resolves varchar(25) - the SUM, not CASE/COALESCE's own
-        // Math.Max rule, which this expression used to be typed through by mistake.
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")),
@@ -288,9 +247,6 @@ public sealed class ExpressionTypeInferencerTests
     [Fact]
     public void Resolve_StringConcatenation_OracleVerified_CapsAtHardMaximumRatherThanPromotingToMax()
     {
-        // Oracle-verified: varchar(5000) + varchar(5000) (sum 10000) resolves varchar(8000), the
-        // category's own hard cap - it does NOT auto-promote to varchar(max) the way an explicit
-        // CAST/CONCAT would.
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 5000),
@@ -321,7 +277,6 @@ public sealed class ExpressionTypeInferencerTests
     [Fact]
     public void Resolve_StringConcatenation_EitherSideMax_ResultIsMax()
     {
-        // Oracle-verified: varchar(max) + varchar(10) resolves varchar(max).
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["A"] = new SqlType(SqlTypeCategory.VarChar, IsMax: true),
@@ -334,11 +289,6 @@ public sealed class ExpressionTypeInferencerTests
     [Fact]
     public void Resolve_CrossCategoryStringMerge_LengthUnknownRatherThanImplicitlyNulled()
     {
-        // The gap this fix closes: a cross-category merge (nvarchar beats char in T-SQL
-        // precedence) previously returned the winning string-family category with Length: null,
-        // which ParameterLengthClassifier read as "no explicit length declared" (T-SQL's implicit
-        // length-1 default) - a fabricated cause for a length this pass never actually inferred.
-        // LengthKnown: false now marks the distinction.
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["NvarcharCol"] = new SqlType(SqlTypeCategory.NVarChar, Length: 20),

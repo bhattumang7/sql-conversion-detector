@@ -17,7 +17,6 @@ public sealed class ConvertImplicitDetectorTests
     [Fact]
     public void FindColumnConversions_ConvertOverRealColumn_IsReported()
     {
-        // Real fragment captured from the Phase 0 spike oracle (varchar column vs nvarchar param).
         var xml = Wrap("""
             <ScalarOperator><Compare CompareOp="EQ"><ScalarOperator>
               <Convert DataType="nvarchar" Length="40" Style="0" Implicit="1">
@@ -38,9 +37,6 @@ public sealed class ConvertImplicitDetectorTests
     [Fact]
     public void FindColumnConversions_ImplicitAttributeAsLexicalTrue_IsReported()
     {
-        // The showplan XSD types Implicit as xsd:boolean, which permits both "1"/"0" and
-        // "true"/"false" lexical forms - not every SQL Server version/serialization path is
-        // guaranteed to emit "1" specifically.
         var xml = Wrap("""
             <ScalarOperator><Compare CompareOp="EQ"><ScalarOperator>
               <Convert DataType="nvarchar" Length="40" Style="0" Implicit="true">
@@ -58,9 +54,6 @@ public sealed class ConvertImplicitDetectorTests
     [Fact]
     public void FindColumnConversions_ConvertOverParameterReference_IsNotReported()
     {
-        // Real fragment captured investigating a Phase 4 corpus pilot false positive:
-        // Showplan XML represents a local variable/parameter as a <ColumnReference> too, with
-        // no Table attribute (Column="@p"). Must not be reported as a column-side conversion.
         var xml = Wrap("""
             <ScalarOperator><Compare CompareOp="EQ"><ScalarOperator>
               <Convert DataType="bit" Style="0" Implicit="1">
@@ -103,13 +96,6 @@ public sealed class ConvertImplicitDetectorTests
     [Fact]
     public void FindColumnConversions_TwoConversionsInSamePlanOnlyOneRangeBound_AttributesPerNodeNotPlanWide()
     {
-        // Reproduces the shape oracle-verified against the Docker instance: a single cached plan
-        // (a two-branch Concatenation, the shape a UNION ALL or a multi-predicate module produces)
-        // carrying one genuinely range-seeking conversion (its own RelOp's SeekPredicates bind the
-        // column via GetRangeThroughConvert) and one genuinely scan-forced conversion elsewhere in
-        // the SAME plan (SQL_* collation - no SeekPredicates entry for that column anywhere). Before
-        // this fix, a plan-wide planXml.Contains("GetRangeThroughConvert") marked BOTH conversions
-        // RangeSeek just because the marker existed somewhere in the document.
         var xml = $"""
             <ShowPlanXML xmlns="{ShowPlanNs}">
               <BatchSequence><Batch><Statements><StmtSimple>

@@ -3,14 +3,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// Catalog-only pass (docs/detection-checklist.md Tier 1): no AST walking, no predicate site
-/// needed - runs directly over the already-built <see cref="DatabaseCatalog"/> and flags every
-/// string-family column whose own collation differs from the relevant baseline (the database's
-/// default collation for an ordinary table, tempdb's effective collation for a temp
-/// table/table variable). Never guesses: a column whose collation didn't resolve, or a catalog
-/// whose own baseline collation is unknown, is silently skipped rather than reported either way.
-/// </summary>
 public static class ColumnCollationDriftScanner
 {
     public static IReadOnlyList<ColumnCollationDriftFinding> Scan(DatabaseCatalog catalog)

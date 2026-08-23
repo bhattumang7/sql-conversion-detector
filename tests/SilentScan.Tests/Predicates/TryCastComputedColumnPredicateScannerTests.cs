@@ -5,13 +5,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second full-archive practitioner sweep" §G: "TRY_CAST in a
-/// non-persisted computed column used in a predicate" - see
-/// <see cref="TryCastComputedColumnPredicateFinding"/> for the full precision story and oracle
-/// evidence. Structural/AST+catalog tests for the extraction logic (file-mode catalog, mirroring
-/// <see cref="CatchAllPredicateScannerTests"/>'s own shape), plus an end-to-end live-oracle test.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class TryCastComputedColumnPredicateScannerTests
 {
@@ -92,7 +85,6 @@ public sealed class TryCastComputedColumnPredicateScannerTests
     [Fact]
     public void PlainCastComputedColumn_NeverFires()
     {
-        // RoundedAmount is CAST, not TRY_CAST - deterministic, indexable, out of this rule's scope.
         var findings = Scan(
             "CREATE PROCEDURE dbo.usp_Find AS BEGIN SELECT Id FROM dbo.Events WHERE RoundedAmount = 5; END");
 
@@ -102,9 +94,6 @@ public sealed class TryCastComputedColumnPredicateScannerTests
     [Fact]
     public void ComputedColumnWhoseDefinitionOnlyMentionsTryCastInAStringLiteral_NeverFires()
     {
-        // A text-pattern check on the raw definition would match "TRY_CAST" here even though the
-        // expression is a plain string literal, never a real TRY_CAST call - a parse-based check
-        // must not.
         var ddl = """
             CREATE TABLE dbo.Labels (
                 Id INT NOT NULL PRIMARY KEY,
@@ -134,12 +123,6 @@ public sealed class TryCastComputedColumnPredicateScannerTests
     [Fact]
     public void CteSharesNameWithTheComputedColumnsRealTable_NeverFires()
     {
-        // 2026-08 audit: cteRelations was always null, so a CTE named the same as dbo.Events -
-        // but projecting only Id, never the TRY_CAST computed column - silently resolved against
-        // the REAL dbo.Events instead, matching ParsedDate against the real table's own computed
-        // column and firing a finding about a query that (through the CTE) never actually reads
-        // it. A CTE is never schema-qualified, so it always shadows a same-named real base table;
-        // resolved correctly, ParsedDate fails to resolve within the CTE's own narrower scope.
         var findings = Scan(
             "CREATE PROCEDURE dbo.usp_Find AS BEGIN " +
             "WITH Events AS (SELECT Id FROM dbo.Events) " +
@@ -148,12 +131,7 @@ public sealed class TryCastComputedColumnPredicateScannerTests
         Assert.Empty(findings);
     }
 
-    /// <summary>
-    /// End-to-end against the real standing Docker oracle (a fresh, disposable database, dropped
-    /// unconditionally afterward): proves the full live-read path (LiveCatalogReader's
-    /// SchemaExpressions text, through the candidate builder, into a real predicate reference).
-    /// </summary>
-    [Fact]
+[Fact]
     public async Task LiveDeployment_TryCastComputedColumnInPredicate_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(

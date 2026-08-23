@@ -5,7 +5,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>Roadmap Phase E1: static (no Docker) coverage for TypedPredicateExtractor's write-side (INSERT/UPDATE) analysis - the classification rules themselves are covered by SilentScan.Tests.Rules.WriteLossClassifierTests, and their oracle confirmation by WriteLossOracleTests.</summary>
 public sealed class WriteLossExtractionTests
 {
     private static IReadOnlyList<WriteLossFinding> Extract(params string[] batches) =>
@@ -37,8 +36,6 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertValuesWithAsciiOnlyUnicodeLiteralIntoVarchar_ProvablySafe_NoFinding()
     {
-        // Every character is ASCII, so this is safe under ANY non-Unicode codepage - the
-        // classifier's own "never guess" discipline applies to safety too, not just risk.
         var findings = Extract(
             "CREATE TABLE dbo.T (VarCol VARCHAR(20) NULL);",
             "INSERT INTO dbo.T (VarCol) VALUES (N'hello');");
@@ -49,9 +46,6 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertValuesWithUnicodeColumnIntoVarchar_NonLiteral_AlwaysFlagged()
     {
-        // A column source is data-dependent - unlike a literal, its actual content can never be
-        // inspected statically, so it is flagged unconditionally (mirrors ScanForced's "makes
-        // possible" framing).
         var findings = Extract(
             "CREATE TABLE dbo.Src (NCol NVARCHAR(20) NULL); CREATE TABLE dbo.Dst (VarCol VARCHAR(20) NULL);",
             "INSERT INTO dbo.Dst (VarCol) SELECT NCol FROM dbo.Src;");
@@ -64,11 +58,6 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertValuesWithFractionalNumericLiteralIntoInt_FlagsNumericScaleNarrowing()
     {
-        // A bare `7.9` literal is a NumericLiteral (types DECIMAL(2,1) - LiteralTypeResolver:
-        // only scientific notation types as FLOAT), so a decimal-source-into-integer-target
-        // assignment is the scale-narrowing rule, not the approximate-numeric one - both are
-        // oracle-confirmed to truncate toward zero the same way, just via different source
-        // literal shapes.
         var findings = Extract(
             "CREATE TABLE dbo.T (IntCol INT NULL);",
             "INSERT INTO dbo.T (IntCol) VALUES (7.9);");
@@ -80,9 +69,6 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertValuesWithFractionalScientificNotationLiteralIntoInt_FlagsApproximateTruncation()
     {
-        // Scientific notation always types as FLOAT in T-SQL (oracle-verified elsewhere -
-        // LiteralTypeResolverTests), which is what actually exercises the approximate-numeric
-        // rule via a literal rather than only via a non-literal column source.
         var findings = Extract(
             "CREATE TABLE dbo.T (IntCol INT NULL);",
             "INSERT INTO dbo.T (IntCol) VALUES (7.9e0);");
@@ -230,8 +216,6 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertSelectWithWhereClause_StillFindsPredicateAndWriteLoss()
     {
-        // Confirms the ordinary predicate-scanning pass (WHERE clause) and the new write-loss
-        // pass both fire for the same INSERT ... SELECT - neither one crowds out the other.
         var result = ExtractAll(
             """
             CREATE TABLE dbo.Src (Amount DECIMAL(10,4) NOT NULL, Flag INT NOT NULL);
@@ -290,11 +274,6 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertWithCteContainingSelectStar_DoesNotThrow()
     {
-        // The WITH clause's CTE body is itself a QuerySpecification and is walked BEFORE
-        // InsertSpecification in ScriptDOM's natural child order - it must not be mistaken for
-        // the INSERT's own SELECT (whose select list AnalyzeInsertWriteLoss already guarded as
-        // scalar-only). A CTE body containing SELECT * previously invalid-cast
-        // SelectStarExpression to SelectScalarExpression.
         var findings = Extract(
             "CREATE TABLE dbo.Src (a INT NULL, b INT NULL, c INT NULL); CREATE TABLE dbo.T (a INT NULL, b INT NULL, c INT NULL);",
             "WITH cte AS (SELECT * FROM dbo.Src) INSERT INTO dbo.T (a, b, c) SELECT a, b, c FROM cte;");
@@ -305,9 +284,6 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertWithCteContainingSelectStar_LossySource_FlagsWriteLoss()
     {
-        // Same shape as above, but the INSERT's own SELECT (via the CTE) carries an NVARCHAR
-        // source into a VARCHAR target - proves the fix still lets AnalyzeSelectListWriteLoss
-        // run against the real InsertSource SELECT, not just avoid crashing.
         var findings = Extract(
             "CREATE TABLE dbo.Src (NCol NVARCHAR(20) NULL); CREATE TABLE dbo.T (VarCol VARCHAR(20) NULL);",
             "WITH cte AS (SELECT * FROM dbo.Src) INSERT INTO dbo.T (VarCol) SELECT NCol FROM cte;");

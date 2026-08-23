@@ -4,22 +4,11 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Lineage;
 
-/// <summary>
-/// Dependency graph over view definitions: view -&gt; the views it (transitively, through
-/// subqueries too) references. Base tables are leaves, not graph nodes. CLAUDE.md: "Views
-/// in topological order of dependency; cycles -&gt; Unknown."
-/// </summary>
 public static class ViewDependencyGraph
 {
-    /// <returns>Views in dependency order (a view's dependencies appear before it), and the set of qualified names involved in a dependency cycle.</returns>
-    public static (IReadOnlyList<ViewDefinition> Order, IReadOnlySet<string> CyclicViews) TopologicalSort(
+public static (IReadOnlyList<ViewDefinition> Order, IReadOnlySet<string> CyclicViews) TopologicalSort(
         IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
     {
-        // A corpus scan can see the same view name defined more than once - e.g. incremental
-        // upgrade scripts that each re-issue CREATE VIEW for the same object across a
-        // project's version history. Last one wins, consistent with CatalogBuilder's
-        // AddOrReplace semantics for tables (real deployments apply scripts in order, so the
-        // last CREATE is the one that's actually live).
         var byName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
         foreach (var view in views)
         {
@@ -51,8 +40,6 @@ public static class ViewDependencyGraph
 
         if (state.PathSet.Contains(name))
         {
-            // Back-edge to a node already on the current DFS path: every node from its
-            // first occurrence to here (inclusive) is part of this cycle.
             var cycleStart = state.Path.IndexOf(name);
             for (var i = cycleStart; i < state.Path.Count; i++)
             {
@@ -82,11 +69,6 @@ public static class ViewDependencyGraph
         var collector = new TableReferenceCollector(CteNameCollector.Collect(selectStatement));
         selectStatement.Accept(collector);
 
-        // A view defined over a synonym for another view must still get a dependency edge to
-        // that view - collector.QualifiedNames names the synonym itself, which never matches
-        // knownViewNames on its own, so topological order could resolve the outer view before
-        // the inner one and its columns would silently degrade to Unknown (the same failure
-        // mode the TVF-to-TVF edge fix below already guards against).
         var known = new HashSet<string>(knownViewNames, StringComparer.OrdinalIgnoreCase);
         return [.. collector.QualifiedNames.Select(catalog.ResolveSynonymName).Where(known.Contains)];
     }
@@ -97,12 +79,6 @@ public static class ViewDependencyGraph
 
         public override void Visit(NamedTableReference node)
         {
-            // CTE names shadow catalog views of the same name (FromScopeResolver's own rule) - a
-            // CTE is never schema-qualified, so an unqualified reference matching an in-scope CTE
-            // can never mean a real view instead. Without this, `CREATE VIEW dbo.Foo AS WITH Foo
-            // AS (...) SELECT * FROM Foo` created a self-edge (a false cycle, poisoning dbo.Foo to
-            // Unknown), and a CTE coinciding with an unrelated real view elsewhere created a false
-            // dependency edge to it.
             if (node.SchemaObject.SchemaIdentifier is null && cteNames.Contains(node.SchemaObject.BaseIdentifier.Value))
             {
                 return;
@@ -111,12 +87,6 @@ public static class ViewDependencyGraph
             QualifiedNames.Add(SchemaObjectNameHelper.Qualify(node.SchemaObject));
         }
 
-        // An inline TVF calling another inline TVF in its own FROM clause (FROM
-        // dbo.other_itvf(...)) is a SchemaObjectFunctionTableReference, not a
-        // NamedTableReference - missing this meant no dependency edge was recorded between
-        // them, so topological order could resolve the outer TVF before the inner one and its
-        // columns would degrade to Unknown, and a genuine TVF-to-TVF cycle went undetected
-        // entirely (coverage-remediation-plan.md Phase 3.5).
         public override void Visit(SchemaObjectFunctionTableReference node) =>
             QualifiedNames.Add(SchemaObjectNameHelper.Qualify(node.SchemaObject));
     }

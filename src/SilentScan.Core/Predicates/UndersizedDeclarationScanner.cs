@@ -5,18 +5,11 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second OSS/commercial sweep": declared type of size 1 or 2.
-/// Two independent halves, run separately - see <see cref="UndersizedDeclarationFinding"/>.
-/// </summary>
 public static class UndersizedDeclarationScanner
 {
     private const int MaxFlaggedLength = 2;
 
-    /// <summary>Catalog half: every real table column declared CHAR/VARCHAR/NCHAR/NVARCHAR/
-    /// BINARY/VARBINARY of length 1 or 2. Pure catalog walk, no AST, mirrors
-    /// <see cref="MaxTypedColumnScanner"/>'s own "one structural fact per column" shape.</summary>
-    public static IReadOnlyList<UndersizedDeclarationFinding> ScanCatalog(DatabaseCatalog catalog)
+public static IReadOnlyList<UndersizedDeclarationFinding> ScanCatalog(DatabaseCatalog catalog)
     {
         var findings = new List<UndersizedDeclarationFinding>();
 
@@ -47,12 +40,7 @@ public static class UndersizedDeclarationScanner
         ];
     }
 
-    /// <summary>Declaration half: every DECLARE'd local variable and every procedure/function
-    /// formal parameter declared CHAR/VARCHAR/NCHAR/NVARCHAR/BINARY/VARBINARY of length 1 or 2,
-    /// across every parsed module. Fully syntax-only - no catalog dependency beyond type-alias
-    /// resolution (<see cref="DatabaseCatalog.TypeAliases"/>, the same path every other typed
-    /// rule in this codebase already uses for a <c>sysname</c>-style alias).</summary>
-    public static IReadOnlyList<UndersizedDeclarationFinding> ScanDeclarations(SqlParseResult parseResult, DatabaseCatalog catalog)
+public static IReadOnlyList<UndersizedDeclarationFinding> ScanDeclarations(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog);
         parseResult.Fragment.Accept(visitor);

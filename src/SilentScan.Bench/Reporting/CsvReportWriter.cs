@@ -3,15 +3,10 @@ using System.Text;
 
 namespace SilentScan.Bench.Reporting;
 
-/// <summary>Writes the cost table CSV (CLAUDE.md: "Output a CSV the writeup can chart directly").</summary>
 public static class CsvReportWriter
 {
     public static string Write(IReadOnlyList<BenchmarkResult> results)
     {
-        // Explicit "\n" (not AppendLine's platform-dependent Environment.NewLine) and
-        // lowercase booleans (not bool.ToString()'s "True"/"False") so the CSV is byte-
-        // identical regardless of what platform generated it - this file feeds a published
-        // study's charts, not just a human reading it in a terminal.
         var builder = new StringBuilder();
         builder.Append("ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,Selectivity,MedianLogicalReads,MedianCpuMs,MedianElapsedMs,StaticVerdict\n");
 

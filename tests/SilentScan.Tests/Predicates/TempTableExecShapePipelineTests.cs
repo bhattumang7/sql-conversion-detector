@@ -3,19 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// End-to-end proof (docs/detection-checklist.md Tier 2 "Dynamic SQL quality" item 3, temp-table
-/// shape mismatch across a proc-call boundary) that a real deployed caller/callee pair surfaces
-/// through the SAME live pipeline production's <c>scan-db</c> uses
-/// (<see cref="Support.EngineAuthoritativeScan"/>), not just that
-/// <c>SilentScan.Live.Catalog.TempTableExecShapeChecker.Classify</c>'s own logic is correct
-/// against hand-built inputs (<see cref="Catalog.TempTableExecShapeCheckerClassifyTests"/>). This
-/// is also the only place the new <c>LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly</c>
-/// carve-out and <c>sys.dm_exec_describe_first_result_set(N'EXEC dbo.proc', ...)</c> get proven
-/// against a REAL server round trip - <see cref="Catalog.LiveReadOnlyGuardTests"/> only proves the
-/// guard parses the shapes it should accept/reject, not that the DMV itself accepts an EXEC-form
-/// probe text end to end.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class TempTableExecShapePipelineTests
 {

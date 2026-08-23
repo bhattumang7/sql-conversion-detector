@@ -4,11 +4,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// Tier B of CLAUDE.md's dynamic SQL policy: sp_executesql's second argument declares its
-/// parameters' exact types, parsed here by reusing ScriptDOM's own stored-procedure parameter
-/// grammar rather than hand-rolling one.
-/// </summary>
 public sealed class DynamicSqlParameterDeclarationsTests
 {
     [Fact]

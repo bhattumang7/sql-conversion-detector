@@ -4,13 +4,6 @@ using SilentScan.Verify.Catalog;
 
 namespace SilentScan.Live.Catalog;
 
-/// <summary>
-/// docs/detection-checklist.md "Second OSS/commercial sweep": "Database-level configuration
-/// flags" - a single, cheap read of the target database's own row in <c>sys.databases</c> plus
-/// (when relevant) <c>sys.database_query_store_options</c>, run once per scan (not per module).
-/// See <see cref="DatabaseConfigurationFinding"/> for the full per-flag reasoning and severity
-/// split.
-/// </summary>
 public sealed class DatabaseConfigurationReader
 {
     private readonly string _connectionString;
@@ -48,8 +41,6 @@ public sealed class DatabaseConfigurationReader
         {
             if (!await reader.ReadAsync(cancellationToken))
             {
-                // The connecting login cannot see its own database's row in sys.databases at all
-                // (an unusually locked-down permission set) - never guess, report nothing.
                 return [];
             }
 
@@ -95,12 +86,6 @@ public sealed class DatabaseConfigurationReader
             findings.Add(new DatabaseConfigurationFinding(DatabaseConfigurationFindingKind.AutoUpdateStatisticsOff, databaseName));
         }
 
-        // "The engine's own current default compat level" is read live from the model system
-        // database (see DatabaseConfigurationFinding's own doc comment for why this is preferred
-        // over a SERVERPROPERTY('ProductMajorVersion')-derived version-number mapping) - model is
-        // an unqualified, server-scoped sys.databases row visible from any database's connection,
-        // no USE/context switch required, and is exactly what the engine itself clones every newly
-        // created database from.
         await using (var modelCommand = connection.CreateReadOnlyCommand(
             "SELECT compatibility_level FROM sys.databases WHERE name = 'model';"))
         await using (var modelReader = await modelCommand.ExecuteReaderAsync(cancellationToken))
@@ -114,9 +99,6 @@ public sealed class DatabaseConfigurationReader
                 }
             }
 
-            // If model's own row is unreadable (an unusually locked-down permission set that
-            // still allowed the earlier DB_ID() row through), never guess at the engine's default -
-            // silently skip this one kind rather than report a comparison against a made-up level.
         }
 
         if (engineDefaultCompatibilityLevel > compatibilityLevel)
@@ -151,11 +133,6 @@ public sealed class DatabaseConfigurationReader
             }
         }
 
-        // sys.database_query_store_options is scoped to the CURRENT database context (the
-        // connection string's own initial catalog) - no cross-database join needed, and it
-        // returns zero rows on an edition/engine that lacks Query Store entirely (Azure SQL DB
-        // vs. on-prem SKUs historically differed here), which this query treats the same as "not
-        // read-write" rather than erroring.
         await using (var queryStoreCommand = connection.CreateReadOnlyCommand(
             "SELECT actual_state_desc, query_capture_mode_desc FROM sys.database_query_store_options;"))
         await using (var reader = await queryStoreCommand.ExecuteReaderAsync(cancellationToken))
@@ -173,8 +150,6 @@ public sealed class DatabaseConfigurationReader
                 }
                 else if (!string.Equals(captureModeDesc, "AUTO", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Only evaluated when Query Store IS actually running - see
-                    // DatabaseConfigurationFinding's own doc comment for why.
                     findings.Add(new DatabaseConfigurationFinding(DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto, databaseName));
                 }
             }
@@ -187,17 +162,7 @@ public sealed class DatabaseConfigurationReader
         return findings;
     }
 
-    /// <summary>
-    /// docs/detection-reference.md Appendix 8's forced-parameterization clause-skip entry - the
-    /// single live precondition <see cref="ForcedParameterizationScanner"/>'s own AST
-    /// findings are gated on. A separate, tiny round trip rather than folded into
-    /// <see cref="ReadAsync"/>'s own query: it isn't a <see cref="DatabaseConfigurationFinding"/>
-    /// itself (a database explicitly turning this ON is a deliberate choice, not a misconfiguration -
-    /// see docs/detection-reference.md's "Forced plans / plan guides / forced parameterization"
-    /// survey entry, correctly skipped), only a fact another stream needs to know before it can
-    /// report anything at all.
-    /// </summary>
-    public async Task<bool> ReadIsParameterizationForcedAsync(CancellationToken cancellationToken = default)
+public async Task<bool> ReadIsParameterizationForcedAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -206,9 +171,6 @@ public sealed class DatabaseConfigurationReader
             "SELECT is_parameterization_forced FROM sys.databases WHERE database_id = DB_ID();");
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        // No visible row at all (an unusually locked-down permission set) - never guess; treat
-        // as "not forced" so the gated scanner stays silent rather than assuming a state it
-        // can't confirm.
         return await reader.ReadAsync(cancellationToken) && reader.GetBoolean(0);
     }
 }

@@ -35,9 +35,6 @@ public sealed class BinderParityDetectorTests
     [Fact]
     public void FindAllColumnReferences_LocalVariableOrParameter_IsExcluded()
     {
-        // Showplan XML represents a local variable/parameter as a <ColumnReference> too, with no
-        // Table attribute at all - not a real table-column binding, so excluded here the same way
-        // ConvertImplicitDetector excludes it (same real fragment shape, see its own tests).
         var xml = Wrap("""<ScalarOperator><Identifier><ColumnReference Column="@p" /></Identifier></ScalarOperator>""");
 
         var found = BinderParityDetector.FindAllColumnReferences(xml);
@@ -48,9 +45,6 @@ public sealed class BinderParityDetectorTests
     [Fact]
     public void FindAllColumnReferences_NotJustUnderConvert_UnlikeConvertImplicitDetector()
     {
-        // The whole reason this is a separate detector from ConvertImplicitDetector: a real column
-        // reference with no conversion anywhere near it must still be found - the parity check
-        // needs every binding, not just the ones that happen to convert.
         var xml = Wrap("""
             <ScalarOperator><Identifier><ColumnReference Database="[T]" Schema="[dbo]" Table="[Orders]" Column="OrderId" /></Identifier></ScalarOperator>
             """);

@@ -69,10 +69,6 @@ public sealed class VerifyCorpusCommandTests : IDisposable
     [Fact]
     public async Task RunAsync_UnknownConfidence_ReturnsOneAndWritesError()
     {
-        // verify-corpus's own --confidence must reject the same way scan-db/scan-corpus-live do
-        // (FindingConfidenceParsing is the single shared parser both CLIs use) - checked before
-        // this command ever deploys anything, so a typo fails fast rather than burning a full
-        // Docker provisioning cycle first.
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 

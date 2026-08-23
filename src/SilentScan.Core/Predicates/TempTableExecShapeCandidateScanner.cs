@@ -5,23 +5,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Dynamic SQL quality" item 3: <c>INSERT INTO #temp EXEC
-/// OtherProc</c> assumes <c>OtherProc</c>'s described result-set shape matches <c>#temp</c>'s own
-/// declared columns. This pass finds the SITES only - a bare, catalog-only, no-network AST walk,
-/// exactly mirroring <see cref="TvfFenceScanner"/>'s own <c>ExplicitVisit(InsertStatement)</c>
-/// handling of the identical <c>ExecuteInsertSource</c>/<c>ExecutableProcedureReference</c> shape
-/// (used there for a different finding). The live round trip that actually describes each site's
-/// executed proc (<c>sys.dm_exec_describe_first_result_set</c>, live-mode only) happens
-/// afterward, in <c>SilentScan.Live.Catalog.TempTableExecShapeChecker</c> - this pass only decides
-/// WHERE to probe and resolves the caller-side half (the temp table's own declared shape) that
-/// needs no network round trip at all.
-///
-/// Only a genuine named-procedure EXEC target is a candidate - <c>INSERT INTO #temp EXEC(@sql)</c>
-/// (a string-form EXEC) has no fixed shape to describe and is out of scope by construction,
-/// matching <c>SilentScan.Verify.Catalog.LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly</c>'s
-/// own restriction to a named-procedure reference.
-/// </summary>
 public static class TempTableExecShapeCandidateScanner
 {
     public static IReadOnlyList<TempTableExecShapeCandidate> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
@@ -82,12 +65,6 @@ public static class TempTableExecShapeCandidateScanner
     }
 }
 
-/// <summary>
-/// One <c>INSERT INTO #temp EXEC proc</c> site. <see cref="TempTableColumns"/> is null when the
-/// temp table's own declared shape could not be resolved in the catalog (declared via a shape
-/// this tool's own module-body catalog pass doesn't model, or genuinely never DECLAREd before
-/// this site) - reported as an honest unanalyzed case downstream, never guessed.
-/// </summary>
 public readonly record struct TempTableExecShapeCandidate(
     string TempTableQualifiedName,
     IReadOnlyList<CatalogColumn>? TempTableColumns,

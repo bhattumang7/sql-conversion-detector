@@ -2,12 +2,6 @@ using SilentScan.Core.Catalog;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// Catalog-only pass (mirrors <see cref="CrossTableTypeDriftScanner"/>'s own shape) - walks
-/// <see cref="DatabaseCatalog.TriggerEvents"/> (live-mode only; always empty in file mode) and
-/// flags a table+event whose enabled, non-INSTEAD-OF triggers leave two or more unpinned relative
-/// to each other. See <see cref="TriggerOrderFinding"/>'s own doc comment for the full firing rule.
-/// </summary>
 public static class TriggerOrderScanner
 {
     public static IReadOnlyList<TriggerOrderFinding> Scan(DatabaseCatalog catalog)

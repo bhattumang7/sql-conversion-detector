@@ -3,12 +3,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Formatting and layout" - ten structural/textual checks over
-/// the AST and raw token stream. Fully syntax-only: no <see cref="Catalog.DatabaseCatalog"/>, no
-/// oracle (every member is a directly observable parse/token-stream fact, never a plan-shape or
-/// runtime-behavior claim - the same reasoning <see cref="CodeMetricScanner"/> already established).
-/// </summary>
 public static class FormattingScanner
 {
     public static IReadOnlyList<FormattingFinding> Scan(SqlParseResult parseResult)
@@ -32,11 +26,6 @@ public static class FormattingScanner
         ];
     }
 
-    // ScriptDOM's ScriptTokenStream is a single shared list for the whole parsed input - every
-    // fragment/sub-node returns the SAME list reference. Only FirstTokenIndex/LastTokenIndex mark
-    // which slice belongs to THIS fragment (CodeMetricScanner's own doc comment records the real
-    // bug this bounding avoids: an earlier version of that scanner walked the raw stream unbounded
-    // and silently pulled in sibling modules' own text).
     private static void ScanTabCharacters(SqlParseResult parseResult, List<FormattingFinding> findings)
     {
         var fragment = parseResult.Fragment;
@@ -55,8 +44,6 @@ public static class FormattingScanner
                 continue;
             }
 
-            // One finding per physical line containing a tab, not one per tab character or per
-            // token (a single whitespace token can carry several tabs in a row).
             var line = token.Line;
             var offset = 0;
             var index = text.IndexOf('\t');
@@ -75,11 +62,6 @@ public static class FormattingScanner
         }
     }
 
-    // A module's own definition text does not begin, before its first real statement, with a
-    // comment (`--` or `/* ... */`). Reported at Low confidence purely as an informational fact -
-    // whether a T-SQL module conventionally carries a file-style header at all is a much weaker,
-    // less universal convention than it is for application source files, so this is stated
-    // honestly as advisory rather than a real maintainability risk.
     private static void ScanFileHeader(SqlParseResult parseResult, List<FormattingFinding> findings)
     {
         var fragment = parseResult.Fragment;
@@ -159,11 +141,6 @@ public static class FormattingScanner
 
         public override void ExplicitVisit(BeginEndBlockStatement node)
         {
-            // An empty BEGIN...END is a hard parse error under this tool's own dialect (confirmed
-            // directly: "BEGIN END" fails with "Incorrect syntax near 'END'." in every context
-            // tried, and a bare ";" produces no statement node to attach a finding to at all) - so
-            // StatementList is never actually empty here, matching the disposition already recorded
-            // for COMPUTE/COMPUTE BY and *=/=* elsewhere in this codebase: not reachable, not built.
             if (node.StatementList is not null)
             {
                 CheckStatements(node.StatementList.Statements);
@@ -212,8 +189,6 @@ public static class FormattingScanner
         {
             if (node.Expression is BooleanParenthesisExpression)
             {
-                // A double-wrapped boolean expression - the outer pair is always redundant
-                // regardless of what the inner pair itself contains.
                 Findings.Add(new FormattingFinding(
                     FormattingFindingKind.RedundantParentheses, _currentModule, sourcePath, node.StartLine, node.StartColumn));
             }
@@ -242,10 +217,6 @@ public static class FormattingScanner
             }
         }
 
-        // A statement immediately following an unbraced IF/WHILE's single-statement body, starting
-        // on the very next line at the same or deeper indentation - visually still "inside" the
-        // conditional/loop even though it structurally is not. Only checked against the immediately
-        // preceding sibling, never across a nested scope.
         private void CheckDanglingStatement(IList<TSqlStatement> statements, int index)
         {
             if (index == 0)
@@ -269,12 +240,6 @@ public static class FormattingScanner
             var bodyLastLine = LastLine(bodyStatement);
             var current = statements[index];
 
-            // A following IF/WHILE is unambiguously its own new conditional the moment its own
-            // keyword is read - a real corpus run found this excludes the overwhelming majority
-            // of raw matches, all a common, unambiguous "IF x insert; IF y insert; ..." chained-
-            // conditionals idiom, never actually confusable with an unconditional statement. The
-            // real risk this kind targets is narrower: a non-conditional statement that visually
-            // reads as still belonging to the block above it.
             if (current is IfStatement or WhileStatement)
             {
                 return;
@@ -288,8 +253,6 @@ public static class FormattingScanner
             }
         }
 
-        // An IF immediately following the closing END of a prior braced IF (with no ELSE), on the
-        // exact same line as that END - easy to misread as an ELSE IF continuation.
         private void CheckIfFollowingPriorBlockEnd(IList<TSqlStatement> statements, int index)
         {
             if (index == 0 || statements[index] is not IfStatement current)
@@ -315,7 +278,6 @@ public static class FormattingScanner
         {
             if (body is null or BeginEndBlockStatement or IfStatement)
             {
-                // A null else, an already-braced body, or an ELSE IF continuation never fire here.
                 return;
             }
 
@@ -359,10 +321,6 @@ public static class FormattingScanner
             return lastToken.Line + (lastToken.Text?.Count(c => c == '\n') ?? 0);
         }
 
-        // Scans the shared token stream between two fragments for the last non-trivial token
-        // (skipping whitespace/comment-only tokens by text shape) immediately before `after`
-        // starts, and returns its line - used to locate an ELSE keyword, which ScriptDOM's
-        // IfStatement does not expose as its own token/property.
         private static int FindPrecedingKeywordLine(TSqlFragment before, TSqlFragment after, string expectedKeyword)
         {
             if (after.ScriptTokenStream is not { } tokens)

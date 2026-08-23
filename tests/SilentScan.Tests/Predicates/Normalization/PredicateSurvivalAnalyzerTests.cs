@@ -4,14 +4,6 @@ using SilentScan.Core.Predicates.Normalization;
 
 namespace SilentScan.Tests.Predicates.Normalization;
 
-/// <summary>
-/// Pure algebra tests - no catalog, no oracle needed, since three-valued boolean logic and
-/// interval arithmetic are deterministic math, exhaustively checkable by hand. Column facts are
-/// driven by naming convention: <c>NotNullCol</c>/<c>NullableCol</c>/<c>UnknownNullCol</c> for
-/// nullability, <c>CsCol</c>/<c>CiCol</c>/<c>UnknownCollationCol</c> for collation
-/// case-sensitivity - every column referenced in a test's WHERE clause must use one of these
-/// names so <see cref="ResolveFacts"/> can answer deterministically.
-/// </summary>
 public sealed class PredicateSurvivalAnalyzerTests
 {
     private static PredicateSurvivalAnalyzer.ColumnFacts ResolveFacts(ColumnReferenceExpression colRef)
@@ -56,9 +48,7 @@ public sealed class PredicateSurvivalAnalyzerTests
             : throw new InvalidOperationException("no WHERE clause parsed");
     }
 
-    /// <summary>Single parse per test case: the dead set is keyed by AST reference identity, so the
-    /// dead set and the leaf list being compared must come from the exact same parse.</summary>
-    private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Leaves) Analyze(string whereExpr)
+private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Leaves) Analyze(string whereExpr)
     {
         var condition = ParseCondition(whereExpr);
 
@@ -68,8 +58,6 @@ public sealed class PredicateSurvivalAnalyzerTests
         var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(condition, ResolveFacts);
         return (dead, collector.Leaves);
     }
-
-    // ---- AND contradiction: numeric range algebra ----
 
     [Fact]
     public void SameColumnConflictingEquality_BothMarkedDead()
@@ -90,7 +78,6 @@ public sealed class PredicateSurvivalAnalyzerTests
     [Fact]
     public void SameColumnTouchingExclusiveBounds_MarkedDead()
     {
-        // x < 5 AND x > 5: the single point 5 is excluded by both sides - genuinely empty.
         var (dead, leaves) = Analyze("NotNullCol < 5 AND NotNullCol > 5");
         Assert.All(leaves, l => Assert.Contains(l, dead));
     }
@@ -98,7 +85,6 @@ public sealed class PredicateSurvivalAnalyzerTests
     [Fact]
     public void SameColumnAdjacentInclusiveBounds_NotDead()
     {
-        // x <= 5 AND x >= 5: exactly satisfiable at x=5 - not a contradiction.
         var (dead, _) = Analyze("NotNullCol <= 5 AND NotNullCol >= 5");
         Assert.Empty(dead);
     }
@@ -134,9 +120,6 @@ public sealed class PredicateSurvivalAnalyzerTests
     [Fact]
     public void SelfJoinAliasesSameSchemaColumn_NeverConflated()
     {
-        // t1.NotNullCol and t2.NotNullCol are syntactically distinct qualifiers - even though a
-        // real self-join could resolve both to the same underlying table, this analyzer only sees
-        // the reference text and must never guess they're the same value.
         var (dead, _) = Analyze("t1.NotNullCol = 1 AND t2.NotNullCol = 2");
         Assert.Empty(dead);
     }
@@ -149,8 +132,6 @@ public sealed class PredicateSurvivalAnalyzerTests
         Assert.Equal(3, leaves.Count);
         Assert.All(leaves, l => Assert.Contains(l, dead));
     }
-
-    // ---- AND contradiction: IS NULL vs comparison ----
 
     [Fact]
     public void IsNullWithComparison_MarkedDead()
@@ -173,8 +154,6 @@ public sealed class PredicateSurvivalAnalyzerTests
         Assert.Empty(dead);
     }
 
-    // ---- AND contradiction: BETWEEN ----
-
     [Fact]
     public void SelfContradictoryBetween_MarkedDead()
     {
@@ -196,8 +175,6 @@ public sealed class PredicateSurvivalAnalyzerTests
         Assert.All(leaves, l => Assert.Contains(l, dead));
     }
 
-    // ---- AND contradiction: string equality (collation-gated) ----
-
     [Fact]
     public void SameLiteralRequiredAndExcluded_MarkedDeadRegardlessOfCollation()
     {
@@ -215,12 +192,9 @@ public sealed class PredicateSurvivalAnalyzerTests
     [Fact]
     public void DifferentLiteralsRequiredEquals_CaseInsensitiveOrUnknownCollation_NeverConcluded()
     {
-        // 'Foo' and 'foo' could legally collate equal - never safe to fold without confirmation.
         Assert.Empty(Analyze("CiCol = 'Foo' AND CiCol = 'foo'").Dead);
         Assert.Empty(Analyze("UnknownCollationCol = 'Foo' AND UnknownCollationCol = 'foo'").Dead);
     }
-
-    // ---- Pure literal-vs-literal constant folding ----
 
     [Fact]
     public void ConstantFalseComparison_MarkedDead()
@@ -236,8 +210,6 @@ public sealed class PredicateSurvivalAnalyzerTests
         Assert.All(leaves, l => Assert.Contains(l, dead));
     }
 
-    // ---- OR composition: all-disjuncts-dead propagates ----
-
     [Fact]
     public void OrOfTwoContradictions_AllMarkedDead()
     {
@@ -251,12 +223,9 @@ public sealed class PredicateSurvivalAnalyzerTests
     {
         var (dead, leaves) = Analyze("(NotNullCol = 1 AND NotNullCol = 2) OR NullableCol = 3");
 
-        // Only the dead disjunct's own two comparisons are marked - the live one survives.
         Assert.Equal(2, dead.Count);
         Assert.DoesNotContain(leaves[2], dead);
     }
-
-    // ---- OR tautology: requires NOT NULL ----
 
     [Fact]
     public void EqualsOrNotEquals_SameLiteral_NotNullColumn_MarkedDead()
@@ -268,7 +237,6 @@ public sealed class PredicateSurvivalAnalyzerTests
     [Fact]
     public void EqualsOrNotEquals_SameLiteral_NullableColumn_NeverConcluded()
     {
-        // If the column is NULL, both sides are UNKNOWN - not a tautology when NULL is possible.
         Assert.Empty(Analyze("NullableCol = 1 OR NullableCol <> 1").Dead);
     }
 
@@ -298,8 +266,6 @@ public sealed class PredicateSurvivalAnalyzerTests
         Assert.All(leaves, l => Assert.Contains(l, dead));
     }
 
-    // ---- OR tautology: IS NULL / IS NOT NULL needs no nullability confirmation at all ----
-
     [Fact]
     public void IsNullOrIsNotNull_UnconditionallyMarkedDead()
     {
@@ -307,14 +273,9 @@ public sealed class PredicateSurvivalAnalyzerTests
         Assert.All(leaves, l => Assert.Contains(l, dead));
     }
 
-    // ---- NOT boundary ----
-
     [Fact]
     public void NotOfContradiction_NotNullColumn_MarkedDead()
     {
-        // NOT(x=1 AND x=2) on a column confirmed NOT NULL: the inner AND is strictly False for
-        // every row (never Unknown, since x can never be null), so the negation is an unconditional
-        // tautology and the inner comparisons never reach a residual filter either.
         var (dead, leaves) = Analyze("NOT (NotNullCol = 1 AND NotNullCol = 2)");
         Assert.All(leaves, l => Assert.Contains(l, dead));
     }
@@ -322,10 +283,6 @@ public sealed class PredicateSurvivalAnalyzerTests
     [Fact]
     public void NotOfContradiction_NullableOrUnconfirmedColumn_NeverConcluded()
     {
-        // Same shape, but without a NOT NULL guarantee: for a null x, x=1 AND x=2 is Unknown (not
-        // False), so NOT(...) is also Unknown for that row - not an unconditional tautology, and
-        // the inner comparisons must not be marked dead just because the un-negated form would have
-        // been (on a confirmed NOT NULL column) or was declined (here).
         Assert.Empty(Analyze("NOT (NullableCol = 1 AND NullableCol = 2)").Dead);
         Assert.Empty(Analyze("NOT (UnknownNullCol = 1 AND UnknownNullCol = 2)").Dead);
     }
@@ -340,10 +297,6 @@ public sealed class PredicateSurvivalAnalyzerTests
     [Fact]
     public void NotOfOrContainingContradiction_InnerContradictionNeverConcluded()
     {
-        // NOT((x=1 AND x=2) OR y=5): for a null x and a non-null y<>5, the inner OR is Unknown OR
-        // False = Unknown, so the whole NOT is Unknown (row excluded) - NOT True as naively
-        // discarding the never-true first disjunct would wrongly conclude. Marking must not cross
-        // this NOT boundary at all.
         Assert.Empty(Analyze("NOT ((NotNullCol = 1 AND NotNullCol = 2) OR NullableCol = 5)").Dead);
     }
 
@@ -373,8 +326,6 @@ public sealed class PredicateSurvivalAnalyzerTests
         Assert.Empty(Analyze("NotNullCol = 1 AND (NotNullCol = 2 OR NullableCol = 2)").Dead);
     }
 
-    // ---- Opaque leaves: never guessed at ----
-
     [Fact]
     public void NonLiteralComparison_NeverConcluded()
     {
@@ -384,8 +335,6 @@ public sealed class PredicateSurvivalAnalyzerTests
     [Fact]
     public void NullLiteralComparison_NeverConcluded()
     {
-        // x = NULL is ANSI_NULLS-dependent and declined entirely, not treated as an ordinary
-        // comparison and not treated as IS NULL either.
         Assert.Empty(Analyze("NullableCol = NULL AND NullableCol IS NOT NULL").Dead);
     }
 

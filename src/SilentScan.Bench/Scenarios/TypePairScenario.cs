@@ -3,17 +3,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Bench.Scenarios;
 
-/// <summary>
-/// One reported type-pair to benchmark (CLAUDE.md Benchmark protocol): a column type/collation
-/// and a query parameter that either matches it (SEEK_PRESERVED-shaped) or mismatches it
-/// (the implicit-conversion case). The matched/mismatched param values must be seedable data
-/// (present in the synthetic table) so the query returns a real, comparable plan.
-/// <paramref name="ColumnCategory"/>/<paramref name="MismatchedOtherCategory"/>/<paramref name="Collation"/>
-/// are the same category/collation facts <see cref="SilentScan.Core.Rules.VerdictClassifier"/> itself consumes -
-/// carried here so a benchmark row can be stamped with the STATIC verdict it predicts, rather
-/// than a reader having to cross-reference the matrix by hand to tell a row that confirms the
-/// classifier apart from one that contradicts it.
-/// </summary>
 public sealed record TypePairScenario(
     string Name,
     string ColumnTypeDdl,
@@ -26,8 +15,7 @@ public sealed record TypePairScenario(
     SqlTypeCategory MismatchedOtherCategory,
     Collation? Collation = null)
 {
-    /// <summary>The flagship CLAUDE.md example: varchar column vs nvarchar parameter.</summary>
-    public static TypePairScenario VarCharVsNVarChar(string collation) => new(
+public static TypePairScenario VarCharVsNVarChar(string collation) => new(
         Name: $"varchar_vs_nvarchar_{collation}",
         ColumnTypeDdl: $"VARCHAR(20) COLLATE {collation}",
         MatchedParamTypeDdl: "VARCHAR(20)",
@@ -39,8 +27,7 @@ public sealed record TypePairScenario(
         MismatchedOtherCategory: SqlTypeCategory.NVarChar,
         Collation: new Collation(collation));
 
-    /// <summary>Numeric precedence example: int column vs bigint parameter.</summary>
-    public static TypePairScenario IntVsBigInt() => new(
+public static TypePairScenario IntVsBigInt() => new(
         Name: "int_vs_bigint",
         ColumnTypeDdl: "INT",
         MatchedParamTypeDdl: "INT",

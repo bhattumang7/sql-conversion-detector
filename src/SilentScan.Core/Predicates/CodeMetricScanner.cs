@@ -3,9 +3,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>Configurable thresholds for <see cref="CodeMetricScanner"/> - every default calibrated
-/// against the real local test database's own measured distribution (docs/detection-checklist.md
-/// records the real numbers), not an arbitrarily invented cutoff.</summary>
 public sealed record CodeMetricThresholds(
     int MaxLineLength = 200,
     int MaxModuleLines = 1000,
@@ -19,18 +16,6 @@ public sealed record CodeMetricThresholds(
     public static readonly CodeMetricThresholds Default = new();
 }
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Size and complexity metrics" - eight configurable-threshold
-/// structural metrics over the AST. Fully syntax-only: no <see cref="Catalog.DatabaseCatalog"/>,
-/// no oracle (a line count or nesting depth is directly observable from the parse, never a
-/// plan-shape or runtime-behavior claim).
-///
-/// Physical line text/length is reconstructed losslessly from the fragment's own
-/// <see cref="TSqlFragment.ScriptTokenStream"/> (ScriptDOM's token stream is complete - every
-/// whitespace/comment/newline token is present - so concatenating every token's own
-/// <see cref="TSqlParserToken.Text"/> in order reproduces the exact source text) rather than
-/// requiring a separate raw-text side channel through <see cref="SqlParseResult"/>.
-/// </summary>
 public static class CodeMetricScanner
 {
     public static IReadOnlyList<CodeMetricFinding> Scan(SqlParseResult parseResult, CodeMetricThresholds? thresholds = null)
@@ -90,13 +75,6 @@ public static class CodeMetricScanner
 
     private static string[] ReconstructedLines(TSqlFragment fragment)
     {
-        // ScriptDOM's ScriptTokenStream is a single shared list for the whole parsed input -
-        // every fragment/sub-node, however small, returns the SAME list reference. Only
-        // FirstTokenIndex/LastTokenIndex mark which slice of it actually belongs to THIS
-        // fragment; iterating the raw stream unbounded would silently pull in every sibling
-        // module's own text too whenever more than one object shares one parse (a real bug
-        // caught by running this against the real corpus before shipping - it inflated every
-        // measurement by however much of the file/batch came after the module being measured).
         if (fragment.ScriptTokenStream is null || fragment.LastTokenIndex < fragment.FirstTokenIndex)
         {
             return [];
@@ -193,9 +171,6 @@ public static class CodeMetricScanner
             _nestingDepth++;
             if (_nestingDepth == thresholds.MaxNestingDepth + 1)
             {
-                // Fire once, at the exact statement that first breaches the limit - a node nested
-                // 10 levels deep against a threshold of 6 reports one finding at level 7, not four
-                // cascading ones for levels 7 through 10.
                 Findings.Add(new CodeMetricFinding(
                     CodeMetricFindingKind.NestingTooDeep, sourcePath, sourcePath,
                     node.StartLine, node.StartColumn, _nestingDepth, thresholds.MaxNestingDepth));
@@ -225,7 +200,6 @@ public static class CodeMetricScanner
 
             if (statementList is null)
             {
-                // EXTERNAL NAME (CLR) body - nothing to measure.
                 return;
             }
 

@@ -4,21 +4,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Closes the last link in VerdictClassifier's authority chain back to the real engine:
-/// VerdictClassifier is a pure lookup over the checked-in <c>TypePairMatrix.json</c>
-/// (<see cref="Rules.VerdictClassifierTests.Classify_NeverDisagreesWithItsOwnOracleProbedMatrix"/>
-/// already pins that), and that JSON was itself oracle-probed - but only once, at generation
-/// time, by <c>silentscan-verify generate-type-matrix</c>. Nothing previously re-checked that
-/// the checked-in file still matches what THIS Docker SQL Server actually does today, so a
-/// stale matrix (a new server image, a compat-level or CE change, or a hand-edit) could drift
-/// silently and every downstream test would keep agreeing with itself forever. This regenerates
-/// the FULL matrix - the exact same category/collation lists <c>GenerateTypeMatrixCommand</c>
-/// uses - against the live oracle and diffs it cell-by-cell against the checked-in file, so a
-/// real disagreement fails loudly here instead of shipping a wrong verdict.
-/// Slow by nature (deploys and drops several disposable databases across ~200 probed cells);
-/// this is the one test in the suite whose whole job is to be exhaustive rather than fast.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class TypePairMatrixLiveRegenerationTests
 {

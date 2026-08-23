@@ -3,10 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Formatting and layout" - ten structural/textual checks over
-/// the AST and raw token stream. Fully syntax-only, no oracle needed.
-/// </summary>
 public sealed class FormattingScannerTests
 {
     private static IReadOnlyList<FormattingFinding> Scan(string sql)
@@ -112,8 +108,6 @@ public sealed class FormattingScannerTests
         var sql = "IF 1 = 1\n    SELECT 1;\nELSE IF 2 = 2\n    SELECT 2;";
         var findings = Scan(sql);
 
-        // The ELSE IF continuation itself must never be treated as an unbraced ELSE body -
-        // only each IF's own THEN body (already covered by the unbraced-body cases above).
         Assert.DoesNotContain(findings, f => f.Kind == FormattingFindingKind.SingleLineConditionalBody && f.Line == 3);
     }
 
@@ -147,10 +141,6 @@ public sealed class FormattingScannerTests
     [Fact]
     public void ChainedUnbracedIfsAtSameIndentation_NeverFiresDangling()
     {
-        // A real corpus false-positive risk caught before shipping: "IF @a = 1\n  X\nIF @b = 1\n  Y"
-        // is a common, unambiguous chained-conditionals idiom, never confusable with an
-        // unconditional statement - only a non-conditional statement dangling off an unbraced
-        // body is the real risk this kind targets.
         var sql = "CREATE PROCEDURE dbo.P AS\nBEGIN\nIF @a = 1\n    SELECT 1;\nIF @b = 1\n    SELECT 2;\nEND";
         var findings = Scan(sql);
 

@@ -5,15 +5,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Phase 0.2 of docs/audit-remediation-plan.md: the checked-in TypePairMatrix.json must be
-/// reproducible from the live oracle, not a one-off hand-edit that silently drifts from what
-/// the server actually does. This exercises the real generator against the Docker SQL Server on
-/// a small, fast subset (not the full curated family lists the CLI command uses, which take
-/// longer) and pins two of the specific, previously-undetected facts the full generation run
-/// found: an INT column converts against a REAL value, and TIME is not comparable to DATE at
-/// all - the two discoveries that motivated replacing the old family-wide heuristic.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class TypeMatrixGeneratorTests
 {
@@ -83,9 +74,6 @@ public sealed class TypeMatrixGeneratorTests
     [Fact]
     public async Task GenerateAsync_TimestampColumnVsVarbinaryValue_ColumnConverts()
     {
-        // Roadmap Phase A3: a rowversion/timestamp concurrency-token column compared against a
-        // VARBINARY(8) variable is a ubiquitous optimistic-concurrency pattern that previously
-        // resolved Unknown for lack of any probe data at all.
         var generator = new TypeMatrixGenerator(Options);
 
         var (entries, _) = await generator.GenerateAsync([], [], [], [], binaryFamily: TypeMatrixGenerator.BinaryFamily);
@@ -101,9 +89,6 @@ public sealed class TypeMatrixGeneratorTests
     [Fact]
     public async Task GenerateAsync_BinaryColumnVsVarbinaryValue_SameComparisonTypeNeitherConverts()
     {
-        // Mirrors the char/varchar precedent already established elsewhere: binary and
-        // varbinary are the same comparison type in SQL Server despite being distinct
-        // SqlTypeCategory values in this tool's model.
         var generator = new TypeMatrixGenerator(Options);
 
         var (entries, _) = await generator.GenerateAsync([], [], [], [], binaryFamily: TypeMatrixGenerator.BinaryFamily);

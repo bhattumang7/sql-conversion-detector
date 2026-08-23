@@ -3,11 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second OSS/commercial sweep": SET DATEFORMAT/DATEFIRST mid-module.
-/// Fully syntax-only - the underlying session-state-dependent interpretation mechanism was
-/// oracle-confirmed once (real ambiguous literal / real weekday DATEPART), not per finding.
-/// </summary>
 public sealed class SessionDateSettingScannerTests
 {
     private static IReadOnlyList<SessionDateSettingFinding> Scan(string sql)

@@ -3,12 +3,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Dead and duplicated code" - the five members needing real
-/// control-flow/dataflow analysis. Fully syntax-only, no oracle needed - see
-/// <see cref="DeadCodeFinding"/>'s own doc comment for the full scope/precision-guard rationale
-/// these tests exercise.
-/// </summary>
 public sealed class DeadCodeScannerTests
 {
     private static IReadOnlyList<DeadCodeFinding> Scan(string sql)
@@ -17,8 +11,6 @@ public sealed class DeadCodeScannerTests
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return DeadCodeScanner.Scan(result);
     }
-
-    // --- Unreachable code -------------------------------------------------
 
     [Fact]
     public void StatementAfterUnconditionalReturn_FiresUnreachable()
@@ -78,7 +70,6 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void IfWithOnlyOneBranchTerminal_NeverFiresUnreachable()
     {
-        // The ELSE branch falls through, so code after the IF is genuinely reachable.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P @x INT AS BEGIN
                 IF @x = 1 RETURN;
@@ -93,7 +84,6 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void IfWithNoElse_NeverFiresUnreachableAfter()
     {
-        // The implicit else always falls through.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P @x INT AS BEGIN
                 IF @x = 1 RETURN;
@@ -121,9 +111,6 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void WhileLoopIsNeverTerminal_CodeAfterNeverFiresUnreachable()
     {
-        // A WHILE may run zero times, so code after it is always reachable regardless of the
-        // body's own terminality - conservative, matching TransactionHygieneScanner's identical
-        // WHILE reasoning.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 WHILE 1 = 1
@@ -176,9 +163,6 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void RoutineContainingGoto_DeclinesUnreachableCodeAnalysisEntirely()
     {
-        // An arbitrary jump target can make structurally-unreachable code actually reachable -
-        // the whole routine's UnreachableCode analysis declines rather than guesses (see
-        // DeadCodeFinding's own doc comment).
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 RETURN;
@@ -191,8 +175,6 @@ public sealed class DeadCodeScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DeadCodeFindingKind.UnreachableCode);
     }
-
-    // --- Unused label -------------------------------------------------------
 
     [Fact]
     public void LabelWithNoGoto_FiresUnusedLabel()
@@ -223,8 +205,6 @@ public sealed class DeadCodeScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DeadCodeFindingKind.UnusedLabel);
     }
-
-    // --- Unused local variable -----------------------------------------------
 
     [Fact]
     public void DeclaredVariableNeverReferenced_FiresUnusedLocalVariable()
@@ -298,8 +278,6 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void CompoundAssignmentReadsPriorValue_CountsAsUse()
     {
-        // SET @x += ... reads @x's own prior value, unlike a plain SET @x = ..., so this alone
-        // counts as a real use even with no other reference anywhere.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 0;
@@ -313,8 +291,6 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void VariableUsedOnlyAsCursorFetchTarget_NeverFiresUnused()
     {
-        // FETCH ... INTO @x is deliberately treated as a real use (a conservative, never-a-
-        // false-positive choice - see DeadCodeFinding's own doc comment).
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT;
@@ -328,8 +304,6 @@ public sealed class DeadCodeScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DeadCodeFindingKind.UnusedLocalVariable);
     }
-
-    // --- Unused parameter -----------------------------------------------------
 
     [Fact]
     public void ParameterNeverReferenced_FiresUnusedParameter()
@@ -358,9 +332,6 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void UnreferencedOutputParameter_NeverFiresUnusedParameter()
     {
-        // A never-assigned OUTPUT parameter is a distinct, already-shipped, sharper claim
-        // (OutputParameterFinding's "unassigned on some path") - deliberately excluded here to
-        // avoid two findings restating the same underlying fact differently.
         var findings = Scan("""
             CREATE PROCEDURE dbo.P @x INT OUTPUT AS BEGIN
                 SELECT 1;
@@ -369,8 +340,6 @@ public sealed class DeadCodeScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DeadCodeFindingKind.UnusedParameter);
     }
-
-    // --- Redundant jump ---------------------------------------------------------
 
     [Fact]
     public void GotoImmediatelyFollowedByItsOwnLabel_FiresRedundantJump()
@@ -406,12 +375,6 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void RedundantJumpAtRoutineTopLevel_StillFires()
     {
-        // Regression guard: the routine's own outermost statement list is never itself
-        // Accept()-ed (Unwrap looks past a single wrapping BEGIN...END), so a redundant jump
-        // sitting directly at the top level - not nested inside any IF/WHILE/TRY - must still be
-        // caught by the explicit top-level check in RoutineVisitor.Analyze, not only by
-        // UsageCollector's own ExplicitVisit(StatementList) override (which only ever sees
-        // NESTED lists).
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             SELECT 1;
@@ -423,14 +386,9 @@ public sealed class DeadCodeScannerTests
         Assert.Contains(findings, f => f.Kind == DeadCodeFindingKind.RedundantJump);
     }
 
-    // --- Scope limits -----------------------------------------------------------
-
     [Fact]
     public void FunctionBody_NeverAnalyzed()
     {
-        // Known v1 scope limit: only procedure/trigger bodies are analyzed (matching
-        // TransactionHygieneScanner's own established scope) - a function with the exact same
-        // unused-variable/unreachable-code shapes is declined, not silently swept in.
         var findings = Scan("""
             CREATE FUNCTION dbo.F(@x INT) RETURNS INT AS
             BEGIN

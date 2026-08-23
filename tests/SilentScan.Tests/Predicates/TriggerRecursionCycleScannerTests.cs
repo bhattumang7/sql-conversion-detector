@@ -4,15 +4,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md "Second full-archive practitioner sweep (2026-08-18)" §G "Multi-hop
-/// trigger recursion cycle across tables" - fire/near-miss coverage for
-/// <see cref="TriggerRecursionCycleFinding"/>. See that finding's own doc comment for the full
-/// precision story, the gating correction (server-level 'nested triggers', not database-level
-/// RECURSIVE_TRIGGERS), and the real Docker oracle evidence (a disposable scratch database and a
-/// real cross-table trigger cascade, dropped immediately after - not reproduced here, this file
-/// exercises the static AST+catalog claim only).
-/// </summary>
 public sealed class TriggerRecursionCycleScannerTests
 {
     private const string Ddl =
@@ -66,7 +57,6 @@ public sealed class TriggerRecursionCycleScannerTests
     [Fact]
     public void TwoTableCycle_NestedTriggersUnknown_NeverFires()
     {
-        // File-mode/never-read - never overclaim a risk that may not be live.
         var findings = Scan(
             "CREATE TRIGGER dbo.trg_TA ON dbo.TA AFTER UPDATE AS "
             + "BEGIN UPDATE dbo.TB SET Id = Id WHERE Id = 1; END;"
@@ -99,7 +89,6 @@ public sealed class TriggerRecursionCycleScannerTests
     [Fact]
     public void OneWayChainNoCycle_NeverFires()
     {
-        // A writes to B, B writes to C, but nothing writes back to A - no cycle exists at all.
         var findings = Scan(
             "CREATE TRIGGER dbo.trg_TA ON dbo.TA AFTER UPDATE AS "
             + "BEGIN UPDATE dbo.TB SET Id = Id WHERE Id = 1; END;"
@@ -114,8 +103,6 @@ public sealed class TriggerRecursionCycleScannerTests
     [Fact]
     public void SelfWritingTriggerAlone_NeverFires_NotThisStream()
     {
-        // A single trigger writing back to its own table is DirectRecursiveTrigger's own claim
-        // (TriggerCorrectnessScanner), not this cross-table stream.
         var findings = Scan(
             "CREATE TRIGGER dbo.trg_TA ON dbo.TA AFTER UPDATE AS "
             + "BEGIN UPDATE dbo.TA SET Id = Id WHERE Id = 1; END;",

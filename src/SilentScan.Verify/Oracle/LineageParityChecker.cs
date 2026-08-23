@@ -4,21 +4,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Verify.Oracle;
 
-/// <summary>
-/// The environment parity gate CLAUDE.md's Verify workflow calls for but which, before this,
-/// only ran inside hand-picked unit tests: after a repo's DDL deploys, diff every view's
-/// statically-inferred column type against sys.columns and fail loudly on any mismatch ("any
-/// mismatch is a P0 lineage bug"), rather than trusting the static classifier's types silently
-/// for the rest of the pipeline. Covers every provenance kind <see
-/// cref="ColumnProvenanceAnalysis.TryGetScalarType"/> can resolve a type for - a direct
-/// BaseColumn passthrough, but also a CAST/CONVERT's explicit target type, Pass 2's own
-/// inferred Expression type, a multi-statement TVF's Declared column, and a Union whose
-/// branches all agreed - not only the passthrough case. Length/precision/scale are diffed
-/// alongside category/collation: a category match with the wrong length is exactly the kind of
-/// wrong-but-plausible answer this gate exists to catch (an audit finding - the previous
-/// category+collation-only diff would pass a `varchar(20)` column statically typed as
-/// `varchar(50)` clean).
-/// </summary>
 public sealed class LineageParityChecker
 {
     private readonly ColumnCatalogReader _reader;
@@ -47,8 +32,6 @@ public sealed class LineageParityChecker
             }
             catch (Microsoft.Data.SqlClient.SqlException)
             {
-                // Not every resolved relation is a real deployed view (derived tables, MSTVFs
-                // that never became a server object) - absence here is not itself a mismatch.
                 continue;
             }
 
@@ -86,17 +69,6 @@ public sealed class LineageParityChecker
             return;
         }
 
-        // A null inferred collation is never "the resolved answer happens to be nothing" - it's
-        // VerdictClassifier's own never-guess contract: no per-column COLLATE clause and no
-        // manifest-declared collation to fall back to means this pass deliberately left the
-        // facet unresolved (CLAUDE.md: "collation unknown and unpinned -> UNKNOWN, never
-        // guess"). sys.columns, by contrast, ALWAYS reports a real resolved collation - every
-        // string column has one whether or not any DDL statement said so explicitly - so
-        // comparing "intentionally unresolved" against "the database's actual default" reports
-        // a mismatch on every single unpinned repo, which is exactly the false-positive this
-        // gate must not produce (an audit finding: 47 of 48 DNN Platform "P0 lineage bugs" were
-        // this, burying the one real bug underneath them). Only compare the facet when this
-        // pass actually claimed to know the answer.
         if (type.IsStringFamily && type.Collation is not null
             && !string.Equals(type.Collation.Name, oracleColumn.CollationName, StringComparison.OrdinalIgnoreCase))
         {
@@ -119,33 +91,14 @@ public sealed class LineageParityChecker
         }
     }
 
-    /// <summary>
-    /// <c>sys.types.name</c> for almost every category is just the C# enum member's own name
-    /// lowercased (comparison here is already <see cref="StringComparison.OrdinalIgnoreCase"/>,
-    /// so the two need not even agree on casing) - except <see cref="SqlTypeCategory.SqlVariant"/>,
-    /// whose real engine type name is <c>sql_variant</c> (an underscore, not merely a casing
-    /// difference from the bare enum name "SqlVariant"), which no case-insensitive comparison
-    /// against <c>ToString()</c> can ever bridge. Oracle-confirmed directly: a real SQL_VARIANT
-    /// column reported a false "category" mismatch (SqlVariant vs sql_variant) before this fix -
-    /// exactly the false-positive class this checker's own doc comment warns burying a real bug
-    /// under (the DNN Platform collation-facet incident).
-    /// </summary>
-    private static string CategoryTypeName(SqlTypeCategory category) =>
+private static string CategoryTypeName(SqlTypeCategory category) =>
         category == SqlTypeCategory.SqlVariant ? "sql_variant" : category.ToString();
 
     private static bool IsStringOrBinaryFamily(SqlTypeCategory category) =>
         category is SqlTypeCategory.Char or SqlTypeCategory.VarChar or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar
             or SqlTypeCategory.Binary or SqlTypeCategory.VarBinary;
 
-    /// <summary>
-    /// sys.columns.max_length is a BYTE count, not a character count - verified directly against
-    /// the real engine: an nchar/nvarchar column's max_length is always double its declared
-    /// character length (Unicode is 2 bytes/char), while char/varchar/binary/varbinary's
-    /// max_length equals the declared length exactly. A (max) column reports max_length = -1
-    /// regardless of family. Returns true (nothing to compare) when the inferred type carries no
-    /// length facet at all - not every string-family SqlType construction site sets one.
-    /// </summary>
-    private static bool LengthMatches(SqlType type, CatalogColumnInfo oracleColumn, out string inferredLength, out string actualLength)
+private static bool LengthMatches(SqlType type, CatalogColumnInfo oracleColumn, out string inferredLength, out string actualLength)
     {
         inferredLength = string.Empty;
         actualLength = string.Empty;
@@ -179,7 +132,6 @@ public sealed class LineageParityChecker
     }
 }
 
-/// <summary>One inferred-vs-actual disagreement the environment parity gate found - CLAUDE.md: "any mismatch is a P0 lineage bug".</summary>
 public sealed record LineageParityMismatch(
     string QualifiedViewName,
     string ColumnName,

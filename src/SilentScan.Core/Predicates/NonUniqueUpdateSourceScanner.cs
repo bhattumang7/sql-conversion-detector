@@ -6,19 +6,6 @@ using SilentScan.Core.Predicates.Normalization;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "UPDATE ... FROM without source uniqueness" - a standalone
-/// scanner. Reuses <see cref="Lineage.FromScopeResolver.ResolveForDataModification"/> (the same
-/// UPDATE-scope resolution <c>TypedPredicateExtractor</c>/<c>NotInNullableSubqueryScanner</c>
-/// already use) and the same JOIN-tree-flattening/AND-only-flattening shape
-/// <see cref="PartialCompositeForeignKeyJoinScanner"/> already established for "does a JOIN's own
-/// ON clause equate the columns a catalog structure says it needs to."
-///
-/// Only examines a JOIN where one side is unambiguously the UPDATE's own target (matched by
-/// alias, resolved against the same scope every column reference in the statement resolves
-/// through) - a join two hops away from the target is a materially different claim this scanner
-/// does not make (a known v1 scope limit, not a silently-missed case).
-/// </summary>
 public static class NonUniqueUpdateSourceScanner
 {
     public static IReadOnlyList<NonUniqueUpdateSourceFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
@@ -80,13 +67,7 @@ public static class NonUniqueUpdateSourceScanner
             }
         }
 
-        /// <summary>
-        /// A CTE is never schema-qualified, so it always shadows a same-named real base table for
-        /// its statement's own lifetime, including an updatable-CTE UPDATE target - resolving
-        /// through the catalog instead (cteRelations always null, pre-fix) silently matched the
-        /// target against an unrelated real table sharing the CTE's name (2026-08 audit).
-        /// </summary>
-        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
+private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
             new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
@@ -105,15 +86,7 @@ public static class NonUniqueUpdateSourceScanner
                 baseColumn.Type?.Collation?.IsCaseSensitive);
         }
 
-        /// <summary>
-        /// The alias a <see cref="NamedTableReference"/> is known by in its own FROM clause -
-        /// matches <see cref="ExplicitVisit(UpdateStatement)"/>'s own <c>targetAlias</c> extraction.
-        /// Any other <see cref="TableReference"/> shape (subquery, TVF, another nested JOIN) is
-        /// unresolvable to a single alias here and correctly falls through to null - a known,
-        /// stated v1 scope limit (a join two hops from the target, or through something other than
-        /// a direct base table, is a materially different claim this scanner does not make).
-        /// </summary>
-        private static string? AliasOf(TableReference reference) =>
+private static string? AliasOf(TableReference reference) =>
             reference is NamedTableReference named ? named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value : null;
 
         private void InspectJoin(
@@ -150,9 +123,6 @@ public static class NonUniqueUpdateSourceScanner
             var joinColumns = JoinKeyUniqueness.EqualityColumnsQualifiedBy(join.SearchCondition, sourceAlias);
             if (joinColumns.Count == 0)
             {
-                // No equality this scanner could resolve back to the source alias's own columns -
-                // could be a non-equality join predicate, or a column this pass couldn't resolve.
-                // Left unanalyzed rather than guessed at either way.
                 return;
             }
 
@@ -170,8 +140,6 @@ public static class NonUniqueUpdateSourceScanner
 
             if (setColumnNames.Count == 0)
             {
-                // The join exists but the SET clause never reads from this source - no observable
-                // risk, since which of the matching source rows "won" changes nothing.
                 return;
             }
 

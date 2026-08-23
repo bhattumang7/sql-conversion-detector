@@ -7,30 +7,6 @@ using SilentScan.Verify.Deployment;
 
 namespace SilentScan.Tests.Reporting;
 
-/// <summary>
-/// docs/audit-remediation-plan.md Phase 4.4, audit finding B4: a file with one bad batch
-/// previously vanished from catalog/lineage/predicates entirely, because
-/// <see cref="ScanReportBuilder.BuildFromParseResults"/> excluded any parse result with a
-/// non-empty Errors list, even though ScriptDOM itself had already dropped only the one
-/// malformed batch and kept parsing the rest. "Done when: a file with one bad batch still
-/// contributes its other batches' tables."
-///
-/// This is pure ScriptDOM-level parse recovery - <see cref="SqlScriptParser.ParseText"/> itself
-/// drops only the malformed batch and keeps parsing the rest of the file, and
-/// <see cref="ScanReportBuilder.BuildFromParseResults"/> must not throw the whole file's
-/// <see cref="SqlParseResult"/> away just because its Errors list is non-empty. Neither of those
-/// steps touches a database, so this does not route the malformed batch itself through
-/// <c>ScriptDeployer.DeployAsync</c> - that deployer executes each GO-separated batch directly
-/// against a real SQL Server with no per-batch try/catch (unlike the corpus-facing
-/// <c>DeployWhitelistedDdlAsync</c>), so a genuinely malformed batch would throw and abort the
-/// whole deployment, taking every later batch's table with it - which is exactly the failure
-/// mode this test exists to rule out at the ScanReportBuilder layer, and would make the test
-/// depend on deployment behavior it isn't about. Instead: the mixed-batch text is parsed
-/// directly (matching the original, pre-engine-authoritative test's own parse step) to prove
-/// ScriptDOM's recovery and BuildFromParseResults' resilience, while the catalog it's checked
-/// against is read from a real database that was deployed only the SQL known to be valid - the
-/// engine is still the sole source of catalog truth, it just never sees the broken batch text.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ScanReportBuilderParseRecoveryTests
 {
@@ -72,9 +48,6 @@ public sealed class ScanReportBuilderParseRecoveryTests
         Assert.NotEmpty(health.Errors);
         Assert.Equal(2, health.BatchCount);
 
-        // The proc's own WHERE predicate against dbo.Orders is only classifiable if the table's
-        // CREATE TABLE batch (unrelated to, and positioned around, the broken batch) still made
-        // it into the catalog.
         var finding = Assert.Single(report.TypedFindings);
         Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
     }
@@ -96,13 +69,7 @@ public sealed class ScanReportBuilderParseRecoveryTests
         Assert.Empty(report.Tier1Findings);
     }
 
-    /// <summary>
-    /// Deploys only the known-valid SQL text to a fresh disposable database and reads its
-    /// catalog back via the engine - no parse-error text ever reaches deployment, since
-    /// <see cref="ScriptDeployer.DeployAsync"/> aborts the whole deployment on the first batch
-    /// that fails, which a malformed batch always would.
-    /// </summary>
-    private static async Task<DatabaseCatalog> DeployAndReadCatalogAsync(string sql, CancellationToken cancellationToken = default)
+private static async Task<DatabaseCatalog> DeployAndReadCatalogAsync(string sql, CancellationToken cancellationToken = default)
     {
         var options = SqlServerOptions.LocalDocker;
         var databaseName = $"SilentScanTest_{Guid.NewGuid():N}";

@@ -4,19 +4,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// Roadmap Phase C2: before <see cref="Catalog.DatabaseCatalog.MergeFileModeExtras"/> existed,
-/// live mode's catalog came straight from engine metadata alone and never learned about
-/// synonyms, scalar UDF return types, or temp-table/table-variable shapes - all three exist only
-/// as text inside a module body, which a live scan parses (for predicate analysis) but never fed
-/// through <see cref="Catalog.CatalogBuilder"/>. That made a live scan of a synonym/UDF/temp-
-/// table-heavy database resolve strictly WORSE than it does now - a predicate the engine
-/// metadata alone couldn't see came back "no known DDL" purely because
-/// <see cref="Catalog.CatalogBuilder"/>'s own module-body inference was never consulted at all.
-/// Proves live mode actually resolves all three constructs correctly, on its own merits (no
-/// file-mode comparison - the file-parsed catalog pipeline this test used to compare against has
-/// been deleted, per the roadmap's "delete the file-parsed catalog path" item).
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LiveCatalogParityExtrasTests : OracleTestFixture
 {

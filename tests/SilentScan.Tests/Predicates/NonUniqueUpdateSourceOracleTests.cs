@@ -3,14 +3,6 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "UPDATE ... FROM without source uniqueness" - oracle-
-/// confirms the general mechanism once (not per finding, per this session's own precedent): a
-/// real executed <c>UPDATE ... FROM ... JOIN</c> against a non-unique source silently picks a
-/// value from one of the matching source rows, and the identical shape against a provably unique
-/// source is deterministic. Also directly confirms the load-bearing MERGE contrast this finding's
-/// own doc comment cites, rather than trusting Microsoft's documentation blind.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class NonUniqueUpdateSourceOracleTests : OracleTestFixture
 {
@@ -97,9 +89,6 @@ public sealed class NonUniqueUpdateSourceOracleTests : OracleTestFixture
     [Fact]
     public async Task CompositeUniqueSuperset_JoinOnSubsetOnly_StillMultiMatches()
     {
-        // UNIQUE(TargetId, Cat) does NOT make a join on TargetId alone safe - the same
-        // precision-critical case the scanner must not mis-suppress, confirmed at the engine
-        // level too, not just in the scanner's own catalog check.
         await using var connection = await OpenConnectionAsync();
 
         await using (var seed = new SqlCommand(

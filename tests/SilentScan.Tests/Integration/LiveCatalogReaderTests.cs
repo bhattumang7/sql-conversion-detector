@@ -7,14 +7,6 @@ using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Integration;
 
-/// <summary>
-/// <see cref="LiveCatalogReader"/> builds a <see cref="DatabaseCatalog"/> straight from live
-/// engine metadata instead of inferring it from parsed DDL text - this locks in that the
-/// resulting catalog shape (types, per-column collations, the indexed flag, computed-column
-/// types the engine itself resolved, type aliases) matches what the same DDL would produce
-/// through the file-mode <c>CatalogBuilder</c> path, against the real oracle rather than a
-/// hand-maintained expectation of what <c>sys.columns</c>/<c>sys.indexes</c> return.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LiveCatalogReaderTests : OracleTestFixture
 {
@@ -110,10 +102,6 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_ComputedColumn_TypeIsEngineResolvedNotReDerived()
     {
-        // Unlike file mode (which must re-derive a computed column's type from its defining
-        // expression via ComputedColumnTypeResolver), live mode gets the engine's own already-
-        // resolved type straight from sys.columns - this asserts that type actually reads back
-        // as the string family it really is, not Unknown/null.
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         var table = Assert.Single(catalog.Tables, t => t.Name == "Customers");
@@ -176,18 +164,6 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_MatchingForeignKey_CrossTableTypeDriftScannerNeverFires()
     {
-        // Oracle-discovered while building the fires case (both attempts rejected outright, even
-        // WITH NOCHECK): SQL Server enforces category AND collation equality between an FK's two
-        // sides at ADD CONSTRAINT time (Msg 1757 for a collation mismatch), and blocks an ALTER
-        // COLUMN on either side afterward while the constraint still exists (Msg 5074/4922) - a
-        // genuinely drifted, currently-valid FK relationship cannot exist in a real database at
-        // all. This means the scanner's real-world yield on FK-linked pairs specifically is
-        // structurally zero on any database with intact constraints, not just empirically rare -
-        // explaining why 1,247 real FK pairs measured against the local RM_ test database showed
-        // 0 drift (docs/detection-checklist.md). The scanner's actual "fires" logic is still
-        // proven correct - directly, against a hand-built catalog, in
-        // CrossTableTypeDriftScannerTests, since that's the only way to construct the state at
-        // all. This test locks in the negative: a real, matching FK never produces a finding.
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         var findings = CrossTableTypeDriftScanner.Scan(catalog);
@@ -254,9 +230,6 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
         Assert.False(unpinned.IsFirst);
         Assert.False(unpinned.IsLast);
 
-        // First pinned + one unpinned = a fully determined order (middle set of one) - the
-        // scanner correctly declines even though a pin exists, matching TriggerOrderScanner's
-        // own ThreeTriggers_FirstAndLastPinned_MiddleSingleton_NeverFires unit test.
         var findings = TriggerOrderScanner.Scan(catalog);
         Assert.DoesNotContain(findings, f => f.TableQualifiedName == "dbo.OrderedTriggers");
     }
@@ -305,9 +278,6 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
 
         var history = catalog.Find("dbo.WidgetHistory");
         Assert.NotNull(history);
-        // The engine auto-creates a clustered index on the history table keyed on the period
-        // columns (no explicit history index was named) - real, but not a business-column index,
-        // so it must never be treated as a match for IX_Widget_Code.
         Assert.DoesNotContain(history!.Indexes, i => i.KeyColumns.Contains("Code", StringComparer.OrdinalIgnoreCase));
     }
 
@@ -341,8 +311,6 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
 
         var findings = TemporalTableHistoryIndexGapScanner.Scan(catalog);
 
-        // WidgetId is the current table's clustered PRIMARY KEY - structurally impossible on the
-        // history side (Msg 13558), so it must never appear as a finding's own key-column list.
         Assert.DoesNotContain(findings, f => f.KeyColumns.Contains("WidgetId"));
     }
 }

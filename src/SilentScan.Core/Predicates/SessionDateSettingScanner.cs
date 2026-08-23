@@ -3,8 +3,6 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>docs/detection-checklist.md "Second OSS/commercial sweep": SET DATEFORMAT/DATEFIRST
-/// mid-module. Fully syntax-only, one AST match per <see cref="SetCommandStatement"/>.</summary>
 public static class SessionDateSettingScanner
 {
     public static IReadOnlyList<SessionDateSettingFinding> Scan(SqlParseResult parseResult)

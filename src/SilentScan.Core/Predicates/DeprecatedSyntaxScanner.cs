@@ -4,17 +4,8 @@ using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 4 "Task-comment tracking" and "Non-ANSI and deprecated
-/// spellings" - see <see cref="DeprecatedSyntaxFinding"/> for the full scope, oracle-verification,
-/// and closed-item documentation.
-/// </summary>
 public static class DeprecatedSyntaxScanner
 {
-    // Microsoft's own documented pre-SQL-Server-2005 system compatibility views ("Mapping System
-    // Tables to System Views", Microsoft Learn) - retained for backward compatibility only, missing
-    // columns/rows the real sys.* catalog views expose. Independently sourced from Microsoft's own
-    // public documentation, not the third-party rule set this Tier 4 entry is derived from.
     private static readonly HashSet<string> LegacyCompatibilityViewNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "sysaltfiles", "syscacheobjects", "syscharsets", "syscolumns", "syscomments", "sysconfigures",
@@ -25,10 +16,6 @@ public static class DeprecatedSyntaxScanner
         "sysremotelogins", "sysservers", "systypes", "sysusers",
     };
 
-    // Microsoft's own documented pre-2005 legacy security-administration system stored procedures
-    // ("Deprecated Database Engine Features in SQL Server", Microsoft Learn) - superseded by
-    // CREATE LOGIN/CREATE USER/ALTER ROLE/ALTER SERVER ROLE. Independently sourced from Microsoft's
-    // own public documentation.
     private static readonly HashSet<string> RemovedSecurityStoredProcedureNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "sp_addapprole", "sp_addlogin", "sp_addremotelogin", "sp_addrole", "sp_addrolemember",
@@ -40,19 +27,7 @@ public static class DeprecatedSyntaxScanner
         "sp_revokelogin", "sp_srvrolepermission",
     };
 
-    /// <param name="parseResult">The already-parsed module/file to scan.</param>
-    /// <param name="catalog">
-    /// When supplied (live/corpus mode only - file-mode scanning never populates this), used to
-    /// suppress the "= NULL"/"&lt;&gt; NULL" findings for a module whose own live-read
-    /// <c>sys.sql_modules.uses_ansi_nulls</c> is false: under ANSI_NULLS OFF (baked in at
-    /// CREATE/ALTER time), <c>col = NULL</c> behaves as <c>col IS NULL</c> and genuinely matches
-    /// NULL rows, so the finding's core claim - a silent always-false trap - would be actively
-    /// wrong for that module. A module this pass can't resolve the flag for (file-mode, or a
-    /// live catalog lookup miss) keeps the finding - CLAUDE.md precision discipline treats a
-    /// false positive as worse than a missed one, but an unresolved flag is the documented
-    /// majority-case default (ANSI_NULLS ON), not a license to suppress speculatively.
-    /// </param>
-    public static IReadOnlyList<DeprecatedSyntaxFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
+public static IReadOnlyList<DeprecatedSyntaxFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
     {
         var findings = new List<DeprecatedSyntaxFinding>();
 
@@ -111,9 +86,6 @@ public static class DeprecatedSyntaxScanner
         }
     }
 
-    // Word-boundary match, case-insensitive - the target word fires as a whole word only; a longer
-    // word merely containing it as a substring (e.g. a to-do-tracking word embedded in "TODOLIST"
-    // or "AUTODOC") does not.
     private static bool ContainsWord(string text, string word)
     {
         var index = 0;
@@ -133,8 +105,7 @@ public static class DeprecatedSyntaxScanner
         return false;
     }
 
-    /// <summary>The qualified name of the single procedure/function/view/trigger a parse result's own top-level CREATE/ALTER statement declares, if any - null for a parse result with no such statement (an ad-hoc script, a batch of plain DML) or with more than one candidate (a multi-object file-mode script, where no single module's own ANSI_NULLS flag would apply to the whole fragment anyway).</summary>
-    private static string? TryGetModuleQualifiedName(TSqlFragment fragment)
+private static string? TryGetModuleQualifiedName(TSqlFragment fragment)
     {
         if (fragment is not TSqlScript script)
         {
@@ -210,12 +181,6 @@ public static class DeprecatedSyntaxScanner
                         "\"<> NULL\"/\"!= NULL\" never matches any row under the default ANSI_NULLS ON session setting - use \"IS NOT NULL\".");
                     break;
 
-                // Not NULL-compared: the plain non-ANSI-spelling complaint applies instead. "!="
-                // is functionally identical to the ANSI "<>" (both NotEqualToBrackets/Exclamation
-                // already produce the same BooleanComparisonType family), but ANSI SQL only ever
-                // defines "<>" - "!=" is a T-SQL-specific spelling of it, same as "!<"/"!>" are
-                // T-SQL-specific spellings with no ANSI equivalent at all ("<>" has no direction,
-                // so only the exclamation form itself, never NotEqualToBrackets, is non-ANSI here).
                 case BooleanComparisonType.NotEqualToExclamation
                     or BooleanComparisonType.NotLessThan
                     or BooleanComparisonType.NotGreaterThan:
@@ -313,12 +278,6 @@ public static class DeprecatedSyntaxScanner
         private static bool IsNullLiteral(ScalarExpression expression) =>
             expression is NullLiteral;
 
-        // The first table hint's own FirstTokenIndex points at the hint keyword itself (e.g.
-        // "NOLOCK"), not at the enclosing "(" - ScriptDom's raw token stream also includes
-        // WhiteSpace as its own token type (confirmed directly: dumping the stream for
-        // "WITH (NOLOCK)" shows With, WhiteSpace, LeftParenthesis, Identifier as four distinct
-        // tokens), so walk back past whitespace, then exactly one LeftParenthesis, then past any
-        // further whitespace, to reach the token that would be "WITH" if the modern form was used.
         private static bool HasPrecedingWithKeyword(IList<TSqlParserToken> tokens, int hintFirstTokenIndex)
         {
             var index = SkipBackWhitespace(tokens, hintFirstTokenIndex - 1);
@@ -348,7 +307,6 @@ public static class DeprecatedSyntaxScanner
             BooleanComparisonType.NotEqualToExclamation => "!=",
             _ => type.ToString(),
         };
-
 
         private void Add(DeprecatedSyntaxFindingKind kind, TSqlFragment node, string detail) =>
             Findings.Add(new DeprecatedSyntaxFinding(
