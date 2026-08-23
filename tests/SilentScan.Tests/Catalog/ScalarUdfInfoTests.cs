@@ -446,6 +446,132 @@ public sealed class ScalarUdfInfoTests
     }
 
     [Fact]
+    public void Build_FunctionUsingTryCatch_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_TryCatch (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @r INT = 0;
+                BEGIN TRY
+                    SET @r = @x / 1;
+                END TRY
+                BEGIN CATCH
+                    SET @r = 0;
+                END CATCH
+                RETURN @r;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_TryCatch", out var info));
+        Assert.Contains("TRY/CATCH", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionDeclaringTableVariable_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_TableVar (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @t TABLE (Id INT);
+                RETURN @x;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_TableVar", out var info));
+        Assert.Contains("table variable", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionUsingExecuteStatement_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE PROCEDURE dbo.usp_Helper AS SELECT 1;
+            GO
+            CREATE FUNCTION dbo.fn_Exec (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                EXEC dbo.usp_Helper;
+                RETURN @x;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Exec", out var info));
+        Assert.Contains("EXECUTE", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionDeclaringCursor_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_Cursor (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE cur CURSOR LOCAL FOR SELECT 1;
+                RETURN @x;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Cursor", out var info));
+        Assert.Contains("cursor", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionWithMultipleReturnStatements_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_MultiReturn (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                IF @x > 0
+                    RETURN 1;
+                RETURN 0;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_MultiReturn", out var info));
+        Assert.Contains("multiple RETURN", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_RecursiveFunction_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_Recursive (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN dbo.fn_Recursive(@x - 1);
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Recursive", out var info));
+        Assert.Contains("recursive", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionReferencingDbts_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_Dbts ()
+            RETURNS VARBINARY(8)
+            AS
+            BEGIN
+                RETURN @@DBTS;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Dbts", out var info));
+        Assert.Contains("@@DBTS", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Build_ClrFunction_RegistersClrKindAndSkipsBlockerScan()
     {
         var catalog = BuildFrom(

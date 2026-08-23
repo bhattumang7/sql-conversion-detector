@@ -195,4 +195,128 @@ public sealed class CatchAllPredicateScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void AlterProcedure_SameShape_Fires()
+    {
+        var findings = Scan(
+            "ALTER PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN SELECT 1 FROM dbo.Customers WHERE (Code = @p OR @p IS NULL); END");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void CreateOrAlterProcedure_SameShape_Fires()
+    {
+        var findings = Scan(
+            "CREATE OR ALTER PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN SELECT 1 FROM dbo.Customers WHERE (Code = @p OR @p IS NULL); END");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void CreateFunction_SameShape_Fires()
+    {
+        var findings = Scan(
+            "CREATE FUNCTION dbo.usf_Find (@p VARCHAR(20)) RETURNS INT AS BEGIN DECLARE @r INT = (SELECT COUNT(*) FROM dbo.Customers WHERE (Code = @p OR @p IS NULL)); RETURN @r; END");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void CreateTrigger_ParametersAlwaysEmpty_NeverFires()
+    {
+        var findings = Scan(
+            "CREATE TRIGGER dbo.trg_Customers ON dbo.Customers AFTER INSERT AS BEGIN SELECT 1 FROM dbo.Customers WHERE Code = 'x'; END");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void AlterFunction_SameShape_Fires()
+    {
+        var findings = Scan(
+            "ALTER FUNCTION dbo.usf_Find (@p VARCHAR(20)) RETURNS INT AS BEGIN DECLARE @r INT = (SELECT COUNT(*) FROM dbo.Customers WHERE (Code = @p OR @p IS NULL)); RETURN @r; END");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void CreateOrAlterFunction_SameShape_Fires()
+    {
+        var findings = Scan(
+            "CREATE OR ALTER FUNCTION dbo.usf_Find (@p VARCHAR(20)) RETURNS INT AS BEGIN DECLARE @r INT = (SELECT COUNT(*) FROM dbo.Customers WHERE (Code = @p OR @p IS NULL)); RETURN @r; END");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void AlterTrigger_ParametersAlwaysEmpty_NeverFires()
+    {
+        var findings = Scan(
+            "ALTER TRIGGER dbo.trg_Customers ON dbo.Customers AFTER INSERT AS BEGIN SELECT 1 FROM dbo.Customers WHERE Code = 'x'; END");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CreateOrAlterTrigger_ParametersAlwaysEmpty_NeverFires()
+    {
+        var findings = Scan(
+            "CREATE OR ALTER TRIGGER dbo.trg_Customers ON dbo.Customers AFTER INSERT AS BEGIN SELECT 1 FROM dbo.Customers WHERE Code = 'x'; END");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void DeleteStatement_SameShapeInWhereClause_Fires()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN DELETE FROM dbo.Customers WHERE (Code = @p OR @p IS NULL); END");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.ColumnName);
+    }
+
+    [Fact]
+    public void DeleteStatement_WithRecompileHint_NeverFires()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN DELETE FROM dbo.Customers WHERE (Code = @p OR @p IS NULL) OPTION (RECOMPILE); END");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void MergeStatement_NoStandaloneWhereClause_NeverThrows()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN "
+            + "MERGE dbo.Customers AS t USING (SELECT @p AS Code) AS s ON t.Code = s.Code "
+            + "WHEN MATCHED THEN UPDATE SET t.Region = 'X' "
+            + "WHEN NOT MATCHED THEN INSERT (Id, Code, Region) VALUES (1, s.Code, 'X'); END");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void OrLeavesWrappedInParentheses_StillDetected()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN SELECT 1 FROM dbo.Customers WHERE (Code = @p) OR (@p IS NULL); END");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ColumnFromCte_NotABaseColumnAtDepthZero_NeverFires()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN "
+            + "WITH C AS (SELECT Code + '' AS Code FROM dbo.Customers) "
+            + "SELECT 1 FROM C WHERE (C.Code = @p OR @p IS NULL); END");
+
+        Assert.Empty(findings);
+    }
 }
