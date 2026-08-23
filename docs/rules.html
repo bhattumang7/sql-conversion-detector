@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">274 rules. 182 carry fix guidance; 23 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">275 rules. 183 carry fix guidance; 24 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -110,6 +110,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/catalog-max-typed-column.html">Max Typed Column</a> <code class="rule-key">silentscan/catalog/max-typed-column</code><span class="snippet">A string/binary column is declared MAX-typed.</span></li>
       <li><a class="id" href="rules/catalog-memory-optimized-clustered-index.html">Memory Optimized Clustered Index</a> <code class="rule-key">silentscan/catalog/memory-optimized-clustered-index</code><span class="snippet">A memory-optimized table&#x27;s primary key or an index on it resolves to a rowstore CLUSTERED index.</span></li>
       <li><a class="id" href="rules/catalog-memory-optimized-cross-storage-foreign-key.html">Memory Optimized Cross Storage Foreign Key</a> <code class="rule-key">silentscan/catalog/memory-optimized-cross-storage-foreign-key</code><span class="snippet">A foreign key relationship spans a memory-optimized table and a disk-based (non-memory-optimized) table, in either direction.</span></li>
+      <li><a class="id" href="rules/catalog-memory-optimized-filtered-index.html">Memory Optimized Filtered Index</a> <code class="rule-key">silentscan/catalog/memory-optimized-filtered-index</code><span class="snippet">A memory-optimized table carries a filtered index (a WHERE clause on the index definition).</span></li>
       <li><a class="id" href="rules/catalog-memory-optimized-foreign-key-referential-action.html">Memory Optimized Foreign Key Referential Action</a> <code class="rule-key">silentscan/catalog/memory-optimized-foreign-key-referential-action</code><span class="snippet">A foreign key between two memory-optimized tables declares an ON DELETE/ON UPDATE referential action other than NO ACTION (CASCADE, SET NULL, or SET DEFAULT).</span></li>
       <li><a class="id" href="rules/catalog-memory-optimized-index-included-columns.html">Memory Optimized Index Included Columns</a> <code class="rule-key">silentscan/catalog/memory-optimized-index-included-columns</code><span class="snippet">A memory-optimized table&#x27;s index declares INCLUDE columns.</span></li>
       <li><a class="id" href="rules/catalog-memory-optimized-unsupported-column-type.html">Memory Optimized Unsupported Column Type</a> <code class="rule-key">silentscan/catalog/memory-optimized-unsupported-column-type</code><span class="snippet">A memory-optimized table declares a column typed xml, sql_variant, text, ntext, image, or timestamp/rowversion.</span></li>

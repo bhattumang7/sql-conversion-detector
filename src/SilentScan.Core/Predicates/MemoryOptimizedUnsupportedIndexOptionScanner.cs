@@ -37,6 +37,13 @@ public static class MemoryOptimizedUnsupportedIndexOptionScanner
                         table.QualifiedName, indexName, MemoryOptimizedUnsupportedIndexOptionKind.IncludedColumns,
                         table.SourcePath, table.SourceLine));
                 }
+
+                if (index.IsFiltered)
+                {
+                    findings.Add(new MemoryOptimizedUnsupportedIndexOptionFinding(
+                        table.QualifiedName, indexName, MemoryOptimizedUnsupportedIndexOptionKind.FilteredIndex,
+                        table.SourcePath, table.SourceLine));
+                }
             }
         }
 

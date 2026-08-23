@@ -813,7 +813,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Unsupported index option on a memory-optimized table ({report.MemoryOptimizedUnsupportedIndexOptionFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "A structural catalog fact: a rowstore CLUSTERED index, or an index with INCLUDE columns, is not supported on a memory-optimized table - oracle-confirmed real DDL execution fails (Msg 12317/10664 respectively).");
+            "A structural catalog fact: a rowstore CLUSTERED index, an index with INCLUDE columns, or a filtered index (a WHERE clause on the index) is not supported on a memory-optimized table - oracle-confirmed real DDL execution fails (Msg 12317/10664/10794 respectively).");
 
         yield return new ReadableBlock.Table(
             [WhereHeader, "Table", "Index", "Issue"],
@@ -826,6 +826,7 @@ public static class ReadableScanReportWriter
                 {
                     MemoryOptimizedUnsupportedIndexOptionKind.ClusteredIndex => "rowstore CLUSTERED index",
                     MemoryOptimizedUnsupportedIndexOptionKind.IncludedColumns => "INCLUDE columns",
+                    MemoryOptimizedUnsupportedIndexOptionKind.FilteredIndex => "filtered index (WHERE clause)",
                     _ => "unsupported index option",
                 },
             })]);

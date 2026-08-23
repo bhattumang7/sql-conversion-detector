@@ -74,6 +74,22 @@ public sealed class MemoryOptimizedOracleTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task FilteredIndex_OnMemoryOptimizedTable_FailsToDeploy()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE TABLE dbo.Widgets (Id INT NOT NULL PRIMARY KEY NONCLUSTERED, Amount INT NULL) WITH (MEMORY_OPTIMIZED = ON);
+            """);
+
+        var exception = await AssertDeployFailsAsync(
+            """
+            CREATE INDEX IX_Amount ON dbo.Widgets (Amount) WHERE Amount IS NOT NULL;
+            """);
+
+        Assert.Equal(10794, exception.Number);
+    }
+
+    [Fact]
     public async Task ClusteredPrimaryKey_OnMemoryOptimizedTable_FailsToDeploy()
     {
         var exception = await AssertDeployFailsAsync(

@@ -33,6 +33,23 @@ public sealed class MemoryOptimizedUnsupportedIndexOptionScannerTests
     }
 
     [Fact]
+    public void FilteredIndex_OnMemoryOptimizedTable_Fires()
+    {
+        var findings = Scan(
+            """
+            CREATE TABLE dbo.Widgets (
+                Id INT NOT NULL PRIMARY KEY NONCLUSTERED,
+                Amount INT NULL
+            ) WITH (MEMORY_OPTIMIZED = ON);
+            GO
+            CREATE INDEX IX_Amount ON dbo.Widgets (Amount) WHERE Amount IS NOT NULL;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(MemoryOptimizedUnsupportedIndexOptionKind.FilteredIndex, finding.Kind);
+    }
+
+    [Fact]
     public void PlainNonclusteredIndex_OnMemoryOptimizedTable_NeverFires()
     {
         var findings = Scan(

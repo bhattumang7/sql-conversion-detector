@@ -6,6 +6,7 @@ public enum MemoryOptimizedUnsupportedIndexOptionKind
 {
     ClusteredIndex,
     IncludedColumns,
+    FilteredIndex,
 }
 
 public sealed record MemoryOptimizedUnsupportedIndexOptionFinding(

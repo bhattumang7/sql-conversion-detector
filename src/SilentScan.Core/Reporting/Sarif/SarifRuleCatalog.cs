@@ -51,6 +51,7 @@ public static class SarifRuleCatalog
     {
         MemoryOptimizedUnsupportedIndexOptionKind.ClusteredIndex => "silentscan/catalog/memory-optimized-clustered-index",
         MemoryOptimizedUnsupportedIndexOptionKind.IncludedColumns => "silentscan/catalog/memory-optimized-index-included-columns",
+        MemoryOptimizedUnsupportedIndexOptionKind.FilteredIndex => "silentscan/catalog/memory-optimized-filtered-index",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled MemoryOptimizedUnsupportedIndexOptionKind."),
     };
     public static string MemoryOptimizedForeignKeyRuleId(MemoryOptimizedForeignKeyFindingKind kind) => kind switch
