@@ -299,6 +299,18 @@ Competitor tools are referred to generically; real identities are in
         check whether this boundary is already caught downstream.
       - `UNPIVOT` mixing source columns with incompatible types
         (`sys.columns`-decidable).
+      - Memory-optimized (Hekaton) natively compiled module restrictions
+        distinct from the shipped table-level family (unsupported column
+        type, unsupported index option, cross-storage/CASCADE foreign key):
+        the fixed row-size ceiling for a memory-optimized table, CLR UDT/
+        function binding inside a natively compiled module, "deep type"/
+        unsupported-builtin binder rejection inside a natively compiled
+        module, non-Unicode-with-UTF-8-collation rejection in a natively
+        compiled module, and an unsupported `GENERATED ALWAYS` variant —
+        each needs its own oracle confirmation; likely higher-effort than
+        the shipped catalog-only family since a module body's own
+        expressions have to be walked, not just the table's own catalog
+        shape.
       - `WITH SCHEMABINDING` referencing an alias user type (or an invalid
         parsed type name) is a documented restriction.
       - Full-text index DDL validation (unsupported column type, invalid
