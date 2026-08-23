@@ -127,4 +127,74 @@ public sealed class CartesianJoinScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void CrossApply_IsNotTreatedAsExplicitCrossJoin()
+    {
+        var findings = Scan("SELECT * FROM dbo.A a CROSS APPLY dbo.B b;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == CartesianJoinKind.ExplicitCrossJoin);
+    }
+
+    [Fact]
+    public void ParenthesizedConnectingPredicate_NeverFires()
+    {
+        var findings = Scan("SELECT * FROM dbo.A a, dbo.B b WHERE (a.Id = b.AId);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void NegatedConnectingPredicate_NeverFires()
+    {
+        var findings = Scan("SELECT * FROM dbo.A a, dbo.B b WHERE NOT (a.Id <> b.AId);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void ThreeWayExplicitInnerJoinChain_AllConnected_NeverFires()
+    {
+        var findings = Scan(
+            "SELECT * FROM dbo.A a JOIN dbo.B b ON a.Id = b.AId JOIN dbo.C c ON b.AId = c.Id;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void NestedParenthesizedCrossJoinsOnBothSides_FiresForEachDisconnectedPair()
+    {
+        var findings = Scan(
+            "SELECT * FROM (dbo.A CROSS JOIN dbo.B) CROSS JOIN (dbo.C CROSS JOIN dbo.D);");
+
+        Assert.NotEmpty(findings);
+        Assert.All(findings, f => Assert.Equal(CartesianJoinKind.ExplicitCrossJoin, f.Kind));
+    }
+
+    [Fact]
+    public void QualifiedJoinWithNestedCrossJoinOnOneSide_FiresForTheNestedCrossJoin()
+    {
+        var findings = Scan(
+            "SELECT * FROM dbo.A a JOIN (dbo.B b CROSS JOIN dbo.C c) ON a.Id = b.AId;");
+
+        Assert.Contains(findings, f => f.Kind == CartesianJoinKind.ExplicitCrossJoin);
+    }
+
+    [Fact]
+    public void TopLevelParenthesizedQualifiedJoin_NeverCrashes()
+    {
+        var findings = Scan(
+            "SELECT * FROM (dbo.A a JOIN dbo.B b ON a.Id = b.AId);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void QualifiedJoinWithNestedCrossJoinOnFirstSide_FiresForTheNestedCrossJoin()
+    {
+        var findings = Scan(
+            "SELECT * FROM (dbo.A a CROSS JOIN dbo.B b) JOIN dbo.C c ON a.Id = c.Id;");
+
+        Assert.Contains(findings, f => f.Kind == CartesianJoinKind.ExplicitCrossJoin);
+    }
 }

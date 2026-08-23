@@ -1259,6 +1259,37 @@ public sealed class DuplicationScannerTests
     }
 
     [Fact]
+    public void CreateFunction_StringLiteralRepeatedThreeTimes_FiresDuplicatedStringLiteral()
+    {
+        var findings = Scan("""
+            CREATE FUNCTION dbo.F() RETURNS INT AS
+            BEGIN
+                DECLARE @a VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @b VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @c VARCHAR(20) = 'PENDING_REVIEW';
+                RETURN 1;
+            END
+            """);
+
+        Assert.Single(findings, f => f.Kind == DuplicationFindingKind.DuplicatedStringLiteral);
+    }
+
+    [Fact]
+    public void CreateTrigger_StringLiteralRepeatedThreeTimes_FiresDuplicatedStringLiteral()
+    {
+        var findings = Scan("""
+            CREATE TRIGGER dbo.trg_T ON dbo.T AFTER INSERT AS
+            BEGIN
+                DECLARE @a VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @b VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @c VARCHAR(20) = 'PENDING_REVIEW';
+            END
+            """);
+
+        Assert.Single(findings, f => f.Kind == DuplicationFindingKind.DuplicatedStringLiteral);
+    }
+
+    [Fact]
     public void AlterFunction_StringLiteralRepeatedThreeTimes_FiresDuplicatedStringLiteral()
     {
         var findings = Scan("""
@@ -1318,5 +1349,203 @@ public sealed class DuplicationScannerTests
             """);
 
         Assert.Single(findings, f => f.Kind == DuplicationFindingKind.DuplicatedStringLiteral);
+    }
+
+    [Fact]
+    public void EmptyScript_NoTokens_NeverFiresCommentedOutCode()
+    {
+        var findings = Scan("");
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.CommentedOutCode);
+    }
+
+    [Fact]
+    public void DeleteStatement_IdenticalUnqualifiedColumnOperands_Fires()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.A (Id INT NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DELETE FROM dbo.A WHERE Id = Id;
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void SelectStatement_IdenticalAliasQualifiedColumnOperands_Fires()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.A (Id INT NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.P AS BEGIN
+                SELECT 1 FROM dbo.A a WHERE a.Id = a.Id;
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void ColumnComparisonOutsideAnyQueryScope_NeverFiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF Col = Col PRINT 'y';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void NestedWhileLoop_GotoLabelCollectorDoesNotDescendIntoInnerLoop()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                WHILE 1 = 1
+                BEGIN
+                    WHILE 1 = 1
+                    BEGIN
+                        BREAK;
+                    END
+                    BREAK;
+                END
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.SingleIterationLoop);
+    }
+
+    [Fact]
+    public void NegatedNotLessThanComparison_HasNoOppositeOperator_NeverFiresNegatedComparisonAsOpposite()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF NOT (@x !< 5) PRINT 'y';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.NegatedComparisonAsOpposite);
+    }
+
+    [Fact]
+    public void AndChainBoundsWithSameLowerValueDifferentInclusivity_FiresRedundantAndCondition()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x > 5 AND @x >= 5 PRINT 'y';
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+    }
+
+    [Fact]
+    public void AndChainBoundsWithSameUpperValueDifferentInclusivity_FiresRedundantAndCondition()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x < 5 AND @x <= 5 PRINT 'y';
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+    }
+
+    [Fact]
+    public void AndChainDuplicateGreaterThanOrEqualBounds_FiresRedundantAndCondition()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x >= 1 AND @x >= 1 PRINT 'y';
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+    }
+
+    [Fact]
+    public void AndChainDuplicateLessThanBounds_FiresRedundantAndCondition()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x < 10 AND @x < 10 PRINT 'y';
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+    }
+
+    [Fact]
+    public void AndChainLowerOnlyAndUpperOnlyBounds_NeverFireEither()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x > 1 AND @x < 10 PRINT 'y';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.MutuallyExclusiveAndCondition);
+    }
+
+    [Fact]
+    public void AndChainDuplicateEqualsBounds_FiresRedundantAndCondition()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x = 1 AND @x = 1 PRINT 'y';
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+    }
+
+    [Fact]
+    public void AndChainDecimalLiteralBounds_FiresRedundantAndCondition()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x DECIMAL(10,2) = 10.0;
+                IF @x > 1.5 AND @x > 1.0 PRINT 'y';
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+    }
+
+    [Fact]
+    public void InlineTableValuedFunction_NoStatementList_NeverThrowsOrFiresDuplicatedStringLiteral()
+    {
+        var findings = Scan("""
+            CREATE FUNCTION dbo.F() RETURNS TABLE AS RETURN SELECT 'PENDING_REVIEW' AS X;
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.DuplicatedStringLiteral);
+    }
+
+    [Theory]
+    [InlineData("100 > @x", "@x > 200")]
+    [InlineData("5 >= @x", "@x > 100")]
+    [InlineData("5 <= @x", "@x < 1")]
+    public void AndChainLiteralOnLeftMirroredOperators_FireMutuallyExclusiveAndCondition(string firstComparison, string secondComparison)
+    {
+        var findings = Scan($"""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF {firstComparison} AND {secondComparison} PRINT 'y';
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.MutuallyExclusiveAndCondition);
     }
 }

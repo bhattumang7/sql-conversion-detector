@@ -367,4 +367,106 @@ public sealed class PredicateSurvivalAnalyzerTests
         var condition = ParseCondition("(NotNullCol = 1 AND NotNullCol = 2) OR NullableCol = 5");
         Assert.False(PredicateSurvivalAnalyzer.IsUnsatisfiable(condition, ResolveFacts));
     }
+
+    [Fact]
+    public void EquivalentOuterIsNullConjunct_AbsorbsInnerDisjunction()
+    {
+        var (dead, leaves) = Analyze("NullableCol IS NULL AND (NullableCol IS NULL OR NotNullCol = 1)");
+
+        Assert.DoesNotContain(leaves[0], dead);
+        Assert.Contains(leaves[1], dead);
+        Assert.Contains(leaves[2], dead);
+    }
+
+    [Fact]
+    public void EquivalentOuterNumericLiteralConjunct_AbsorbsInnerDisjunction()
+    {
+        var (dead, leaves) = Analyze("NotNullCol = 1.5 AND (NotNullCol = 1.5 OR NullableCol = 2)");
+
+        Assert.DoesNotContain(leaves[0], dead);
+        Assert.Contains(leaves[1], dead);
+        Assert.Contains(leaves[2], dead);
+    }
+
+    [Fact]
+    public void EquivalentOuterMoneyLiteralConjunct_AbsorbsInnerDisjunction()
+    {
+        var (dead, leaves) = Analyze("NotNullCol = $1.50 AND (NotNullCol = $1.50 OR NullableCol = 2)");
+
+        Assert.DoesNotContain(leaves[0], dead);
+        Assert.Contains(leaves[1], dead);
+        Assert.Contains(leaves[2], dead);
+    }
+
+    [Fact]
+    public void EquivalentOuterVariableComparisonConjunct_AbsorbsInnerDisjunction()
+    {
+        var (dead, leaves) = Analyze("@x = @y AND (@x = @y OR NullableCol = 2)");
+
+        Assert.DoesNotContain(leaves[0], dead);
+        Assert.Contains(leaves[1], dead);
+        Assert.Contains(leaves[2], dead);
+    }
+
+    [Fact]
+    public void SingleParenthesizedLiveComparison_NeverConcluded()
+    {
+        Assert.Empty(Analyze("(NotNullCol = 1)").Dead);
+    }
+
+    [Fact]
+    public void StringLiteralVsLiteralFalseEquality_MarkedDead()
+    {
+        var (dead, leaves) = Analyze("'a' = 'b' AND NotNullCol = 1");
+        Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
+
+    [Theory]
+    [InlineData("2 <> 2 AND NotNullCol = 1")]
+    [InlineData("2 < 1 AND NotNullCol = 1")]
+    [InlineData("2 <= 1 AND NotNullCol = 1")]
+    [InlineData("1 > 2 AND NotNullCol = 1")]
+    [InlineData("1 >= 2 AND NotNullCol = 1")]
+    public void NumericLiteralVsLiteralFalseComparison_VariousOperators_MarkedDead(string whereExpr)
+    {
+        var (dead, leaves) = Analyze(whereExpr);
+        Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
+
+    [Fact]
+    public void StringLiteralVsLiteralFalseInequality_MarkedDead()
+    {
+        var (dead, leaves) = Analyze("'a' <> 'a' AND NotNullCol = 1");
+        Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
+
+    [Fact]
+    public void StringLiteralVsLiteralUnsupportedOperator_NeverConcluded()
+    {
+        Assert.Empty(Analyze("'a' < 'b' AND NotNullCol = 1").Dead);
+    }
+
+    [Fact]
+    public void MoneyLiteralBetween_NeverCrashes()
+    {
+        Analyze("NotNullCol BETWEEN $1 AND $10");
+    }
+
+    [Fact]
+    public void UnaryPositiveAndNegativeLiteralEquality_Contradiction_MarkedDead()
+    {
+        var (dead, leaves) = Analyze("NotNullCol = +5 AND NotNullCol = -5");
+        Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
+
+    [Theory]
+    [InlineData("NotNullCol > 5 AND 3 > NotNullCol")]
+    [InlineData("NotNullCol > 5 AND 3 >= NotNullCol")]
+    [InlineData("NotNullCol < 1 AND 5 < NotNullCol")]
+    [InlineData("NotNullCol < 1 AND 5 <= NotNullCol")]
+    public void LiteralFirstRangeComparison_ContradictsColumnFirstComparison_MarkedDead(string whereExpr)
+    {
+        var (dead, leaves) = Analyze(whereExpr);
+        Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
 }

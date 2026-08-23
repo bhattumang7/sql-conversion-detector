@@ -387,4 +387,239 @@ public sealed class ProcCallGraphBuilderTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void Build_AlterProcedure_ProducesEdge()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@A int) AS SELECT 1;
+            GO
+            ALTER PROCEDURE dbo.Caller AS EXEC dbo.Callee @A = 1;
+            """);
+
+        Assert.Single(graph.Edges);
+    }
+
+    [Fact]
+    public void Build_CreateOrAlterProcedure_ProducesEdge()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@A int) AS SELECT 1;
+            GO
+            CREATE OR ALTER PROCEDURE dbo.Caller AS EXEC dbo.Callee @A = 1;
+            """);
+
+        Assert.Single(graph.Edges);
+    }
+
+    [Fact]
+    public void Build_CreateFunction_ProducesEdge()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@A int) AS SELECT 1;
+            GO
+            CREATE FUNCTION dbo.Caller() RETURNS INT AS
+            BEGIN
+                EXEC dbo.Callee @A = 1;
+                RETURN 1;
+            END
+            """);
+
+        Assert.Single(graph.Edges);
+    }
+
+    [Fact]
+    public void Build_AlterFunction_ProducesEdge()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@A int) AS SELECT 1;
+            GO
+            ALTER FUNCTION dbo.Caller() RETURNS INT AS
+            BEGIN
+                EXEC dbo.Callee @A = 1;
+                RETURN 1;
+            END
+            """);
+
+        Assert.Single(graph.Edges);
+    }
+
+    [Fact]
+    public void Build_CreateOrAlterFunction_ProducesEdge()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@A int) AS SELECT 1;
+            GO
+            CREATE OR ALTER FUNCTION dbo.Caller() RETURNS INT AS
+            BEGIN
+                EXEC dbo.Callee @A = 1;
+                RETURN 1;
+            END
+            """);
+
+        Assert.Single(graph.Edges);
+    }
+
+    [Fact]
+    public void Build_CreateTrigger_ProducesEdge()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE TABLE dbo.T (Id INT);
+            GO
+            CREATE PROCEDURE dbo.Callee (@A int) AS SELECT 1;
+            GO
+            CREATE TRIGGER dbo.trg_T ON dbo.T AFTER INSERT AS EXEC dbo.Callee @A = 1;
+            """);
+
+        Assert.Single(graph.Edges);
+    }
+
+    [Fact]
+    public void Build_AlterTrigger_ProducesEdge()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE TABLE dbo.T (Id INT);
+            GO
+            CREATE PROCEDURE dbo.Callee (@A int) AS SELECT 1;
+            GO
+            ALTER TRIGGER dbo.trg_T ON dbo.T AFTER INSERT AS EXEC dbo.Callee @A = 1;
+            """);
+
+        Assert.Single(graph.Edges);
+    }
+
+    [Fact]
+    public void Build_CreateOrAlterTrigger_ProducesEdge()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE TABLE dbo.T (Id INT);
+            GO
+            CREATE PROCEDURE dbo.Callee (@A int) AS SELECT 1;
+            GO
+            CREATE OR ALTER TRIGGER dbo.trg_T ON dbo.T AFTER INSERT AS EXEC dbo.Callee @A = 1;
+            """);
+
+        Assert.Single(graph.Edges);
+    }
+
+    [Fact]
+    public void Build_TopLevelDeclareBeforeProcedure_RestoresPriorVariableTypesAfterScope()
+    {
+        var (graph, _) = BuildFrom("""
+            DECLARE @g INT = 1;
+            GO
+            CREATE PROCEDURE dbo.Callee (@X int) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS EXEC dbo.Callee @X = 1;
+            """);
+
+        Assert.Single(graph.Edges);
+    }
+
+    [Fact]
+    public void Build_NamedArgumentNotMatchingAnyFormalParameter_IsSkipped()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@A int) AS SELECT 1;
+            GO
+            EXEC dbo.Callee @NoSuchParam = 1;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        Assert.Empty(edge.Arguments);
+    }
+
+    [Fact]
+    public void Build_UnrelatedPrintStatementBeforeCall_IsSkippedDuringLiteralPropagation()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @Status nvarchar(20) = 'PENDING';
+                PRINT 'noop';
+                EXEC dbo.Callee @Status = @Status;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.Equal("PENDING", argument.LiteralArgument!.Value);
+    }
+
+    [Fact]
+    public void Build_UnrelatedDeclareOfDifferentVariableBeforeCall_IsSkippedDuringLiteralPropagation()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @Status nvarchar(20) = 'PENDING';
+                DECLARE @Other INT = 1;
+                EXEC dbo.Callee @Status = @Status;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.Equal("PENDING", argument.LiteralArgument!.Value);
+    }
+
+    [Fact]
+    public void Build_CallerVariableAssignedInsideWhileLoop_DoesNotPropagateLiteral()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @Status nvarchar(20);
+                WHILE 1 = 0
+                BEGIN
+                    SET @Status = 'PENDING';
+                END
+                EXEC dbo.Callee @Status = @Status;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.Null(argument.LiteralArgument);
+    }
+
+    [Fact]
+    public void Build_CallerVariableAssignedInsideTryCatch_DoesNotPropagateLiteral()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @Status nvarchar(20);
+                BEGIN TRY
+                    SET @Status = 'PENDING';
+                END TRY
+                BEGIN CATCH
+                END CATCH
+                EXEC dbo.Callee @Status = @Status;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.Null(argument.LiteralArgument);
+    }
+
+    [Fact]
+    public void Build_CallerVariableDeclaredInsideConditional_DoesNotPropagateLiteral()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                IF 1 = 0
+                BEGIN
+                    DECLARE @Status nvarchar(20) = 'PENDING';
+                END
+                EXEC dbo.Callee @Status = @Status;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.Null(argument.LiteralArgument);
+    }
 }
