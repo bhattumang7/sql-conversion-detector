@@ -175,6 +175,27 @@ Competitor tools are referred to generically; real identities are in
       `INSERT INTO #temp EXEC` rules already use) is the `WITH RESULT SETS`
       analogue of that shipped family.
 
+- [ ] **Review low-precision rules for removal.** `statement-shape/top-without-order-by`
+      duplicates `bare-top-no-order-by` (same TOP-without-ORDER-BY detection,
+      near-identical rationale text) and is strictly worse — it's missing the
+      `TOP (100) PERCENT ... ORDER BY` exclusion its sibling already has.
+      Separately, several flat magic-number thresholds fire with no
+      comparison against any other catalog/usage data, the same shape as the
+      now-removed `declaration/undersized-column` and
+      `declaration/undersized-variable-or-parameter` rules:
+      `identity/seed-or-increment-anomaly` (any non-1 increment or negative
+      seed, while its own message concedes interleaved-writer sharding is
+      legitimate), `index-design/high-nullable-column-ratio` and
+      `high-string-column-ratio` (flat 0.8 ratio, no baseline),
+      `index-design/many-nonclustered-indexes` (>=7), `many-key-columns-index`
+      (>=7), `wide-table` (>=35 columns or >2000 bytes), and
+      `index-design/wide-clustered-key` (>3 key columns or >16 bytes, at
+      least tied to Microsoft's own published guidance rather than an
+      invented number). All are already labeled advisory/informational, not
+      asserting "almost always a mistake" - so this is a judgment call on
+      how much honestly-labeled heuristic noise the project tolerates, not a
+      correctness bug.
+
 - [ ] **Lower-confidence/niche backlog from the 2026-08-22 gap survey — one
       line each, group before scoping.** These didn't clear the bar for a
       full write-up above (medium/low survey confidence, a narrower feature
@@ -428,25 +449,19 @@ Competitor tools are referred to generically; real identities are in
 
 ### Docs
 
-- [ ] **Per-rule pages: remaining follow-ups.** All 284/284 rules now have a
+- [ ] **Per-rule pages: remaining follow-up.** All 284/284 rules now have a
       `RuleDocContent` entry under `RuleDocs/<Family>/<RuleName>.cs`, wired
-      into `RuleDocCatalog.ByRuleId`. Still open: `helpUri` on the JSON
-      findings schema (deliberately deferred behind the later
-      findings-schema-unification pass, not piecemeal — no finding record
-      carries a rule id today, so this needs the same rule-id field added to
-      all ~90 finding types in one pass, not one at a time).
-
-      Linking the rule page from the readable/console report: shipped for
-      every heading whose finding collection resolves to exactly one rule id
-      - the 5 `Kind`-grouped families (`Tier1`/`TvfFence`/`ScalarUdf`/
-      `ForcedSerial`/`SetOption`, one link per `group.Key`) plus 46
-      single-rule headings (`DanglingObjectReference`, `ExpressionDerived`,
-      `CollationConflicts`, `OversizedParameter`, etc.), all via
-      `RuleDocSite.Url(SarifRuleCatalog.*RuleId)`. The remaining ~40 headings
-      aggregate multiple rule IDs under one heading with no single ID at that
-      call site (e.g. `QueryAntiPattern`, `Formatting`, `TriggerCorrectness`,
-      `Duplication`) - linking those needs a real per-heading `GroupBy(f.Kind)`
-      restructuring, not attempted here.
+      into `RuleDocCatalog.ByRuleId`. Every readable/console report heading
+      now links to its own rule doc page too - the originally-shipped 5
+      `Kind`-grouped families, 46 single-rule-id headings, and the remaining
+      ~40 multi-kind headings (`QueryAntiPattern`, `Formatting`,
+      `TriggerCorrectness`, `Duplication`, etc.), each restructured to
+      `GroupBy(f => f.Kind)` with a per-kind sub-heading and
+      `RuleDocSite.Url(SarifRuleCatalog.*RuleId(group.Key))`. Still open:
+      `helpUri` on the JSON findings schema - deliberately deferred behind
+      the later findings-schema-unification pass, not piecemeal, since no
+      finding record carries a rule id today and adding one means touching
+      all ~90 finding types in one pass, not one at a time.
 
 ---
 
