@@ -428,38 +428,11 @@ Competitor tools are referred to generically; real identities are in
 
 ### Docs
 
-- [ ] **Per-rule pages: fill the remaining ~60/234 rules.** Shipped:
-      `RuleDocSite` (`helpUri` scheme, wired into SARIF `rules[].helpUri` and
-      `driver.informationUri`, plus `HumanizeTitle` so the index/page never
-      show a raw `silentscan/family/name` id as the display label) with its
-      golden slug test; `docs/rules.html` is a family-grouped index linking to
-      one generated page per rule under `docs/rules/`; each page is
-      Sonar-shaped ("Why is this an issue?" / "How can I fix it?" with
-      noncompliant/compliant SQL, plus a separate "Verified by an automated
-      test" section only when a real checked-in fixture exists) via
-      `RuleDocContent`/`RuleDocExample` (`src/SilentScan.Core/Reporting/
-      RuleDocs/RuleDocContent.cs`) — one hand-authored file per rule under
-      `RuleDocs/<Family>/<RuleName>.cs`, wired into `RuleDocCatalog.ByRuleId`;
-      `rules-doc` prunes orphaned pages; a docs-are-current regeneration test
-      (`RulesDocGeneratorTests`) byte-compares against `docs/`. 174/234 rules
-      have a `RuleDocContent` entry today (tier1, verdict/scan-forced+range-
-      seek, write-loss, tvf-fence, scalar-udf, a chunk of catalog/predicates/
-      call-graph, query-anti-pattern, trigger-correctness, forced-serial,
-      cross-module, correctness/dml/join/query singles, cartesian-join,
-      naming, session-date-setting, hint, window-frame, view-ordering,
-      temp-table, identity, declaration, security, module-compile-flag,
-      control-flow-risk, statement-shape, database-configuration, lineage,
-      dynamic-sql, the rest of catalog/predicate singles, index-design) — a
-      rule with no entry still renders (short rationale only, humanized
-      title, no fabricated fix/example section), just thinner. Remaining
-      backlog: formatting/dead-code/duplication/deprecated-syntax/
-      code-metrics (~50, lower value - mostly self-evident from their name).
-      Also open: `helpUri` on the JSON findings schema (deliberately deferred
-      behind the later findings-schema-unification pass, not piecemeal). Do
-      family-by-family, each its own commit (the per-rule-file-in-its-own-class
-      pattern parallelizes well across subagents - each batch just needs the
-      exact `SarifRuleCatalog` constant + current Rationale/FixGuidance text
-      per rule, handed out per family).
+- [ ] **Per-rule pages: remaining follow-ups.** All 284/284 rules now have a
+      `RuleDocContent` entry under `RuleDocs/<Family>/<RuleName>.cs`, wired
+      into `RuleDocCatalog.ByRuleId`. Still open: `helpUri` on the JSON
+      findings schema (deliberately deferred behind the later
+      findings-schema-unification pass, not piecemeal).
 
       Linking the rule page from the readable/console report: shipped for the
       5 finding-group headings that carry a real `Kind`-driven rule ID at
@@ -469,23 +442,6 @@ Competitor tools are referred to generically; real identities are in
       ~79 group headings aggregate multiple rule IDs under one heading with
       no single ID to hang a link on - linking those needs a real per-heading
       rule-id redesign, not attempted here.
-
-### Architecture inversion
-
-The 2026-08 audit's root cause, one problem behind ~15 findings: the pipeline
-doesn't own the rules — every scanner is a free-standing `static Scan(...)`
-that re-decides pipeline-level questions (name resolution, module identity,
-skip honesty, crash behavior, ordering) for itself, and all the shared
-machinery is opt-in. The inversion: a rule receives an already-resolved world
-and returns findings; the pipeline owns everything else. Phases are ordered by
-value-per-line and are each independently shippable; do them in order, commit
-per phase (Phase 0 commits per fix).
-
-- [ ] **Phase 4 — terminology rename.** ~384 "corpus" + ~609 "oracle" in
-      `src/`, including namespaces (`SilentScan.Core.Corpus`,
-      `SilentScan.Verify.Oracle`), public types, the `scan-corpus-live` verb,
-      fixture dirs, and docs. Mechanical but touches the CLI contract —
-      pick replacement terms with Umang first.
 
 ---
 
