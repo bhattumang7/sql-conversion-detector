@@ -17,6 +17,14 @@ public sealed class DynamicSqlScannerV2Tests
         return result;
     }
 
+    private static DynamicSqlExtractionResult ScanWithCatalog(string ddl, string sql)
+    {
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", ddl);
+        Assert.False(ddlResult.HasErrors, string.Join(';', ddlResult.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([ddlResult]);
+        return DynamicSqlScannerV2.Scan(Parse(sql), catalog: catalog);
+    }
+
     [Fact]
     public void TopLevelExec_OutsideAnyProcedure_EmitsScriptWithNoScope()
     {
@@ -224,5 +232,74 @@ public sealed class DynamicSqlScannerV2Tests
         var script = Assert.Single(result.AnalyzableScripts);
         Assert.Equal("SELECT fixed-output", script.InnerText);
         Assert.Equal(FindingConfidence.High, script.Confidence);
+    }
+
+    [Fact]
+    public void OrdinaryCall_CallGraphPresentButNoEdgeAtThisCallSite_FallsBackToHavocRatherThanSeedingFromSummary()
+    {
+        var callGraph = new ProcCallGraph([
+            new ProcCallEdge(null, "dbo.usp_Helper", new SourceSpan(SourcePath, 99, 1),
+                [new ProcCallArgument("@Out", new SqlType(SqlTypeCategory.NVarChar, Length: 50), FormalParameterIsOutput: true, CallerVariableName: "@rc", IsLiteral: false)]),
+        ]);
+        var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>
+        {
+            [("dbo.usp_Helper", "@Out")] = ["fixed-output"],
+        };
+
+        var result = DynamicSqlScannerV2.Scan(
+            Parse("DECLARE @rc NVARCHAR(50);\nEXEC dbo.usp_Helper @Out = @rc OUTPUT;\nEXEC('SELECT ' + @rc);"),
+            callGraph: callGraph, outputSummaryIndex: outputSummaryIndex);
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+        Assert.NotNull(script.PlaceholderOccurrences);
+        Assert.DoesNotContain("fixed-output", script.InnerText);
+    }
+
+    [Fact]
+    public void OrdinaryCall_KnownCalleeSummaryHasMultipleValues_JoinsThemIntoSeparateAnalyzableScripts()
+    {
+        var callSite = new SourceSpan(SourcePath, 2, 1);
+        var callGraph = new ProcCallGraph([
+            new ProcCallEdge(null, "dbo.usp_Helper", callSite,
+                [new ProcCallArgument("@Out", new SqlType(SqlTypeCategory.NVarChar, Length: 50), FormalParameterIsOutput: true, CallerVariableName: "@rc", IsLiteral: false)]),
+        ]);
+        var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>
+        {
+            [("dbo.usp_Helper", "@Out")] = ["fixed-output-a", "fixed-output-b"],
+        };
+
+        var result = DynamicSqlScannerV2.Scan(
+            Parse("DECLARE @rc NVARCHAR(50);\nEXEC dbo.usp_Helper @Out = @rc OUTPUT;\nEXEC('SELECT ' + @rc);"),
+            callGraph: callGraph, outputSummaryIndex: outputSummaryIndex);
+
+        Assert.Empty(result.Findings);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).ToList();
+        Assert.Equal(2, texts.Count);
+        Assert.Contains("SELECT fixed-output-a", texts);
+        Assert.Contains("SELECT fixed-output-b", texts);
+    }
+
+    [Fact]
+    public void SelectAssignmentFromSingleKnownTable_ParenthesizedVariablePlusColumnExpression_FoldsBothOperands()
+    {
+        var result = ScanWithCatalog(
+            "CREATE TABLE dbo.Templates (Name VARCHAR(50) NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Scratch AS
+            BEGIN
+                DECLARE @prefix VARCHAR(20) = 'PFX_';
+                DECLARE @x VARCHAR(100);
+                SELECT @x = (@prefix + Name) FROM dbo.Templates WHERE Name = 'Report';
+                EXEC (@x);
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+        Assert.StartsWith("PFX_", script.InnerText, StringComparison.Ordinal);
+        Assert.NotNull(script.PlaceholderOccurrences);
+        Assert.Single(script.PlaceholderOccurrences!);
     }
 }
