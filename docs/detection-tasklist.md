@@ -481,17 +481,11 @@ and returns findings; the pipeline owns everything else. Phases are ordered by
 value-per-line and are each independently shippable; do them in order, commit
 per phase (Phase 0 commits per fix).
 
-- [ ] **Engine-version sensitivity as a modeled field.** Today it's rationale
-      prose; only `QueryAntiPatternScanner` and
-      `ScalarUdfInfo.EngineIsInlineable` branch on `CompatibilityLevel` at
-      runtime. Fold in `TypePairMatrix`'s unread `ServerVersion` stamp
-      (16.0.4236.2/compat 160, zero consumers, so older/newer targets
-      silently get that build's verdicts at full confidence).
 - [ ] **Phase 4 — terminology rename.** ~384 "corpus" + ~609 "oracle" in
       `src/`, including namespaces (`SilentScan.Core.Corpus`,
       `SilentScan.Verify.Oracle`), public types, the `scan-corpus-live` verb,
       fixture dirs, and docs. Mechanical but touches the CLI contract —
-      ride it on Phase 3's churn, pick replacement terms with Umang first.
+      pick replacement terms with Umang first.
 
 ---
 
