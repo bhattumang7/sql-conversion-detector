@@ -286,5 +286,21 @@ public static class RuleDocCatalog
         [DeprecatedSyntax.StringLiteralColumnAlias.RuleId] = DeprecatedSyntax.StringLiteralColumnAlias.Content,
         [DeprecatedSyntax.RemovedSecurityStoredProcedure.RuleId] = DeprecatedSyntax.RemovedSecurityStoredProcedure.Content,
         [DeprecatedSyntax.DeprecatedSetRowcount.RuleId] = DeprecatedSyntax.DeprecatedSetRowcount.Content,
+
+        [Duplication.CommentedOutCode.RuleId] = Duplication.CommentedOutCode.Content,
+        [Duplication.DuplicatedStringLiteral.RuleId] = Duplication.DuplicatedStringLiteral.Content,
+        [Duplication.SingleIterationLoop.RuleId] = Duplication.SingleIterationLoop.Content,
+        [Duplication.SelfAssignment.RuleId] = Duplication.SelfAssignment.Content,
+        [Duplication.IdenticalBinaryOperands.RuleId] = Duplication.IdenticalBinaryOperands.Content,
+        [Duplication.RepeatedUnaryOperator.RuleId] = Duplication.RepeatedUnaryOperator.Content,
+        [Duplication.NegatedComparisonAsOpposite.RuleId] = Duplication.NegatedComparisonAsOpposite.Content,
+        [Duplication.DuplicateSiblingCondition.RuleId] = Duplication.DuplicateSiblingCondition.Content,
+        [Duplication.IdenticalBranchBodies.RuleId] = Duplication.IdenticalBranchBodies.Content,
+        [Duplication.AllBranchesIdentical.RuleId] = Duplication.AllBranchesIdentical.Content,
+        [Duplication.RedundantAndCondition.RuleId] = Duplication.RedundantAndCondition.Content,
+        [Duplication.MutuallyExclusiveAndCondition.RuleId] = Duplication.MutuallyExclusiveAndCondition.Content,
+        [Duplication.CollapsibleNestedIf.RuleId] = Duplication.CollapsibleNestedIf.Content,
+        [Duplication.NestedConditionalExpression.RuleId] = Duplication.NestedConditionalExpression.Content,
+        [Duplication.AlwaysTrueOrFalseLiteralComparison.RuleId] = Duplication.AlwaysTrueOrFalseLiteralComparison.Content,
     };
 }
