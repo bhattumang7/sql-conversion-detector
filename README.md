@@ -4,7 +4,7 @@ Static analyzer for SQL Server / T-SQL. It reads your code and your
 database's real catalog — no execution plan needed — and finds the bugs that
 compile, run, return the right rows on test data, and are still wrong.
 
-**234 rules across 11 families** — implicit conversions that silently kill an
+**284 rules across 11 families** — implicit conversions that silently kill an
 index seek, DML that truncates or rounds data with no engine error, unsafe
 dynamic SQL, missing indexes, dangerous triggers, and more. Every rule that
 makes a plan-shape or runtime claim is verified against a real SQL Server
@@ -50,7 +50,7 @@ dotnet run --project src/SilentScan.Cli -- scan-db <connection-string> \
 
 Connects to a live SQL Server database, reads its catalog straight from
 engine metadata, and runs every readable view, procedure, function and
-trigger through all 234 rules in one read-only pass — no DDL or DML is ever
+trigger through all 284 rules in one read-only pass — no DDL or DML is ever
 executed against the database you point it at.
 
 * `--format text` (default) — a readable report, grouped and explained.
@@ -103,5 +103,5 @@ against this instance's real plan XML before it ships.
   rule, its rationale, and how to fix it.
 * `CLAUDE.md` — the full project contract: scope, detection streams,
   verification approach.
-* `docs/detection-checklist.md` — the working backlog.
+* `docs/detection-tasklist.md` — the working backlog.
 * `docs/local-dev.md` — further local setup detail.

@@ -1,4 +1,4 @@
--- Oracle-verified precision guard (docs/detection-checklist.md Tier 1 "Type-aware upgrade of
+-- Oracle-verified precision guard (docs/detection-tasklist.md Tier 1 "Type-aware upgrade of
 -- the sargability stream" #1): ISNULL(col, x) on a NOT NULL column is a false positive the
 -- blanket function-wrap rule doesn't catch on its own - the optimizer proves
 -- ISNULL(NOT-NULL-col, x) = col and simplifies the wrap away entirely, seeking on Age directly,
