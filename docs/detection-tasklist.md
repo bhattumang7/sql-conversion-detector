@@ -432,16 +432,21 @@ Competitor tools are referred to generically; real identities are in
       `RuleDocContent` entry under `RuleDocs/<Family>/<RuleName>.cs`, wired
       into `RuleDocCatalog.ByRuleId`. Still open: `helpUri` on the JSON
       findings schema (deliberately deferred behind the later
-      findings-schema-unification pass, not piecemeal).
+      findings-schema-unification pass, not piecemeal — no finding record
+      carries a rule id today, so this needs the same rule-id field added to
+      all ~90 finding types in one pass, not one at a time).
 
-      Linking the rule page from the readable/console report: shipped for the
-      5 finding-group headings that carry a real `Kind`-driven rule ID at
-      their own call site (`Tier1Title`/`TvfFenceTitle`/`ScalarUdfTitle`/
-      `ForcedSerialTitle`/`SetOptionTitle` in `ReadableScanReportWriter.cs`),
-      via `RuleDocSite.Url(SarifRuleCatalog.*RuleId(group.Key))`. The other
-      ~79 group headings aggregate multiple rule IDs under one heading with
-      no single ID to hang a link on - linking those needs a real per-heading
-      rule-id redesign, not attempted here.
+      Linking the rule page from the readable/console report: shipped for
+      every heading whose finding collection resolves to exactly one rule id
+      - the 5 `Kind`-grouped families (`Tier1`/`TvfFence`/`ScalarUdf`/
+      `ForcedSerial`/`SetOption`, one link per `group.Key`) plus 46
+      single-rule headings (`DanglingObjectReference`, `ExpressionDerived`,
+      `CollationConflicts`, `OversizedParameter`, etc.), all via
+      `RuleDocSite.Url(SarifRuleCatalog.*RuleId)`. The remaining ~40 headings
+      aggregate multiple rule IDs under one heading with no single ID at that
+      call site (e.g. `QueryAntiPattern`, `Formatting`, `TriggerCorrectness`,
+      `Duplication`) - linking those needs a real per-heading `GroupBy(f.Kind)`
+      restructuring, not attempted here.
 
 ---
 

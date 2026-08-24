@@ -356,6 +356,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Heading(level, $"Collation conflicts ({report.CollationConflictFindings.Count})");
         yield return new ReadableBlock.Paragraph(
             "These comparisons put two explicitly different collations on either side, which SQL Server rejects at compile time (Msg 468) - the query does not run at all. That outranks any seek-versus-scan question, so they are listed first.");
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CollationConflictRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Left", "Right", OperatorHeader],
             [.. report.CollationConflictFindings.Select(f => new List<string>
@@ -378,6 +379,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "By the time these columns reach the predicate they are the result of an expression a view or function computed, not a stored column. An index on whatever feeds them cannot be seeked through that expression. " +
             "The ones that DO have a real index sitting underneath the expression - the cases actually worth rewriting the predicate for - are listed first.");
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ExpressionDerivedRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Computed by", "Underlying base columns"],
             [.. report.ExpressionDerivedFindings
@@ -595,6 +597,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A conversion seed, not yet a comparison: this column's own collation differs from the database's default (or, for a temp table/table variable, from tempdb's own effective collation) - the classic setup for a future collation-conflict compile error or a forced-scan implicit conversion once a query actually compares it against something carrying the baseline collation.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ColumnCollationDriftRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Column collation", "Baseline collation", "Object kind"],
             [.. report.ColumnCollationDriftFindings.Select(f => new List<string>
@@ -617,6 +620,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A conversion seed on a real foreign-key relationship: every JOIN that follows it risks the same column-side conversion the implicit-conversion stream classifies, whether or not any scanned query actually joins on it yet. Read live from sys.foreign_key_columns - always empty for a file-mode scan.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CrossTableTypeDriftRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ConstraintHeader, "Parent column", "Referenced column", "Collation differs"],
             [.. report.CrossTableTypeDriftFindings.Select(f => new List<string>
@@ -640,6 +644,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Two or more enabled AFTER triggers on the same table+event with no sp_settriggerorder pin narrowing their relative order down to a single pair - the engine documents this order as undefined. Read live from sys.triggers/sys.trigger_events - always empty for a file-mode scan.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TriggerOrderRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Event", "Unordered triggers"],
             [.. report.TriggerOrderFindings.Select(f => new List<string>
@@ -661,6 +666,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A real EXEC call site's caller-side variable has a declared type that risks silent data loss against the callee's own declared parameter type - an assignment-shaped conversion at parameter marshalling, not a predicate. This also primes the exact mismatched value for any comparison the callee's own body makes against a column using this parameter.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ProcCallArgumentMismatchRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Callee", ParameterHeader, "Caller variable", "Caller type", "Parameter type", "Risk"],
             [.. report.ProcCallArgumentMismatchFindings.Select(f => new List<string>
@@ -746,6 +752,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A structural catalog fact, not a plan-shape claim: a SQL_VARIANT column participating in a columnstore index does not deploy at all - oracle-confirmed real DDL execution fails with Msg 35343 (\"a data type that cannot participate in a columnstore index\").");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ColumnstoreUnsupportedColumnTypeRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Type", "Index"],
             [.. report.ColumnstoreUnsupportedColumnTypeFindings.Select(f => new List<string>
@@ -791,6 +798,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A structural catalog fact, not a plan-shape claim: xml, sql_variant, text, ntext, image, and timestamp/rowversion columns are not supported on a memory-optimized table at all - oracle-confirmed real DDL execution fails with Msg 10794.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MemoryOptimizedUnsupportedColumnTypeRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Type"],
             [.. report.MemoryOptimizedUnsupportedColumnTypeFindings.Select(f => new List<string>
@@ -868,6 +876,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A structural catalog fact (sys.computed_columns.is_persisted = 0): the column's definition is recomputed from the base row on every read that touches it, independent of whether that definition calls a UDF - never fires on a PERSISTED computed column, regardless of whether it's also indexed.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NonPersistedComputedColumnRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Definition"],
             [.. report.NonPersistedComputedColumnFindings.Select(f => new List<string>
@@ -889,6 +898,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Informational, not a plan-shape claim for this specific predicate - oracle-falsified that a bare equality predicate shows any memory-grant difference on its own. The risk is structural: the parameter/variable/expression on the other side is declared with a meaningfully longer length than the column, which risks memory-grant inflation once that value feeds a sort/hash operator elsewhere in the plan.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.OversizedParameterRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Column length", "Other operand length"],
             [.. report.OversizedParameterFindings.Select(f => new List<string>
@@ -911,6 +921,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "The mirror of the oversized-parameter section above, but strictly worse: the parameter/variable/expression on the other side is declared SHORTER than the column - or with no explicit length at all (T-SQL defaults a length-less DECLARE/parameter to 1) - so the value is silently truncated before the predicate ever runs. Structural, not a per-instance proof (this pass never traces the variable's actual assigned value): it states the declared-length pairing risks truncation, the same honesty WriteLossFinding already applies to assignment-site truncation. Where the parameter feeds a LIKE pattern or a range bound, truncation changes what the comparison itself means, not just which exact value it excludes - marked in the Effect column.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.UnderLengthParameterRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Column length", "Other operand length", OperatorHeader, "Effect"],
             [.. report.UnderLengthParameterFindings.Select(f => new List<string>
@@ -935,6 +946,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A CORRECTNESS finding, not a plan-shape one: the column's own catalog flag (sys.columns.is_ansi_padded = 0) means trailing blanks are stripped at INSERT time, so the column can never store a value ending in whitespace at all. The LIKE pattern here has significant trailing whitespace, so this predicate can never match anything the column could ever contain - oracle-confirmed directly (real seeded rows) that a plain equality comparison is NOT affected the same way, since T-SQL trims trailing spaces for '=' regardless of padding; only LIKE, where a pattern's own trailing whitespace is never trimmed, shows the real difference.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.AnsiPaddingMismatchRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Pattern"],
             [.. report.AnsiPaddingMismatchFindings.Select(f => new List<string>
@@ -956,6 +968,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "The classic '(Col = @p OR @p IS NULL)' optional-filter idiom (Erland Sommarskog, \"Dynamic Search Conditions in T-SQL\") - one cached plan must stay correct for every NULL/non-NULL state of @p, typically forcing a scan regardless of what value a given call actually passes. Not a claim about what a specific already-compiled plan is doing right now - a structural risk report. Suppressed entirely (not merely downgraded) when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE, both of which let the optimizer see the real value on each call and fully resolve this risk. Rows on a confirmed-indexed column are listed first.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CatchAllPredicateRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, ParameterHeader, IndexedHeader],
             [.. report.CatchAllPredicateFindings
@@ -982,6 +995,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Purely informational, not a sargability claim: the predicate is still fully sargable and WILL seek if the column is indexed. The compared value came from a DECLARE'd local variable, not a formal parameter, so it is invisible to the cardinality estimator (Microsoft's own documented behavior - the optimizer falls back to the column's average-density statistic instead of a value-specific estimate). Whether a bad estimate actually matters depends on data-distribution facts this pass cannot see - listed for awareness, not as a proven defect. Suppressed entirely when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE, since a per-execution recompile lets the optimizer see the variable's real current value.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.LocalVariablePredicateRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Variable", OperatorHeader, IndexedHeader],
             [.. report.LocalVariablePredicateFindings.Select(f => new List<string>
@@ -1005,6 +1019,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A real access-path defect, oracle-confirmed (SET SHOWPLAN_XML, 2026-08-18): the optimizer can only match a filtered index against a query whose own WHERE clause restates the filter with a LITERAL value - a query filtering the same column via a parameter or local variable can never use that index, even when the runtime value is identical to the index's own filter literal. Not a cardinality-estimate risk like a plain local-variable predicate; the access path itself is unavailable. Not suppressed by OPTION (RECOMPILE)/WITH RECOMPILE - confirmed directly that a recompiled plan still cannot match the index, since the limitation is evaluated against the predicate's compile-time shape, not its runtime value.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FilteredIndexParameterMismatchRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Filtered index", "Filter literal", "Variable", OperatorHeader],
             [.. report.FilteredIndexParameterMismatchFindings.Select(f => new List<string>
@@ -1029,6 +1044,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Purely informational, not a sargability claim: the predicate is still fully sargable and WILL seek if the column is indexed. The compared value is a formal parameter that is reassigned (SET/SELECT) on every statically reachable path before this predicate runs - the optimizer's compile-time sniffed value (the caller's original argument) is provably stale by the time this comparison executes. Distinct from a predicate against a plain DECLARE'd local variable (never sniffable to begin with) - here a value that WAS sniffable had its sniffed value invalidated by the procedure's own code. Suppressed entirely when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ParameterReassignmentPredicateRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, ParameterHeader, OperatorHeader, IndexedHeader, "Reassigned at"],
             [.. report.ParameterReassignmentPredicateFindings.Select(f => new List<string>
@@ -1319,6 +1335,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A WHERE/ON equality predicate (=) compares a float/real (IEEE-754 approximate) column - a correctness risk, not a performance one: two values a person would call the same number can carry a different bit pattern and compare unequal, silently returning the wrong rows regardless of plan shape or indexing. Direct base-table columns in the immediate statement's own FROM clause only - a predicate reached through a view/CTE/derived table is not analyzed by this v1.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FloatEqualityRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Type", DetailHeader],
             [.. report.FloatEqualityFindings.Select(f => new List<string>
@@ -1341,6 +1358,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "SUM/AVG/VAR/VARP/STDEV/STDEVP is applied to a float/real (IEEE-754 approximate) column - these aggregates accumulate their running result in an order that depends on plan shape (serial vs parallel, degree of parallelism), so the identical aggregate over identical data can return a different bit pattern across runs, silently. MIN/MAX/COUNT are unaffected and not flagged.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FloatOrderDependentAggregateRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Type", "Aggregate", DetailHeader],
             [.. report.FloatOrderDependentAggregateFindings.Select(f => new List<string>
@@ -1364,6 +1382,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "An ORDER BY clause references an Always Encrypted column - the statement does not compile at all (Msg 33277), for both DETERMINISTIC and RANDOMIZED encryption types, regardless of whether the connecting client is itself Always-Encrypted-enabled. Direct base-table columns in the immediate statement's own top-level ORDER BY only - a window function's own OVER (... ORDER BY ...) and an encrypted column reached only through a view/CTE/derived table are not analyzed by this v1.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.AlwaysEncryptedOrderByRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Encryption type", DetailHeader],
             [.. report.AlwaysEncryptedOrderByFindings.Select(f => new List<string>
@@ -1386,6 +1405,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A RANDOMIZED-encrypted column is used as a key column of an index, PRIMARY KEY/UNIQUE constraint, or statistics object, and the column encryption key backing it is tied to a column master key declared without ENCLAVE_COMPUTATIONS - the statement does not deploy (Msg 33573).");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.AlwaysEncryptedKeyColumnRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Object", "Kind"],
             [.. report.AlwaysEncryptedKeyColumnFindings.Select(f => new List<string>
@@ -1529,6 +1549,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Two top-level procedures' own direct explicit-transaction write orders disagree on the relative lock order of the same two base tables - the textbook cross-session deadlock shape. V1 scope: direct DML targets only (never through a view or dynamic SQL), base tables only, writes inside an explicit BEGIN TRANSACTION only, and only top-level procedures' own direct bodies (not traced transitively through the call graph) - see the finding's own doc comment for the full precision story.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CrossModuleLockOrderRuleId));
         yield return new ReadableBlock.Table(
             ["First table", "Second table", "Writes first-then-second", "Writes second-then-first"],
             [.. report.CrossModuleLockOrderFindings.Select(f => new List<string>
@@ -1551,6 +1572,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A directed cycle of triggers across two or more distinct tables (table A's trigger writes to table B, whose own trigger writes back toward A) - oracle-confirmed reachable while the server's own 'nested triggers' option is on (not RECURSIVE_TRIGGERS, which only governs a trigger recursing into itself), and confirmed to hit a real Msg 217 nesting-level-exceeded error once the cascade runs unbounded. V1 scope: only a direct INSERT/UPDATE/DELETE/MERGE target inside a trigger's own body counts as a hop, base tables only, cycle search capped at 8 hops - see the finding's own doc comment for the full precision story.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TriggerRecursionCycleRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Cycle", "Hops"],
             [.. report.TriggerRecursionCycleFindings.Select(f => new List<string>
@@ -1572,6 +1594,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "'x NOT IN (SELECT y FROM t)' where y is a nullable column - a three-valued-logic correctness trap, not a plan-shape one. The instant the subquery produces one NULL row, the whole predicate evaluates to UNKNOWN for every outer row, so the query silently returns ZERO rows instead of the expected anti-join result - independent of any index or plan choice. Never fires when the subquery column is NOT NULL, or when the subquery already filters it with an unconditional 'WHERE y IS NOT NULL'.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NotInNullableSubqueryRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Outer column", "Subquery column", IndexedHeader],
             [.. report.NotInNullableSubqueryFindings.Select(f => new List<string>
@@ -1594,6 +1617,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "The joined source's own join columns carry no unique index/constraint - if a target row ever matches more than one source row, SQL Server silently picks a value from an unspecified one of them (plan-dependent, not guaranteed stable across executions). MERGE raises a hard error in this exact situation instead of picking silently. A structural defect, not a 'wrong for current data' one: no current duplicate has to exist for the statement to be unsafe, only the schema's own absence of a uniqueness guarantee. Never fires when the source's join columns are covered by a genuine unique index/constraint, or when the SET clause never reads from the non-unique source.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NonUniqueUpdateSourceRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Target", "Source", "Join columns", "SET columns"],
             [.. report.NonUniqueUpdateSourceFindings.Select(f => new List<string>
@@ -1700,6 +1724,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A column carries a DEFAULT constraint but is still nullable. A DEFAULT only ever applies when the column is OMITTED from an INSERT's own column list; any caller that supplies NULL explicitly (a common ORM-generated full-column INSERT shape) bypasses the default entirely, silently, with no error.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.DefaultNullableConstraintRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, TableHeader, ColumnHeader, "Default"],
             [.. report.DefaultNullableConstraintFindings.Select(f => new List<string>
@@ -1722,6 +1747,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A non-persisted computed column built on TRY_CAST is referenced inside a real filter-context predicate (WHERE/JOIN ON/HAVING) elsewhere in the corpus. TRY_CAST is session-DATEFORMAT-dependent and therefore classified non-deterministic by the engine, so this column can never be PERSISTED or indexed at all - the predicate can never seek through it no matter what index exists elsewhere on the table.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TryCastComputedColumnPredicateRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, TableHeader, ColumnHeader, "Definition", "Definition site"],
             [.. report.TryCastComputedColumnPredicateFindings.Select(f => new List<string>
@@ -1745,6 +1771,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A view's own outermost SELECT * over a single base table has a compiled column list (frozen at CREATE/ALTER/sp_refreshview time) that no longer matches that base table's current column list - a later ALTER TABLE ADD/DROP COLUMN never propagates to the view. If a drop and a later add shifted column identity, the view may be silently surfacing real data under a stale, wrong column label, not merely missing/adding a column.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.StaleSelectStarViewRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "View", "Base table", "View's columns", "Table's current columns"],
             [.. report.StaleSelectStarViewFindings.Select(f => new List<string>
@@ -1768,6 +1795,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A TOP (n) with no ORDER BY anywhere in the same query. SQL Server's own documentation does not guarantee which rows TOP returns, or their order, without an explicit ORDER BY - the returned row set can change run to run with plan choice, parallelism, or statistics drift. TOP (100) PERCENT is excluded: 100 percent of a result set is every row regardless of TOP's own row-selection nondeterminism.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.BareTopNoOrderByRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader],
             [.. report.BareTopNoOrderByFindings.Select(f => new List<string>
@@ -1787,6 +1815,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A + concatenation chain includes a nullable string column with no ISNULL/COALESCE guard. Unlike CONCAT(), which treats a NULL operand as empty string, + propagates a single NULL operand to NULL for the whole expression, silently, with no error.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.StringConcatNullRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, TableHeader, ColumnHeader],
             [.. report.StringConcatNullFindings.Select(f => new List<string>
@@ -1808,6 +1837,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "An aggregate argument contains a CASE-guarded division by a non-constant divisor, on a table backed by a columnstore index. Historically reported as a class of bug where batch-mode (vectorized) execution does not reliably preserve the same per-row CASE-branch short-circuit elision rowstore scalar execution provides. Shipped as a structural risk flag only, Low confidence, after a genuine but unsuccessful attempt to reproduce a live failure against this tool's own standing engine build - not a proven-current-behavior claim.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.AggregateDivisionColumnstoreRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Aggregate", TableHeader],
             [.. report.AggregateDivisionColumnstoreFindings.Select(f => new List<string>
@@ -1829,6 +1859,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "An enabled Row-Level Security FILTER predicate's own bound column(s) lead no active index on the secured table - the predicate is silently applied to every SELECT/UPDATE/DELETE against this table, so the engine cannot seek and must evaluate it as a residual, per-row filter over a full scan. Oracle-confirmed scan-vs-seek contrast; the checklist's own 'forces single-threaded execution' claim was not reproduced live on this tool's own standing engine build and is deliberately not asserted here.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SecurityPredicateIndexRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, TableHeader, "Policy", "Predicate function", "Filtered column(s)"],
             [.. report.SecurityPredicateIndexFindings.Select(f => new List<string>
@@ -1874,6 +1905,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A foreign key with a non-NO_ACTION ON DELETE/ON UPDATE action - a single DML statement against the referenced table silently touches every dependent row in the child table too, with no visible predicate change at the call site. Purely informational: this states the fact, not a proven cost - how many rows and how often depends on data this pass cannot see.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CascadingForeignKeyRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ConstraintHeader, "Parent", "Referenced", "Delete action", "Update action"],
             [.. report.CascadingForeignKeyFindings.Select(f => new List<string>
@@ -1898,6 +1930,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "SQL Server does not materialize a plain CTE once and reuse it - each reference downstream of the WITH clause independently re-runs the CTE's own defining query, confirmed directly against the oracle (a base table's own scan count doubled under a CTE referenced twice). A self-reference inside a recursive CTE's own body is never counted - that's the structurally mandated recursion mechanism, not optional re-invocation.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MultiReferencedCteRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "CTE", "References"],
             [.. report.MultiReferencedCteFindings.Select(f => new List<string>
@@ -1919,6 +1952,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             $"A view/inline TVF nested {NestedViewDepthScanner.DepthThreshold}+ view/TVF layers deep before reaching a base table - structural depth, not a claim the query is currently slow. A change to a base table now has to be traced through multiple independent view layers before its blast radius is understood, and each layer is a place a SELECT */column-list mismatch or silent type widening can hide. Catalog/lineage-only, reported once per view regardless of whether any scanned query calls it.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NestedViewDepthRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "View", "Depth", "Chain", "Base tables"],
             [.. report.NestedViewDepthFindings.Select(f => new List<string>
@@ -1942,6 +1976,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "The written FROM/JOIN table count is meaningless when half the sources are views - the number that matters is the EXPANDED one, base tables after resolving every view/inline-TVF reference transitively. Ranked by the gap between written and expanded count. Deliberately makes no claim about a specific 'past N the optimizer gives up exhaustive search' threshold - that number is unconfirmed folklore, not yet oracle-verified on this engine.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.PostExpansionJoinWidthRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Written", "Expanded", "Inflating source(s)", "Unexpanded?"],
             [.. report.PostExpansionJoinWidthFindings.Select(f => new List<string>
@@ -1965,6 +2000,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A view/inline TVF nested 1+ view/TVF layers deep whose own outermost SELECT is a bare or qualified * - its column list is frozen at CREATE/ALTER time and silently disagrees with the base table after any change, confirmed to survive even a live describe-only probe and real execution until sp_refreshview runs. Only listed here where a real consuming query explicitly selects a strict, named subset of the view's full column set - a consumer doing SELECT * from the view never narrows anything and is never matched.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SelectStarViewRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "View", "View columns", "Consumer selects"],
             [.. report.SelectStarViewFindings.Select(f => new List<string>
@@ -2032,6 +2068,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "An INSERT/UPDATE/DELETE/MERGE whose own read side (a self-join, a WHERE/SET subquery, or a view over the same base table) also names the exact table it writes to. Oracle-confirmed to force extra defensive plan work an otherwise-identical statement reading a different table never pays - a LogicalOp=\"Eager Spool\" for INSERT/DELETE, an extra Sort operator for UPDATE ... FROM self-joins and MERGE (no spool at all in that case). A performance-cost finding, not a correctness one - the result is identical either way.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SelfReferencingDmlRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Statement", "Target", DetailHeader],
             [.. report.SelfReferencingDmlFindings.Select(f => new List<string>
@@ -2056,6 +2093,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A system-versioned temporal table's CURRENT side carries a nonclustered index with no structurally matching index (same key columns, same order) on its HISTORY side. FOR SYSTEM_TIME AS OF/BETWEEN rewrites to a UNION ALL of the two tables - oracle-confirmed directly (real seeded data, UPDATE STATISTICS ... WITH FULLSCAN on both sides): a predicate that seeks the current-table branch via this index degrades to a full Clustered Index Scan of the whole history table when the gap exists, and seeks both branches once a matching index is added. PRIMARY KEY/UNIQUE-constraint indexes on the current side are never compared - the engine itself refuses either constraint on a temporal history table (Msg 13558/13583), so flagging them would be a guaranteed-always-fire signal with no possible fix.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TemporalTableHistoryIndexGapRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Current table", "History table", IndexHeader, "Key columns"],
             [.. report.TemporalTableHistoryIndexGapFindings.Select(f => new List<string>
@@ -2143,6 +2181,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "WAITFOR DELAY/WAITFOR TIME holds the calling worker thread idle for the full delay/until-time - a documented, unconditional cost, worse still when reached inside an open transaction, where any locks that transaction holds stay held for the same duration.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.WaitForRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, "Inside open transaction?"],
             [.. report.WaitForFindings.Select(f => new List<string>
@@ -2184,6 +2223,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A BEGIN TRANSACTION reaches a RETURN/THROW, or the natural end of the module body, on some statically reachable path with no intervening COMMIT/ROLLBACK - oracle-confirmed directly that SQL Server raises Msg 266 and leaves @@TRANCOUNT elevated by one the instant such a procedure returns, holding its locks indefinitely.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TransactionHygieneRuleId));
         yield return new ReadableBlock.Table(
             ["BEGIN TRANSACTION at", "Unresolved at"],
             [.. report.TransactionHygieneFindings.Select(f => new List<string>
@@ -2204,6 +2244,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A resolved predicate column has no covering statistic (single-column, or leading key of a multi-column statistic) on its table, and the connected database has AUTO_CREATE_STATISTICS turned off - the engine cannot create one on its own for this predicate.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MissingStatisticsRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, TableHeader, "Column"],
             [.. report.MissingStatisticsFindings.Select(f => new List<string>
@@ -2225,6 +2266,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A real composite index's leading key column is never bound anywhere in this statement, while the query genuinely constrains one of that index's later key columns - the index is a single B-tree keyed first by its leading column, so this specific index cannot be seek-used for this predicate at all. Only fires when no other usable index on the table leads with the same violating column either, so this is not an index-recommendation or an overall-query-is-slow claim - just \"this query cannot seek this index\".");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CompositeIndexLeadingColumnRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, TableHeader, IndexHeader, "Key columns", "Unconstrained leading column", "Violating column"],
             [.. report.CompositeIndexLeadingColumnFindings.Select(f => new List<string>
@@ -2335,6 +2377,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "TRUNCATE TABLE sits inside a TRY block whose CATCH never THROWs/RAISERRORs - oracle-confirmed a real TRUNCATE failure (e.g. an enforced FK reference, Msg 4712) is silently swallowed here, with execution continuing as if it had succeeded and no error reaching the caller.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TruncateSwallowedRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader],
             [.. report.TruncateSwallowedFindings.Select(f => new List<string>
@@ -2375,6 +2418,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "An OUTPUT parameter is not assigned on some statically reachable path - oracle-confirmed a caller's own variable is left completely unchanged by the call on that path (not reset to NULL), so a reused caller variable can silently carry stale data from a previous, unrelated call.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.OutputParameterRuleId));
         yield return new ReadableBlock.Table(
             ["Procedure at", ParameterHeader, "Unresolved at"],
             [.. report.OutputParameterFindings.Select(f => new List<string>
@@ -2431,6 +2475,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A CORRECTNESS and plan defect, not a lost seek: this join equates some but not all of a real composite foreign key's column pairs, and the omitted column(s) are not covered anywhere else in the statement - a parent row can match more than one child row than the declared relationship allows, silently multiplying rows through the join. Reported at MEDIUM confidence by default: a narrower join can be a genuine, deliberate fan-out (e.g. joining every historical revision), which static analysis alone cannot always tell apart from a forgotten column - review each one rather than treating it as a certain bug.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.PartialCompositeForeignKeyJoinRuleId));
         yield return new ReadableBlock.Table(
             [WhereHeader, ConstraintHeader, "Tables", "Matched columns", "Missing columns"],
             [.. report.PartialCompositeForeignKeyJoinFindings.Select(f => new List<string>
