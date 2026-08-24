@@ -87,6 +87,7 @@ public static class SarifRuleCatalog
     public const string QueryAntiPatternAlterTableSwitchCdcPartitionSwitchRuleId = "silentscan/query/alter-table-switch-cdc-partition-switch";
     public const string QueryAntiPatternAlterTableSwitchPartitionFilegroupMismatchRuleId = "silentscan/query/alter-table-switch-partition-filegroup-mismatch";
     public const string QueryAntiPatternAlterTableSwitchFullTextIndexRestrictionRuleId = "silentscan/query/alter-table-switch-full-text-index-restriction";
+    public const string QueryAntiPatternGroupingSetsCardinalityLimitExceededRuleId = "silentscan/query/grouping-sets-cardinality-limit-exceeded";
     public const string IndexCoverageKeyLookupProneIndexRuleId = "silentscan/index/key-lookup-prone";
     public const string TriggerCorrectnessMultiRowUnsafeSingleRowAssignmentRuleId = "silentscan/trigger/multi-row-unsafe-single-row-assignment";
     public const string TriggerCorrectnessMultiRowUnsafeKeyedDmlRuleId = "silentscan/trigger/multi-row-unsafe-keyed-dml";
@@ -521,6 +522,7 @@ public static class SarifRuleCatalog
         QueryAntiPatternFindingKind.AlterTableSwitchCdcPartitionSwitch => QueryAntiPatternAlterTableSwitchCdcPartitionSwitchRuleId,
         QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch => QueryAntiPatternAlterTableSwitchPartitionFilegroupMismatchRuleId,
         QueryAntiPatternFindingKind.AlterTableSwitchFullTextIndexRestriction => QueryAntiPatternAlterTableSwitchFullTextIndexRestrictionRuleId,
+        QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded => QueryAntiPatternGroupingSetsCardinalityLimitExceededRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled QueryAntiPatternFindingKind."),
     };
 

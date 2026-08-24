@@ -74,6 +74,7 @@ public static class RuleDocCatalog
         [QueryAntiPattern.AlterTableSwitchCdcPartitionSwitch.RuleId] = QueryAntiPattern.AlterTableSwitchCdcPartitionSwitch.Content,
         [QueryAntiPattern.AlterTableSwitchPartitionFilegroupMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchPartitionFilegroupMismatch.Content,
         [QueryAntiPattern.AlterTableSwitchFullTextIndexRestriction.RuleId] = QueryAntiPattern.AlterTableSwitchFullTextIndexRestriction.Content,
+        [QueryAntiPattern.GroupingSetsCardinalityLimitExceeded.RuleId] = QueryAntiPattern.GroupingSetsCardinalityLimitExceeded.Content,
 
         [TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.RuleId] = TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.Content,
         [TriggerCorrectness.MultiRowUnsafeKeyedDml.RuleId] = TriggerCorrectness.MultiRowUnsafeKeyedDml.Content,

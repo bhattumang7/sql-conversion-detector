@@ -239,6 +239,7 @@ public static class QueryAntiPatternScanner
 
             InspectHaving(node, scopeChain);
             InspectDistinctJoinFanout(node, byAlias, scopeChain);
+            InspectGroupBySetsCardinality(node.GroupByClause);
 
             base.ExplicitVisit(node);
         }
@@ -1042,6 +1043,132 @@ public static class QueryAntiPatternScanner
                     $"Recursive CTE '{cte.ExpressionName.Value}' has no OPTION (MAXRECURSION n) on its containing statement - the engine's own default limit of 100 levels fails the statement outright (Msg 530) once exceeded.",
                     FindingConfidence.High));
             }
+        }
+
+        private void InspectGroupBySetsCardinality(GroupByClause? groupBy)
+        {
+            if (groupBy is null)
+            {
+                return;
+            }
+
+            if (groupBy.GroupByOption == GroupByOption.Cube)
+            {
+                ReportCubeCeilingIfExceeded(groupBy, groupBy.GroupingSpecifications.Count);
+            }
+            else if (groupBy.GroupByOption == GroupByOption.Rollup)
+            {
+                ReportRollupCeilingIfExceeded(groupBy, groupBy.GroupingSpecifications.Count);
+            }
+
+            foreach (var spec in groupBy.GroupingSpecifications)
+            {
+                InspectGroupingSpecification(spec);
+            }
+        }
+
+        private void InspectGroupingSpecification(GroupingSpecification spec)
+        {
+            switch (spec)
+            {
+                case CubeGroupingSpecification cube:
+                    ReportCubeCeilingIfExceeded(cube, cube.Arguments.Count);
+                    foreach (var argument in cube.Arguments)
+                    {
+                        InspectGroupingSpecification(argument);
+                    }
+
+                    break;
+
+                case RollupGroupingSpecification rollup:
+                    ReportRollupCeilingIfExceeded(rollup, rollup.Arguments.Count);
+                    foreach (var argument in rollup.Arguments)
+                    {
+                        InspectGroupingSpecification(argument);
+                    }
+
+                    break;
+
+                case GroupingSetsGroupingSpecification groupingSets:
+                    var combinationCount = GroupingSetsCombinationCount(groupingSets);
+                    if (combinationCount > 4096)
+                    {
+                        Findings.Add(new QueryAntiPatternFinding(
+                            QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded, sourcePath,
+                            groupingSets.StartLine, groupingSets.StartColumn,
+                            $"GROUPING SETS (...) expands to {combinationCount} grouping sets, exceeding the engine's fixed compile-time limit of 4096 - the statement does not compile (Msg 10703, \"Too many grouping sets. The maximum number is 4096.\").",
+                            FindingConfidence.High));
+                    }
+
+                    foreach (var set in groupingSets.Sets)
+                    {
+                        InspectGroupingSpecification(set);
+                    }
+
+                    break;
+
+                case CompositeGroupingSpecification composite:
+                    foreach (var item in composite.Items)
+                    {
+                        InspectGroupingSpecification(item);
+                    }
+
+                    break;
+            }
+        }
+
+        private void ReportCubeCeilingIfExceeded(TSqlFragment anchor, int columnCount)
+        {
+            if (columnCount <= 12)
+            {
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded, sourcePath,
+                anchor.StartLine, anchor.StartColumn,
+                $"CUBE over {columnCount} columns expands to 2^{columnCount} grouping sets, exceeding the engine's fixed compile-time limit of 4096 for CUBE (12 columns) - the statement does not compile (Msg 10703, \"Too many grouping sets. The maximum number is 4096.\").",
+                FindingConfidence.High));
+        }
+
+        private void ReportRollupCeilingIfExceeded(TSqlFragment anchor, int columnCount)
+        {
+            if (columnCount <= 32)
+            {
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded, sourcePath,
+                anchor.StartLine, anchor.StartColumn,
+                $"ROLLUP over {columnCount} columns exceeds the engine's fixed compile-time limit of 32 grouping expressions for an extended GROUP BY clause - the statement does not compile (Msg 10706, \"Too many expressions are specified in the GROUP BY clause. The maximum number is 32 when grouping sets are supplied.\").",
+                FindingConfidence.High));
+        }
+
+        private static long GroupingSetsCombinationCount(GroupingSpecification spec) => spec switch
+        {
+            CubeGroupingSpecification cube => CubePower(cube.Arguments.Count),
+            RollupGroupingSpecification rollup => rollup.Arguments.Count + 1L,
+            GroupingSetsGroupingSpecification nested => SumClamped(nested.Sets),
+            _ => 1L,
+        };
+
+        private static long CubePower(int columnCount) =>
+            columnCount >= 62 ? long.MaxValue / 2 : 1L << columnCount;
+
+        private static long SumClamped(IList<GroupingSpecification> specs)
+        {
+            var total = 0L;
+            foreach (var spec in specs)
+            {
+                total += GroupingSetsCombinationCount(spec);
+                if (total > 1_000_000)
+                {
+                    return total;
+                }
+            }
+
+            return total;
         }
 
         private void InspectStaleTableVariableInLoop(WhileStatement node)

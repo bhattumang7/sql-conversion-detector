@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grouping Sets Cardinality Limit Exceeded - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Grouping Sets Cardinality Limit Exceeded</h1>
+  <p class="rule-key"><code>silentscan/query/grouping-sets-cardinality-limit-exceeded</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A GROUP BY clause&#x27;s CUBE, ROLLUP, or explicit GROUPING SETS exceeds a fixed, purely syntactic compile-time ceiling - oracle-confirmed CUBE over 12 columns and any expanded GROUPING SETS combination count over 4096 raise Msg 10703, and ROLLUP (or any extended GROUP BY clause) over 32 total grouping expressions raises Msg 10706, all unconditionally regardless of the underlying data.</p>
+  <p class="rationale">CUBE, ROLLUP, and explicit GROUPING SETS all expand a GROUP BY clause into more than one underlying grouping set, and the engine caps how many grouping sets a single clause can expand into before it will even compile the statement. This scan&#x27;s oracle confirms two distinct, fixed ceilings, both purely syntactic and independent of the table&#x27;s real data:</p>
+  <p class="rationale">The first is the total expanded grouping-set count across the whole clause, capped at 4096. CUBE(...) expands its column list into every subset, so a CUBE over more than 12 columns already exceeds 4096 combinations (2^13 = 8192) on its own; an explicit GROUPING SETS(...) list hits the same 4096 ceiling once the combinations its own entries expand to (a CUBE or ROLLUP nested inside one of its sets counts for as many combinations as it would standalone) add up past it. Either way the statement is rejected outright with Msg 10703, &quot;Too many grouping sets. The maximum number is 4096.&quot;</p>
+  <p class="rationale">The second is a tighter limit on the total number of grouping expressions named anywhere in an extended GROUP BY clause (one using CUBE, ROLLUP, or GROUPING SETS), capped at 32. ROLLUP(...) never has enough columns to hit the 4096 combination ceiling in practice - it only ever adds one combination per column - so this 32-expression ceiling is the one that actually rejects an oversized ROLLUP, with Msg 10706, &quot;Too many expressions are specified in the GROUP BY clause. The maximum number is 32 when grouping sets are supplied.&quot; Both ceilings apply equally to the older WITH CUBE/WITH ROLLUP syntax appended after a plain column list.</p>
+  <p class="rationale">Neither ceiling has anything to do with how much data the query actually touches, and both are usually reached by tables that simply have a lot of dimension columns, not by malformed queries - a wide fact table rolled up across all of its columns, or a report that lists every combination of a dozen or more attributes, can cross either limit with no warning until the statement is actually executed and fails to compile.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Reduce the number of columns passed to CUBE or ROLLUP, or the number of sets listed in GROUPING SETS, until the clause is back under the engine&#x27;s fixed limit. If every combination genuinely needs to be produced, split the aggregation into multiple statements (e.g. several smaller ROLLUP/CUBE/GROUPING SETS clauses unioned together) instead of asking a single clause to expand past what the engine allows.</p>
+  <h3>A CUBE over more than 12 columns</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>SELECT c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, COUNT(*)&#xA;FROM dbo.WideFact&#xA;GROUP BY CUBE(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13);</code></pre></div>
+  <p class="example-explanation">13 columns expand to 2^13 = 8192 grouping sets, past the engine&#x27;s fixed 4096 ceiling - the statement does not compile (Msg 10703), regardless of how much data dbo.WideFact actually holds.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, COUNT(*)&#xA;FROM dbo.WideFact&#xA;GROUP BY CUBE(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12);</code></pre></div>
+  <p class="example-explanation">12 columns expand to exactly 2^12 = 4096 grouping sets, the engine&#x27;s own boundary - the statement compiles.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

@@ -58,6 +58,8 @@ public enum QueryAntiPatternFindingKind
     AlterTableSwitchPartitionFilegroupMismatch,
 
     AlterTableSwitchFullTextIndexRestriction,
+
+    GroupingSetsCardinalityLimitExceeded,
 }
 
 public sealed record QueryAntiPatternFinding(

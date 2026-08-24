@@ -19,15 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **New rule family: compile-time cardinality ceilings on
-      `GROUPING SETS`/`CUBE`/`ROLLUP`.** Each has a fixed, documented,
-      purely syntactic compile-time limit independent of any table's real
-      data (expanded `GROUPING SETS` combination count > 4096; `CUBE` column
-      count > 12; `ROLLUP` column count > 4095) — the same decidability
-      shape as the already-shipped missing-`MAXRECURSION` rule. Oracle-check
-      the exact boundary and error text for each of the three before
-      shipping.
-
 - [ ] **New rule family: constant-foldable argument validation for
       `LAG`/`LEAD`/`PERCENTILE_CONT`/`PERCENTILE_DISC`.** `LAG`/`LEAD`'s
       offset argument must constant-fold to a non-negative value;

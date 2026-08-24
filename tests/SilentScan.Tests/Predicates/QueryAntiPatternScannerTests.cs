@@ -529,6 +529,92 @@ public sealed class QueryAntiPatternScannerTests
     }
 
     [Fact]
+    public void CubeOverTwelveColumns_Fires()
+    {
+        var columns = string.Join(", ", Enumerable.Repeat("Id", 13));
+        var findings = Scan($"SELECT Id, COUNT(*) FROM dbo.A GROUP BY CUBE({columns});");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded);
+        Assert.Contains("CUBE over 13 columns", finding.DetailText);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void CubeAtTwelveColumns_NeverFires()
+    {
+        var columns = string.Join(", ", Enumerable.Repeat("Id", 12));
+        var findings = Scan($"SELECT Id, COUNT(*) FROM dbo.A GROUP BY CUBE({columns});");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded);
+    }
+
+    [Fact]
+    public void LegacyWithCubeOverTwelveColumns_Fires()
+    {
+        var columns = string.Join(", ", Enumerable.Repeat("Id", 13));
+        var findings = Scan($"SELECT Id, COUNT(*) FROM dbo.A GROUP BY {columns} WITH CUBE;");
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded);
+    }
+
+    [Fact]
+    public void RollupOverThirtyTwoColumns_Fires()
+    {
+        var columns = string.Join(", ", Enumerable.Repeat("Id", 33));
+        var findings = Scan($"SELECT Id, COUNT(*) FROM dbo.A GROUP BY ROLLUP({columns});");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded);
+        Assert.Contains("ROLLUP over 33 columns", finding.DetailText);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void RollupAtThirtyTwoColumns_NeverFires()
+    {
+        var columns = string.Join(", ", Enumerable.Repeat("Id", 32));
+        var findings = Scan($"SELECT Id, COUNT(*) FROM dbo.A GROUP BY ROLLUP({columns});");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded);
+    }
+
+    [Fact]
+    public void LegacyWithRollupOverThirtyTwoColumns_Fires()
+    {
+        var columns = string.Join(", ", Enumerable.Repeat("Id", 33));
+        var findings = Scan($"SELECT Id, COUNT(*) FROM dbo.A GROUP BY {columns} WITH ROLLUP;");
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded);
+    }
+
+    [Fact]
+    public void GroupingSetsCombinationCountOverFourThousandNinetySix_Fires()
+    {
+        var cubeColumns = string.Join(", ", Enumerable.Repeat("Id", 12));
+        var findings = Scan($"SELECT Id, COUNT(*) FROM dbo.A GROUP BY GROUPING SETS (CUBE({cubeColumns}), (Id));");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded);
+        Assert.Contains("4097 grouping sets", finding.DetailText);
+    }
+
+    [Fact]
+    public void GroupingSetsCombinationCountAtFourThousandNinetySix_NeverFires()
+    {
+        var cubeColumns = string.Join(", ", Enumerable.Repeat("Id", 12));
+        var findings = Scan($"SELECT Id, COUNT(*) FROM dbo.A GROUP BY GROUPING SETS (CUBE({cubeColumns}));");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded);
+    }
+
+    [Fact]
+    public void PlainGroupByManyColumns_NeverFiresGroupingSetsCardinalityLimit()
+    {
+        var columns = string.Join(", ", Enumerable.Repeat("Id", 40));
+        var findings = Scan($"SELECT Id, COUNT(*) FROM dbo.A GROUP BY {columns};");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded);
+    }
+
+    [Fact]
     public void UpdateWithNoWhereNoTop_Fires()
     {
         var findings = Scan("UPDATE dbo.Big SET Col = 'x';");

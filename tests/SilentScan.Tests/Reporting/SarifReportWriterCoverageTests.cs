@@ -698,6 +698,7 @@ public sealed class SarifReportWriterCoverageTests
     [InlineData(QueryAntiPatternFindingKind.NonAggregateHavingPredicate, "warning")]
     [InlineData(QueryAntiPatternFindingKind.MergeNonUniqueUsingSource, "error")]
     [InlineData(QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion, "error")]
+    [InlineData(QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded, "error")]
     [InlineData(QueryAntiPatternFindingKind.GlobalCursorDeclaration, "warning")]
     public void Write_QueryAntiPatternFinding_MapsKindToItsOwnLevelBucket(QueryAntiPatternFindingKind kind, string expectedLevel)
     {
