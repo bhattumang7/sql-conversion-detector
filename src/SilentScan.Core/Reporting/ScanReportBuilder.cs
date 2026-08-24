@@ -326,6 +326,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<WindowFunctionArgumentFinding> windowFunctionArgumentFindings;
+        using (var windowFunctionArgumentStage = progress.Begin("scanning LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC constant arguments", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = WindowFunctionArgumentScanner.Scan(r);
+                    windowFunctionArgumentStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            windowFunctionArgumentFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<WaitForFinding> waitForFindings;
         using (var waitForStage = progress.Begin("scanning WAITFOR DELAY/TIME", usableCount))
         {
@@ -1236,6 +1254,7 @@ public static class ScanReportBuilder
         temporalTableHistoryIndexGapFindings = [.. temporalTableHistoryIndexGapFindings.Where(f => f.Confidence <= minimumConfidence)];
         moduleCompileFlagFindings = [.. moduleCompileFlagFindings.Where(f => f.Confidence <= minimumConfidence)];
         windowFrameFindings = [.. windowFrameFindings.Where(f => f.Confidence <= minimumConfidence)];
+        windowFunctionArgumentFindings = [.. windowFunctionArgumentFindings.Where(f => f.Confidence <= minimumConfidence)];
         waitForFindings = [.. waitForFindings.Where(f => f.Confidence <= minimumConfidence)];
         viewOrderingFindings = [.. viewOrderingFindings.Where(f => f.Confidence <= minimumConfidence)];
         transactionHygieneFindings = [.. transactionHygieneFindings.Where(f => f.Confidence <= minimumConfidence)];
@@ -1333,6 +1352,7 @@ public static class ScanReportBuilder
             memoryOptimizedUnsupportedColumnTypeFindings,
             memoryOptimizedUnsupportedIndexOptionFindings,
             memoryOptimizedForeignKeyFindings,
+            windowFunctionArgumentFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

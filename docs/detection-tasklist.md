@@ -19,17 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **New rule family: constant-foldable argument validation for
-      `LAG`/`LEAD`/`PERCENTILE_CONT`/`PERCENTILE_DISC`.** `LAG`/`LEAD`'s
-      offset argument must constant-fold to a non-negative value;
-      `PERCENTILE_CONT`/`PERCENTILE_DISC`'s percentile argument must
-      constant-fold to a value in `[0, 1]`. Both are pure source-level
-      constant-folding with no catalog dependency, the same shape as the
-      already-shipped literal-required `ForcedParameterization` findings.
-      Needs an oracle check of the exact rejected boundary (is exactly `0`/`1`
-      valid for percentile? is a non-literal but foldable expression treated
-      the same as a literal?) before shipping.
-
 - [ ] **`MaxTypedColumnRuleId`-family sibling: SELECTIVE XML INDEX value
       column too wide.** A selective XML index's value column resolving to a
       large object or a string over 900 bytes (`sys.columns` type/max-length)

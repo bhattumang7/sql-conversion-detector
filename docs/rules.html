@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">276 rules. 184 carry fix guidance; 24 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">278 rules. 186 carry fix guidance; 24 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -597,6 +597,14 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <ul class="rule-list">
       <li><a class="id" href="rules/window-frame-explicit-range.html">Explicit Range</a> <code class="rule-key">silentscan/window-frame/explicit-range</code><span class="snippet">A window function&#x27;s OVER clause uses an explicit RANGE frame.</span></li>
       <li><a class="id" href="rules/window-frame-implicit-default-range.html">Implicit Default Range</a> <code class="rule-key">silentscan/window-frame/implicit-default-range</code><span class="snippet">A window function&#x27;s OVER clause has an ORDER BY but no explicit frame clause at all.</span></li>
+    </ul>
+  </section>
+
+  <section class="family-section">
+    <h2>window-function</h2>
+    <ul class="rule-list">
+      <li><a class="id" href="rules/window-function-lag-lead-negative-offset.html">Lag Lead Negative Offset</a> <code class="rule-key">silentscan/window-function/lag-lead-negative-offset</code><span class="snippet">A LAG/LEAD call&#x27;s offset argument constant-folds to a negative value.</span></li>
+      <li><a class="id" href="rules/window-function-percentile-out-of-range.html">Percentile Out Of Range</a> <code class="rule-key">silentscan/window-function/percentile-out-of-range</code><span class="snippet">A PERCENTILE_CONT/PERCENTILE_DISC call&#x27;s percentile argument constant-folds to a value outside the inclusive range [0, 1].</span></li>
     </ul>
   </section>
 

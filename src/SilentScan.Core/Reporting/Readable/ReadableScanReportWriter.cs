@@ -98,6 +98,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TemporalTableHistoryIndexGap(report, headingLevel, pathBase));
         blocks.AddRange(ModuleCompileFlag(report, headingLevel, pathBase));
         blocks.AddRange(WindowFrame(report, headingLevel, pathBase));
+        blocks.AddRange(WindowFunctionArgument(report, headingLevel, pathBase));
         blocks.AddRange(WaitFor(report, headingLevel, pathBase));
         blocks.AddRange(ViewOrdering(report, headingLevel, pathBase));
         blocks.AddRange(TransactionHygiene(report, headingLevel, pathBase));
@@ -246,6 +247,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Temporal table history-side index gaps", report.TemporalTableHistoryIndexGapFindings.Count);
         AddCount(counts, "Module compile flags (WITH RECOMPILE / TVF database-collation return)", report.ModuleCompileFlagFindings.Count);
         AddCount(counts, "RANGE window-function frames", report.WindowFrameFindings.Count);
+        AddCount(counts, "LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC out-of-range constant arguments", report.WindowFunctionArgumentFindings.Count);
         AddCount(counts, "WAITFOR DELAY/TIME", report.WaitForFindings.Count);
         AddCount(counts, "View/inline TVF ordering not guaranteed", report.ViewOrderingFindings.Count);
         AddCount(counts, "Unresolved BEGIN TRANSACTION", report.TransactionHygieneFindings.Count);
@@ -1996,6 +1998,27 @@ public static class ReadableScanReportWriter
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.Kind == WindowFrameFindingKind.ExplicitRangeFrame ? "Explicit RANGE" : "Implicit default (RANGE)",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> WindowFunctionArgument(ScanReport report, int level, string? pathBase)
+    {
+        if (report.WindowFunctionArgumentFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC out-of-range constant arguments ({report.WindowFunctionArgumentFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A LAG/LEAD offset argument, or a PERCENTILE_CONT/PERCENTILE_DISC percentile argument, constant-folds to a value the engine rejects (a negative offset, or a percentile outside the inclusive [0, 1] range) - oracle-confirmed the statement fails (Msg 8730/Msg 8727) the moment any row reaches the function.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Function", "Argument"],
+            [.. report.WindowFunctionArgumentFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.FunctionName,
+                f.ArgumentText,
             })]);
     }
 

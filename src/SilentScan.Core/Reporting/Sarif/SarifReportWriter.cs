@@ -69,6 +69,7 @@ public static class SarifReportWriter
         results.AddRange(report.TemporalTableHistoryIndexGapFindings.Select(ToResult));
         results.AddRange(report.ModuleCompileFlagFindings.Select(ToResult));
         results.AddRange(report.WindowFrameFindings.Select(ToResult));
+        results.AddRange(report.WindowFunctionArgumentFindings.Select(ToResult));
         results.AddRange(report.WaitForFindings.Select(ToResult));
         results.AddRange(report.ViewOrderingFindings.Select(ToResult));
         results.AddRange(report.TransactionHygieneFindings.Select(ToResult));
@@ -853,6 +854,22 @@ public static class SarifReportWriter
                 "This window function uses an explicit RANGE frame - oracle-measured to cost materially more CPU at the Window Spool operator than the equivalent ROWS frame for the same logical boundary.",
             WindowFrameFindingKind.ImplicitDefaultRangeFrame =>
                 "This window function has an ORDER BY but no explicit frame clause - T-SQL silently defaults this to a RANGE frame, oracle-confirmed to carry the same measured cost as writing RANGE explicitly.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(WindowFunctionArgumentFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.WindowFunctionArgumentRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            WindowFunctionArgumentFindingKind.LagLeadNegativeOffset =>
+                $"{finding.FunctionName}'s offset argument '{finding.ArgumentText}' constant-folds to a negative value - oracle-confirmed (Msg 8730) this fails the moment any row reaches the window function.",
+            WindowFunctionArgumentFindingKind.PercentileOutOfRange =>
+                $"{finding.FunctionName}'s percentile argument '{finding.ArgumentText}' constant-folds to a value outside [0, 1] - oracle-confirmed (Msg 8727) this fails the moment any row reaches the function.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
         };
 

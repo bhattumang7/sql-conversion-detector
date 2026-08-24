@@ -91,11 +91,12 @@ public sealed record ScanReport(
     IReadOnlyList<MemoryOptimizedUnsupportedColumnTypeFinding> MemoryOptimizedUnsupportedColumnTypeFindings,
     IReadOnlyList<MemoryOptimizedUnsupportedIndexOptionFinding> MemoryOptimizedUnsupportedIndexOptionFindings,
     IReadOnlyList<MemoryOptimizedForeignKeyFinding> MemoryOptimizedForeignKeyFindings,
+    IReadOnlyList<WindowFunctionArgumentFinding> WindowFunctionArgumentFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
     DynamicSqlSummary DynamicSqlSummary,
     int SchemaVersion = ScanReport.CurrentSchemaVersion)
 {
-    public const int CurrentSchemaVersion = 68;
+    public const int CurrentSchemaVersion = 69;
 }

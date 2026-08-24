@@ -122,6 +122,30 @@ public sealed class LiteralComparisonFolderTests
         Assert.Null(LiteralComparisonFolder.TryFoldToNumeric(comparison.FirstExpression));
     }
 
+    [Fact]
+    public void TryFoldToNumeric_UnaryNegativeLiteral_ReturnsNegatedValue()
+    {
+        var comparison = ExtractComparison("SELECT 1 WHERE -1 = -1;");
+
+        Assert.Equal(-1m, LiteralComparisonFolder.TryFoldToNumeric(comparison.FirstExpression));
+    }
+
+    [Fact]
+    public void TryFoldToNumeric_UnaryPositiveLiteral_ReturnsUnchangedValue()
+    {
+        var comparison = ExtractComparison("SELECT 1 WHERE +1 = +1;");
+
+        Assert.Equal(1m, LiteralComparisonFolder.TryFoldToNumeric(comparison.FirstExpression));
+    }
+
+    [Fact]
+    public void TryFoldToNumeric_ArithmeticFoldingToNegative_ReturnsNegatedValue()
+    {
+        var comparison = ExtractComparison("SELECT 1 WHERE 0 - 1 = 0 - 1;");
+
+        Assert.Equal(-1m, LiteralComparisonFolder.TryFoldToNumeric(comparison.FirstExpression));
+    }
+
     private static BooleanComparisonExpression ExtractComparison(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);

@@ -219,6 +219,13 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
+    public static string WindowFunctionArgumentRuleId(WindowFunctionArgumentFindingKind kind) => kind switch
+    {
+        WindowFunctionArgumentFindingKind.LagLeadNegativeOffset => "silentscan/window-function/lag-lead-negative-offset",
+        WindowFunctionArgumentFindingKind.PercentileOutOfRange => "silentscan/window-function/percentile-out-of-range",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
     public const string WaitForRuleId = "silentscan/control-flow/waitfor";
 
     public const string TransactionHygieneRuleId = "silentscan/control-flow/unresolved-transaction";

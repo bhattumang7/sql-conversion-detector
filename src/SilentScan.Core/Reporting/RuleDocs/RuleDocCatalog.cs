@@ -45,6 +45,8 @@ public static class RuleDocCatalog
 
         [WindowFrame.ExplicitRangeFrame.RuleId] = WindowFrame.ExplicitRangeFrame.Content,
         [WindowFrame.ImplicitDefaultRangeFrame.RuleId] = WindowFrame.ImplicitDefaultRangeFrame.Content,
+        [WindowFunctionArgument.LagLeadNegativeOffset.RuleId] = WindowFunctionArgument.LagLeadNegativeOffset.Content,
+        [WindowFunctionArgument.PercentileOutOfRange.RuleId] = WindowFunctionArgument.PercentileOutOfRange.Content,
         [Query.BareTopNoOrderBy.RuleId] = Query.BareTopNoOrderBy.Content,
 
         [QueryAntiPattern.TableVariablePspSkip.RuleId] = QueryAntiPattern.TableVariablePspSkip.Content,
