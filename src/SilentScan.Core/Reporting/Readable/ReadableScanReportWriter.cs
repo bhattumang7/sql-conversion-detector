@@ -71,6 +71,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
         blocks.AddRange(ColumnstoreUnsupportedColumnType(report, headingLevel, pathBase));
+        blocks.AddRange(SelectiveXmlIndexValueColumn(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUnsupportedColumnType(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUnsupportedIndexOption(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedForeignKey(report, headingLevel, pathBase));
@@ -190,6 +191,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count(f => f.Kind == NonIndexableColumnFindingKind.MaxLength));
         AddCount(counts, "Legacy large-object columns (can never appear in any index)", report.MaxTypedColumnFindings.Count(f => f.Kind == NonIndexableColumnFindingKind.LegacyLargeObject));
         AddCount(counts, "SQL_VARIANT columns participating in a columnstore index (does not deploy)", report.ColumnstoreUnsupportedColumnTypeFindings.Count);
+        AddCount(counts, "Secondary selective XML indexes over an oversized/large-object value column (does not deploy)", report.SelectiveXmlIndexValueColumnFindings.Count);
         AddCount(counts, "Unsupported column type on a memory-optimized table (does not deploy)", report.MemoryOptimizedUnsupportedColumnTypeFindings.Count);
         AddCount(counts, "Unsupported index option on a memory-optimized table (does not deploy)", report.MemoryOptimizedUnsupportedIndexOptionFindings.Count);
         AddCount(counts, "Unsupported memory-optimized foreign key (does not deploy)", report.MemoryOptimizedForeignKeyFindings.Count);
@@ -746,6 +748,29 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.TypeDisplay,
                 f.IndexName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> SelectiveXmlIndexValueColumn(ScanReport report, int level, string? pathBase)
+    {
+        if (report.SelectiveXmlIndexValueColumnFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Secondary selective XML indexes over an oversized/large-object value column ({report.SelectiveXmlIndexValueColumnFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A structural catalog fact, not a plan-shape claim: a secondary selective XML index over a promoted path whose declared type is a large object or wider than 900 bytes does not deploy at all - oracle-confirmed real DDL execution fails with Msg 6391 (large object) or Msg 6395 (maximum key length is 900 bytes).");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Secondary index", "Primary index", "Path", "Type"],
+            [.. report.SelectiveXmlIndexValueColumnFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.SecondaryIndexName}",
+                f.PrimaryIndexName,
+                f.PathName,
+                f.TypeDisplay,
             })]);
     }
 

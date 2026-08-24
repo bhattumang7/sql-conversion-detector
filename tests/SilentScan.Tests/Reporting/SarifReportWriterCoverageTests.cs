@@ -963,6 +963,21 @@ public sealed class SarifReportWriterCoverageTests
     }
 
     [Theory]
+    [InlineData(SelectiveXmlIndexValueColumnFindingKind.TooWide, "silentscan/catalog/selective-xml-index-value-column-too-wide", "Msg 6395")]
+    [InlineData(SelectiveXmlIndexValueColumnFindingKind.LargeObject, "silentscan/catalog/selective-xml-index-value-column-large-object", "Msg 6391")]
+    public void Write_SelectiveXmlIndexValueColumnFinding_MapsKindToDistinctRuleIdAndMessage(
+        SelectiveXmlIndexValueColumnFindingKind kind, string expectedRuleId, string expectedMessageSubstring)
+    {
+        var finding = new SelectiveXmlIndexValueColumnFinding(
+            "dbo.Orders", "SXI_Orders_Note", "SXI_Orders", "Note", "varchar(901)", "test.sql", 1, kind);
+        var report = TestScanReports.Build(SelectiveXmlIndexValueColumnFindings: [finding]);
+
+        var result = FirstResult(report);
+        Assert.Equal(expectedRuleId, result.GetProperty("ruleId").GetString());
+        Assert.Contains(expectedMessageSubstring, result.GetProperty("message").GetProperty("text").GetString());
+    }
+
+    [Theory]
     [InlineData(StatementShapeFindingKind.BareSelectStar, "note")]
     [InlineData(StatementShapeFindingKind.TopWithoutOrderBy, "warning")]
     public void Write_StatementShapeFinding_OnlyBareSelectStarIsDowngradedToNote(StatementShapeFindingKind kind, string expectedLevel)

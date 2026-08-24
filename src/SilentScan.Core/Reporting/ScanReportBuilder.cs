@@ -181,6 +181,13 @@ public static class ScanReportBuilder
             columnstoreBatchModeStage.Complete($"{columnstoreBatchModeDisqualifyingTypeFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<SelectiveXmlIndexValueColumnFinding> selectiveXmlIndexValueColumnFindings;
+        using (var selectiveXmlIndexValueColumnStage = progress.Begin("scanning selective XML index value-column width"))
+        {
+            selectiveXmlIndexValueColumnFindings = SelectiveXmlIndexValueColumnScanner.Scan(catalog);
+            selectiveXmlIndexValueColumnStage.Complete($"{selectiveXmlIndexValueColumnFindings.Count:N0} findings");
+        }
+
         IReadOnlyList<MemoryOptimizedUnsupportedColumnTypeFinding> memoryOptimizedUnsupportedColumnTypeFindings;
         using (var memoryOptimizedColumnTypeStage = progress.Begin("scanning memory-optimized unsupported column types"))
         {
@@ -1291,6 +1298,7 @@ public static class ScanReportBuilder
         triggerOrderFindings = [.. triggerOrderFindings.Where(f => f.Confidence <= minimumConfidence)];
         missingStatisticsFindings = [.. missingStatisticsFindings.Where(f => f.Confidence <= minimumConfidence)];
         operandComparabilityFindings = [.. operandComparabilityFindings.Where(f => f.Confidence <= minimumConfidence)];
+        selectiveXmlIndexValueColumnFindings = [.. selectiveXmlIndexValueColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
@@ -1353,6 +1361,7 @@ public static class ScanReportBuilder
             memoryOptimizedUnsupportedIndexOptionFindings,
             memoryOptimizedForeignKeyFindings,
             windowFunctionArgumentFindings,
+            selectiveXmlIndexValueColumnFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

@@ -104,6 +104,7 @@ public static class RuleDocCatalog
         [Catalog.CrossTableFkTypeDrift.RuleId] = Catalog.CrossTableFkTypeDrift.Content,
         [CallGraph.ArgumentTypeMismatch.RuleId] = CallGraph.ArgumentTypeMismatch.Content,
         [Catalog.MaxTypedColumn.RuleId] = Catalog.MaxTypedColumn.Content,
+        [Catalog.SelectiveXmlIndexValueColumn.RuleId] = Catalog.SelectiveXmlIndexValueColumn.Content,
         [Catalog.ColumnstoreUnsupportedColumnType.RuleId] = Catalog.ColumnstoreUnsupportedColumnType.Content,
         [Catalog.RecompilesEveryCall.RuleId] = Catalog.RecompilesEveryCall.Content,
         [Catalog.TableValuedFunctionReturnUsesDatabaseCollation.RuleId] = Catalog.TableValuedFunctionReturnUsesDatabaseCollation.Content,

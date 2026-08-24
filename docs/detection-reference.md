@@ -221,6 +221,24 @@ confirmed independently of any one tool's output.
   category (rather than just null-checking) would have silently never seen
   Xml at all.
 
+- **A selective XML index's own `CREATE SELECTIVE XML INDEX` never enforces the 900-byte key-length
+  ceiling or the no-large-object restriction on a promoted path's declared `SQL_DATA_TYPE` - the
+  check only fires later, at `CREATE XML INDEX ... USING XML INDEX ... FOR (path)` (a secondary
+  selective XML index), because only then does the promoted path become an actual index key
+  column.** Oracle-confirmed directly (Docker SQL Server 2025): a primary `CREATE SELECTIVE XML
+  INDEX` with a promoted path declared `VARCHAR(MAX)` or `NVARCHAR(4000)` (well past 900 bytes)
+  deploys with no error at all; building a secondary index over that same path then fails - Msg
+  6391 ("is promoted to a type that is invalid for use as a key column in a secondary selective XML
+  index") for the MAX-typed path, Msg 6395 ("The maximum key length is 900 bytes... has maximum
+  length of N bytes") for any string type whose byte width exceeds 900 (`VARCHAR(901)`+,
+  `NVARCHAR(451)`+ - the byte width doubles for the unicode types, matching `sys.columns.max_length`
+  semantics). The boundary is exact: `VARCHAR(900)`/`NVARCHAR(450)` (900 bytes) deploy fine.
+  Non-string promoted path types (`INT`, `BIGINT`, ...) never trigger either check.
+  `VARBINARY`/`TEXT`/`NTEXT`/`DATETIME2` and other unsupported promoted-path types are rejected
+  outright at the primary `CREATE SELECTIVE XML INDEX` statement itself (Msg 6375, "data type ...
+  is not allowed") - a distinct, simpler, already-primary-time failure, out of scope for the
+  value-column-width rule.
+
 ## Predicate survival (normalization/simplification)
 
 Scope note for `detection-tasklist.md`'s top open item. Every predicate

@@ -45,6 +45,7 @@ public static class SarifReportWriter
         results.AddRange(report.TemporalBoundaryFindings.Select(ToResult));
         results.AddRange(report.MaxTypedColumnFindings.Select(ToResult));
         results.AddRange(report.ColumnstoreUnsupportedColumnTypeFindings.Select(ToResult));
+        results.AddRange(report.SelectiveXmlIndexValueColumnFindings.Select(ToResult));
         results.AddRange(report.OversizedParameterFindings.Select(ToResult));
         results.AddRange(report.UnderLengthParameterFindings.Select(ToResult));
         results.AddRange(report.AnsiPaddingMismatchFindings.Select(ToResult));
@@ -295,6 +296,18 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ColumnstoreUnsupportedColumnTypeRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} and participates in columnstore index '{finding.IndexName}' - this does not deploy (Msg 35343: a SQL_VARIANT column cannot participate in a columnstore index).";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(SelectiveXmlIndexValueColumnFinding finding)
+    {
+
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SelectiveXmlIndexValueColumnRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = finding.Kind == SelectiveXmlIndexValueColumnFindingKind.LargeObject
+            ? $"Secondary selective XML index '{finding.SecondaryIndexName}' on '{finding.TableQualifiedName}' over path '{finding.PathName}' (promoted as {finding.TypeDisplay} in selective XML index '{finding.PrimaryIndexName}') does not deploy (Msg 6391: promoted to a type invalid for use as a key column in a secondary selective XML index)."
+            : $"Secondary selective XML index '{finding.SecondaryIndexName}' on '{finding.TableQualifiedName}' over path '{finding.PathName}' (promoted as {finding.TypeDisplay} in selective XML index '{finding.PrimaryIndexName}') does not deploy (Msg 6395: the maximum key length is 900 bytes).";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
     }

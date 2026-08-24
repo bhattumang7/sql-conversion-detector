@@ -254,6 +254,7 @@ public sealed class ReadableScanReportWriterTests
             [], [], [], [], [], [], [], [],
             [], [], [], [], [], [], [], [],
             [],
+            [],
             SkippedConstructSummary.From([]), TypedPredicateSummary.From([]), DynamicSqlSummary.From([]));
 
         var rendered = ReadableScanReportWriter.Write(report, "t", ReadableStyle.Text);
@@ -359,6 +360,7 @@ public sealed class ReadableScanReportWriterTests
         [],
         [],
         [],
+            [],
         SkippedConstructSummary.From([]),
         TypedPredicateSummary.From([]),
         DynamicSqlSummary.From([]));
@@ -464,6 +466,7 @@ public sealed class ReadableScanReportWriterTests
         MemoryOptimizedUnsupportedIndexOptionFindings: [],
         MemoryOptimizedForeignKeyFindings: [],
         WindowFunctionArgumentFindings: [],
+        SelectiveXmlIndexValueColumnFindings: [],
         SkippedConstructs: [],
         SkippedConstructSummary: SkippedConstructSummary.From([]),
         TypedPredicateSummary: TypedPredicateSummary.From([]),

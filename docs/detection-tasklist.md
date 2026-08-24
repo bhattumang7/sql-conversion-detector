@@ -19,13 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`MaxTypedColumnRuleId`-family sibling: SELECTIVE XML INDEX value
-      column too wide.** A selective XML index's value column resolving to a
-      large object or a string over 900 bytes (`sys.columns` type/max-length)
-      fails at CREATE/ALTER time — the same catalog-decidable structural-
-      failure shape as the shipped MAX-typed-column/columnstore-unsupported-
-      type family, for a feature that family doesn't cover yet.
-
 - [ ] **`FloatEqualityRuleId` sibling: float/real column fed into an
       aggregate.** Distinct footgun from the shipped equality-predicate
       rule: parallel-plan accumulation order for `SUM`/`AVG`/etc. over a

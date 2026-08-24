@@ -36,6 +36,12 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled NonIndexableColumnFindingKind."),
     };
     public const string ColumnstoreUnsupportedColumnTypeRuleId = "silentscan/catalog/columnstore-unsupported-column-type";
+    public static string SelectiveXmlIndexValueColumnRuleId(SelectiveXmlIndexValueColumnFindingKind kind) => kind switch
+    {
+        SelectiveXmlIndexValueColumnFindingKind.TooWide => "silentscan/catalog/selective-xml-index-value-column-too-wide",
+        SelectiveXmlIndexValueColumnFindingKind.LargeObject => "silentscan/catalog/selective-xml-index-value-column-large-object",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SelectiveXmlIndexValueColumnFindingKind."),
+    };
     public const string FloatEqualityRuleId = "silentscan/predicates/float-equality";
     public const string AlwaysEncryptedOrderByRuleId = "silentscan/predicates/always-encrypted-order-by";
     public const string TriggerOrderRuleId = "silentscan/catalog/trigger-firing-order-undefined";

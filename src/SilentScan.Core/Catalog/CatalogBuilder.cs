@@ -258,6 +258,16 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
+        public override void ExplicitVisit(CreateSelectiveXmlIndexStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                VisitCreateSelectiveXmlIndex(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
         public override void ExplicitVisit(CreateExternalTableStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
@@ -1003,6 +1013,41 @@ public static class CatalogBuilder
                 IsFiltered: createIndex.FilterPredicate is not null);
 
             catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] }, writeScope);
+        }
+
+        private void VisitCreateSelectiveXmlIndex(CreateSelectiveXmlIndexStatement node)
+        {
+            var qualifiedName = SchemaObjectNameHelper.Qualify(node.OnName);
+
+            if (node.IsSecondary)
+            {
+                if (node.Name is null || node.UsingXmlIndexName is null || node.PathName is null)
+                {
+                    return;
+                }
+
+                catalog.AddSecondarySelectiveXmlIndexReference(new CatalogSecondarySelectiveXmlIndexReference(
+                    qualifiedName, node.Name.Value, node.UsingXmlIndexName.Value, node.PathName.Value,
+                    sourcePath, node.StartLine));
+                return;
+            }
+
+            if (node.Name is null)
+            {
+                return;
+            }
+
+            foreach (var promotedPath in node.PromotedPaths)
+            {
+                if (promotedPath.Name is null || promotedPath.SQLDataType is null)
+                {
+                    continue;
+                }
+
+                var type = SqlTypeReferenceResolver.Resolve(promotedPath.SQLDataType, columnCollation: null, catalog.TypeAliases);
+                catalog.AddSelectiveXmlIndexPromotedPath(new CatalogSelectiveXmlIndexPromotedPath(
+                    qualifiedName, node.Name.Value, promotedPath.Name.Value, type));
+            }
         }
 
         private void VisitCreateColumnStoreIndex(CreateColumnStoreIndexStatement createIndex)
