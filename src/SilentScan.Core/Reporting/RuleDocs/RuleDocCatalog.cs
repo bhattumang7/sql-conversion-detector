@@ -241,5 +241,11 @@ public static class RuleDocCatalog
         [ForcedParameterization.CheckSumArgumentLiteral.RuleId] = ForcedParameterization.CheckSumArgumentLiteral.Content,
         [ForcedParameterization.ConstantFoldableExpressionLiteral.RuleId] = ForcedParameterization.ConstantFoldableExpressionLiteral.Content,
         [ForcedParameterization.GroupByExpressionLiteral.RuleId] = ForcedParameterization.GroupByExpressionLiteral.Content,
+
+        [DeadCode.UnreachableCode.RuleId] = DeadCode.UnreachableCode.Content,
+        [DeadCode.UnusedLabel.RuleId] = DeadCode.UnusedLabel.Content,
+        [DeadCode.UnusedLocalVariable.RuleId] = DeadCode.UnusedLocalVariable.Content,
+        [DeadCode.UnusedParameter.RuleId] = DeadCode.UnusedParameter.Content,
+        [DeadCode.RedundantJump.RuleId] = DeadCode.RedundantJump.Content,
     };
 }
