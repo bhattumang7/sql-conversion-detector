@@ -77,9 +77,9 @@ public static class TryCastComputedColumnPredicateScanner
             .. visitor.Findings
                 .OrderBy(f => f.TableQualifiedName, StringComparer.Ordinal)
                 .ThenBy(f => f.ColumnName, StringComparer.Ordinal)
-                .ThenBy(f => f.PredicateSourcePath, StringComparer.Ordinal)
-                .ThenBy(f => f.PredicateLine)
-                .ThenBy(f => f.PredicateColumn),
+                .ThenBy(f => f.Location.SourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.Location.Line)
+                .ThenBy(f => f.Location.Column),
         ];
     }
 
@@ -184,8 +184,9 @@ public static class TryCastComputedColumnPredicateScanner
                 }
 
                 Findings.Add(new TryCastComputedColumnPredicateFinding(
-                    baseColumn.TableQualifiedName, baseColumn.ColumnName, candidate.DefinitionText, candidate.SourcePath, candidate.Line,
-                    sourcePath, columnRef.StartLine, columnRef.StartColumn));
+                    baseColumn.TableQualifiedName, baseColumn.ColumnName, candidate.DefinitionText,
+                    new SourceSpan(candidate.SourcePath, candidate.Line, 1),
+                    new SourceSpan(sourcePath, columnRef.StartLine, columnRef.StartColumn)));
             }
         }
 

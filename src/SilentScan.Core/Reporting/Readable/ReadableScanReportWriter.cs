@@ -1726,11 +1726,11 @@ public static class ReadableScanReportWriter
             [WhereHeader, TableHeader, ColumnHeader, "Definition", "Definition site"],
             [.. report.TryCastComputedColumnPredicateFindings.Select(f => new List<string>
             {
-                Where(f.PredicateSourcePath, f.PredicateLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                Where(f.Location.SourcePath, f.Location.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.TableQualifiedName,
                 f.ColumnName,
                 f.DefinitionText,
-                Where(f.DefinitionSourcePath, f.DefinitionLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                Where(f.DefinitionLocation.SourcePath, f.DefinitionLocation.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
             })]);
     }
 

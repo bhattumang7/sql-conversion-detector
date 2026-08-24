@@ -796,9 +796,9 @@ public static class SarifReportWriter
     {
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TryCastComputedColumnPredicateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
-        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (a non-persisted computed column defined as '{finding.DefinitionText}', {finding.DefinitionSourcePath}:{finding.DefinitionLine}) is referenced in a predicate here - TRY_CAST makes this column non-deterministic, so it can never be PERSISTED or indexed, and this predicate can never seek through it.";
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (a non-persisted computed column defined as '{finding.DefinitionText}', {finding.DefinitionLocation.SourcePath}:{finding.DefinitionLocation.Line}) is referenced in a predicate here - TRY_CAST makes this column non-deterministic, so it can never be PERSISTED or indexed, and this predicate can never seek through it.";
 
-        return BuildResult(ruleId, level, message, finding.PredicateSourcePath, finding.PredicateLine, finding.PredicateColumn);
+        return BuildResult(ruleId, level, message, finding.Location.SourcePath, finding.Location.Line, finding.Location.Column);
     }
 
     private static SarifResult ToResult(StaleSelectStarViewFinding finding)

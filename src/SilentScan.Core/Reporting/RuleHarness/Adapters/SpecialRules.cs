@@ -41,14 +41,14 @@ internal sealed class TryCastComputedColumnPredicateRule : IPerFileRule
             return cmp;
         }
 
-        cmp = string.CompareOrdinal(a.PredicateSourcePath, b.PredicateSourcePath);
+        cmp = string.CompareOrdinal(a.Location.SourcePath, b.Location.SourcePath);
         if (cmp != 0)
         {
             return cmp;
         }
 
-        cmp = a.PredicateLine.CompareTo(b.PredicateLine);
-        return cmp != 0 ? cmp : a.PredicateColumn.CompareTo(b.PredicateColumn);
+        cmp = a.Location.Line.CompareTo(b.Location.Line);
+        return cmp != 0 ? cmp : a.Location.Column.CompareTo(b.Location.Column);
     });
 }
 
