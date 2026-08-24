@@ -270,13 +270,6 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
-    public static string UndersizedDeclarationRuleId(UndersizedDeclarationSite site) => site switch
-    {
-        UndersizedDeclarationSite.TableColumn => "silentscan/declaration/undersized-column",
-        UndersizedDeclarationSite.Declaration => "silentscan/declaration/undersized-variable-or-parameter",
-        _ => throw new ArgumentOutOfRangeException(nameof(site), site, null),
-    };
-
     public const string TruncateSwallowedRuleId = "silentscan/control-flow/truncate-swallowed-by-catch";
 
     public static string DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind kind) => kind switch

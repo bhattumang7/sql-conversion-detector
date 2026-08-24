@@ -46,7 +46,6 @@ public static class RuleRegistry
 
         new PartialCompositeForeignKeyJoinRule(),
         new TryCastComputedColumnPredicateRule(),
-        new UndersizedDeclarationRule(),
         new StatementShapeRule(),
         new MultiReferencedCteRule(),
         new PostExpansionJoinWidthRule(),

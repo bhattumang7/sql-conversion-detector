@@ -52,24 +52,6 @@ internal sealed class TryCastComputedColumnPredicateRule : IPerFileRule
     });
 }
 
-internal sealed class UndersizedDeclarationRule : IPerFileRule
-{
-    public string Id => "UndersizedDeclarationScanner";
-
-    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) =>
-        UndersizedDeclarationScanner.ScanDeclarations(parseResult, context.Catalog);
-
-    public IReadOnlyList<IFinding> ScanCatalogOnce(RuleContext context) => UndersizedDeclarationScanner.ScanCatalog(context.Catalog);
-
-    public IComparer<IFinding>? Comparer => Comparer<IFinding>.Create((x, y) =>
-    {
-        var a = (UndersizedDeclarationFinding)x;
-        var b = (UndersizedDeclarationFinding)y;
-        var cmp = string.CompareOrdinal(a.QualifiedOrVariableName, b.QualifiedOrVariableName);
-        return cmp != 0 ? cmp : DefaultLocationComparer.Instance.Compare(x, y);
-    });
-}
-
 internal sealed class StatementShapeRule : IPerFileRule
 {
     public string Id => "StatementShapeScanner";

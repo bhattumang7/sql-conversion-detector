@@ -178,7 +178,6 @@ public static class ScanReportBuilder
         var indexHintFindings = ruleResults.For<IndexHintFinding>("IndexHintScanner");
         var sessionDateSettingFindings = ruleResults.For<SessionDateSettingFinding>("SessionDateSettingScanner");
         var cartesianJoinFindings = ruleResults.For<CartesianJoinFinding>("CartesianJoinScanner");
-        var undersizedDeclarationFindings = ruleResults.For<UndersizedDeclarationFinding>("UndersizedDeclarationScanner");
         var truncateSwallowedFindings = ruleResults.For<TruncateSwallowedFinding>("TruncateSwallowedScanner");
         var unindexedTempTableUsageFindings = ruleResults.For<UnindexedTempTableUsageFinding>("UnindexedTempTableUsageScanner");
         var outputParameterFindings = ruleResults.For<OutputParameterFinding>("OutputParameterScanner");
@@ -369,7 +368,7 @@ public static class ScanReportBuilder
             moduleCompileFlagFindings,
             windowFrameFindings, waitForFindings, viewOrderingFindings, transactionHygieneFindings,
             compositeIndexLeadingColumnFindings, indexHintFindings,
-            sessionDateSettingFindings, cartesianJoinFindings, undersizedDeclarationFindings, truncateSwallowedFindings, unindexedTempTableUsageFindings,
+            sessionDateSettingFindings, cartesianJoinFindings, truncateSwallowedFindings, unindexedTempTableUsageFindings,
             outputParameterFindings,
 
             [],

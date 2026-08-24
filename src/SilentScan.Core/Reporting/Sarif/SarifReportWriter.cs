@@ -78,7 +78,6 @@ public static class SarifReportWriter
         results.AddRange(report.IndexHintFindings.Select(ToResult));
         results.AddRange(report.SessionDateSettingFindings.Select(ToResult));
         results.AddRange(report.CartesianJoinFindings.Select(ToResult));
-        results.AddRange(report.UndersizedDeclarationFindings.Select(ToResult));
         results.AddRange(report.TruncateSwallowedFindings.Select(ToResult));
         results.AddRange(report.UnindexedTempTableUsageFindings.Select(ToResult));
         results.AddRange(report.OutputParameterFindings.Select(ToResult));
@@ -1075,13 +1074,6 @@ public static class SarifReportWriter
         var kindText = finding.Kind == CartesianJoinKind.ExplicitCrossJoin ? "CROSS JOIN" : "comma-join";
         var message = $"{finding.FirstTableQualifiedName} and {finding.SecondTableQualifiedName} are combined via a {kindText} with no predicate anywhere in the statement connecting the two - a true cartesian product.";
         return BuildResult(ruleId, FloorLevelForConfidence(LevelWarning, finding.Confidence), message, finding.SourcePath, finding.Line, finding.Column);
-    }
-
-    private static SarifResult ToResult(UndersizedDeclarationFinding finding)
-    {
-        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UndersizedDeclarationRuleId(finding.Site), finding.Confidence);
-        var message = $"{finding.QualifiedOrVariableName} is declared {finding.TypeDescription} - a length of {finding.Length} is almost always a truncated-from-a-larger-source mistake or a leftover placeholder.";
-        return BuildResult(ruleId, FloorLevelForConfidence(LevelNote, finding.Confidence), message, finding.SourcePath, finding.Line, finding.Column);
     }
 
     private static SarifResult ToResult(TruncateSwallowedFinding finding)

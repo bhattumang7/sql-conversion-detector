@@ -140,9 +140,6 @@ public static class RuleDocCatalog
         [Identity.RangeNearExhaustion.RuleId] = Identity.RangeNearExhaustion.Content,
         [Identity.SeedOrIncrementAnomaly.RuleId] = Identity.SeedOrIncrementAnomaly.Content,
 
-        [Declaration.UndersizedColumn.RuleId] = Declaration.UndersizedColumn.Content,
-        [Declaration.UndersizedVariableOrParameter.RuleId] = Declaration.UndersizedVariableOrParameter.Content,
-
         [Security.HardCodedCredential.RuleId] = Security.HardCodedCredential.Content,
         [Security.HardCodedIpAddress.RuleId] = Security.HardCodedIpAddress.Content,
         [Security.WeakHashAlgorithm.RuleId] = Security.WeakHashAlgorithm.Content,

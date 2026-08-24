@@ -108,7 +108,6 @@ public static class ReadableScanReportWriter
         blocks.AddRange(IndexHint(report, headingLevel, pathBase));
         blocks.AddRange(SessionDateSetting(report, headingLevel, pathBase));
         blocks.AddRange(CartesianJoin(report, headingLevel, pathBase));
-        blocks.AddRange(UndersizedDeclaration(report, headingLevel, pathBase));
         blocks.AddRange(TruncateSwallowed(report, headingLevel, pathBase));
         blocks.AddRange(UnindexedTempTableUsage(report, headingLevel, pathBase));
         blocks.AddRange(OutputParameter(report, headingLevel, pathBase));
@@ -264,7 +263,6 @@ public static class ReadableScanReportWriter
         AddCount(counts, "INDEX hints naming a nonexistent or non-seekable index", report.IndexHintFindings.Count);
         AddCount(counts, "SET DATEFORMAT/DATEFIRST mid-module", report.SessionDateSettingFindings.Count);
         AddCount(counts, "True cartesian joins", report.CartesianJoinFindings.Count);
-        AddCount(counts, "Undersized (length 1/2) declarations", report.UndersizedDeclarationFindings.Count);
         AddCount(counts, "TRUNCATE swallowed by an empty/non-rethrowing CATCH", report.TruncateSwallowedFindings.Count);
         AddCount(counts, "Unindexed SELECT INTO temp table usage", report.UnindexedTempTableUsageFindings.Count);
         AddCount(counts, "Unassigned OUTPUT parameters", report.OutputParameterFindings.Count);
@@ -409,16 +407,22 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Heading(level, $"Assignments risking silent data loss ({report.WriteLossFindings.Count})");
         yield return new ReadableBlock.Paragraph(
             "Each of these writes a value whose static type carries more information than its target can hold - T-SQL rounds, truncates, or replaces the value with no error raised, so nothing here shows up as a failed statement. A case T-SQL itself refuses to run (a too-long string, an overflowing integer) is not listed - those already fail loudly on their own.");
-        yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Target type", "Source type", "Risk"],
-            [.. report.WriteLossFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
-                f.TableQualifiedName is { } table ? $"{table}.{f.ColumnName}" : f.ColumnName,
-                f.TargetType.ToString(),
-                f.SourceType.ToString(),
-                DescribeWriteLossKind(f.Kind),
-            })]);
+        foreach (var group in report.WriteLossFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.WriteLossRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ColumnHeader, "Target type", "Source type", "Risk"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
+                    f.TableQualifiedName is { } table ? $"{table}.{f.ColumnName}" : f.ColumnName,
+                    f.TargetType.ToString(),
+                    f.SourceType.ToString(),
+                    DescribeWriteLossKind(f.Kind),
+                })]);
+        }
     }
 
     private static string DescribeWriteLossKind(WriteLossKind kind) => kind switch
@@ -712,6 +716,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level, $"MAX-typed columns ({maxLength.Count})");
             yield return new ReadableBlock.Paragraph(
                 "A structural catalog fact, not a comparison: VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) columns can never be an index key column at all (SQL Server rejects them at CREATE INDEX time), so no predicate or join on them can ever seek, regardless of how they're used.");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MaxTypedColumnRuleId(NonIndexableColumnFindingKind.MaxLength)));
 
             yield return new ReadableBlock.Table(
                 [WhereHeader, ColumnHeader, "Type"],
@@ -729,6 +734,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level, $"Legacy large-object columns ({legacyLob.Count})");
             yield return new ReadableBlock.Paragraph(
                 "A structural catalog fact, not a comparison: TEXT/NTEXT/IMAGE columns can never appear in any index at all (SQL Server rejects them at CREATE INDEX time, even as a nonclustered index's INCLUDE column), so no predicate or join on them can ever seek and they can never be covered.");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MaxTypedColumnRuleId(NonIndexableColumnFindingKind.LegacyLargeObject)));
 
             yield return new ReadableBlock.Table(
                 [WhereHeader, ColumnHeader, "Type"],
@@ -775,16 +781,22 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A structural catalog fact, not a plan-shape claim: a secondary selective XML index over a promoted path whose declared type is a large object or wider than 900 bytes does not deploy at all - oracle-confirmed real DDL execution fails with Msg 6391 (large object) or Msg 6395 (maximum key length is 900 bytes).");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Secondary index", "Primary index", "Path", "Type"],
-            [.. report.SelectiveXmlIndexValueColumnFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                $"{f.TableQualifiedName}.{f.SecondaryIndexName}",
-                f.PrimaryIndexName,
-                f.PathName,
-                f.TypeDisplay,
-            })]);
+        foreach (var group in report.SelectiveXmlIndexValueColumnFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SelectiveXmlIndexValueColumnRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Secondary index", "Primary index", "Path", "Type"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    $"{f.TableQualifiedName}.{f.SecondaryIndexName}",
+                    f.PrimaryIndexName,
+                    f.PathName,
+                    f.TypeDisplay,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> MemoryOptimizedUnsupportedColumnType(ScanReport report, int level, string? pathBase)
@@ -820,22 +832,29 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A structural catalog fact: a rowstore CLUSTERED index, an index with INCLUDE columns, or a filtered index (a WHERE clause on the index) is not supported on a memory-optimized table - oracle-confirmed real DDL execution fails (Msg 12317/10664/10794 respectively).");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Index", "Issue"],
-            [.. report.MemoryOptimizedUnsupportedIndexOptionFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.TableQualifiedName,
-                f.IndexName,
-                f.Kind switch
+        foreach (var group in report.MemoryOptimizedUnsupportedIndexOptionFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{MemoryOptimizedUnsupportedIndexOptionTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MemoryOptimizedUnsupportedIndexOptionRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Table", "Index"],
+                [.. ordered.Select(f => new List<string>
                 {
-                    MemoryOptimizedUnsupportedIndexOptionKind.ClusteredIndex => "rowstore CLUSTERED index",
-                    MemoryOptimizedUnsupportedIndexOptionKind.IncludedColumns => "INCLUDE columns",
-                    MemoryOptimizedUnsupportedIndexOptionKind.FilteredIndex => "filtered index (WHERE clause)",
-                    _ => "unsupported index option",
-                },
-            })]);
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.TableQualifiedName,
+                    f.IndexName,
+                })]);
+        }
     }
+
+    private static string MemoryOptimizedUnsupportedIndexOptionTitle(MemoryOptimizedUnsupportedIndexOptionKind kind) => kind switch
+    {
+        MemoryOptimizedUnsupportedIndexOptionKind.ClusteredIndex => "Rowstore CLUSTERED index",
+        MemoryOptimizedUnsupportedIndexOptionKind.IncludedColumns => "INCLUDE columns",
+        MemoryOptimizedUnsupportedIndexOptionKind.FilteredIndex => "Filtered index (WHERE clause)",
+        _ => "Unsupported index option",
+    };
 
     private static IEnumerable<ReadableBlock> MemoryOptimizedForeignKey(ScanReport report, int level, string? pathBase)
     {
@@ -848,22 +867,29 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A structural catalog fact: a foreign key spanning a memory-optimized and a disk-based table, or a CASCADE/SET NULL/SET DEFAULT referential action between two memory-optimized tables, is not supported - oracle-confirmed real DDL execution fails (Msg 10778/10794 respectively).");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Constraint", "Parent table", "Referenced table", "Issue"],
-            [.. report.MemoryOptimizedForeignKeyFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.ConstraintName,
-                f.ParentTableQualifiedName,
-                f.ReferencedTableQualifiedName,
-                f.Kind switch
+        foreach (var group in report.MemoryOptimizedForeignKeyFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{MemoryOptimizedForeignKeyTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MemoryOptimizedForeignKeyRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Constraint", "Parent table", "Referenced table"],
+                [.. ordered.Select(f => new List<string>
                 {
-                    MemoryOptimizedForeignKeyFindingKind.CrossStorageForeignKey => "spans memory-optimized and disk-based tables",
-                    MemoryOptimizedForeignKeyFindingKind.ReferentialAction => "non-NO ACTION referential action",
-                    _ => "unsupported foreign key shape",
-                },
-            })]);
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.ConstraintName,
+                    f.ParentTableQualifiedName,
+                    f.ReferencedTableQualifiedName,
+                })]);
+        }
     }
+
+    private static string MemoryOptimizedForeignKeyTitle(MemoryOptimizedForeignKeyFindingKind kind) => kind switch
+    {
+        MemoryOptimizedForeignKeyFindingKind.CrossStorageForeignKey => "Spans memory-optimized and disk-based tables",
+        MemoryOptimizedForeignKeyFindingKind.ReferentialAction => "Non-NO ACTION referential action",
+        _ => "Unsupported foreign key shape",
+    };
 
     private static IEnumerable<ReadableBlock> NonPersistedComputedColumn(ScanReport report, int level, string? pathBase)
     {
@@ -1069,16 +1095,21 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Purely a maintainability/readability signal - none of these eight metrics change a query's result or its plan. Every threshold is configurable; the defaults were calibrated against this codebase's own real corpus distribution, not invented arbitrarily.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Measured", "Threshold", DetailHeader],
-            [.. report.CodeMetricFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.MeasuredValue.ToString(CultureInfo.InvariantCulture),
-                f.Threshold.ToString(CultureInfo.InvariantCulture),
-                f.DetailText ?? f.ModuleQualifiedName,
-            })]);
+        foreach (var group in report.CodeMetricFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CodeMetricRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Measured", "Threshold", DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.MeasuredValue.ToString(CultureInfo.InvariantCulture),
+                    f.Threshold.ToString(CultureInfo.InvariantCulture),
+                    f.DetailText ?? f.ModuleQualifiedName,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> Formatting(ScanReport report, int level, string? pathBase)
@@ -1092,14 +1123,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Purely a readability/maintainability signal for most of these - none change a query's result or its plan. Two kinds are a visual-ambiguity risk instead (a statement that looks like it belongs to a conditional/loop but structurally does not): the statement's own behavior is still unaffected, only a future edit relying on the misleading shape is at risk.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", DetailHeader],
-            [.. report.FormattingFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.DetailText ?? f.ModuleQualifiedName,
-            })]);
+        foreach (var group in report.FormattingFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FormattingRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.DetailText ?? f.ModuleQualifiedName,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> Naming(ScanReport report, int level, string? pathBase)
@@ -1113,14 +1149,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A reserved keyword used as an identifier, a user-defined procedure/function named with the \"sp_\" prefix, a schema-scoped CREATE with no explicit schema qualifier, and a redundant \"dbo.\" qualifier on a type reference.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", DetailHeader],
-            [.. report.NamingFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.DetailText,
-            })]);
+        foreach (var group in report.NamingFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NamingRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.DetailText,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> ForcedParameterization(ScanReport report, int level, string? pathBase)
@@ -1134,14 +1175,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Live-mode only, reported only when the target database has PARAMETERIZATION FORCED on. Ten query-text clause shapes - a LIKE pattern, a TOP/OFFSET-FETCH row count, a select-list/HAVING/ORDER-BY/OUTPUT-clause literal, a TABLESAMPLE size, a literal argument to a TypeName::Method(...) static call/CONVERT style code/CHECKSUM(...), and a constant-foldable arithmetic expression - each independently oracle-confirmed (docs/detection-reference.md Appendix 8) to stay unparameterized even while the rest of the same statement correctly shares one plan, silently defeating the setting for exactly the values an app's own workload varies most.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", DetailHeader],
-            [.. report.ForcedParameterizationFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.DetailText,
-            })]);
+        foreach (var group in report.ForcedParameterizationFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ForcedParameterizationRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.DetailText,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> DeadCode(ScanReport report, int level, string? pathBase)
@@ -1155,14 +1201,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Unreachable code, an unused label, an unused local variable, an unused non-OUTPUT parameter, or a GOTO whose target is the very next statement. Purely a maintainability signal for every kind - the flagged code's own current behavior is unaffected.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", DetailHeader],
-            [.. report.DeadCodeFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.DetailText ?? f.ModuleQualifiedName,
-            })]);
+        foreach (var group in report.DeadCodeFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.DeadCodeRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.DetailText ?? f.ModuleQualifiedName,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> Duplication(ScanReport report, int level, string? pathBase)
@@ -1176,14 +1227,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Commented-out code, a duplicated string literal, a WHILE loop that can only run once, a self-assignment, identical operands either side of an operator, a repeated unary operator, a negated comparison written as the negation of its opposite, a duplicated or all-identical conditional branch, a redundant or mutually-exclusive AND-combined numeric bound, a collapsible nested IF, a nested IIF, or an always-true/always-false literal comparison. Purely a maintainability/readability signal for every kind - the flagged code's own current behavior is unaffected.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", DetailHeader],
-            [.. report.DuplicationFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.DetailText ?? f.ModuleQualifiedName,
-            })]);
+        foreach (var group in report.DuplicationFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.DuplicationRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.DetailText ?? f.ModuleQualifiedName,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> DeprecatedSyntax(ScanReport report, int level, string? pathBase)
@@ -1197,14 +1253,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A TODO/FIXME comment, a non-ANSI comparison operator, the \"= NULL\"/\"<> NULL\" silent always-false trap, a wildcard-free LIKE pattern, a legacy system compatibility view, a table hint without WITH, a numbered-procedure-group definition/invocation, a string-literal column alias, a removed legacy security stored procedure, or SET ROWCOUNT. The two NULL-comparison kinds are a real silent correctness trap under the default ANSI_NULLS ON setting; every other kind is a maintainability/forward-compatibility signal.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", DetailHeader],
-            [.. report.DeprecatedSyntaxFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.DetailText,
-            })]);
+        foreach (var group in report.DeprecatedSyntaxFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.DeprecatedSyntaxRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.DetailText,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> StatementShape(ScanReport report, int level, string? pathBase)
@@ -1218,14 +1279,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "An INSERT with no explicit column list, an ordinal ORDER BY, a TOP with no ORDER BY, a base table with no PRIMARY KEY, a routine missing SET NOCOUNT ON, or a bare SELECT *. The first three are correctness-adjacent (silently wrong the moment the target's/source's own column shape changes, or genuinely unspecified row selection); the rest are maintainability/cost signals.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", DetailHeader],
-            [.. report.StatementShapeFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.DetailText,
-            })]);
+        foreach (var group in report.StatementShapeFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.StatementShapeRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.DetailText,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> ControlFlowRisk(ScanReport report, int level, string? pathBase)
@@ -1239,14 +1305,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A cursor FETCH whose INTO list doesn't match its own cursor's defining SELECT column count (always fails at runtime, Msg 16924), an empty CATCH block (silently swallows every error), output emitted from a trigger (a SELECT or PRINT sent back to whatever connection fired the DML, not the calling application), a NOLOCK/READUNCOMMITTED dirty-read hint, the same expression passed twice to one call, a reference to @@IDENTITY (session-wide scope, prefer SCOPE_IDENTITY()), a GOTO statement, a simple CASE with no ELSE (silently evaluates to NULL when nothing matches), or a non-deterministic function (NEWID/RAND/CRYPT_GEN_RANDOM) used as a CASE input (oracle-confirmed to be re-evaluated separately per WHEN comparison, making every branch effectively unreachable).");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", DetailHeader],
-            [.. report.ControlFlowRiskFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.DetailText,
-            })]);
+        foreach (var group in report.ControlFlowRiskFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ControlFlowRiskRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.DetailText,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> Security(ScanReport report, int level, string? pathBase)
@@ -1260,14 +1331,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A credential-suggestive-named variable assigned a literal string, a hardcoded non-benign IP address, a HASHBYTES call naming a weak/deprecated algorithm (general use and, sharper, a security-sensitive context), and a dynamic SQL call site whose assembled text this tool cannot prove is free of runtime/external influence.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", DetailHeader],
-            [.. report.SecurityFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.DetailText,
-            })]);
+        foreach (var group in report.SecurityFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SecurityRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.DetailText,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> IndexDesign(ScanReport report, int level, string? pathBase)
@@ -1281,15 +1357,20 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Live-mode only. A heap (no clustered index) carrying nonclustered indexes, and the sharper sibling, a heap whose own PRIMARY KEY is declared NONCLUSTERED - both pay an 8-byte RID lookup instead of a clustering-key seek. Clustering-key quality: a non-unique clustered index (hidden 4-byte uniquifier), a wide clustered key (>3 key columns or >16 estimated bytes - every nonclustered index on the table carries a copy of it), and a uniqueidentifier clustered key defaulted to NEWID() (random insert order fragments the B-tree; NEWSEQUENTIALID() does not fire here). Also: duplicate/prefix-subsumed indexes, unindexed foreign keys, disabled/hypothetical indexes, over-indexing (many nonclustered indexes on one table, or a single index with too many key columns), three low-confidence, listed-for-completeness table-shape signals (wide table, high nullable-column ratio, high string-column ratio), a filtered index whose filter columns are absent from its own key/INCLUDE list, deprecated LOB column types (text/ntext/image, and timestamp vs. rowversion as a naming-only note), a float/real column used as an index key, and a statistics object marked NORECOMPUTE.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", IndexHeader, DetailHeader],
-            [.. report.IndexDesignFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.IndexName ?? (IsTableLevelIndexDesignKind(f.Kind) ? "(table-level)" : "<unnamed>"),
-                f.DetailText,
-            })]);
+        foreach (var group in report.IndexDesignFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.IndexDesignRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, IndexHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.IndexName ?? (IsTableLevelIndexDesignKind(f.Kind) ? "(table-level)" : "<unnamed>"),
+                    f.DetailText,
+                })]);
+        }
     }
 
     private static bool IsTableLevelIndexDesignKind(IndexDesignFindingKind kind) => kind switch
@@ -1313,15 +1394,20 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Live-mode only. A negative seed or a non-1 increment on an IDENTITY column - schema-decidable, informational, not a proven defect. An IDENTITY column that has consumed most of its declared type's representable range - data-state-decidable, meaningful ONLY against a production-shaped target; never read the absence of this finding as a passing signal on a low-value development database.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", ColumnHeader, DetailHeader],
-            [.. report.IdentityRangeFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.ColumnName,
-                f.DetailText,
-            })]);
+        foreach (var group in report.IdentityRangeFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.IdentityRangeRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ColumnHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.ColumnName,
+                    f.DetailText,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> FloatEquality(ScanReport report, int level, string? pathBase)
@@ -1434,22 +1520,29 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "An ALTER TABLE ... ALTER COLUMN either narrows a DECIMAL/NUMERIC or var-time column's declared precision/scale below its current catalog value, or retypes a char/nchar/varchar/nvarchar column directly to binary/varbinary - both fail or silently lose data at DDL time.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Previous type", "New type", "Kind"],
-            [.. report.AlterColumnSafetyFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                $"{f.TableQualifiedName}.{f.ColumnName}",
-                f.PreviousType.ToString(),
-                f.NewType.ToString(),
-                f.Kind switch
+        foreach (var group in report.AlterColumnSafetyFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{AlterColumnSafetyTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.AlterColumnSafetyRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ColumnHeader, "Previous type", "New type"],
+                [.. ordered.Select(f => new List<string>
                 {
-                    AlterColumnSafetyKind.PrecisionOrScaleNarrowing => "precision/scale narrowing",
-                    AlterColumnSafetyKind.IncompatibleFamilyConversion => "incompatible family conversion",
-                    _ => "unknown",
-                },
-            })]);
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    $"{f.TableQualifiedName}.{f.ColumnName}",
+                    f.PreviousType.ToString(),
+                    f.NewType.ToString(),
+                })]);
+        }
     }
+
+    private static string AlterColumnSafetyTitle(AlterColumnSafetyKind kind) => kind switch
+    {
+        AlterColumnSafetyKind.PrecisionOrScaleNarrowing => "Precision/scale narrowing",
+        AlterColumnSafetyKind.IncompatibleFamilyConversion => "Incompatible family conversion",
+        _ => "Unknown",
+    };
 
     private static IEnumerable<ReadableBlock> OperandComparability(ScanReport report, int level, string? pathBase)
     {
@@ -1462,15 +1555,21 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "An xml or legacy large-object (text/ntext/image) column is referenced from a comparison, IN list, BETWEEN, NULLIF, ORDER BY, GROUP BY, or SELECT DISTINCT - these types are not comparable at all outside IS NULL (and, for the legacy large-object types, LIKE); the statement does not compile. Direct base-table columns resolved through the immediate statement's own FROM/CTE scope only - a column reached only through a view/derived table is not analyzed by this v1.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Type", DetailHeader],
-            [.. report.OperandComparabilityFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                $"{f.TableQualifiedName}.{f.ColumnName}",
-                f.TypeDisplay,
-                $"{f.Context}{(f.OperatorText is null ? "" : $" ({f.OperatorText})")} at line {f.Line}, column {f.Column}.",
-            })]);
+        foreach (var group in report.OperandComparabilityFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.OperandComparabilityRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ColumnHeader, "Type", DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    $"{f.TableQualifiedName}.{f.ColumnName}",
+                    f.TypeDisplay,
+                    $"{f.Context}{(f.OperatorText is null ? "" : $" ({f.OperatorText})")} at line {f.Line}, column {f.Column}.",
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> QueryAntiPattern(ScanReport report, int level, string? pathBase)
@@ -1484,14 +1583,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Structurally-provable query shapes from two DBA-script-family sweep batches: a table variable used as a query source under a low compatibility level or a growing WHILE loop (stale/fixed cardinality estimate), a WHILE loop doing single-row DML keyed to its own tracked variable (RBAR), a cursor declared without LOCAL, COUNT(*) assigned to a variable then compared only to zero (a real full-set scan, unlike the inline scalar-subquery form the optimizer already rewrites), a non-aggregate HAVING predicate that belongs in WHERE, a UNION of provably disjoint branches, a SELECT DISTINCT join not backed by a unique index, an unqualified table reference at a real query site, three MERGE hazards (missing HOLDLOCK, a non-unique USING source, an unconditional DELETE branch), a recursive CTE with no MAXRECURSION option, a whole-table UPDATE/DELETE with no WHERE and no TOP, and a linked-server/cross-database table reference.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", DetailHeader],
-            [.. report.QueryAntiPatternFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind.ToString(),
-                f.DetailText,
-            })]);
+        foreach (var group in report.QueryAntiPatternFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.QueryAntiPatternRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.DetailText,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> IndexCoverage(ScanReport report, int level, string? pathBase)
@@ -1505,6 +1609,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A WHERE-equality seek against a base table's own single candidate nonclustered index (never fired when a real alternative index exists too) whose key + INCLUDE columns do not cover every other column the statement references on that table - oracle-confirmed via real plan XML that this shape produces a Key/RID Lookup (Lookup=\"1\") per matched row.");
 
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.IndexCoverageRuleId(IndexCoverageFindingKind.KeyLookupProneIndex)));
         yield return new ReadableBlock.Table(
             [WhereHeader, TableHeader, IndexHeader, "Uncovered columns"],
             [.. report.IndexCoverageFindings.Select(f => new List<string>
@@ -1527,15 +1632,20 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A variable assigned from a single, unspecified row of inserted/deleted with no WHERE/TOP/aggregate - oracle-confirmed to silently bind an arbitrary row's value (and discard the rest) the moment the trigger's own DML affects more than one row - plus the sharper sub-kind where that value then drives a keyed UPDATE/DELETE straight-line in the same trigger body; a trigger with no IF NOT EXISTS/@@ROWCOUNT-style early-out guard (advisory, low confidence); and a trigger that writes directly back to its own target table, only reported when the connected database's own RECURSIVE_TRIGGERS option is live-confirmed on (oracle-confirmed the write genuinely re-fires the trigger rather than silently no-oping in that case).");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Trigger", "Kind", DetailHeader],
-            [.. report.TriggerCorrectnessFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.TriggerQualifiedName,
-                f.Kind.ToString(),
-                f.DetailText,
-            })]);
+        foreach (var group in report.TriggerCorrectnessFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TriggerCorrectnessRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Trigger", DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.TriggerQualifiedName,
+                    f.DetailText,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> CrossModuleLockOrder(ScanReport report, int level, string? pathBase)
@@ -1679,15 +1789,21 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A constraint the engine itself does not trust - almost always the result of a WITH NOCHECK re-enabling ALTER TABLE statement (the default there, the opposite of the default on the original ADD CONSTRAINT). The optimizer forfeits join-elimination and other constraint-based rewrites for every query touching it, and the constraint may not actually hold over existing rows. A disabled constraint is not reported - it's openly off, not silently weaker than it looks.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, ConstraintHeader, TableHeader, "Kind"],
-            [.. report.UntrustedConstraintFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.ConstraintName,
-                f.TableQualifiedName,
-                f.Kind == UntrustedConstraintFindingKind.ForeignKey ? "foreign key" : "CHECK constraint",
-            })]);
+        foreach (var group in report.UntrustedConstraintFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == UntrustedConstraintFindingKind.ForeignKey ? "Foreign key" : "CHECK constraint";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.UntrustedConstraintRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ConstraintHeader, TableHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.ConstraintName,
+                    f.TableQualifiedName,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> CheckConstraint(ScanReport report, int level, string? pathBase)
@@ -1701,16 +1817,22 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A CHECK constraint whose own predicate text is wrong, independent of trust state. \"NULL not handled\": a nullable column's predicate has no IS NULL/IS NOT NULL test anywhere against it, so a NULL value silently passes under three-valued logic even though the constraint reads as if it forbids bad data. \"On IDENTITY column\": the predicate directly references an IDENTITY column - the counter advances through every failed insert, so a numeric-threshold CHECK here fails deterministically until the counter catches up, then silently stops mattering forever.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, ConstraintHeader, TableHeader, ColumnHeader, "Kind"],
-            [.. report.CheckConstraintFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.ConstraintName,
-                f.TableQualifiedName,
-                f.ColumnName,
-                f.Kind == CheckConstraintFindingKind.NullNotHandled ? "NULL not handled" : "on IDENTITY column",
-            })]);
+        foreach (var group in report.CheckConstraintFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == CheckConstraintFindingKind.NullNotHandled ? "NULL not handled" : "On IDENTITY column";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CheckConstraintRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ConstraintHeader, TableHeader, ColumnHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.ConstraintName,
+                    f.TableQualifiedName,
+                    f.ColumnName,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> DefaultNullableConstraint(ScanReport report, int level, string? pathBase)
@@ -2023,15 +2145,21 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A value this scanner proved constant (CLAUDE.md's Tier A dynamic-SQL folding) was spliced into an EXEC/sp_executesql call's own SQL text via string concatenation, rather than authored as one fixed literal or passed through sp_executesql's own @params. Every distinct concatenated value compiles its own cached plan - real plan-cache pollution, oracle-confirmed. The 'EXEC(string), sp_executesql available' kind fires only on a genuine EXEC(string)/EXEC(@sql) call site and names the specific fix: switch to sp_executesql and pass the value as a real parameter.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind"],
-            [.. report.UnparameterizedDynamicSqlFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind == UnparameterizedDynamicSqlFindingKind.ExecStringConcatenatesParameterizableValue
-                    ? "EXEC(string), sp_executesql available"
-                    : "Concatenated value in constant SQL",
-            })]);
+        foreach (var group in report.UnparameterizedDynamicSqlFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == UnparameterizedDynamicSqlFindingKind.ExecStringConcatenatesParameterizableValue
+                ? "EXEC(string), sp_executesql available"
+                : "Concatenated value in constant SQL";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.UnparameterizedDynamicSqlRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> TempTableExecShape(ScanReport report, int level, string? pathBase)
@@ -2045,16 +2173,22 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "INSERT INTO #temp EXEC OtherProc binds the executed proc's result set to #temp's own declared columns purely by POSITION, live-verified against the executed proc's real, engine-described shape (sys.dm_exec_describe_first_result_set, compile-only). A column-count mismatch raises a hard runtime error (Msg 213/8164) every time the statement runs. A column-type mismatch at a matching position risks the same class of silent data loss WriteLossFinding already reports for INSERT/UPDATE assignments - live-mode only, since the verdict depends on a real database round trip.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", DetailHeader],
-            [.. report.TempTableExecShapeFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind == TempTableExecShapeFindingKind.ColumnCountMismatch ? "Column count mismatch" : "Column type mismatch",
-                f.Kind == TempTableExecShapeFindingKind.ColumnCountMismatch
-                    ? $"{f.TempTableQualifiedName} declares {f.TempTableDeclaredColumnCount} column(s); {f.ExecutedProcQualifiedName} describes {f.DescribedColumnCount}"
-                    : $"{f.TempTableQualifiedName} position {f.ColumnPosition} ('{f.ColumnName}', {f.TempColumnTypeDisplay}) <- {f.ExecutedProcQualifiedName} ({f.DescribedColumnTypeDisplay}): {f.WriteLoss}",
-            })]);
+        foreach (var group in report.TempTableExecShapeFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == TempTableExecShapeFindingKind.ColumnCountMismatch ? "Column count mismatch" : "Column type mismatch";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TempTableExecShapeRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.Kind == TempTableExecShapeFindingKind.ColumnCountMismatch
+                        ? $"{f.TempTableQualifiedName} declares {f.TempTableDeclaredColumnCount} column(s); {f.ExecutedProcQualifiedName} describes {f.DescribedColumnCount}"
+                        : $"{f.TempTableQualifiedName} position {f.ColumnPosition} ('{f.ColumnName}', {f.TempColumnTypeDisplay}) <- {f.ExecutedProcQualifiedName} ({f.DescribedColumnTypeDisplay}): {f.WriteLoss}",
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> SelfReferencingDml(ScanReport report, int level, string? pathBase)
@@ -2117,16 +2251,22 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Two independent sys.sql_modules catalog flags, each baked in wholesale at CREATE/ALTER time: WITH RECOMPILE (every call compiles a fresh plan and discards it, invisible to any plan-cache-based monitoring), and a non-schema-bound table-valued function's own RETURNS TABLE declaring a character column with no explicit COLLATE (its collation was resolved against the database's default at CREATE/ALTER time and silently disagrees with the database's collation after any later ALTER DATABASE ... COLLATE). Schema-bound modules are deliberately excluded from the second kind - oracle-confirmed that schema-binding sets the underlying flag unconditionally, string data or not, so it carries no differentiating signal there.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, ModuleHeader, "Flag"],
-            [.. report.ModuleCompileFlagFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.ModuleQualifiedName,
-                f.Kind == ModuleCompileFlagFindingKind.RecompilesEveryCall
-                    ? "WITH RECOMPILE"
-                    : "RETURNS TABLE column uses database collation",
-            })]);
+        foreach (var group in report.ModuleCompileFlagFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == ModuleCompileFlagFindingKind.RecompilesEveryCall
+                ? "WITH RECOMPILE"
+                : "RETURNS TABLE column uses database collation";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ModuleCompileFlagRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ModuleHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.ModuleQualifiedName,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> WindowFrame(ScanReport report, int level, string? pathBase)
@@ -2140,13 +2280,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A window function's OVER clause uses (explicitly, or by T-SQL's own silent default when ORDER BY is present with no frame clause at all) a RANGE frame rather than ROWS - oracle-measured to cost materially more CPU at the Window Spool operator than the equivalent ROWS frame, though both compile to the identical Window Spool physical operator, not an on-disk-vs-not distinction.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Frame"],
-            [.. report.WindowFrameFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind == WindowFrameFindingKind.ExplicitRangeFrame ? "Explicit RANGE" : "Implicit default (RANGE)",
-            })]);
+        foreach (var group in report.WindowFrameFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == WindowFrameFindingKind.ExplicitRangeFrame ? "Explicit RANGE" : "Implicit default (RANGE)";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.WindowFrameRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> WindowFunctionArgument(ScanReport report, int level, string? pathBase)
@@ -2160,14 +2306,20 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A LAG/LEAD offset argument, or a PERCENTILE_CONT/PERCENTILE_DISC percentile argument, constant-folds to a value the engine rejects (a negative offset, or a percentile outside the inclusive [0, 1] range) - oracle-confirmed the statement fails (Msg 8730/Msg 8727) the moment any row reaches the function.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Function", "Argument"],
-            [.. report.WindowFunctionArgumentFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.FunctionName,
-                f.ArgumentText,
-            })]);
+        foreach (var group in report.WindowFunctionArgumentFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.WindowFunctionArgumentRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Function", "Argument"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.FunctionName,
+                    f.ArgumentText,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> WaitFor(ScanReport report, int level, string? pathBase)
@@ -2202,14 +2354,20 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A view/inline TVF's own outermost query uses TOP/OFFSET ... ORDER BY - T-SQL requires TOP/OFFSET/FOR XML for ORDER BY to appear in a view at all, but the resulting order is never guaranteed to a consumer that doesn't apply its own ORDER BY. TOP (100) PERCENT is the provably meaningless case (100 PERCENT never excludes a row, oracle-confirmed the order is silently discarded); a genuinely row-limiting TOP(N)/OFFSET is a legitimate use whose final output order is still unguaranteed, oracle-observed to sometimes appear ordered only by plan-shape coincidence.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Object", "Shape"],
-            [.. report.ViewOrderingFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.ObjectQualifiedName,
-                f.Kind == ViewOrderingFindingKind.TopPercentOrderByNeverLimits ? "TOP (100) PERCENT (no-op)" : "TOP(N)/OFFSET (order not guaranteed)",
-            })]);
+        foreach (var group in report.ViewOrderingFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == ViewOrderingFindingKind.TopPercentOrderByNeverLimits ? "TOP (100) PERCENT (no-op)" : "TOP(N)/OFFSET (order not guaranteed)";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ViewOrderingRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Object"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.ObjectQualifiedName,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> TransactionHygiene(ScanReport report, int level, string? pathBase)
@@ -2291,15 +2449,22 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "An INDEX(...) table hint either names an index that no longer exists (oracle-confirmed a hard compile error, Msg 308, every time this statement runs) or forces a real index whose own leading key column is never bound anywhere in the statement (oracle-confirmed to degrade the forced access path to a full index scan, since the hint requires this specific index rather than merely suggesting it).");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, TableHeader, "Hinted index", "Problem"],
-            [.. report.IndexHintFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.TableQualifiedName,
-                f.HintedIndexName,
-                f.Kind == IndexHintFindingKind.IndexDoesNotExist ? "Index does not exist" : $"Leading column {f.LeadingColumnName} never bound",
-            })]);
+        foreach (var group in report.IndexHintFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == IndexHintFindingKind.IndexDoesNotExist ? "Index does not exist" : "Leading column never bound";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.IndexHintRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, TableHeader, "Hinted index", "Problem"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.TableQualifiedName,
+                    f.HintedIndexName,
+                    f.Kind == IndexHintFindingKind.IndexDoesNotExist ? "Index does not exist" : $"Leading column {f.LeadingColumnName} never bound",
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> SessionDateSetting(ScanReport report, int level, string? pathBase)
@@ -2313,13 +2478,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "SET DATEFORMAT/SET DATEFIRST inside a module body changes how a string date literal or DATEPART(weekday, ...) is interpreted for the rest of the session, independent of the caller's own settings - oracle-confirmed the identical literal/date silently means something different depending on which value was set first.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Setting"],
-            [.. report.SessionDateSettingFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.Kind == SessionDateSettingKind.DateFormat ? "DATEFORMAT" : "DATEFIRST",
-            })]);
+        foreach (var group in report.SessionDateSettingFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == SessionDateSettingKind.DateFormat ? "DATEFORMAT" : "DATEFIRST";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SessionDateSettingRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> CartesianJoin(ScanReport report, int level, string? pathBase)
@@ -2333,37 +2504,21 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A comma-join or explicit CROSS JOIN with no predicate anywhere in the statement - no ON clause, no WHERE clause - connecting the two tables at all: a true cartesian product, distinct from the shipped partial-composite-FK-join rule (which fires when a join predicate exists but is incomplete).");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "First table", "Second table", "Shape"],
-            [.. report.CartesianJoinFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.FirstTableQualifiedName,
-                f.SecondTableQualifiedName,
-                f.Kind == CartesianJoinKind.ExplicitCrossJoin ? "Explicit CROSS JOIN" : "Legacy comma-join",
-            })]);
-    }
-
-    private static IEnumerable<ReadableBlock> UndersizedDeclaration(ScanReport report, int level, string? pathBase)
-    {
-        if (report.UndersizedDeclarationFindings.Count == 0)
+        foreach (var group in report.CartesianJoinFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
         {
-            yield break;
+            var ordered = group.ToList();
+            var title = group.Key == CartesianJoinKind.ExplicitCrossJoin ? "Explicit CROSS JOIN" : "Legacy comma-join";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CartesianJoinRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "First table", "Second table"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.FirstTableQualifiedName,
+                    f.SecondTableQualifiedName,
+                })]);
         }
-
-        yield return new ReadableBlock.Heading(level, $"Undersized (length 1/2) declarations ({report.UndersizedDeclarationFindings.Count})");
-        yield return new ReadableBlock.Paragraph(
-            "A table column, DECLARE'd local variable, or procedure/function parameter is declared with a string/binary length of 1 or 2, with no compared column involved at all - advisory: almost always a truncated-from-a-larger-source mistake or a leftover single-character-flag placeholder.");
-
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Name", "Type", "Site"],
-            [.. report.UndersizedDeclarationFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.QualifiedOrVariableName,
-                f.TypeDescription,
-                f.Site == UndersizedDeclarationSite.TableColumn ? "Table column" : "Variable/parameter",
-            })]);
     }
 
     private static IEnumerable<ReadableBlock> TruncateSwallowed(ScanReport report, int level, string? pathBase)
@@ -2397,14 +2552,20 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "A SELECT...INTO #temp table is later joined or filtered by a WHERE predicate in the same batch/procedure scope, but no index was ever created on it - oracle-confirmed this forces a full scan of the temp table, with no seek alternative possible at all.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Temp table", "Usage"],
-            [.. report.UnindexedTempTableUsageFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.UsageLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                f.TempTableQualifiedName,
-                f.Kind == UnindexedTempTableUsageKind.JoinOperand ? "JOIN operand" : "Filtered in WHERE",
-            })]);
+        foreach (var group in report.UnindexedTempTableUsageFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == UnindexedTempTableUsageKind.JoinOperand ? "JOIN operand" : "Filtered in WHERE";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.UnindexedTempTableUsageRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Temp table"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.UsageLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.TempTableQualifiedName,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> OutputParameter(ScanReport report, int level, string? pathBase)
@@ -2440,13 +2601,19 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "Read once per scan run directly from sys.databases/sys.database_query_store_options - a database-granularity fact, not a per-module one. PAGE_VERIFY/AUTO_SHRINK/AUTO_CLOSE/TARGET_RECOVERY_TIME/AUTO_CREATE_STATISTICS/AUTO_UPDATE_STATISTICS/compatibility level (compared against the connected engine instance's own current default, read live from the model system database) are well-established anti-patterns; the two Query Store flags are informational since whether Query Store should be on is a real operational choice.");
 
-        yield return new ReadableBlock.Table(
-            ["Database", "Flag"],
-            [.. report.DatabaseConfigurationFindings.Select(f => new List<string>
-            {
-                f.DatabaseName,
-                DatabaseConfigurationFlagLabel(f),
-            })]);
+        foreach (var group in report.DatabaseConfigurationFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.DatabaseConfigurationRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                ["Database", "Flag"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    f.DatabaseName,
+                    DatabaseConfigurationFlagLabel(f),
+                })]);
+        }
     }
 
     private static string DatabaseConfigurationFlagLabel(DatabaseConfigurationFinding finding) => finding.Kind switch
@@ -2600,14 +2767,19 @@ public static class ReadableScanReportWriter
             yield break;
         }
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, "Outcome", "Reason"],
-            [.. unresolved.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, null, pathBase),
-                DynamicSqlOutcomeLabel(f.Outcome),
-                f.Reason ?? "-",
-            })]);
+        foreach (var group in unresolved.GroupBy(f => f.Outcome).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{DynamicSqlOutcomeLabel(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.DynamicSqlRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Reason"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, null, pathBase),
+                    f.Reason ?? "-",
+                })]);
+        }
     }
 
     private static string DynamicSqlOutcomeLabel(DynamicSqlOutcome outcome) => outcome switch
@@ -2715,6 +2887,23 @@ public static class ReadableScanReportWriter
         AnalysisPass.Lineage => "lineage",
         _ => "predicates",
     };
+
+    private static string HumanizeKindName(string kindName)
+    {
+        var words = new System.Text.StringBuilder();
+        for (var i = 0; i < kindName.Length; i++)
+        {
+            var c = kindName[i];
+            if (i > 0 && char.IsUpper(c) && char.IsLower(kindName[i - 1]))
+            {
+                words.Append(' ');
+            }
+
+            words.Append(i == 0 ? char.ToUpperInvariant(c) : char.ToLowerInvariant(c));
+        }
+
+        return words.ToString();
+    }
 
     private static string Where(string sourcePath, int line, SourceSpan? dynamicSqlCallSite, string? pathBase, FindingConfidence confidence = FindingConfidence.High)
     {

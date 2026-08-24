@@ -49,7 +49,6 @@ public sealed record ScanReport(
     IReadOnlyList<IndexHintFinding> IndexHintFindings,
     IReadOnlyList<SessionDateSettingFinding> SessionDateSettingFindings,
     IReadOnlyList<CartesianJoinFinding> CartesianJoinFindings,
-    IReadOnlyList<UndersizedDeclarationFinding> UndersizedDeclarationFindings,
     IReadOnlyList<TruncateSwallowedFinding> TruncateSwallowedFindings,
     IReadOnlyList<UnindexedTempTableUsageFinding> UnindexedTempTableUsageFindings,
     IReadOnlyList<OutputParameterFinding> OutputParameterFindings,
@@ -102,5 +101,13 @@ public sealed record ScanReport(
     DynamicSqlSummary DynamicSqlSummary,
     int SchemaVersion = ScanReport.CurrentSchemaVersion)
 {
-    public const int CurrentSchemaVersion = 73;
+    public const int CurrentSchemaVersion = 75;
+
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Major Code Smell", "S2325:Methods and properties that don't access instance data should be static",
+        Justification = "Serialized per instance for JSON output even though the value is constant for this type.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Performance", "CA1822:Mark members as static",
+        Justification = "RuleCatalog must stay an instance member so it serializes on every report; the value happens to be constant across reports.")]
+    public IReadOnlyList<RuleCatalogEntry> RuleCatalog => RuleCatalogEntries.All;
 }
