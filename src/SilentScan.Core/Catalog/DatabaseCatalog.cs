@@ -67,6 +67,12 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, IReadOnlyList<ProcedureParameterInfo>> _procedureParametersByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, bool> _columnMasterKeyEnclaveSupportByName =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<string, IReadOnlyList<string>> _columnEncryptionKeyMasterKeysByName =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private const int MaxSynonymHops = 8;
 
     public IReadOnlyCollection<CatalogTable> Tables => _tablesByQualifiedName.Values;
@@ -194,6 +200,40 @@ public sealed class DatabaseCatalog
 
     public bool TryGetProcedureParameters(string qualifiedName, out IReadOnlyList<ProcedureParameterInfo> parameters) =>
         _procedureParametersByQualifiedName.TryGetValue(qualifiedName, out parameters!);
+
+    public void AddColumnMasterKey(string name, bool supportsEnclaveComputations) =>
+        _columnMasterKeyEnclaveSupportByName[name] = supportsEnclaveComputations;
+
+    public void AddColumnEncryptionKey(string name, IReadOnlyList<string> columnMasterKeyNames) =>
+        _columnEncryptionKeyMasterKeysByName[name] = columnMasterKeyNames;
+
+    public ColumnEncryptionEnclaveSupport ResolveColumnEncryptionKeyEnclaveSupport(string columnEncryptionKeyName)
+    {
+        if (!_columnEncryptionKeyMasterKeysByName.TryGetValue(columnEncryptionKeyName, out var masterKeyNames) || masterKeyNames.Count == 0)
+        {
+            return ColumnEncryptionEnclaveSupport.Unknown;
+        }
+
+        bool? supportsEnclave = null;
+        foreach (var masterKeyName in masterKeyNames)
+        {
+            if (!_columnMasterKeyEnclaveSupportByName.TryGetValue(masterKeyName, out var masterKeySupportsEnclave))
+            {
+                return ColumnEncryptionEnclaveSupport.Unknown;
+            }
+
+            if (supportsEnclave is null)
+            {
+                supportsEnclave = masterKeySupportsEnclave;
+            }
+            else if (supportsEnclave != masterKeySupportsEnclave)
+            {
+                return ColumnEncryptionEnclaveSupport.Unknown;
+            }
+        }
+
+        return supportsEnclave == true ? ColumnEncryptionEnclaveSupport.Enabled : ColumnEncryptionEnclaveSupport.Disabled;
+    }
 
     public void AddSynonym(string qualifiedName, string targetQualifiedName) =>
         _synonymTargetsByQualifiedName[qualifiedName] = targetQualifiedName;

@@ -129,6 +129,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(FloatEquality(report, headingLevel, pathBase));
         blocks.AddRange(FloatOrderDependentAggregate(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedOrderBy(report, headingLevel, pathBase));
+        blocks.AddRange(AlwaysEncryptedKeyColumn(report, headingLevel, pathBase));
         blocks.AddRange(OperandComparability(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
         blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
@@ -219,6 +220,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Float/real equality predicates", report.FloatEqualityFindings.Count);
         AddCount(counts, "Float/real columns in order-dependent aggregates", report.FloatOrderDependentAggregateFindings.Count);
         AddCount(counts, "Always Encrypted ORDER BY", report.AlwaysEncryptedOrderByFindings.Count);
+        AddCount(counts, "Always Encrypted non-enclave key column", report.AlwaysEncryptedKeyColumnFindings.Count);
         AddCount(counts, "Operand not comparable (xml/legacy large object)", report.OperandComparabilityFindings.Count);
         AddCount(counts, "Query anti-patterns", report.QueryAntiPatternFindings.Count);
         AddCount(counts, "Index-coverage shapes", report.IndexCoverageFindings.Count);
@@ -1368,6 +1370,34 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.EncryptionTypeDisplay,
                 $"Referenced in ORDER BY at line {f.Line}, column {f.Column}.",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> AlwaysEncryptedKeyColumn(ScanReport report, int level, string? pathBase)
+    {
+        if (report.AlwaysEncryptedKeyColumnFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Always Encrypted non-enclave key column ({report.AlwaysEncryptedKeyColumnFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A RANDOMIZED-encrypted column is used as a key column of an index, PRIMARY KEY/UNIQUE constraint, or statistics object, and the column encryption key backing it is tied to a column master key declared without ENCLAVE_COMPUTATIONS - the statement does not deploy (Msg 33573).");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Object", "Kind"],
+            [.. report.AlwaysEncryptedKeyColumnFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.ObjectName,
+                f.Kind switch
+                {
+                    AlwaysEncryptedKeyColumnKind.PrimaryKey => "PRIMARY KEY constraint",
+                    AlwaysEncryptedKeyColumnKind.UniqueConstraint => "UNIQUE constraint",
+                    AlwaysEncryptedKeyColumnKind.Statistics => "statistics",
+                    _ => "index",
+                },
             })]);
     }
 

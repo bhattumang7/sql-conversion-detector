@@ -135,7 +135,7 @@ public static class CatalogBuilder
             if (phase == BuildPhase.CollectTypeAliases)
             {
                 var (schema, name) = SchemaObjectNameHelper.Resolve(node.Name);
-                var (columns, indexesFromColumns) = BuildColumns(node.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
+                var (columns, indexesFromColumns) = BuildColumns(node.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog);
                 var indexesFromConstraints = BuildIndexesFromTableConstraints(node.Definition.TableConstraints);
 
                 catalog.AddOrReplace(new CatalogTable(
@@ -146,6 +146,31 @@ public static class CatalogBuilder
                     [.. indexesFromColumns, .. indexesFromConstraints],
                     sourcePath,
                     node.StartLine));
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(CreateColumnMasterKeyStatement node)
+        {
+            if (phase == BuildPhase.CollectTypeAliases)
+            {
+                var supportsEnclave = node.Parameters.OfType<ColumnMasterKeyEnclaveComputationsParameter>().Any();
+                catalog.AddColumnMasterKey(node.Name.Value, supportsEnclave);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(CreateColumnEncryptionKeyStatement node)
+        {
+            if (phase == BuildPhase.CollectTypeAliases)
+            {
+                var masterKeyNames = node.ColumnEncryptionKeyValues
+                    .SelectMany(value => value.Parameters.OfType<ColumnMasterKeyNameParameter>())
+                    .Select(parameter => parameter.Name.Value)
+                    .ToList();
+                catalog.AddColumnEncryptionKey(node.Name.Value, masterKeyNames);
             }
 
             node.AcceptChildren(this);
@@ -546,7 +571,7 @@ public static class CatalogBuilder
             if (phase == BuildPhase.ApplyEverythingElse
                 && returnType is TableValuedFunctionReturnType { DeclareTableVariableBody: { VariableName: { } variableName, Definition: { } definition } body })
             {
-                var (columns, indexesFromColumns) = BuildColumns(definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
+                var (columns, indexesFromColumns) = BuildColumns(definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog);
                 var indexesFromConstraints = BuildIndexesFromTableConstraints(definition.TableConstraints);
 
                 var returnTable = new CatalogTable(
@@ -865,7 +890,7 @@ public static class CatalogBuilder
             var isTemp = schema is null;
             var kind = isTemp ? CatalogTableKind.TemporaryTable : CatalogTableKind.Table;
 
-            var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, isTemp ? catalog.EffectiveTempdbCollation : catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
+            var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, isTemp ? catalog.EffectiveTempdbCollation : catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog);
             var indexesFromConstraints = BuildIndexesFromTableConstraints(createTable.Definition.TableConstraints);
             var allIndexes = (List<CatalogIndex>)[.. indexesFromColumns, .. indexesFromConstraints];
             columns = ApplyPrimaryKeyNotNull(columns, allIndexes);
@@ -902,7 +927,7 @@ public static class CatalogBuilder
                 return;
             }
 
-            var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
+            var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog);
             var newIndexes = BuildIndexesFromTableConstraints(alterTable.Definition.TableConstraints);
             var mergedColumns = (List<CatalogColumn>)[.. existing.Columns, .. newColumns];
             var mergedIndexes = (List<CatalogIndex>)[.. existing.Indexes, .. indexesFromColumns, .. newIndexes];
@@ -1083,7 +1108,7 @@ public static class CatalogBuilder
                 return;
             }
 
-            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.EffectiveTempdbCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
+            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.EffectiveTempdbCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog);
             var indexesFromConstraints = BuildIndexesFromTableConstraints(body.Definition.TableConstraints);
 
             var table = new CatalogTable(
@@ -1161,16 +1186,16 @@ public static class CatalogBuilder
 
     public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(
         TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null, SkipLedger? ledger = null, string? sourcePath = null) =>
-        BuildColumns(definition, defaultCollation, typeAliases, ledger, sourcePath).Columns;
+        BuildColumns(definition, defaultCollation, typeAliases, ledger, sourcePath, catalog: null).Columns;
 
     private static (List<CatalogColumn> Columns, List<CatalogIndex> InlineIndexes) BuildColumns(
-        TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases, SkipLedger? ledger, string? sourcePath)
+        TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases, SkipLedger? ledger, string? sourcePath, DatabaseCatalog? catalog)
     {
         var columns = new List<CatalogColumn>();
         var inlineIndexes = new List<CatalogIndex>();
         var computedExpressions = new Dictionary<string, ScalarExpression>(StringComparer.OrdinalIgnoreCase);
         var computedColumnLines = new Dictionary<string, (int Line, int Column)>(StringComparer.OrdinalIgnoreCase);
-        var context = new ColumnBuildContext(defaultCollation, typeAliases, ledger, sourcePath);
+        var context = new ColumnBuildContext(defaultCollation, typeAliases, ledger, sourcePath, catalog);
 
         foreach (var columnDefinition in definition.ColumnDefinitions)
         {
@@ -1184,7 +1209,7 @@ public static class CatalogBuilder
         return (columns, inlineIndexes);
     }
 
-    private readonly record struct ColumnBuildContext(Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger, string? SourcePath);
+    private readonly record struct ColumnBuildContext(Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger, string? SourcePath, DatabaseCatalog? Catalog);
 
     private static CatalogColumn BuildColumn(
         ColumnDefinition columnDefinition, ColumnBuildContext context,
@@ -1227,8 +1252,14 @@ public static class CatalogBuilder
             IsIdentity: columnDefinition.IdentityOptions is not null,
             IsComputed: columnDefinition.ComputedColumnExpression is not null,
             IsPersisted: columnDefinition.IsPersisted,
-            EncryptionType: ResolveEncryptionType(columnDefinition.Encryption));
+            EncryptionType: ResolveEncryptionType(columnDefinition.Encryption),
+            EnclaveSupport: ResolveEnclaveSupport(columnDefinition.Encryption, context.Catalog));
     }
+
+    private static ColumnEncryptionEnclaveSupport ResolveEnclaveSupport(ColumnEncryptionDefinition? encryption, DatabaseCatalog? catalog) =>
+        encryption?.Parameters.OfType<ColumnEncryptionKeyNameParameter>().FirstOrDefault() is { Name: { Value: { } keyName } } && catalog is not null
+            ? catalog.ResolveColumnEncryptionKeyEnclaveSupport(keyName)
+            : ColumnEncryptionEnclaveSupport.Unknown;
 
     private static ColumnEncryptionType ResolveEncryptionType(ColumnEncryptionDefinition? encryption) =>
         encryption?.Parameters.OfType<ColumnEncryptionTypeParameter>().FirstOrDefault() is { } typeParameter

@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">281 rules. 188 carry fix guidance; 24 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">282 rules. 189 carry fix guidance; 25 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -98,6 +98,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
   <section class="family-section">
     <h2>catalog</h2>
     <ul class="rule-list">
+      <li><a class="id" href="rules/catalog-always-encrypted-non-enclave-key-column.html">Always Encrypted Non Enclave Key Column</a> <code class="rule-key">silentscan/catalog/always-encrypted-non-enclave-key-column</code><span class="snippet">A RANDOMIZED-encrypted column is used as a key column of an index, PRIMARY KEY/UNIQUE constraint, or statistics object, and the column encryption key backing it is tied to a column master key declared without ENCLAVE_COMPUTATIONS.</span></li>
       <li><a class="id" href="rules/catalog-cascading-foreign-key.html">Cascading Foreign Key</a> <code class="rule-key">silentscan/catalog/cascading-foreign-key</code><span class="snippet">A foreign key with a non-NO_ACTION ON DELETE/ON UPDATE action.</span></li>
       <li><a class="id" href="rules/catalog-check-constraint-null-not-handled.html">Check Constraint Null Not Handled</a> <code class="rule-key">silentscan/catalog/check-constraint-null-not-handled</code><span class="snippet">A nullable column&#x27;s own CHECK constraint predicate has no IS NULL/IS NOT NULL test against that column anywhere in the predicate.</span></li>
       <li><a class="id" href="rules/catalog-check-constraint-on-identity-column.html">Check Constraint On Identity Column</a> <code class="rule-key">silentscan/catalog/check-constraint-on-identity-column</code><span class="snippet">A CHECK constraint&#x27;s own definition directly references an IDENTITY column.</span></li>

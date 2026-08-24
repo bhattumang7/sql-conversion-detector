@@ -10,6 +10,13 @@
       "rationale": null
     },
     {
+      "construct": "AlterColumnEncryptionKeyStatement",
+      "group": "CatalogLifecycle",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "CatalogBuilder resolves a column encryption key's enclave-support status from CreateColumnEncryptionKeyStatement.ColumnEncryptionKeyValues only. ALTER COLUMN ENCRYPTION KEY ADD/DROP VALUE is a delta against the CREATE form's value list (key rotation), not a restatement of it, so applying it the same way as CREATE would silently drop or misattribute the original column master key reference instead of merging correctly. Deliberately not resolved - key rotation via ALTER is rare in scanned corpora relative to the CREATE form, and no code path records an occurrence of this shape."
+    },
+    {
       "construct": "DefaultConstraintDefinition / CheckConstraintDefinition / ForeignKeyConstraintDefinition",
       "group": "ColumnDefiner",
       "status": "Gap",

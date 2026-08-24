@@ -1,0 +1,23 @@
+using System.Text.Json.Serialization;
+
+namespace SilentScan.Core.Predicates;
+
+public enum AlwaysEncryptedKeyColumnKind
+{
+    Index,
+    PrimaryKey,
+    UniqueConstraint,
+    Statistics,
+}
+
+public sealed record AlwaysEncryptedKeyColumnFinding(
+    string TableQualifiedName,
+    string ObjectName,
+    AlwaysEncryptedKeyColumnKind Kind,
+    string ColumnName,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, 1);
+}

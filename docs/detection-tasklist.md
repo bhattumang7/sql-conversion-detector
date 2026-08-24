@@ -19,18 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **Always Encrypted comparison/index legality beyond the shipped
-      `ORDER BY` rule.** Three related, catalog+config-decidable gaps in the
-      same family as `AlwaysEncryptedOrderByRuleId`: (1) a comparison/join/
-      predicate against an enclave-required AE column when secure-enclave
-      support isn't configured on the connected server; (2) a procedure
-      parameter compared against an AE column with incompatible declared
-      type/length/collation/encryption metadata; (3) a RANDOMIZED-encrypted
-      column (non-deterministic by design, incompatible with the ordering an
-      index key requires) used as an index key column. Each needs its own
-      oracle case — enclave configuration in particular may not be
-      reproducible against every test target.
-
 - [ ] **New rule family: `ALTER TABLE ALTER COLUMN` safety.** Two related,
       catalog-diffable DDL-time risks not covered by any shipped rule: (1)
       narrowing a numeric column's precision/scale, or a var-time column's
@@ -667,6 +655,25 @@ per phase (Phase 0 commits per fix).
 
 ## Settled (do not re-propose)
 
+* **Always Encrypted: only the non-enclave index/constraint/statistics key
+  case shipped (`AlwaysEncryptedKeyColumnRuleId`).** A general comparison/
+  join/predicate against an enclave-required AE column, and a procedure
+  parameter with mismatched declared type/length/collation/encryption
+  metadata compared against an AE column, both turn out not to be
+  statically decidable from T-SQL source at all: whether a connecting
+  client has Always-Encrypted parameterization enabled, and what CEK/
+  algorithm/type metadata it attaches to a given parameter, are TDS-
+  protocol-level facts the driver supplies at execution time — nothing in
+  a T-SQL script or stored procedure declaration carries them. Oracle-
+  verified (against the standing Docker instance): a plain literal or
+  `@variable` compared to an AE column always fails with the same generic
+  "Operand type clash" (Msg 206) regardless of encryption type, enclave
+  configuration, or whether the parameter's declared type matches the
+  column - the source text alone can't distinguish "would work with an
+  AE-enabled client" from "can never work." The index/constraint/
+  statistics-key case is different and did ship: it's a pure DDL-time
+  catalog fact (RANDOMIZED column + a column encryption key whose column
+  master key lacks `ENCLAVE_COMPUTATIONS`), independent of any client.
 * **Confidence stays.** Load-bearing in the `--confidence` filter, the SARIF
   tier, and `DynamicSqlPipeline`'s downgrade of findings that rest on an
   assumption.

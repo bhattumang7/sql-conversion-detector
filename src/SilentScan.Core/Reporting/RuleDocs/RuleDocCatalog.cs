@@ -112,6 +112,7 @@ public static class RuleDocCatalog
         [Predicates.FloatEquality.RuleId] = Predicates.FloatEquality.Content,
         [Predicates.FloatOrderDependentAggregate.RuleId] = Predicates.FloatOrderDependentAggregate.Content,
         [Predicates.AlwaysEncryptedOrderBy.RuleId] = Predicates.AlwaysEncryptedOrderBy.Content,
+        [Predicates.AlwaysEncryptedKeyColumn.RuleId] = Predicates.AlwaysEncryptedKeyColumn.Content,
         [Predicates.XmlOperandNotComparable.RuleId] = Predicates.XmlOperandNotComparable.Content,
         [Predicates.LegacyLobOperandNotComparable.RuleId] = Predicates.LegacyLobOperandNotComparable.Content,
 
