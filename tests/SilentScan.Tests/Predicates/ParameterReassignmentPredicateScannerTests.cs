@@ -6,15 +6,19 @@ namespace SilentScan.Tests.Predicates;
 
 public sealed class ParameterReassignmentPredicateScannerTests
 {
+    private const string Ddl = "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL, Region VARCHAR(20) NOT NULL, INDEX IX_Customers_Code (Code));";
+
     private static IReadOnlyList<ParameterReassignmentPredicateFinding> Scan(string sql)
     {
-        var ddl = "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL, Region VARCHAR(20) NOT NULL, INDEX IX_Customers_Code (Code));";
-        var result = SqlScriptParser.ParseText("test.sql", $"{ddl}\nGO\n{sql}");
+        var result = SqlScriptParser.ParseText("test.sql", $"{Ddl}\nGO\n{sql}");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
 
         var catalog = CatalogBuilder.Build([result]);
         return ParameterReassignmentPredicateScanner.Scan(result, catalog);
     }
+
+    private static int LineOf(string sql, string marker) =>
+        $"{Ddl}\nGO\n{sql}".Split('\n').ToList().FindIndex(l => l.Contains(marker, StringComparison.Ordinal)) + 1;
 
     [Fact]
     public void SetReassignsParameter_ThenPredicateUse_Fires()
@@ -503,5 +507,133 @@ public sealed class ParameterReassignmentPredicateScannerTests
             """);
 
         Assert.Equal(2, findings.Count);
+    }
+
+    [Fact]
+    public void VariableOnLeftOfComparison_StillFires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                SELECT 1 FROM dbo.Customers WHERE @p = Code;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.ColumnName);
+        Assert.Equal("=", finding.Operator);
+    }
+
+    [Fact]
+    public void JoinAcrossTwoTables_AttributesToTheTableActuallyReferencedInThePredicate()
+    {
+        var findings = Scan(
+            """
+            CREATE TABLE dbo.Orders (CustomerCode VARCHAR(20) NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                SELECT 1 FROM dbo.Customers c JOIN dbo.Orders o ON c.Code = o.CustomerCode WHERE o.CustomerCode = @p;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Orders", finding.TableQualifiedName);
+        Assert.Equal("CustomerCode", finding.ColumnName);
+        Assert.False(finding.Indexed);
+    }
+
+    [Fact]
+    public void ReassignmentSiteFromElseBranch_TakesPrecedenceOverIfBranchSite()
+    {
+        var sql =
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20), @flag INT AS
+            BEGIN
+                IF @flag = 1
+                    SET @p = 'A';
+                ELSE
+                    SET @p = 'B';
+                SELECT 1 FROM dbo.Customers WHERE Code = @p;
+            END
+            """;
+
+        var finding = Assert.Single(Scan(sql));
+        Assert.Equal(LineOf(sql, "SET @p = 'B'"), finding.ReassignmentLine);
+        Assert.NotEqual(LineOf(sql, "SET @p = 'A'"), finding.ReassignmentLine);
+    }
+
+    [Fact]
+    public void ReassignmentAndPredicateUse_WithinSameWhileLoopBody_Fires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                WHILE 1 = 0
+                BEGIN
+                    SET @p = 'OVERWRITTEN';
+                    SELECT 1 FROM dbo.Customers WHERE Code = @p;
+                END
+            END
+            """);
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void ReassignmentAndPredicateUse_WithinSameTryBlock_Fires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                BEGIN TRY
+                    SET @p = 'OVERWRITTEN';
+                    SELECT 1 FROM dbo.Customers WHERE Code = @p;
+                END TRY
+                BEGIN CATCH
+                END CATCH
+            END
+            """);
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void ThrowStatement_ResetsReassignedStateForStatementsAfterIt()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20), @flag INT AS
+            BEGIN
+                IF @flag = 1
+                BEGIN
+                    SET @p = 'OVERWRITTEN';
+                    THROW 50000, 'failed', 1;
+                END
+                SELECT 1 FROM dbo.Customers WHERE Code = @p;
+            END
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void ComputedColumnInDerivedTable_NeverFires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                SELECT 1 FROM (SELECT Code + '' AS Code FROM dbo.Customers) d WHERE d.Code = @p;
+            END
+            """);
+
+        Assert.Empty(findings);
     }
 }
