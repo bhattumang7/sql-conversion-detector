@@ -325,4 +325,40 @@ public sealed class DynamicSqlTransferTests
         Assert.Equal(HoleKind.HavocWrite, hole.Kind);
         Assert.Equal(new SqlType(SqlTypeCategory.NVarChar, Length: 50), hole.Type);
     }
+
+    [Fact]
+    public void SpExecuteSql_ParamsArgumentIsUnresolvedVariable_OmitsParameterDeclarationTextButStillEmitsStatement()
+    {
+        Run("EXEC sp_executesql N'SELECT 1', @paramsVar;", out var findings, out var scripts);
+
+        var script = Assert.Single(scripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+        Assert.Null(script.ParameterDeclarationText);
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void SpExecuteSql_ParamsArgumentIsUninitializedVariable_ContainsHoleSoOmitsParameterDeclarationText()
+    {
+        Run(
+            "DECLARE @paramsVar NVARCHAR(200); EXEC sp_executesql N'SELECT 1', @paramsVar;",
+            out var findings, out var scripts);
+
+        var script = Assert.Single(scripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+        Assert.Null(script.ParameterDeclarationText);
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CursorDefinitionContainingSelectAssignment_TreatedAsUnsupportedStatement_HavocsAssignedVariable()
+    {
+        var result = Run(
+            "DECLARE @x NVARCHAR(50) = 'before'; DECLARE cur CURSOR FOR SELECT @x = 'ignored';");
+
+        var template = Assert.IsType<SqlTextValue.Template>(result["@x"]);
+        var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
+        Assert.Equal(HoleKind.HavocWrite, hole.Kind);
+        Assert.Equal(new SqlType(SqlTypeCategory.NVarChar, Length: 50), hole.Type);
+    }
 }
