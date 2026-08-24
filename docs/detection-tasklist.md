@@ -481,29 +481,12 @@ and returns findings; the pipeline owns everything else. Phases are ordered by
 value-per-line and are each independently shippable; do them in order, commit
 per phase (Phase 0 commits per fix).
 
-- [ ] **Phase 3 — one findings schema, one emission path.** `ScanReport` is a
-      76-positional-list record each writer hand-picks from; SARIF (the CI
-      gate) references none of `SkippedConstructs`/`DynamicSqlSummary`/
-      `TypedPredicateSummary`, so "couldn't look" is
-      indistinguishable from "clean" exactly where the contract forbids it.
-      Collapse to findings + summaries consumed uniformly; SARIF gets the
-      honesty channels via `invocations`/`notifications`. Decided (Umang,
-      2026-08-19): always warn on stderr +
-      always carry parse health/skip counts in SARIF notifications; exit code
-      stays 0 unless a new `--strict` flag is passed, so existing pipelines
-      keep passing while the honesty is visible. This is THE one schema change, so the three decisions
-      blocked on "changes every finding type at once" land inside it, not
-      separately: (a) records carry a `SourceSpan` (retires the ~84
-      hand-threaded `(sourcePath, StartLine, StartColumn)` triples), (b)
-      per-instance confidence (fixed per rule type today; matters for a
-      handful of rules), (c) engine-version sensitivity as a modeled field
-      (today rationale prose; only `QueryAntiPatternScanner` and
+- [ ] **Engine-version sensitivity as a modeled field.** Today it's rationale
+      prose; only `QueryAntiPatternScanner` and
       `ScalarUdfInfo.EngineIsInlineable` branch on `CompatibilityLevel` at
-      runtime) — fold in `TypePairMatrix`'s unread `ServerVersion` stamp
+      runtime. Fold in `TypePairMatrix`'s unread `ServerVersion` stamp
       (16.0.4236.2/compat 160, zero consumers, so older/newer targets
-      silently get that build's verdicts at full confidence) and a
-      `ScanReport.CurrentSchemaVersion` round-trip test so a finding-shape
-      change forces a version bump.
+      silently get that build's verdicts at full confidence).
 - [ ] **Phase 4 — terminology rename.** ~384 "corpus" + ~609 "oracle" in
       `src/`, including namespaces (`SilentScan.Core.Corpus`,
       `SilentScan.Verify.Oracle`), public types, the `scan-corpus-live` verb,
