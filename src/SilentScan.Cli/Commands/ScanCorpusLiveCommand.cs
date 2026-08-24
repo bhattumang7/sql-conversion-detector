@@ -55,6 +55,12 @@ public static class ScanCorpusLiveCommand
             DefaultValueFactory = _ => "brief",
         };
 
+        var strictOption = new Option<bool>("--strict")
+        {
+            Description = ReportOutput.StrictOptionDescription,
+            DefaultValueFactory = _ => false,
+        };
+
         var command = new Command(
             "scan-corpus-live",
             "Deploy every repo declared in the corpus manifest to the disposable Docker oracle, read its catalog and module text back from the engine, and report per-repo findings.")
@@ -64,6 +70,7 @@ public static class ScanCorpusLiveCommand
             formatOption,
             confidenceOption,
             verbosityOption,
+            strictOption,
             outputOption,
         };
 
@@ -71,19 +78,20 @@ public static class ScanCorpusLiveCommand
         {
             var manifestPath = parseResult.GetValue(manifestOption)!;
             var clonesRoot = parseResult.GetValue(clonesRootOption)!;
+            var strict = parseResult.GetValue(strictOption);
             var options = new ReportOptions(
                 parseResult.GetValue(formatOption)!,
                 parseResult.GetValue(confidenceOption)!,
                 parseResult.GetValue(outputOption),
                 parseResult.GetValue(verbosityOption)!);
-            return await RunAsync(manifestPath, clonesRoot, Console.Out, Console.Error, options, cancellationToken);
+            return await RunAsync(manifestPath, clonesRoot, strict, Console.Out, Console.Error, options, cancellationToken);
         });
 
         return command;
     }
 
     internal static async Task<int> RunAsync(
-        string manifestPath, string clonesRoot, TextWriter stdout, TextWriter stderr, ReportOptions options, CancellationToken cancellationToken = default)
+        string manifestPath, string clonesRoot, bool strict, TextWriter stdout, TextWriter stderr, ReportOptions options, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(manifestPath))
         {
@@ -158,7 +166,12 @@ public static class ScanCorpusLiveCommand
             return 1;
         }
 
-        return hadMissingRepo || hadUnexpectedFailure ? 1 : 0;
+        if (hadMissingRepo || hadUnexpectedFailure)
+        {
+            return 1;
+        }
+
+        return strict && reportsByRepo.Values.Any(r => ReportOutput.HasCoverageGaps(r.Report)) ? 1 : 0;
     }
 
     private static async Task<CorpusLiveRepoResult?> ScanOneRepoAsync(

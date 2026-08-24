@@ -57,7 +57,7 @@ public sealed class ScanCorpusLiveCommandOracleTests : IDisposable
         var stderr = new StringWriter();
         var options = new ReportOptions("json", "high", null, "brief");
 
-        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, stdout, stderr, options, CancellationToken.None);
+        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(string.Empty, stderr.ToString());
@@ -97,7 +97,7 @@ public sealed class ScanCorpusLiveCommandOracleTests : IDisposable
         var stderr = new StringWriter();
         var options = new ReportOptions("text", "high", null, "brief");
 
-        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, stdout, stderr, options, CancellationToken.None);
+        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("'missing-repo' has no local clone at", stderr.ToString());
@@ -136,7 +136,7 @@ public sealed class ScanCorpusLiveCommandOracleTests : IDisposable
         var stderr = new StringWriter();
         var options = new ReportOptions("text", "high", null, "brief");
 
-        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, stdout, stderr, options, CancellationToken.None);
+        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("warning: 'beta' ", stderr.ToString());
@@ -167,7 +167,7 @@ public sealed class ScanCorpusLiveCommandOracleTests : IDisposable
         var stderr = new StringWriter();
         var options = new ReportOptions("json", "high", null, "brief");
 
-        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, stdout, stderr, options, CancellationToken.None);
+        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("warning: 'delta' parse success rate", stderr.ToString());
@@ -213,7 +213,7 @@ public sealed class ScanCorpusLiveCommandOracleTests : IDisposable
         var stderr = new StringWriter();
         var options = new ReportOptions("text", "high", null, "brief");
 
-        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, stdout, stderr, options, CancellationToken.None);
+        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.DoesNotContain("dialect-sniffing threshold", stderr.ToString());
@@ -245,7 +245,7 @@ public sealed class ScanCorpusLiveCommandOracleTests : IDisposable
         var stderr = new StringWriter();
         var options = new ReportOptions("json", "high", null, "brief");
 
-        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, stdout, stderr, options, CancellationToken.None);
+        var exitCode = await ScanCorpusLiveCommand.RunAsync(manifestPath, _clonesRoot, false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("'zeta' could not be deployed/scanned", stderr.ToString());

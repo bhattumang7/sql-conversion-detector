@@ -58,6 +58,12 @@ public static class ScanDbCommand
             DefaultValueFactory = _ => "brief",
         };
 
+        var strictOption = new Option<bool>("--strict")
+        {
+            Description = ReportOutput.StrictOptionDescription,
+            DefaultValueFactory = _ => false,
+        };
+
         var command = new Command("scan-db", "Connect to a live SQL Server database, read its catalog from engine metadata, and scan every readable module for implicit-conversion, MSTVF-as-fence, and scalar-UDF findings.")
         {
             connectionStringArgument,
@@ -66,6 +72,7 @@ public static class ScanDbCommand
             confidenceOption,
             fetchSqlFromTablesOption,
             verbosityOption,
+            strictOption,
             outputOption,
         };
 
@@ -74,19 +81,20 @@ public static class ScanDbCommand
             var connectionString = parseResult.GetValue(connectionStringArgument)!;
             var planCacheEvidence = parseResult.GetValue(planCacheEvidenceOption);
             var fetchSqlFromTables = parseResult.GetValue(fetchSqlFromTablesOption);
+            var strict = parseResult.GetValue(strictOption);
             var options = new ReportOptions(
                 parseResult.GetValue(formatOption)!,
                 parseResult.GetValue(confidenceOption)!,
                 parseResult.GetValue(outputOption),
                 parseResult.GetValue(verbosityOption)!);
-            return await RunAsync(connectionString, planCacheEvidence, fetchSqlFromTables, options, Console.Out, Console.Error, cancellationToken);
+            return await RunAsync(connectionString, planCacheEvidence, fetchSqlFromTables, strict, options, Console.Out, Console.Error, cancellationToken);
         });
 
         return command;
     }
 
     internal static async Task<int> RunAsync(
-        string connectionString, bool includePlanCacheEvidence, bool fetchSqlFromTables, ReportOptions options, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken = default)
+        string connectionString, bool includePlanCacheEvidence, bool fetchSqlFromTables, bool strict, ReportOptions options, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken = default)
     {
         if (!ReportOutput.TryParseFormat(options.Format, out var reportFormat))
         {
@@ -141,7 +149,12 @@ public static class ScanDbCommand
 
         progress.Done(overall.Elapsed);
 
-        return result.LineageParity.Mismatches.Count == 0 ? 0 : 1;
+        if (result.LineageParity.Mismatches.Count != 0)
+        {
+            return 1;
+        }
+
+        return strict && ReportOutput.HasCoverageGaps(result.Report) ? 1 : 0;
     }
 
     private static async Task WarnOnParseHealthAsync(LiveScanResult result, TextWriter stderr)

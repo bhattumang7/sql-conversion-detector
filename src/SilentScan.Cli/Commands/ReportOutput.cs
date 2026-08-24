@@ -1,4 +1,5 @@
 using SilentScan.Core.Predicates;
+using SilentScan.Core.Reporting;
 using SilentScan.Core.Reporting.Readable;
 
 namespace SilentScan.Cli.Commands;
@@ -25,6 +26,17 @@ internal static class ReportOutput
 
     internal const string VerbosityOptionDescription =
         "How much detail the text/markdown report gives for sections about what could NOT be established (parse errors, unresolvable dynamic SQL, ambiguous types, stale metadata): brief (default - each such section states its count only) or full (every row, as the JSON carries it). Never affects json/sarif output, and never hides an actual finding - only these coverage/caveat sections.";
+
+    internal const string StrictOptionDescription =
+        "Fail the command (non-zero exit code) when the scan could not fully look at the code: parse errors, dropped/unanalyzed batches, skipped constructs, unanalyzable dynamic SQL, or predicates that could not be classified. Off by default - the same coverage gaps are always reported (stderr warnings, SARIF notifications), this flag only changes whether they also affect the exit code.";
+
+    internal static bool HasCoverageGaps(ScanReport report) =>
+        report.ParseHealth.Files.Any(f => f.Errors.Count > 0 || f.UnanalyzedBatches.Count > 0)
+        || report.SkippedConstructSummary.TotalCount > 0
+        || report.DynamicSqlSummary.UnanalyzableCount > 0
+        || report.DynamicSqlSummary.InnerParseFailedCount > 0
+        || report.DynamicSqlSummary.PartiallyAnalyzedCount > 0
+        || report.TypedPredicateSummary.UnknownCount > 0;
 
     internal static bool TryParseConfidence(string confidence, out FindingConfidence parsed) =>
         FindingConfidenceParsing.TryParse(confidence, out parsed);

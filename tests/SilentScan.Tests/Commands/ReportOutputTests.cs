@@ -1,6 +1,11 @@
 using SilentScan.Cli.Commands;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.Reporting;
 using SilentScan.Core.Reporting.Readable;
+using SilentScan.Core.Rules;
+using SilentScan.Core.TypeInference;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Commands;
 
@@ -149,5 +154,49 @@ public sealed class ReportOutputTests : IDisposable
         Assert.Equal(string.Empty, stdout.ToString());
         Assert.Contains("could not write the report", stderr.ToString());
         Assert.False(File.Exists(badPath));
+    }
+
+    [Fact]
+    public void HasCoverageGaps_CleanReport_ReturnsFalse()
+    {
+        var report = TestScanReports.Build();
+
+        Assert.False(ReportOutput.HasCoverageGaps(report));
+    }
+
+    [Fact]
+    public void HasCoverageGaps_SkippedConstructs_ReturnsTrue()
+    {
+        var skipped = new SkippedConstruct(AnalysisPass.Predicates, "test.sql", 1, 1, "MERGE", "unsupported-syntax");
+        var report = TestScanReports.Build(
+            SkippedConstructs: [skipped],
+            SkippedConstructSummary: SkippedConstructSummary.From([skipped]));
+
+        Assert.True(ReportOutput.HasCoverageGaps(report));
+    }
+
+    [Fact]
+    public void HasCoverageGaps_UnanalyzableDynamicSql_ReturnsTrue()
+    {
+        var summary = DynamicSqlSummary.From([new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.Unanalyzable, "non-literal-argument")]);
+        var report = TestScanReports.Build(DynamicSqlSummary: summary);
+
+        Assert.True(ReportOutput.HasCoverageGaps(report));
+    }
+
+    [Fact]
+    public void HasCoverageGaps_UnknownTypedPredicates_ReturnsTrue()
+    {
+        var summary = TypedPredicateSummary.From([new TypedPredicateFinding(
+            Verdict.Unknown,
+            new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar), Indexed: true, Depth: 0, Provenance: null!),
+            new PredicateOperand.Value(null),
+            "=",
+            "test.sql",
+            1,
+            1)]);
+        var report = TestScanReports.Build(TypedPredicateSummary: summary);
+
+        Assert.True(ReportOutput.HasCoverageGaps(report));
     }
 }

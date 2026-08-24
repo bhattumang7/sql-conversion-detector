@@ -31,7 +31,7 @@ public sealed class ScanCorpusLiveCommandTests : IDisposable
         var options = new ReportOptions("text", "high", null, "brief");
 
         var exitCode = await ScanCorpusLiveCommand.RunAsync(
-            "/no/such/manifest.json", "corpus/_clones", stdout, stderr, options, CancellationToken.None);
+            "/no/such/manifest.json", "corpus/_clones", false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("manifest not found", stderr.ToString());
@@ -46,7 +46,7 @@ public sealed class ScanCorpusLiveCommandTests : IDisposable
         var options = new ReportOptions("xml", "high", null, "brief");
 
         var exitCode = await ScanCorpusLiveCommand.RunAsync(
-            _manifestPath, "corpus/_clones", stdout, stderr, options, CancellationToken.None);
+            _manifestPath, "corpus/_clones", false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("unknown --format", stderr.ToString());
@@ -60,7 +60,7 @@ public sealed class ScanCorpusLiveCommandTests : IDisposable
         var options = new ReportOptions("sarif", "high", null, "brief");
 
         var exitCode = await ScanCorpusLiveCommand.RunAsync(
-            _manifestPath, "corpus/_clones", stdout, stderr, options, CancellationToken.None);
+            _manifestPath, "corpus/_clones", false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("does not support --format sarif", stderr.ToString());
@@ -75,7 +75,7 @@ public sealed class ScanCorpusLiveCommandTests : IDisposable
         var options = new ReportOptions("text", "extreme", null, "brief");
 
         var exitCode = await ScanCorpusLiveCommand.RunAsync(
-            _manifestPath, "corpus/_clones", stdout, stderr, options, CancellationToken.None);
+            _manifestPath, "corpus/_clones", false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("unknown --confidence", stderr.ToString());
@@ -89,7 +89,7 @@ public sealed class ScanCorpusLiveCommandTests : IDisposable
         var options = new ReportOptions("text", "high", null, "verbose");
 
         var exitCode = await ScanCorpusLiveCommand.RunAsync(
-            _manifestPath, "corpus/_clones", stdout, stderr, options, CancellationToken.None);
+            _manifestPath, "corpus/_clones", false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("unknown --verbosity", stderr.ToString());
@@ -103,7 +103,7 @@ public sealed class ScanCorpusLiveCommandTests : IDisposable
         var options = new ReportOptions("text", "high", null, "brief");
 
         var exitCode = await ScanCorpusLiveCommand.RunAsync(
-            _manifestPath, "/no/such/clones-root", stdout, stderr, options, CancellationToken.None);
+            _manifestPath, "/no/such/clones-root", false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("'example' has no local clone at", stderr.ToString());
@@ -118,7 +118,7 @@ public sealed class ScanCorpusLiveCommandTests : IDisposable
         var options = new ReportOptions("json", "high", null, "brief");
 
         var exitCode = await ScanCorpusLiveCommand.RunAsync(
-            _manifestPath, "/no/such/clones-root", stdout, stderr, options, CancellationToken.None);
+            _manifestPath, "/no/such/clones-root", false, stdout, stderr, options, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("'example' has no local clone at", stderr.ToString());
@@ -136,7 +136,7 @@ public sealed class ScanCorpusLiveCommandTests : IDisposable
             var options = new ReportOptions("text", "high", outputPath, "brief");
 
             var exitCode = await ScanCorpusLiveCommand.RunAsync(
-                _manifestPath, "/no/such/clones-root", stdout, stderr, options, CancellationToken.None);
+                _manifestPath, "/no/such/clones-root", false, stdout, stderr, options, CancellationToken.None);
 
             Assert.Equal(1, exitCode);
             Assert.Equal(string.Empty, stdout.ToString());
