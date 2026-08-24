@@ -193,4 +193,197 @@ public sealed class CrossModuleLockOrderScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void AlteredAndCreateOrAlterProcedures_StillCompared_OppositeOrderFires()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.ProcA AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END; "
+            + "\nGO\n"
+            + "ALTER PROCEDURE dbo.ProcA AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END; "
+            + "\nGO\n"
+            + "CREATE OR ALTER PROCEDURE dbo.ProcB AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END;");
+
+        Assert.Equal(2, findings.Count);
+        Assert.All(findings, f =>
+        {
+            Assert.Equal("dbo.T1", f.FirstTableQualifiedName);
+            Assert.Equal("dbo.T2", f.SecondTableQualifiedName);
+            Assert.Equal("dbo.ProcA", f.FirstTableFirstOrdering.ProcedureQualifiedName);
+            Assert.Equal("dbo.ProcB", f.SecondTableFirstOrdering.ProcedureQualifiedName);
+        });
+    }
+
+    [Fact]
+    public void TwoDefinitionsOfSameProcedureName_NeverComparedAgainstEachOther()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.ProcA AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END; "
+            + "\nGO\n"
+            + "CREATE PROCEDURE dbo.ProcA AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void UnbalancedExtraRollback_DoesNotCorruptTransactionDepthForLaterWrites()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.ProcA AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "ROLLBACK TRANSACTION; "
+            + "ROLLBACK TRANSACTION; "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END; "
+            + "\nGO\n"
+            + "CREATE PROCEDURE dbo.ProcB AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.T1", finding.FirstTableQualifiedName);
+        Assert.Equal("dbo.T2", finding.SecondTableQualifiedName);
+        Assert.Equal("dbo.ProcA", finding.FirstTableFirstOrdering.ProcedureQualifiedName);
+        Assert.Equal("dbo.ProcB", finding.SecondTableFirstOrdering.ProcedureQualifiedName);
+    }
+
+    [Fact]
+    public void InsertAndDeleteWritesInsideTransaction_CountTowardLockOrder()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.ProcA AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "INSERT INTO dbo.T1 (Id) VALUES (1); "
+            + "DELETE FROM dbo.T2 WHERE Id = 1; "
+            + "COMMIT TRANSACTION; "
+            + "END; "
+            + "\nGO\n"
+            + "CREATE PROCEDURE dbo.ProcB AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.T1", finding.FirstTableQualifiedName);
+        Assert.Equal("dbo.T2", finding.SecondTableQualifiedName);
+        Assert.Equal("dbo.ProcA", finding.FirstTableFirstOrdering.ProcedureQualifiedName);
+        Assert.Equal("dbo.ProcB", finding.SecondTableFirstOrdering.ProcedureQualifiedName);
+    }
+
+    [Fact]
+    public void MergeStatementWrite_CountsTowardLockOrder()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.ProcA AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "MERGE INTO dbo.T1 AS tgt USING (SELECT 1 AS Id) AS src ON tgt.Id = src.Id "
+            + "WHEN MATCHED THEN UPDATE SET tgt.Id = src.Id "
+            + "WHEN NOT MATCHED THEN INSERT (Id) VALUES (src.Id); "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END; "
+            + "\nGO\n"
+            + "CREATE PROCEDURE dbo.ProcB AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.T1", finding.FirstTableQualifiedName);
+        Assert.Equal("dbo.T2", finding.SecondTableQualifiedName);
+        Assert.Equal("dbo.ProcA", finding.FirstTableFirstOrdering.ProcedureQualifiedName);
+        Assert.Equal("dbo.ProcB", finding.SecondTableFirstOrdering.ProcedureQualifiedName);
+    }
+
+    [Fact]
+    public void FirstProcedureWritesHigherNamedTableFirst_FindingStillAttributesCorrectProcedurePerTable()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.ProcA AS BEGIN\n"
+            + "BEGIN TRANSACTION;\n"
+            + "UPDATE dbo.T2 SET Id = Id;\n"
+            + "UPDATE dbo.T1 SET Id = Id;\n"
+            + "COMMIT TRANSACTION;\n"
+            + "END;\n"
+            + "GO\n"
+            + "CREATE PROCEDURE dbo.ProcB AS BEGIN\n"
+            + "BEGIN TRANSACTION;\n"
+            + "UPDATE dbo.T1 SET Id = Id;\n"
+            + "UPDATE dbo.T2 SET Id = Id;\n"
+            + "COMMIT TRANSACTION;\n"
+            + "END;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.T1", finding.FirstTableQualifiedName);
+        Assert.Equal("dbo.T2", finding.SecondTableQualifiedName);
+        Assert.Equal("dbo.ProcB", finding.FirstTableFirstOrdering.ProcedureQualifiedName);
+        Assert.Equal(12, finding.FirstTableFirstOrdering.FirstWriteLine);
+        Assert.Equal(13, finding.FirstTableFirstOrdering.SecondWriteLine);
+        Assert.Equal("dbo.ProcA", finding.SecondTableFirstOrdering.ProcedureQualifiedName);
+        Assert.Equal(6, finding.SecondTableFirstOrdering.FirstWriteLine);
+        Assert.Equal(5, finding.SecondTableFirstOrdering.SecondWriteLine);
+    }
+
+    [Fact]
+    public void SynonymForATable_ResolvedToSameQualifiedNameAsDirectReference()
+    {
+        var findings = Scan(
+            "CREATE SYNONYM dbo.SynT2 FOR dbo.T2;"
+            + "\nGO\n"
+            + "CREATE PROCEDURE dbo.ProcA AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "UPDATE dbo.SynT2 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END; "
+            + "\nGO\n"
+            + "CREATE PROCEDURE dbo.ProcB AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.T1", finding.FirstTableQualifiedName);
+        Assert.Equal("dbo.T2", finding.SecondTableQualifiedName);
+        Assert.Equal("dbo.ProcA", finding.FirstTableFirstOrdering.ProcedureQualifiedName);
+        Assert.Equal("dbo.ProcB", finding.SecondTableFirstOrdering.ProcedureQualifiedName);
+    }
 }
