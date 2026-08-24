@@ -272,5 +272,19 @@ public static class RuleDocCatalog
         [Formatting.IfImmediatelyFollowingPriorBlockEnd.RuleId] = Formatting.IfImmediatelyFollowingPriorBlockEnd.Content,
         [Formatting.RedundantParentheses.RuleId] = Formatting.RedundantParentheses.Content,
         [Formatting.MissingFileHeaderComment.RuleId] = Formatting.MissingFileHeaderComment.Content,
+
+        [DeprecatedSyntax.TaskCommentTodo.RuleId] = DeprecatedSyntax.TaskCommentTodo.Content,
+        [DeprecatedSyntax.TaskCommentFixme.RuleId] = DeprecatedSyntax.TaskCommentFixme.Content,
+        [DeprecatedSyntax.NonAnsiComparisonOperator.RuleId] = DeprecatedSyntax.NonAnsiComparisonOperator.Content,
+        [DeprecatedSyntax.EqualsNullComparison.RuleId] = DeprecatedSyntax.EqualsNullComparison.Content,
+        [DeprecatedSyntax.NotEqualsNullComparison.RuleId] = DeprecatedSyntax.NotEqualsNullComparison.Content,
+        [DeprecatedSyntax.LikeWithNoWildcard.RuleId] = DeprecatedSyntax.LikeWithNoWildcard.Content,
+        [DeprecatedSyntax.LegacySystemCompatibilityView.RuleId] = DeprecatedSyntax.LegacySystemCompatibilityView.Content,
+        [DeprecatedSyntax.TableHintWithoutWith.RuleId] = DeprecatedSyntax.TableHintWithoutWith.Content,
+        [DeprecatedSyntax.NumberedProcedureDefinition.RuleId] = DeprecatedSyntax.NumberedProcedureDefinition.Content,
+        [DeprecatedSyntax.NumberedProcedureExecution.RuleId] = DeprecatedSyntax.NumberedProcedureExecution.Content,
+        [DeprecatedSyntax.StringLiteralColumnAlias.RuleId] = DeprecatedSyntax.StringLiteralColumnAlias.Content,
+        [DeprecatedSyntax.RemovedSecurityStoredProcedure.RuleId] = DeprecatedSyntax.RemovedSecurityStoredProcedure.Content,
+        [DeprecatedSyntax.DeprecatedSetRowcount.RuleId] = DeprecatedSyntax.DeprecatedSetRowcount.Content,
     };
 }
