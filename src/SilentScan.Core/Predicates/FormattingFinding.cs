@@ -30,7 +30,7 @@ public sealed record FormattingFinding(
     [property: JsonIgnore] int Line,
     [property: JsonIgnore] int Column,
     string? DetailText = null,
-    FindingConfidence Confidence = FindingConfidence.Low)
+    FindingConfidence Confidence = FindingConfidence.Low) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
 }

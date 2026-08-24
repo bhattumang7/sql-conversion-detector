@@ -3038,6 +3038,21 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_TwoVariablesSetInTheSameIfElse_ConcatenatedScriptsPairBranchesRatherThanCrossProducting()
+    {
+        var result = Scan(
+            "DECLARE @a VARCHAR(50) = 'A0'; DECLARE @b VARCHAR(50) = 'B0'; " +
+            "IF 1 = 1 BEGIN SET @a = 'A1'; SET @b = 'B1'; END " +
+            "ELSE BEGIN SET @a = 'A2'; SET @b = 'B2'; END " +
+            "EXEC('SELECT ' + @a + @b);");
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(new HashSet<string>(StringComparer.Ordinal) { "SELECT A1B1", "SELECT A2B2" }, texts);
+    }
+
+    [Fact]
     public void Scan_LenOfFoldedVariable_FoldsToLiteralLength()
     {
         var result = Scan(

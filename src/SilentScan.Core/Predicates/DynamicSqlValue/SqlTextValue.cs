@@ -1,10 +1,11 @@
+using System.Threading;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
-public sealed record GuardedAlternative(string GuardText, SqlTextValue.Template Value);
+public sealed record GuardedAlternative(int GuardId, SqlTextValue.Template Value);
 
 public abstract record SqlTextValue
 {
@@ -19,6 +20,10 @@ public abstract record SqlTextValue
     public const string CardinalityCapReason = "diverges-across-if-branches:cardinality-cap";
 
     public const string DivergesInControlFlowGraphReason = "diverges-in-control-flow-graph";
+
+    private static int _nextGuardId;
+
+    public static int NewGuardId() => Interlocked.Increment(ref _nextGuardId);
 
     public static SqlTextValue Concat(SqlTextValue a, SqlTextValue b)
     {
@@ -69,7 +74,7 @@ public abstract record SqlTextValue
         {
             foreach (var alt in aAlternatives)
             {
-                combined = WithGuardedAlternative(combined, alt.GuardText, (Template)Concat(alt.Value, b));
+                combined = WithGuardedAlternative(combined, alt.GuardId, (Template)Concat(alt.Value, b));
             }
         }
 
@@ -77,7 +82,7 @@ public abstract record SqlTextValue
         {
             foreach (var alt in bAlternatives)
             {
-                combined = WithGuardedAlternative(combined, alt.GuardText, (Template)Concat(a, alt.Value));
+                combined = WithGuardedAlternative(combined, alt.GuardId, (Template)Concat(a, alt.Value));
             }
         }
 
@@ -86,11 +91,11 @@ public abstract record SqlTextValue
 
     public const int MaxGuardedAlternatives = 8;
 
-    public static SqlTextValue WithGuardedAlternative(SqlTextValue value, string guardText, Template branchValue)
+    public static SqlTextValue WithGuardedAlternative(SqlTextValue value, int guardId, Template branchValue)
     {
         var existing = value.GuardedAlternatives ?? [];
-        var combined = existing.Where(a => !string.Equals(a.GuardText, guardText, StringComparison.Ordinal)).ToList();
-        combined.Add(new GuardedAlternative(guardText, WithoutOwnAlternatives(branchValue)));
+        var combined = existing.Where(a => a.GuardId != guardId).ToList();
+        combined.Add(new GuardedAlternative(guardId, WithoutOwnAlternatives(branchValue)));
         if (combined.Count > MaxGuardedAlternatives)
         {
             combined.RemoveAt(0);
@@ -107,10 +112,10 @@ public abstract record SqlTextValue
     private static Tainted MergeAlternatives(Tainted a, Tainted b)
     {
         var merged = (SqlTextValue)a;
-        var ownGuards = new HashSet<string>((a.GuardedAlternatives ?? []).Select(alt => alt.GuardText), StringComparer.Ordinal);
-        foreach (var alt in (b.GuardedAlternatives ?? []).Where(alt => ownGuards.Add(alt.GuardText)))
+        var ownGuards = new HashSet<int>((a.GuardedAlternatives ?? []).Select(alt => alt.GuardId));
+        foreach (var alt in (b.GuardedAlternatives ?? []).Where(alt => ownGuards.Add(alt.GuardId)))
         {
-            merged = WithGuardedAlternative(merged, alt.GuardText, alt.Value);
+            merged = WithGuardedAlternative(merged, alt.GuardId, alt.Value);
         }
 
         return (Tainted)merged;
@@ -119,7 +124,7 @@ public abstract record SqlTextValue
     private static Template WithoutOwnAlternatives(Template template) =>
         template.GuardedAlternatives is { Count: > 0 } ? template with { GuardedAlternatives = null } : template;
 
-    public static SqlTextValue Join(SqlTextValue a, SqlTextValue b, string guardText, int cap, SourceSpan at)
+    public static SqlTextValue Join(SqlTextValue a, SqlTextValue b, int guardId, int cap, SourceSpan at)
     {
         if (StructurallyEqual(a, b))
         {
@@ -135,7 +140,7 @@ public abstract record SqlTextValue
                 return aTemplate with { DeclaredType = declaredType };
             }
 
-            var merged = MergeAsChoice(aTemplate, bTemplate, guardText);
+            var merged = MergeAsChoice(aTemplate, bTemplate, guardId);
             return Widen(merged with { DeclaredType = declaredType }, cap, at);
         }
 
@@ -148,31 +153,31 @@ public abstract record SqlTextValue
 
         return (a, b) switch
         {
-            (Tainted onlyA, Template bOnly) => WithGuardedAlternative(onlyA with { DeclaredType = carriedType }, guardText, bOnly),
-            (Template aOnly, Tainted onlyB) => WithGuardedAlternative(onlyB with { DeclaredType = carriedType }, guardText, aOnly),
+            (Tainted onlyA, Template bOnly) => WithGuardedAlternative(onlyA with { DeclaredType = carriedType }, guardId, bOnly),
+            (Template aOnly, Tainted onlyB) => WithGuardedAlternative(onlyB with { DeclaredType = carriedType }, guardId, aOnly),
             (Tainted bothTaintedA, Tainted bothTaintedB) => MergeAlternatives(bothTaintedA with { DeclaredType = carriedType }, bothTaintedB),
             _ => new Tainted(DivergesInControlFlowGraphReason, at) { DeclaredType = carriedType },
         };
     }
 
-    private static Template MergeAsChoice(Template a, Template b, string guardText)
+    private static Template MergeAsChoice(Template a, Template b, int guardId)
     {
-        var aAlternatives = AsChoiceAlternatives(a, guardText);
-        var bAlternatives = AsChoiceAlternatives(b, guardText);
+        var aAlternatives = AsChoiceAlternatives(a, guardId);
+        var bAlternatives = AsChoiceAlternatives(b, guardId);
 
         if (aAlternatives is null && bAlternatives is null)
         {
-            return new Template([new TemplatePiece.Choice(guardText, [a, b])]);
+            return new Template([new TemplatePiece.Choice(guardId, [a, b])]);
         }
 
         var combined = new List<Template>(aAlternatives ?? [a]);
         combined.AddRange((bAlternatives ?? [b]).Where(alt => !combined.Any(existing => StructurallyEqual(existing, alt))));
 
-        return new Template([new TemplatePiece.Choice(guardText, combined)]);
+        return new Template([new TemplatePiece.Choice(guardId, combined)]);
     }
 
-    private static IReadOnlyList<Template>? AsChoiceAlternatives(Template value, string guardText) =>
-        value.Pieces is [TemplatePiece.Choice { GuardText: var g } choice] && string.Equals(g, guardText, StringComparison.Ordinal)
+    private static IReadOnlyList<Template>? AsChoiceAlternatives(Template value, int guardId) =>
+        value.Pieces is [TemplatePiece.Choice { GuardId: var g } choice] && g == guardId
             ? choice.Alternatives
             : null;
 
@@ -195,8 +200,8 @@ public abstract record SqlTextValue
             return false;
         }
 
-        var byGuardTextA = a.ToDictionary(alt => alt.GuardText, alt => alt.Value, StringComparer.Ordinal);
-        return b.All(altB => byGuardTextA.TryGetValue(altB.GuardText, out var valueA) && StructurallyEqual(valueA, altB.Value));
+        var byGuardIdA = a.ToDictionary(alt => alt.GuardId, alt => alt.Value);
+        return b.All(altB => byGuardIdA.TryGetValue(altB.GuardId, out var valueA) && StructurallyEqual(valueA, altB.Value));
     }
 
     private static bool PiecesEqual(IReadOnlyList<TemplatePiece> a, IReadOnlyList<TemplatePiece> b) =>
@@ -206,7 +211,7 @@ public abstract record SqlTextValue
     {
         (TemplatePiece.Lit x, TemplatePiece.Lit y) => x == y,
         (TemplatePiece.Hole x, TemplatePiece.Hole y) => x == y,
-        (TemplatePiece.Choice x, TemplatePiece.Choice y) => x.GuardText == y.GuardText && AlternativesEqual(x.Alternatives, y.Alternatives),
+        (TemplatePiece.Choice x, TemplatePiece.Choice y) => x.GuardId == y.GuardId && AlternativesEqual(x.Alternatives, y.Alternatives),
         _ => false,
     };
 
@@ -303,11 +308,29 @@ public abstract record SqlTextValue
         return count;
     }
 
+    private sealed class AssemblyInProgress(List<FlatPiece> pieces, Dictionary<int, int> chosenGuards)
+    {
+        public List<FlatPiece> Pieces { get; } = pieces;
+
+        public Dictionary<int, int> ChosenGuards { get; } = chosenGuards;
+    }
+
     public static IReadOnlyList<IReadOnlyList<FlatPiece>> Expand(Template template, int maxAssemblies)
     {
-        var assemblies = new List<List<FlatPiece>> { new() };
+        var assemblies = ExpandPieces(template.Pieces, [new AssemblyInProgress([], [])], maxAssemblies);
 
-        foreach (var piece in template.Pieces)
+        if (assemblies.Count > maxAssemblies)
+        {
+            throw new InvalidOperationException(
+                $"Expand produced {assemblies.Count} assemblies, exceeding the {maxAssemblies} cap - Widen should have collapsed this Choice before Expand ever ran.");
+        }
+
+        return assemblies.Select(a => (IReadOnlyList<FlatPiece>)a.Pieces).ToList();
+    }
+
+    private static List<AssemblyInProgress> ExpandPieces(IReadOnlyList<TemplatePiece> pieces, List<AssemblyInProgress> assemblies, int maxAssemblies)
+    {
+        foreach (var piece in pieces)
         {
             if (piece is TemplatePiece.Choice choice)
             {
@@ -318,33 +341,32 @@ public abstract record SqlTextValue
                 var flat = FlatPiece.From(piece);
                 foreach (var assembly in assemblies)
                 {
-                    assembly.Add(flat);
+                    assembly.Pieces.Add(flat);
                 }
             }
-        }
-
-        if (assemblies.Count > maxAssemblies)
-        {
-            throw new InvalidOperationException(
-                $"Expand produced {assemblies.Count} assemblies, exceeding the {maxAssemblies} cap - Widen should have collapsed this Choice before Expand ever ran.");
         }
 
         return assemblies;
     }
 
-    private static List<List<FlatPiece>> ForkAssemblies(List<List<FlatPiece>> assemblies, TemplatePiece.Choice choice, int maxAssemblies)
+    private static List<AssemblyInProgress> ForkAssemblies(List<AssemblyInProgress> assemblies, TemplatePiece.Choice choice, int maxAssemblies)
     {
-        var forked = new List<List<FlatPiece>>();
+        var forked = new List<AssemblyInProgress>();
         foreach (var prefix in assemblies)
         {
-            foreach (var alternative in choice.Alternatives)
+            var alreadyChosen = prefix.ChosenGuards.TryGetValue(choice.GuardId, out var chosenIndex) && chosenIndex < choice.Alternatives.Count;
+            IEnumerable<int> indices = alreadyChosen ? [chosenIndex] : Enumerable.Range(0, choice.Alternatives.Count);
+
+            foreach (var index in indices)
             {
-                foreach (var alternativeAssembly in Expand(alternative, maxAssemblies))
+                var branchGuards = alreadyChosen ? prefix.ChosenGuards : new Dictionary<int, int>(prefix.ChosenGuards) { [choice.GuardId] = index };
+                var branchAssemblies = ExpandPieces(choice.Alternatives[index].Pieces, [new AssemblyInProgress([], branchGuards)], maxAssemblies);
+                foreach (var branchAssembly in branchAssemblies)
                 {
-                    var combined = new List<FlatPiece>(prefix.Count + alternativeAssembly.Count);
-                    combined.AddRange(prefix);
-                    combined.AddRange(alternativeAssembly);
-                    forked.Add(combined);
+                    var combined = new List<FlatPiece>(prefix.Pieces.Count + branchAssembly.Pieces.Count);
+                    combined.AddRange(prefix.Pieces);
+                    combined.AddRange(branchAssembly.Pieces);
+                    forked.Add(new AssemblyInProgress(combined, branchAssembly.ChosenGuards));
                 }
             }
         }

@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 
+
 namespace SilentScan.Core.Predicates;
 
 public sealed record WaitForFinding(
@@ -7,7 +8,7 @@ public sealed record WaitForFinding(
     [property: JsonIgnore] int Line,
     [property: JsonIgnore] int Column,
     bool IsInsideTransaction,
-    FindingConfidence Confidence = FindingConfidence.High)
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
 }

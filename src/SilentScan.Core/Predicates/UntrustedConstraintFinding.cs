@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 
+
 namespace SilentScan.Core.Predicates;
 
 public enum UntrustedConstraintFindingKind
@@ -14,7 +15,7 @@ public sealed record UntrustedConstraintFinding(
     string TableQualifiedName,
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
-    FindingConfidence Confidence = FindingConfidence.High)
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, 1);
 }

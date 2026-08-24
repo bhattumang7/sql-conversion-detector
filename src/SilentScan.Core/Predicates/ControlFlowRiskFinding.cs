@@ -30,7 +30,7 @@ public sealed record ControlFlowRiskFinding(
     [property: JsonIgnore] int Line,
     [property: JsonIgnore] int Column,
     string DetailText,
-    FindingConfidence Confidence = FindingConfidence.Medium)
+    FindingConfidence Confidence = FindingConfidence.Medium) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
 }

@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Common;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -24,22 +25,22 @@ public static class DeadCodeScanner
         public List<DeadCodeFinding> Findings { get; } = [];
 
         public override void ExplicitVisit(CreateProcedureStatement node) =>
-            Analyze(QualifiedName(node.ProcedureReference.Name), node.Parameters, node.StatementList);
+            Analyze(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.Parameters, node.StatementList);
 
         public override void ExplicitVisit(AlterProcedureStatement node) =>
-            Analyze(QualifiedName(node.ProcedureReference.Name), node.Parameters, node.StatementList);
+            Analyze(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.Parameters, node.StatementList);
 
         public override void ExplicitVisit(CreateOrAlterProcedureStatement node) =>
-            Analyze(QualifiedName(node.ProcedureReference.Name), node.Parameters, node.StatementList);
+            Analyze(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.Parameters, node.StatementList);
 
         public override void ExplicitVisit(CreateTriggerStatement node) =>
-            Analyze(QualifiedName(node.Name), [], node.StatementList);
+            Analyze(SchemaObjectNameHelper.Qualify(node.Name), [], node.StatementList);
 
         public override void ExplicitVisit(AlterTriggerStatement node) =>
-            Analyze(QualifiedName(node.Name), [], node.StatementList);
+            Analyze(SchemaObjectNameHelper.Qualify(node.Name), [], node.StatementList);
 
         public override void ExplicitVisit(CreateOrAlterTriggerStatement node) =>
-            Analyze(QualifiedName(node.Name), [], node.StatementList);
+            Analyze(SchemaObjectNameHelper.Qualify(node.Name), [], node.StatementList);
 
         private void Analyze(string moduleName, IList<ProcedureParameter> parameters, StatementList? statementList)
         {
@@ -103,11 +104,6 @@ public static class DeadCodeScanner
                 Findings.AddRange(reachability.Findings);
             }
         }
-
-        private static string QualifiedName(SchemaObjectName name) =>
-            name.SchemaIdentifier is { } schema
-                ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-                : name.BaseIdentifier.Value;
 
         private static IList<TSqlStatement> Unwrap(StatementList statementList) =>
             statementList.Statements is [BeginEndBlockStatement singleBlock]

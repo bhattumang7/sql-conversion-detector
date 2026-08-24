@@ -63,7 +63,7 @@ public sealed record IndexDesignFinding(
     string DetailText,
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
-    FindingConfidence Confidence = FindingConfidence.High)
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, 1);
 }

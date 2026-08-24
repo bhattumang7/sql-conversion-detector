@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Common;
 
+
 namespace SilentScan.Core.Predicates;
 
 public sealed record TvfFenceFinding(
@@ -18,7 +19,7 @@ public sealed record TvfFenceFinding(
     IReadOnlyList<string>? CorrelatedOuterColumns = null,
     string? ReferenceFragmentText = null,
     SourceSpan? DynamicSqlCallSite = null,
-    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<TvfFenceFinding>
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<TvfFenceFinding>, IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
     int IRelocatableFinding<TvfFenceFinding>.PositionColumn => Column;

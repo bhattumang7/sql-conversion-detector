@@ -1,3 +1,4 @@
+
 namespace SilentScan.Core.Predicates;
 
 public enum OutputParameterFindingKind
@@ -13,4 +14,7 @@ public sealed record OutputParameterFinding(
     int ProcedureColumn,
     int UnresolvedExitLine,
     int UnresolvedExitColumn,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
+{
+    public SourceSpan Location => new(SourcePath, ProcedureLine, ProcedureColumn);
+}

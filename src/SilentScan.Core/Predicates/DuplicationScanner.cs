@@ -139,63 +139,63 @@ public static class DuplicationScanner
 
         public override void ExplicitVisit(CreateProcedureStatement node)
         {
-            _currentModule = QualifiedName(node.ProcedureReference.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
             CheckStringLiterals(node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(AlterProcedureStatement node)
         {
-            _currentModule = QualifiedName(node.ProcedureReference.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
             CheckStringLiterals(node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(CreateOrAlterProcedureStatement node)
         {
-            _currentModule = QualifiedName(node.ProcedureReference.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
             CheckStringLiterals(node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(CreateFunctionStatement node)
         {
-            _currentModule = QualifiedName(node.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
             CheckStringLiterals(node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(AlterFunctionStatement node)
         {
-            _currentModule = QualifiedName(node.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
             CheckStringLiterals(node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(CreateOrAlterFunctionStatement node)
         {
-            _currentModule = QualifiedName(node.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
             CheckStringLiterals(node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(CreateTriggerStatement node)
         {
-            _currentModule = QualifiedName(node.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
             CheckStringLiterals(node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(AlterTriggerStatement node)
         {
-            _currentModule = QualifiedName(node.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
             CheckStringLiterals(node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(CreateOrAlterTriggerStatement node)
         {
-            _currentModule = QualifiedName(node.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
             CheckStringLiterals(node.StatementList);
             base.ExplicitVisit(node);
         }
@@ -395,11 +395,6 @@ public static class DuplicationScanner
 
             base.ExplicitVisit(node);
         }
-
-        private static string QualifiedName(SchemaObjectName name) =>
-            name.SchemaIdentifier is { } schema
-                ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-                : name.BaseIdentifier.Value;
 
         private bool CanClaimTautologyOrContradiction(ScalarExpression expression)
         {

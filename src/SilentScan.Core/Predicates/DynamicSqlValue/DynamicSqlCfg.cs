@@ -20,21 +20,24 @@ public sealed class DynamicSqlCfg
 
     private readonly string _sourcePath;
     private readonly int _cap;
-    private readonly Func<TSqlStatement, IReadOnlyList<string>, Action<Dictionary<string, SqlTextValue>, bool>> _compileLeaf;
+    private readonly Func<TSqlStatement, IReadOnlyList<int>, Action<Dictionary<string, SqlTextValue>, bool>> _compileLeaf;
     private readonly IReadOnlySet<string> _callerSeededVariableNames;
-    private static readonly string[] NoActiveGuards = [];
+    private static readonly int[] NoActiveGuards = [];
     private static readonly HashSet<string> NoCallerSeededVariableNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Block> _blocks = [];
     private readonly Dictionary<string, int> _labelBlocks = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<int, string> _guardTextByJoinBlock = [];
+    private readonly Dictionary<int, int> _guardIdByJoinBlock = [];
+    private readonly Dictionary<int, int> _mergeGuardIdByBlock = [];
     private readonly Dictionary<int, BooleanExpression> _conditionByJoinBlock = [];
+    private readonly Dictionary<string, int> _writeGenerationByVariable = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (int GuardId, Dictionary<string, int> Snapshot)> _guardIdByPredicateText = new(StringComparer.Ordinal);
     private readonly Dictionary<int, int> _thenPredecessorByJoinBlock = [];
     private readonly Dictionary<int, int> _elsePredecessorByJoinBlock = [];
     private readonly Dictionary<int, SourceSpan> _blockSpan = [];
     private SourceSpan _defaultSpan;
 
     public DynamicSqlCfg(
-        string sourcePath, int cap, Func<TSqlStatement, IReadOnlyList<string>, Action<Dictionary<string, SqlTextValue>, bool>> compileLeaf,
+        string sourcePath, int cap, Func<TSqlStatement, IReadOnlyList<int>, Action<Dictionary<string, SqlTextValue>, bool>> compileLeaf,
         IReadOnlySet<string>? callerSeededVariableNames = null)
     {
         _sourcePath = sourcePath;
@@ -105,7 +108,7 @@ public sealed class DynamicSqlCfg
 
         var working = new Dictionary<string, SqlTextValue>(merged, StringComparer.OrdinalIgnoreCase);
 
-        if (emit && _guardTextByJoinBlock.ContainsKey(index))
+        if (emit && _guardIdByJoinBlock.ContainsKey(index))
         {
             ApplyGuardedAlternativeFixup(index, working, outStates);
             ApplyConstantConditionPruning(index, working, outStates);
@@ -130,7 +133,7 @@ public sealed class DynamicSqlCfg
             return;
         }
 
-        var guardText = _guardTextByJoinBlock[joinBlock];
+        var guardId = _guardIdByJoinBlock[joinBlock];
         foreach (var key in working.Keys.ToList())
         {
             var thenValue = thenState.GetValueOrDefault(key);
@@ -147,17 +150,17 @@ public sealed class DynamicSqlCfg
             {
                 var declaredType = thenValue.DeclaredType ?? elseValue.DeclaredType;
                 var tainted = new SqlTextValue.Tainted(elseTainted.Reason, elseTainted.Location) { DeclaredType = declaredType };
-                current = SqlTextValue.WithGuardedAlternative(tainted, guardText, thenTemplate);
+                current = SqlTextValue.WithGuardedAlternative(tainted, guardId, thenTemplate);
             }
             else if (elseValue is SqlTextValue.Template elseTemplate && thenValue is SqlTextValue.Tainted thenTainted)
             {
                 var declaredType = thenValue.DeclaredType ?? elseValue.DeclaredType;
                 var tainted = new SqlTextValue.Tainted(thenTainted.Reason, thenTainted.Location) { DeclaredType = declaredType };
-                current = SqlTextValue.WithGuardedAlternative(tainted, guardText, elseTemplate);
+                current = SqlTextValue.WithGuardedAlternative(tainted, guardId, elseTemplate);
             }
             else if (thenValue is SqlTextValue.Template thenTemplateBothResolved)
             {
-                current = SqlTextValue.WithGuardedAlternative(current, guardText, thenTemplateBothResolved);
+                current = SqlTextValue.WithGuardedAlternative(current, guardId, thenTemplateBothResolved);
             }
 
             current = PropagateNestedGuardedAlternatives(current, elseValue);
@@ -168,7 +171,7 @@ public sealed class DynamicSqlCfg
 
     private static SqlTextValue PropagateNestedGuardedAlternatives(SqlTextValue current, SqlTextValue? branchValue) =>
         branchValue?.GuardedAlternatives is { Count: > 0 } nested
-            ? nested.Aggregate(current, (value, alt) => SqlTextValue.WithGuardedAlternative(value, alt.GuardText, alt.Value))
+            ? nested.Aggregate(current, (value, alt) => SqlTextValue.WithGuardedAlternative(value, alt.GuardId, alt.Value))
             : current;
 
     private void ApplyConstantConditionPruning(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
@@ -322,6 +325,7 @@ public sealed class DynamicSqlCfg
     private Dictionary<string, SqlTextValue> MergeExitStates(List<int> exitBlocks, Dictionary<string, SqlTextValue>?[] outStates)
     {
         Dictionary<string, SqlTextValue>? finalState = null;
+        var guardId = SqlTextValue.NewGuardId();
         foreach (var exitBlock in exitBlocks)
         {
             if (outStates[exitBlock] is not { } exitState)
@@ -331,10 +335,26 @@ public sealed class DynamicSqlCfg
 
             finalState = finalState is null
                 ? new Dictionary<string, SqlTextValue>(exitState, StringComparer.OrdinalIgnoreCase)
-                : MergeStateInto(finalState, exitState, guardText: string.Empty, SpanFor(exitBlock));
+                : MergeStateInto(finalState, exitState, guardId, SpanFor(exitBlock));
         }
 
         return finalState ?? new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private int GuardIdFor(int block)
+    {
+        if (_guardIdByJoinBlock.TryGetValue(block, out var ifGuardId))
+        {
+            return ifGuardId;
+        }
+
+        if (!_mergeGuardIdByBlock.TryGetValue(block, out var guardId))
+        {
+            guardId = SqlTextValue.NewGuardId();
+            _mergeGuardIdByBlock[block] = guardId;
+        }
+
+        return guardId;
     }
 
     private Dictionary<string, SqlTextValue>? MergeEntry(
@@ -344,7 +364,7 @@ public sealed class DynamicSqlCfg
             ? new Dictionary<string, SqlTextValue>(initialSeed, StringComparer.OrdinalIgnoreCase)
             : null;
 
-        var guardText = _guardTextByJoinBlock.GetValueOrDefault(block, string.Empty);
+        var guardId = GuardIdFor(block);
         foreach (var predecessor in predecessors[block])
         {
             if (outStates[predecessor] is not { } predecessorState)
@@ -354,7 +374,7 @@ public sealed class DynamicSqlCfg
 
             merged = merged is null
                 ? new Dictionary<string, SqlTextValue>(predecessorState, StringComparer.OrdinalIgnoreCase)
-                : MergeStateInto(merged, predecessorState, guardText, SpanFor(block));
+                : MergeStateInto(merged, predecessorState, guardId, SpanFor(block));
         }
 
         return merged;
@@ -362,13 +382,13 @@ public sealed class DynamicSqlCfg
 
     private SourceSpan SpanFor(int block) => _blockSpan.GetValueOrDefault(block, _defaultSpan);
 
-    private Dictionary<string, SqlTextValue> MergeStateInto(Dictionary<string, SqlTextValue> a, Dictionary<string, SqlTextValue> b, string guardText, SourceSpan at)
+    private Dictionary<string, SqlTextValue> MergeStateInto(Dictionary<string, SqlTextValue> a, Dictionary<string, SqlTextValue> b, int guardId, SourceSpan at)
     {
         var merged = new Dictionary<string, SqlTextValue>(a, StringComparer.OrdinalIgnoreCase);
         foreach (var (key, bValue) in b)
         {
             merged[key] = merged.TryGetValue(key, out var aValue)
-                ? SqlTextValue.Join(aValue, bValue, guardText, _cap, at)
+                ? SqlTextValue.Join(aValue, bValue, guardId, _cap, at)
                 : bValue;
         }
 
@@ -413,7 +433,7 @@ public sealed class DynamicSqlCfg
     private static IList<TSqlStatement> NormalizeToStatementList(TSqlStatement statement) =>
         statement is BeginEndBlockStatement block ? block.StatementList.Statements : [statement];
 
-    private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildSelfTrimBypassStep(IfStatement ifStatement, IReadOnlyList<string> activeGuards)
+    private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildSelfTrimBypassStep(IfStatement ifStatement, IReadOnlyList<int> activeGuards)
     {
         if (ifStatement.ElseStatement is not null
             || NormalizeToStatementList(ifStatement.ThenStatement) is not [SetVariableStatement setVar]
@@ -427,6 +447,7 @@ public sealed class DynamicSqlCfg
         }
 
         var name = setVar.Variable.Name;
+        RecordWrite(name);
         var compiledStep = _compileLeaf(setVar, activeGuards);
         return (state, emit) =>
         {
@@ -476,6 +497,7 @@ public sealed class DynamicSqlCfg
             && TryGetSelfEqualityGuard(ifStatement.Predicate, out var variableName, out var literalExpression))
         {
             var literalValue = ExpressionEvaluator.Fold(literalExpression, EmptyLiteralFoldState, _sourcePath, _cap);
+            RecordWrite(variableName);
             return (state, _) =>
             {
                 var declaredType = state.GetValueOrDefault(variableName)?.DeclaredType;
@@ -513,7 +535,7 @@ public sealed class DynamicSqlCfg
         return false;
     }
 
-    private int? BuildSequence(IList<TSqlStatement> statements, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
+    private int? BuildSequence(IList<TSqlStatement> statements, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<int> activeGuards)
     {
         var reachable = true;
         foreach (var statement in statements)
@@ -580,6 +602,7 @@ public sealed class DynamicSqlCfg
 
                 default:
                     var captured = statement;
+                    RecordWrites(captured);
                     _blocks[current].Steps.Add(_compileLeaf(captured, activeGuards));
                     break;
             }
@@ -588,7 +611,7 @@ public sealed class DynamicSqlCfg
         return reachable ? current : null;
     }
 
-    private int BuildIfWithNarrowingBypasses(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
+    private int BuildIfWithNarrowingBypasses(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<int> activeGuards)
     {
         if (TryBuildSelfTrimBypassStep(ifStatement, activeGuards) is { } bypassStep)
         {
@@ -605,12 +628,12 @@ public sealed class DynamicSqlCfg
         return join;
     }
 
-    private int BuildIf(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
+    private int BuildIf(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<int> activeGuards)
     {
-        var guardText = FragmentTextRenderer.Render(ifStatement.Predicate);
+        var guardId = GuardIdForPredicate(ifStatement.Predicate);
         var thenEntry = NewBlock();
         _blocks[current].Successors.Add(thenEntry);
-        var thenExit = BuildSequence(NormalizeToStatementList(ifStatement.ThenStatement), thenEntry, exitBlocks, loopStack, [.. activeGuards, guardText]);
+        var thenExit = BuildSequence(NormalizeToStatementList(ifStatement.ThenStatement), thenEntry, exitBlocks, loopStack, [.. activeGuards, guardId]);
 
         int? elseExit;
         if (ifStatement.ElseStatement is not null)
@@ -627,7 +650,7 @@ public sealed class DynamicSqlCfg
 
         var join = NewBlock();
         _blockSpan[join] = Span(ifStatement);
-        _guardTextByJoinBlock[join] = guardText;
+        _guardIdByJoinBlock[join] = guardId;
         _conditionByJoinBlock[join] = ifStatement.Predicate;
 
         if (thenExit is { } te)
@@ -645,7 +668,7 @@ public sealed class DynamicSqlCfg
         return join;
     }
 
-    private int BuildWhile(WhileStatement whileStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
+    private int BuildWhile(WhileStatement whileStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<int> activeGuards)
     {
         var header = NewBlock();
         _blockSpan[header] = Span(whileStatement);
@@ -756,7 +779,86 @@ public sealed class DynamicSqlCfg
         public override void Visit(VariableReference node) => Names.Add(node.Name);
     }
 
-    private int BuildTryCatch(TryCatchStatement tryCatch, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
+    private sealed class WrittenVariableCollector : TSqlFragmentVisitor
+    {
+        public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public override void ExplicitVisit(SetVariableStatement node)
+        {
+            Names.Add(node.Variable.Name);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(SelectSetVariable node)
+        {
+            Names.Add(node.Variable.Name);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(DeclareVariableStatement node)
+        {
+            foreach (var element in node.Declarations)
+            {
+                if (element.Value is not null)
+                {
+                    Names.Add(element.VariableName.Value);
+                }
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(FetchCursorStatement node)
+        {
+            if (node.IntoVariables is not null)
+            {
+                foreach (var variable in node.IntoVariables)
+                {
+                    Names.Add(variable.Name);
+                }
+            }
+
+            base.ExplicitVisit(node);
+        }
+    }
+
+    private void RecordWrite(string variableName) =>
+        _writeGenerationByVariable[variableName] = _writeGenerationByVariable.GetValueOrDefault(variableName) + 1;
+
+    private void RecordWrites(TSqlStatement statement)
+    {
+        var collector = new WrittenVariableCollector();
+        statement.Accept(collector);
+        foreach (var name in collector.Names)
+        {
+            RecordWrite(name);
+        }
+    }
+
+    private int GuardIdForPredicate(BooleanExpression predicate)
+    {
+        var text = FragmentTextRenderer.Render(predicate);
+        var reads = new VariableReferenceCollector();
+        predicate.Accept(reads);
+
+        if (_guardIdByPredicateText.TryGetValue(text, out var cached)
+            && reads.Names.All(name => cached.Snapshot.TryGetValue(name, out var generation) && generation == _writeGenerationByVariable.GetValueOrDefault(name)))
+        {
+            return cached.GuardId;
+        }
+
+        var guardId = SqlTextValue.NewGuardId();
+        var snapshot = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in reads.Names)
+        {
+            snapshot[name] = _writeGenerationByVariable.GetValueOrDefault(name);
+        }
+
+        _guardIdByPredicateText[text] = (guardId, snapshot);
+        return guardId;
+    }
+
+    private int BuildTryCatch(TryCatchStatement tryCatch, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<int> activeGuards)
     {
         var tryEntry = NewBlock();
         var catchEntry = NewBlock();

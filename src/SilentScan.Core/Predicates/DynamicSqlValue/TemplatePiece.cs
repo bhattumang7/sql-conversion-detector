@@ -10,7 +10,7 @@ public abstract record TemplatePiece
 
     public sealed record Hole(SqlType Type, SourceSpan Origin, HoleKind Kind) : TemplatePiece;
 
-    public sealed record Choice(string GuardText, IReadOnlyList<SqlTextValue.Template> Alternatives) : TemplatePiece;
+    public sealed record Choice(int GuardId, IReadOnlyList<SqlTextValue.Template> Alternatives) : TemplatePiece;
 }
 
 public abstract record FlatPiece

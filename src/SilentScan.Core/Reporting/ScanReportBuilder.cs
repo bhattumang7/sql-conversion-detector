@@ -81,6 +81,13 @@ public static class ScanReportBuilder
             callerScopeByCalleeScope[group.Key] = group.Select(e => e.CallerScopeQualifiedName!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
+        var ruleContext = new RuleHarness.RuleContext(
+            catalog, lineage, new SkipLedger(), procCallGraph,
+            tvfFenceMap, scalarUdfMap, viewExpansionMap, viewDefinitions,
+            selectStarViewCandidates, callerScopeByCalleeScope);
+        var ruleResults = RuleHarness.RuleRunner.Run(RuleHarness.RuleRegistry.All, usableParseResults, ruleContext, minimumConfidence, progress);
+        var ruleCrashes = ruleResults.Crashes;
+
         List<(List<SargabilityFinding> Findings, List<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings, IReadOnlyList<SkippedConstruct> Skipped)> tier1PerFile;
         using (var tier1Stage = progress.Begin("scanning syntactic predicates", usableCount))
         {
@@ -139,712 +146,73 @@ public static class ScanReportBuilder
             schemaDependencyStage.Complete($"{schemaDependencyFindings.Count:N0} findings");
         }
 
-        IReadOnlyList<ColumnCollationDriftFinding> columnCollationDriftFindings;
-        using (var collationDriftStage = progress.Begin("scanning column collation drift"))
-        {
-            columnCollationDriftFindings = ColumnCollationDriftScanner.Scan(catalog);
-            collationDriftStage.Complete($"{columnCollationDriftFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<CrossTableTypeDriftFinding> crossTableTypeDriftFindings;
-        using (var crossTableDriftStage = progress.Begin("scanning cross-table FK type drift"))
-        {
-            crossTableTypeDriftFindings = CrossTableTypeDriftScanner.Scan(catalog);
-            crossTableDriftStage.Complete($"{crossTableTypeDriftFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<TriggerOrderFinding> triggerOrderFindings;
-        using (var triggerOrderStage = progress.Begin("scanning trigger firing-order gaps"))
-        {
-            triggerOrderFindings = TriggerOrderScanner.Scan(catalog);
-            triggerOrderStage.Complete($"{triggerOrderFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<ProcCallArgumentMismatchFinding> procCallArgumentMismatchFindings;
-        using (var argumentMismatchStage = progress.Begin("scanning call-boundary argument mismatches"))
-        {
-            procCallArgumentMismatchFindings = ProcCallArgumentMismatchScanner.Scan(procCallGraph);
-            argumentMismatchStage.Complete($"{procCallArgumentMismatchFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<MaxTypedColumnFinding> maxTypedColumnFindings;
-        using (var maxTypedColumnStage = progress.Begin("scanning MAX-typed columns"))
-        {
-            maxTypedColumnFindings = MaxTypedColumnScanner.Scan(catalog);
-            maxTypedColumnStage.Complete($"{maxTypedColumnFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<ColumnstoreUnsupportedColumnTypeFinding> columnstoreBatchModeDisqualifyingTypeFindings;
-        using (var columnstoreBatchModeStage = progress.Begin("scanning columnstore batch-mode-disqualifying types"))
-        {
-            columnstoreBatchModeDisqualifyingTypeFindings = ColumnstoreUnsupportedColumnTypeScanner.Scan(catalog);
-            columnstoreBatchModeStage.Complete($"{columnstoreBatchModeDisqualifyingTypeFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<SelectiveXmlIndexValueColumnFinding> selectiveXmlIndexValueColumnFindings;
-        using (var selectiveXmlIndexValueColumnStage = progress.Begin("scanning selective XML index value-column width"))
-        {
-            selectiveXmlIndexValueColumnFindings = SelectiveXmlIndexValueColumnScanner.Scan(catalog);
-            selectiveXmlIndexValueColumnStage.Complete($"{selectiveXmlIndexValueColumnFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<MemoryOptimizedUnsupportedColumnTypeFinding> memoryOptimizedUnsupportedColumnTypeFindings;
-        using (var memoryOptimizedColumnTypeStage = progress.Begin("scanning memory-optimized unsupported column types"))
-        {
-            memoryOptimizedUnsupportedColumnTypeFindings = MemoryOptimizedUnsupportedColumnTypeScanner.Scan(catalog);
-            memoryOptimizedColumnTypeStage.Complete($"{memoryOptimizedUnsupportedColumnTypeFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<MemoryOptimizedUnsupportedIndexOptionFinding> memoryOptimizedUnsupportedIndexOptionFindings;
-        using (var memoryOptimizedIndexOptionStage = progress.Begin("scanning memory-optimized unsupported index options"))
-        {
-            memoryOptimizedUnsupportedIndexOptionFindings = MemoryOptimizedUnsupportedIndexOptionScanner.Scan(catalog);
-            memoryOptimizedIndexOptionStage.Complete($"{memoryOptimizedUnsupportedIndexOptionFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<AlwaysEncryptedKeyColumnFinding> alwaysEncryptedKeyColumnFindings;
-        using (var alwaysEncryptedKeyColumnStage = progress.Begin("scanning Always Encrypted key columns"))
-        {
-            alwaysEncryptedKeyColumnFindings = AlwaysEncryptedKeyColumnScanner.Scan(catalog);
-            alwaysEncryptedKeyColumnStage.Complete($"{alwaysEncryptedKeyColumnFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<AlterColumnSafetyFinding> alterColumnSafetyFindings;
-        using (var alterColumnSafetyStage = progress.Begin("scanning ALTER COLUMN safety"))
-        {
-            alterColumnSafetyFindings = AlterColumnSafetyScanner.Scan(catalog);
-            alterColumnSafetyStage.Complete($"{alterColumnSafetyFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<MemoryOptimizedForeignKeyFinding> memoryOptimizedForeignKeyFindings;
-        using (var memoryOptimizedForeignKeyStage = progress.Begin("scanning memory-optimized foreign keys"))
-        {
-            memoryOptimizedForeignKeyFindings = MemoryOptimizedForeignKeyScanner.Scan(catalog);
-            memoryOptimizedForeignKeyStage.Complete($"{memoryOptimizedForeignKeyFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<NonPersistedComputedColumnFinding> nonPersistedComputedColumnFindings;
-        using (var nonPersistedComputedColumnStage = progress.Begin("scanning non-persisted computed columns"))
-        {
-            nonPersistedComputedColumnFindings = NonPersistedComputedColumnScanner.Scan(catalog);
-            nonPersistedComputedColumnStage.Complete($"{nonPersistedComputedColumnFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<UntrustedConstraintFinding> untrustedConstraintFindings;
-        using (var untrustedConstraintStage = progress.Begin("scanning untrusted FK/CHECK constraints"))
-        {
-            untrustedConstraintFindings = UntrustedConstraintScanner.Scan(catalog);
-            untrustedConstraintStage.Complete($"{untrustedConstraintFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<CheckConstraintFinding> checkConstraintFindings;
-        using (var checkConstraintStage = progress.Begin("scanning CHECK constraint text"))
-        {
-            checkConstraintFindings = CheckConstraintScanner.Scan(catalog);
-            checkConstraintStage.Complete($"{checkConstraintFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<SecurityPredicateIndexFinding> securityPredicateIndexFindings;
-        using (var securityPredicateIndexStage = progress.Begin("scanning RLS predicate index coverage"))
-        {
-            securityPredicateIndexFindings = SecurityPredicateIndexScanner.Scan(catalog);
-            securityPredicateIndexStage.Complete($"{securityPredicateIndexFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<DefaultNullableConstraintFinding> defaultNullableConstraintFindings;
-        using (var defaultNullableStage = progress.Begin("scanning nullable DEFAULT constraints"))
-        {
-            defaultNullableConstraintFindings = DefaultNullableConstraintScanner.Scan(catalog);
-            defaultNullableStage.Complete($"{defaultNullableConstraintFindings.Count:N0} findings");
-        }
-
-        var tryCastComputedColumnCandidates = TryCastComputedColumnPredicateScanner.BuildCandidates(catalog);
-
-        IReadOnlyList<CascadingForeignKeyFinding> cascadingForeignKeyFindings;
-        using (var cascadingFkStage = progress.Begin("scanning cascading FK actions"))
-        {
-            cascadingForeignKeyFindings = CascadingForeignKeyScanner.Scan(catalog);
-            cascadingFkStage.Complete($"{cascadingForeignKeyFindings.Count:N0} findings");
-        }
-
-        IReadOnlyList<TemporalTableHistoryIndexGapFinding> temporalTableHistoryIndexGapFindings;
-        using (var temporalHistoryStage = progress.Begin("scanning temporal table history-side index gaps"))
-        {
-            temporalTableHistoryIndexGapFindings = TemporalTableHistoryIndexGapScanner.Scan(catalog);
-            temporalHistoryStage.Complete($"{temporalTableHistoryIndexGapFindings.Count:N0} findings");
-        }
-
-        List<PartialCompositeForeignKeyJoinFinding> partialCompositeForeignKeyJoinFindings;
-        using (var partialFkJoinStage = progress.Begin("scanning partial composite-FK joins", usableCount))
-        {
-            var compositeForeignKeys = PartialCompositeForeignKeyJoinScanner.BuildCompositeForeignKeys(catalog);
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = PartialCompositeForeignKeyJoinScanner.Scan(r, catalog, compositeForeignKeys);
-                    partialFkJoinStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            partialCompositeForeignKeyJoinFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<SetOptionFinding> setOptionFindings;
-        using (var setOptionStage = progress.Begin("scanning SET options blocking indexed views/filtered indexes", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = SetOptionScanner.Scan(r, catalog, lineage);
-                    setOptionStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            setOptionFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<ModuleCompileFlagFinding> moduleCompileFlagFindings;
-        using (var moduleCompileFlagStage = progress.Begin("scanning module compile flags (WITH RECOMPILE, database-collation-dependent TVF returns)", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = ModuleCompileFlagScanner.Scan(r, catalog);
-                    moduleCompileFlagStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            moduleCompileFlagFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<WindowFrameFinding> windowFrameFindings;
-        using (var windowFrameStage = progress.Begin("scanning RANGE window-function frames", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = WindowFrameScanner.Scan(r);
-                    windowFrameStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            windowFrameFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<WindowFunctionArgumentFinding> windowFunctionArgumentFindings;
-        using (var windowFunctionArgumentStage = progress.Begin("scanning LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC constant arguments", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = WindowFunctionArgumentScanner.Scan(r);
-                    windowFunctionArgumentStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            windowFunctionArgumentFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<WaitForFinding> waitForFindings;
-        using (var waitForStage = progress.Begin("scanning WAITFOR DELAY/TIME", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = WaitForScanner.Scan(r);
-                    waitForStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            waitForFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<ViewOrderingFinding> viewOrderingFindings;
-        using (var viewOrderingStage = progress.Begin("scanning TOP(100) PERCENT/ORDER BY in views and inline TVFs", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = ViewOrderingScanner.Scan(r);
-                    viewOrderingStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            viewOrderingFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<TransactionHygieneFinding> transactionHygieneFindings;
-        using (var transactionHygieneStage = progress.Begin("scanning transaction hygiene (unresolved BEGIN TRANSACTION)", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = TransactionHygieneScanner.Scan(r);
-                    transactionHygieneStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            transactionHygieneFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.BeginTransactionLine).ThenBy(f => f.BeginTransactionColumn)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<CompositeIndexLeadingColumnFinding> compositeIndexLeadingColumnFindings;
-        using (var compositeIndexStage = progress.Begin("scanning composite index leading-column violations", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = CompositeIndexLeadingColumnScanner.Scan(r, catalog);
-                    compositeIndexStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            compositeIndexLeadingColumnFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<MissingStatisticsFinding> missingStatisticsFindings;
-        using (var missingStatisticsStage = progress.Begin("scanning missing-statistics/disabled-auto-create predicates", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = MissingStatisticsScanner.Scan(r, catalog);
-                    missingStatisticsStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            missingStatisticsFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<IndexHintFinding> indexHintFindings;
-        using (var indexHintStage = progress.Begin("scanning INDEX hint validity", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = IndexHintScanner.Scan(r, catalog);
-                    indexHintStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            indexHintFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<SessionDateSettingFinding> sessionDateSettingFindings;
-        using (var sessionDateStage = progress.Begin("scanning SET DATEFORMAT/DATEFIRST", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = SessionDateSettingScanner.Scan(r);
-                    sessionDateStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            sessionDateSettingFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<CartesianJoinFinding> cartesianJoinFindings;
-        using (var cartesianJoinStage = progress.Begin("scanning true cartesian joins", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = CartesianJoinScanner.Scan(r);
-                    cartesianJoinStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            cartesianJoinFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<UndersizedDeclarationFinding> undersizedDeclarationFindings;
-        using (var undersizedDeclarationStage = progress.Begin("scanning undersized (length 1/2) declarations", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = UndersizedDeclarationScanner.ScanDeclarations(r, catalog);
-                    undersizedDeclarationStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            unordered.AddRange(UndersizedDeclarationScanner.ScanCatalog(catalog));
-            undersizedDeclarationFindings = unordered
-                .OrderBy(f => f.QualifiedOrVariableName, StringComparer.Ordinal).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<TruncateSwallowedFinding> truncateSwallowedFindings;
-        using (var truncateSwallowedStage = progress.Begin("scanning TRUNCATE inside a swallowing TRY/CATCH", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = TruncateSwallowedScanner.Scan(r);
-                    truncateSwallowedStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            truncateSwallowedFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<UnindexedTempTableUsageFinding> unindexedTempTableUsageFindings;
-        using (var unindexedTempTableStage = progress.Begin("scanning unindexed SELECT INTO temp tables", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = UnindexedTempTableUsageScanner.Scan(r, catalog);
-                    unindexedTempTableStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            unindexedTempTableUsageFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.DeclarationLine)
-                .ThenBy(f => f.TempTableQualifiedName, StringComparer.Ordinal)
-                .ThenBy(f => f.UsageLine).ThenBy(f => f.UsageColumn).ThenBy(f => f.Kind)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<OutputParameterFinding> outputParameterFindings;
-        using (var outputParameterStage = progress.Begin("scanning unassigned OUTPUT parameters", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = OutputParameterScanner.Scan(r);
-                    outputParameterStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            outputParameterFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.ProcedureLine)
-                .ThenBy(f => f.ParameterName, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<CatchAllPredicateFinding> catchAllPredicateFindings;
-        using (var catchAllStage = progress.Begin("scanning catch-all predicates", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = CatchAllPredicateScanner.Scan(r, catalog);
-                    catchAllStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            catchAllPredicateFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<TryCastComputedColumnPredicateFinding> tryCastComputedColumnPredicateFindings;
-        using (var tryCastStage = progress.Begin("scanning TRY_CAST computed columns used in predicates", usableCount))
-        {
-            var unordered = tryCastComputedColumnCandidates.Count == 0
-                ? []
-                : usableParseResults
-                    .AsParallel()
-                    .SelectMany(r =>
-                    {
-                        var findings = TryCastComputedColumnPredicateScanner.Scan(r, catalog, tryCastComputedColumnCandidates);
-                        tryCastStage.Advance();
-                        return findings;
-                    })
-                    .ToList();
-            tryCastComputedColumnPredicateFindings = unordered
-                .OrderBy(f => f.TableQualifiedName, StringComparer.Ordinal).ThenBy(f => f.ColumnName, StringComparer.Ordinal)
-                .ThenBy(f => f.PredicateSourcePath, StringComparer.Ordinal).ThenBy(f => f.PredicateLine)
-                .ThenBy(f => f.PredicateColumn)
-                .ToList();
-            tryCastStage.Complete($"{tryCastComputedColumnPredicateFindings.Count:N0} findings");
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<BareTopNoOrderByFinding> bareTopNoOrderByFindings;
-        using (var bareTopStage = progress.Begin("scanning bare TOP with no ORDER BY", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = BareTopNoOrderByScanner.Scan(r);
-                    bareTopStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            bareTopNoOrderByFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-            bareTopStage.Complete($"{bareTopNoOrderByFindings.Count:N0} findings");
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<StringConcatNullFinding> stringConcatNullFindings;
-        using (var stringConcatStage = progress.Begin("scanning + operator string concatenation NULL propagation", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = StringConcatNullScanner.Scan(r, catalog);
-                    stringConcatStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            stringConcatNullFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-            stringConcatStage.Complete($"{stringConcatNullFindings.Count:N0} findings");
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<AggregateDivisionColumnstoreFinding> aggregateDivisionColumnstoreFindings;
-        using (var aggregateDivisionStage = progress.Begin("scanning CASE-guarded division inside aggregates on columnstore tables", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = AggregateDivisionColumnstoreScanner.Scan(r, catalog);
-                    aggregateDivisionStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            aggregateDivisionColumnstoreFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-            aggregateDivisionStage.Complete($"{aggregateDivisionColumnstoreFindings.Count:N0} findings");
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<ParameterReassignmentPredicateFinding> parameterReassignmentPredicateFindings;
-        using (var reassignmentStage = progress.Begin("scanning reassigned-parameter predicates", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = ParameterReassignmentPredicateScanner.Scan(r, catalog);
-                    reassignmentStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            parameterReassignmentPredicateFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<CodeMetricFinding> codeMetricFindings;
-        using (var codeMetricStage = progress.Begin("scanning size/complexity metrics", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = CodeMetricScanner.Scan(r);
-                    codeMetricStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            codeMetricFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<FormattingFinding> formattingFindings;
-        using (var formattingStage = progress.Begin("scanning formatting and layout", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = FormattingScanner.Scan(r);
-                    formattingStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            formattingFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<NamingFinding> namingFindings;
-        using (var namingStage = progress.Begin("scanning naming and identifier risks", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = NamingScanner.Scan(r);
-                    namingStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            namingFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<DeadCodeFinding> deadCodeFindings;
-        using (var deadCodeStage = progress.Begin("scanning dead code and control-flow risks", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = DeadCodeScanner.Scan(r);
-                    deadCodeStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            deadCodeFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<DuplicationFinding> duplicationFindings;
-        using (var duplicationStage = progress.Begin("scanning duplicated/redundant code shapes", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = DuplicationScanner.Scan(r, catalog);
-                    duplicationStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            duplicationFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<DeprecatedSyntaxFinding> deprecatedSyntaxFindings;
-        using (var deprecatedSyntaxStage = progress.Begin("scanning task comments and deprecated syntax", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = DeprecatedSyntaxScanner.Scan(r, catalog);
-                    deprecatedSyntaxStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            deprecatedSyntaxFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<StatementShapeFinding> statementShapeFindings;
-        using (var statementShapeStage = progress.Begin("scanning statement-shape risks", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = StatementShapeScanner.Scan(r);
-                    statementShapeStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            unordered.AddRange(StatementShapeScanner.ScanCatalog(catalog));
-            statementShapeFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<ControlFlowRiskFinding> controlFlowRiskFindings;
-        using (var controlFlowRiskStage = progress.Begin("scanning cursor and control-flow risks", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = ControlFlowRiskScanner.Scan(r);
-                    controlFlowRiskStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            controlFlowRiskFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
+        var columnCollationDriftFindings = ruleResults.For<ColumnCollationDriftFinding>("ColumnCollationDriftScanner");
+        var crossTableTypeDriftFindings = ruleResults.For<CrossTableTypeDriftFinding>("CrossTableTypeDriftScanner");
+        var triggerOrderFindings = ruleResults.For<TriggerOrderFinding>("TriggerOrderScanner");
+        var procCallArgumentMismatchFindings = ruleResults.For<ProcCallArgumentMismatchFinding>("ProcCallArgumentMismatchScanner");
+        var maxTypedColumnFindings = ruleResults.For<MaxTypedColumnFinding>("MaxTypedColumnScanner");
+        var columnstoreBatchModeDisqualifyingTypeFindings = ruleResults.For<ColumnstoreUnsupportedColumnTypeFinding>("ColumnstoreUnsupportedColumnTypeScanner");
+        var selectiveXmlIndexValueColumnFindings = ruleResults.For<SelectiveXmlIndexValueColumnFinding>("SelectiveXmlIndexValueColumnScanner");
+        var memoryOptimizedUnsupportedColumnTypeFindings = ruleResults.For<MemoryOptimizedUnsupportedColumnTypeFinding>("MemoryOptimizedUnsupportedColumnTypeScanner");
+        var memoryOptimizedUnsupportedIndexOptionFindings = ruleResults.For<MemoryOptimizedUnsupportedIndexOptionFinding>("MemoryOptimizedUnsupportedIndexOptionScanner");
+        var alwaysEncryptedKeyColumnFindings = ruleResults.For<AlwaysEncryptedKeyColumnFinding>("AlwaysEncryptedKeyColumnScanner");
+        var alterColumnSafetyFindings = ruleResults.For<AlterColumnSafetyFinding>("AlterColumnSafetyScanner");
+        var memoryOptimizedForeignKeyFindings = ruleResults.For<MemoryOptimizedForeignKeyFinding>("MemoryOptimizedForeignKeyScanner");
+        var nonPersistedComputedColumnFindings = ruleResults.For<NonPersistedComputedColumnFinding>("NonPersistedComputedColumnScanner");
+        var untrustedConstraintFindings = ruleResults.For<UntrustedConstraintFinding>("UntrustedConstraintScanner");
+        var checkConstraintFindings = ruleResults.For<CheckConstraintFinding>("CheckConstraintScanner");
+        var securityPredicateIndexFindings = ruleResults.For<SecurityPredicateIndexFinding>("SecurityPredicateIndexScanner");
+        var defaultNullableConstraintFindings = ruleResults.For<DefaultNullableConstraintFinding>("DefaultNullableConstraintScanner");
+        var cascadingForeignKeyFindings = ruleResults.For<CascadingForeignKeyFinding>("CascadingForeignKeyScanner");
+        var temporalTableHistoryIndexGapFindings = ruleResults.For<TemporalTableHistoryIndexGapFinding>("TemporalTableHistoryIndexGapScanner");
+        var partialCompositeForeignKeyJoinFindings = ruleResults.For<PartialCompositeForeignKeyJoinFinding>("PartialCompositeForeignKeyJoinScanner");
+        var setOptionFindings = ruleResults.For<SetOptionFinding>("SetOptionScanner");
+        var moduleCompileFlagFindings = ruleResults.For<ModuleCompileFlagFinding>("ModuleCompileFlagScanner");
+        var windowFrameFindings = ruleResults.For<WindowFrameFinding>("WindowFrameScanner");
+        var windowFunctionArgumentFindings = ruleResults.For<WindowFunctionArgumentFinding>("WindowFunctionArgumentScanner");
+        var waitForFindings = ruleResults.For<WaitForFinding>("WaitForScanner");
+        var viewOrderingFindings = ruleResults.For<ViewOrderingFinding>("ViewOrderingScanner");
+        var transactionHygieneFindings = ruleResults.For<TransactionHygieneFinding>("TransactionHygieneScanner");
+        var compositeIndexLeadingColumnFindings = ruleResults.For<CompositeIndexLeadingColumnFinding>("CompositeIndexLeadingColumnScanner");
+        var missingStatisticsFindings = ruleResults.For<MissingStatisticsFinding>("MissingStatisticsScanner");
+        var indexHintFindings = ruleResults.For<IndexHintFinding>("IndexHintScanner");
+        var sessionDateSettingFindings = ruleResults.For<SessionDateSettingFinding>("SessionDateSettingScanner");
+        var cartesianJoinFindings = ruleResults.For<CartesianJoinFinding>("CartesianJoinScanner");
+        var undersizedDeclarationFindings = ruleResults.For<UndersizedDeclarationFinding>("UndersizedDeclarationScanner");
+        var truncateSwallowedFindings = ruleResults.For<TruncateSwallowedFinding>("TruncateSwallowedScanner");
+        var unindexedTempTableUsageFindings = ruleResults.For<UnindexedTempTableUsageFinding>("UnindexedTempTableUsageScanner");
+        var outputParameterFindings = ruleResults.For<OutputParameterFinding>("OutputParameterScanner");
+        var catchAllPredicateFindings = ruleResults.For<CatchAllPredicateFinding>("CatchAllPredicateScanner");
+        var tryCastComputedColumnPredicateFindings = ruleResults.For<TryCastComputedColumnPredicateFinding>("TryCastComputedColumnPredicateScanner");
+        var bareTopNoOrderByFindings = ruleResults.For<BareTopNoOrderByFinding>("BareTopNoOrderByScanner");
+        var stringConcatNullFindings = ruleResults.For<StringConcatNullFinding>("StringConcatNullScanner");
+        var aggregateDivisionColumnstoreFindings = ruleResults.For<AggregateDivisionColumnstoreFinding>("AggregateDivisionColumnstoreScanner");
+        var parameterReassignmentPredicateFindings = ruleResults.For<ParameterReassignmentPredicateFinding>("ParameterReassignmentPredicateScanner");
+        var codeMetricFindings = ruleResults.For<CodeMetricFinding>("CodeMetricScanner");
+        var formattingFindings = ruleResults.For<FormattingFinding>("FormattingScanner");
+        var namingFindings = ruleResults.For<NamingFinding>("NamingScanner");
+        var deadCodeFindings = ruleResults.For<DeadCodeFinding>("DeadCodeScanner");
+        var duplicationFindings = ruleResults.For<DuplicationFinding>("DuplicationScanner");
+        var deprecatedSyntaxFindings = ruleResults.For<DeprecatedSyntaxFinding>("DeprecatedSyntaxScanner");
+        var statementShapeFindings = ruleResults.For<StatementShapeFinding>("StatementShapeScanner");
+        var controlFlowRiskFindings = ruleResults.For<ControlFlowRiskFinding>("ControlFlowRiskScanner");
+        var notInNullableSubqueryFindings = ruleResults.For<NotInNullableSubqueryFinding>("NotInNullableSubqueryScanner");
+        var nonUniqueUpdateSourceFindings = ruleResults.For<NonUniqueUpdateSourceFinding>("NonUniqueUpdateSourceScanner");
+        var floatEqualityFindings = ruleResults.For<FloatEqualityFinding>("FloatEqualityPredicateScanner");
+        var floatOrderDependentAggregateFindings = ruleResults.For<FloatOrderDependentAggregateFinding>("FloatOrderDependentAggregateScanner");
+        var alwaysEncryptedOrderByFindings = ruleResults.For<AlwaysEncryptedOrderByFinding>("AlwaysEncryptedOrderByScanner");
+        var operandComparabilityFindings = ruleResults.For<OperandComparabilityFinding>("OperandComparabilityScanner");
+        var queryAntiPatternFindings = ruleResults.For<QueryAntiPatternFinding>("QueryAntiPatternScanner");
+        var indexCoverageFindings = ruleResults.For<IndexCoverageFinding>("IndexCoverageScanner");
+        var triggerCorrectnessFindings = ruleResults.For<TriggerCorrectnessFinding>("TriggerCorrectnessScanner");
+        var crossModuleLockOrderFindings = ruleResults.For<CrossModuleLockOrderFinding>("CrossModuleLockOrderScanner");
+        var triggerRecursionCycleFindings = ruleResults.For<TriggerRecursionCycleFinding>("TriggerRecursionCycleScanner");
+        var forcedSerialFindings = ruleResults.For<ForcedSerialFinding>("ForcedSerialScanner");
+        var multiReferencedCteFindings = ruleResults.For<MultiReferencedCteFinding>("MultiReferencedCteScanner");
+        var nestedViewDepthFindings = ruleResults.For<NestedViewDepthFinding>("NestedViewDepthScanner");
+        var postExpansionJoinWidthFindings = ruleResults.For<PostExpansionJoinWidthFinding>("PostExpansionJoinWidthScanner");
+        var selfReferencingDmlFindings = ruleResults.For<SelfReferencingDmlFinding>("SelfReferencingDmlScanner");
+        var selectStarViewFindings = ruleResults.For<SelectStarViewFinding>("SelectStarViewScanner");
 
         List<SecurityFinding> securityFindings;
         using (var securityStage = progress.Begin("scanning security risks", usableCount))
@@ -860,295 +228,6 @@ public static class ScanReportBuilder
                 .ToList();
             securityFindings = unordered
                 .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<NotInNullableSubqueryFinding> notInNullableSubqueryFindings;
-        using (var notInStage = progress.Begin("scanning NOT IN over nullable subquery columns", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = NotInNullableSubqueryScanner.Scan(r, catalog);
-                    notInStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            notInNullableSubqueryFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<NonUniqueUpdateSourceFinding> nonUniqueUpdateSourceFindings;
-        using (var updateSourceStage = progress.Begin("scanning UPDATE...FROM source uniqueness", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = NonUniqueUpdateSourceScanner.Scan(r, catalog);
-                    updateSourceStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            nonUniqueUpdateSourceFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<FloatEqualityFinding> floatEqualityFindings;
-        using (var floatEqualityStage = progress.Begin("scanning float/real equality predicates", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = FloatEqualityPredicateScanner.Scan(r, catalog);
-                    floatEqualityStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            floatEqualityFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<FloatOrderDependentAggregateFinding> floatOrderDependentAggregateFindings;
-        using (var floatOrderDependentAggregateStage = progress.Begin("scanning float/real columns fed into order-dependent aggregates", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = FloatOrderDependentAggregateScanner.Scan(r, catalog);
-                    floatOrderDependentAggregateStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            floatOrderDependentAggregateFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<AlwaysEncryptedOrderByFinding> alwaysEncryptedOrderByFindings;
-        using (var alwaysEncryptedOrderByStage = progress.Begin("scanning ORDER BY against Always Encrypted columns", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = AlwaysEncryptedOrderByScanner.Scan(r, catalog);
-                    alwaysEncryptedOrderByStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            alwaysEncryptedOrderByFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<OperandComparabilityFinding> operandComparabilityFindings;
-        using (var operandComparabilityStage = progress.Begin("scanning operand comparability", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = OperandComparabilityScanner.Scan(r, catalog);
-                    operandComparabilityStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            operandComparabilityFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<QueryAntiPatternFinding> queryAntiPatternFindings;
-        using (var queryAntiPatternStage = progress.Begin("scanning query anti-patterns", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = QueryAntiPatternScanner.Scan(r, catalog);
-                    queryAntiPatternStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            queryAntiPatternFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<IndexCoverageFinding> indexCoverageFindings;
-        using (var indexCoverageStage = progress.Begin("scanning index-coverage shapes", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = IndexCoverageScanner.Scan(r, catalog);
-                    indexCoverageStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            indexCoverageFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<TriggerCorrectnessFinding> triggerCorrectnessFindings;
-        using (var triggerCorrectnessStage = progress.Begin("scanning trigger correctness", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = TriggerCorrectnessScanner.Scan(r, catalog);
-                    triggerCorrectnessStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            triggerCorrectnessFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        IReadOnlyList<CrossModuleLockOrderFinding> crossModuleLockOrderFindings;
-        using (var lockOrderStage = progress.Begin("scanning cross-module lock ordering"))
-        {
-
-            crossModuleLockOrderFindings = CrossModuleLockOrderScanner.Scan(usableParseResults, catalog);
-            lockOrderStage.Complete($"{crossModuleLockOrderFindings.Count:N0} findings");
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        IReadOnlyList<TriggerRecursionCycleFinding> triggerRecursionCycleFindings;
-        using (var triggerRecursionStage = progress.Begin("scanning multi-hop trigger recursion cycles"))
-        {
-
-            triggerRecursionCycleFindings = TriggerRecursionCycleScanner.Scan(usableParseResults, catalog);
-            triggerRecursionStage.Complete($"{triggerRecursionCycleFindings.Count:N0} findings");
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<ForcedSerialFinding> forcedSerialFindings;
-        using (var forcedSerialStage = progress.Begin("scanning forced-serial constructs", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = ForcedSerialScanner.Scan(r);
-                    forcedSerialStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            forcedSerialFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<MultiReferencedCteFinding> multiReferencedCteFindings;
-        using (var multiCteStage = progress.Begin("scanning multi-referenced CTEs", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = MultiReferencedCteScanner.Scan(r);
-                    multiCteStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            multiReferencedCteFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.CteName, StringComparer.Ordinal)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        IReadOnlyList<NestedViewDepthFinding> nestedViewDepthFindings;
-        using (var nestedViewDepthStage = progress.Begin("scanning nested-view depth"))
-        {
-            nestedViewDepthFindings = NestedViewDepthScanner.Scan(viewExpansionMap, viewDefinitions);
-            nestedViewDepthStage.Complete($"{nestedViewDepthFindings.Count:N0} findings");
-        }
-
-        List<PostExpansionJoinWidthFinding> postExpansionJoinWidthFindings;
-        using (var joinWidthStage = progress.Begin("scanning post-expansion join width", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = PostExpansionJoinWidthScanner.Scan(r, catalog, viewExpansionMap);
-                    joinWidthStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            postExpansionJoinWidthFindings = unordered
-                .OrderByDescending(f => f.ExpandedCount - f.WrittenCount)
-                .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
-                .ThenBy(f => f.Line)
-                .ThenBy(f => f.Column)
-                .ThenBy(f => f.ModuleQualifiedName, StringComparer.Ordinal)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<SelfReferencingDmlFinding> selfReferencingDmlFindings;
-        using (var selfRefStage = progress.Begin("scanning self-referencing DML", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = SelfReferencingDmlScanner.Scan(r, catalog, viewExpansionMap);
-                    selfRefStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            selfReferencingDmlFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
-                .ThenBy(f => f.Line)
-                .ThenBy(f => f.Column)
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
-        List<SelectStarViewFinding> selectStarViewFindings;
-        using (var selectStarStage = progress.Begin("scanning SELECT * inside nested views", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = SelectStarViewScanner.Scan(r, catalog, lineage, selectStarViewCandidates);
-                    selectStarStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            selectStarViewFindings = unordered
-                .OrderBy(f => f.ViewQualifiedName, StringComparer.Ordinal)
-                .ThenBy(f => f.ConsumerSourcePath, StringComparer.Ordinal)
-                .ThenBy(f => f.ConsumerLine)
-                .ThenBy(f => f.ConsumerColumn)
-                .ThenBy(f => f.ViewDepth)
-                .ThenBy(f => f.ViewSourcePath, StringComparer.Ordinal)
-                .ThenBy(f => f.ViewLine)
                 .ToList();
         }
         PhaseMemory.ReleaseBetweenPhases();
@@ -1187,6 +266,8 @@ public static class ScanReportBuilder
         skippedConstructs.AddRange(callGraphLedger.Entries);
         skippedConstructs.AddRange(tier1SkippedEntries);
         skippedConstructs.AddRange(extractionResults.SelectMany(r => r.SkippedConstructs));
+        skippedConstructs.AddRange(ruleContext.Ledger.Entries);
+        skippedConstructs.AddRange(ruleCrashes);
 
         var dynamicSqlResult = DynamicSqlPipeline.Analyze(dynamicSqlScripts, catalog, lineage, tvfFenceMap, scalarUdfMap, callerScopeByCalleeScope);
         dynamicSqlFindings = [.. dynamicSqlFindings, .. dynamicSqlResult.Findings];
@@ -1265,75 +346,13 @@ public static class ScanReportBuilder
             .ThenBy(s => s.Column)
             .ToList();
 
-        columnCollationDriftFindings = [.. columnCollationDriftFindings.Where(f => f.Confidence <= minimumConfidence)];
-        crossTableTypeDriftFindings = [.. crossTableTypeDriftFindings.Where(f => f.Confidence <= minimumConfidence)];
-        procCallArgumentMismatchFindings = [.. procCallArgumentMismatchFindings.Where(f => f.Confidence <= minimumConfidence)];
         temporalBoundaryFindings = [.. temporalBoundaryFindings.Where(f => f.Confidence <= minimumConfidence)];
-        maxTypedColumnFindings = [.. maxTypedColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
         oversizedParameterFindings = [.. oversizedParameterFindings.Where(f => f.Confidence <= minimumConfidence)];
         underLengthParameterFindings = [.. underLengthParameterFindings.Where(f => f.Confidence <= minimumConfidence)];
         ansiPaddingMismatchFindings = [.. ansiPaddingMismatchFindings.Where(f => f.Confidence <= minimumConfidence)];
-        partialCompositeForeignKeyJoinFindings = [.. partialCompositeForeignKeyJoinFindings.Where(f => f.Confidence <= minimumConfidence)];
-        setOptionFindings = [.. setOptionFindings.Where(f => f.Confidence <= minimumConfidence)];
-        catchAllPredicateFindings = [.. catchAllPredicateFindings.Where(f => f.Confidence <= minimumConfidence)];
         localVariablePredicateFindings = [.. localVariablePredicateFindings.Where(f => f.Confidence <= minimumConfidence)];
         filteredIndexParameterMismatchFindings = [.. filteredIndexParameterMismatchFindings.Where(f => f.Confidence <= minimumConfidence)];
-        notInNullableSubqueryFindings = [.. notInNullableSubqueryFindings.Where(f => f.Confidence <= minimumConfidence)];
-        nonUniqueUpdateSourceFindings = [.. nonUniqueUpdateSourceFindings.Where(f => f.Confidence <= minimumConfidence)];
-        forcedSerialFindings = [.. forcedSerialFindings.Where(f => f.Confidence <= minimumConfidence)];
-        untrustedConstraintFindings = [.. untrustedConstraintFindings.Where(f => f.Confidence <= minimumConfidence)];
-        checkConstraintFindings = [.. checkConstraintFindings.Where(f => f.Confidence <= minimumConfidence)];
-        cascadingForeignKeyFindings = [.. cascadingForeignKeyFindings.Where(f => f.Confidence <= minimumConfidence)];
-        multiReferencedCteFindings = [.. multiReferencedCteFindings.Where(f => f.Confidence <= minimumConfidence)];
-        nestedViewDepthFindings = [.. nestedViewDepthFindings.Where(f => f.Confidence <= minimumConfidence)];
-        postExpansionJoinWidthFindings = [.. postExpansionJoinWidthFindings.Where(f => f.Confidence <= minimumConfidence)];
-        selectStarViewFindings = [.. selectStarViewFindings.Where(f => f.Confidence <= minimumConfidence)];
-        nonPersistedComputedColumnFindings = [.. nonPersistedComputedColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
-        selfReferencingDmlFindings = [.. selfReferencingDmlFindings.Where(f => f.Confidence <= minimumConfidence)];
-        temporalTableHistoryIndexGapFindings = [.. temporalTableHistoryIndexGapFindings.Where(f => f.Confidence <= minimumConfidence)];
-        moduleCompileFlagFindings = [.. moduleCompileFlagFindings.Where(f => f.Confidence <= minimumConfidence)];
-        windowFrameFindings = [.. windowFrameFindings.Where(f => f.Confidence <= minimumConfidence)];
-        windowFunctionArgumentFindings = [.. windowFunctionArgumentFindings.Where(f => f.Confidence <= minimumConfidence)];
-        waitForFindings = [.. waitForFindings.Where(f => f.Confidence <= minimumConfidence)];
-        viewOrderingFindings = [.. viewOrderingFindings.Where(f => f.Confidence <= minimumConfidence)];
-        transactionHygieneFindings = [.. transactionHygieneFindings.Where(f => f.Confidence <= minimumConfidence)];
-        compositeIndexLeadingColumnFindings = [.. compositeIndexLeadingColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
-        indexHintFindings = [.. indexHintFindings.Where(f => f.Confidence <= minimumConfidence)];
-        sessionDateSettingFindings = [.. sessionDateSettingFindings.Where(f => f.Confidence <= minimumConfidence)];
-        cartesianJoinFindings = [.. cartesianJoinFindings.Where(f => f.Confidence <= minimumConfidence)];
-        undersizedDeclarationFindings = [.. undersizedDeclarationFindings.Where(f => f.Confidence <= minimumConfidence)];
-        truncateSwallowedFindings = [.. truncateSwallowedFindings.Where(f => f.Confidence <= minimumConfidence)];
-        unindexedTempTableUsageFindings = [.. unindexedTempTableUsageFindings.Where(f => f.Confidence <= minimumConfidence)];
-        outputParameterFindings = [.. outputParameterFindings.Where(f => f.Confidence <= minimumConfidence)];
-        parameterReassignmentPredicateFindings = [.. parameterReassignmentPredicateFindings.Where(f => f.Confidence <= minimumConfidence)];
-        codeMetricFindings = [.. codeMetricFindings.Where(f => f.Confidence <= minimumConfidence)];
-        formattingFindings = [.. formattingFindings.Where(f => f.Confidence <= minimumConfidence)];
-        namingFindings = [.. namingFindings.Where(f => f.Confidence <= minimumConfidence)];
-        deadCodeFindings = [.. deadCodeFindings.Where(f => f.Confidence <= minimumConfidence)];
-        duplicationFindings = [.. duplicationFindings.Where(f => f.Confidence <= minimumConfidence)];
-        deprecatedSyntaxFindings = [.. deprecatedSyntaxFindings.Where(f => f.Confidence <= minimumConfidence)];
-        statementShapeFindings = [.. statementShapeFindings.Where(f => f.Confidence <= minimumConfidence)];
-        controlFlowRiskFindings = [.. controlFlowRiskFindings.Where(f => f.Confidence <= minimumConfidence)];
         securityFindings = [.. securityFindings.Where(f => f.Confidence <= minimumConfidence)];
-        floatEqualityFindings = [.. floatEqualityFindings.Where(f => f.Confidence <= minimumConfidence)];
-        alwaysEncryptedOrderByFindings = [.. alwaysEncryptedOrderByFindings.Where(f => f.Confidence <= minimumConfidence)];
-        queryAntiPatternFindings = [.. queryAntiPatternFindings.Where(f => f.Confidence <= minimumConfidence)];
-        indexCoverageFindings = [.. indexCoverageFindings.Where(f => f.Confidence <= minimumConfidence)];
-        triggerCorrectnessFindings = [.. triggerCorrectnessFindings.Where(f => f.Confidence <= minimumConfidence)];
-        crossModuleLockOrderFindings = [.. crossModuleLockOrderFindings.Where(f => f.Confidence <= minimumConfidence)];
-        triggerRecursionCycleFindings = [.. triggerRecursionCycleFindings.Where(f => f.Confidence <= minimumConfidence)];
-        defaultNullableConstraintFindings = [.. defaultNullableConstraintFindings.Where(f => f.Confidence <= minimumConfidence)];
-        tryCastComputedColumnPredicateFindings = [.. tryCastComputedColumnPredicateFindings.Where(f => f.Confidence <= minimumConfidence)];
-        bareTopNoOrderByFindings = [.. bareTopNoOrderByFindings.Where(f => f.Confidence <= minimumConfidence)];
-        stringConcatNullFindings = [.. stringConcatNullFindings.Where(f => f.Confidence <= minimumConfidence)];
-        aggregateDivisionColumnstoreFindings = [.. aggregateDivisionColumnstoreFindings.Where(f => f.Confidence <= minimumConfidence)];
-        triggerOrderFindings = [.. triggerOrderFindings.Where(f => f.Confidence <= minimumConfidence)];
-        missingStatisticsFindings = [.. missingStatisticsFindings.Where(f => f.Confidence <= minimumConfidence)];
-        operandComparabilityFindings = [.. operandComparabilityFindings.Where(f => f.Confidence <= minimumConfidence)];
-        selectiveXmlIndexValueColumnFindings = [.. selectiveXmlIndexValueColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
-        floatOrderDependentAggregateFindings = [.. floatOrderDependentAggregateFindings.Where(f => f.Confidence <= minimumConfidence)];
-        alwaysEncryptedKeyColumnFindings = [.. alwaysEncryptedKeyColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
-        alterColumnSafetyFindings = [.. alterColumnSafetyFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,

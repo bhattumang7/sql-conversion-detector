@@ -37,42 +37,42 @@ public static class ControlFlowRiskScanner
 
         public override void ExplicitVisit(CreateProcedureStatement node)
         {
-            EnterRoutine(QualifiedName(node.ProcedureReference.Name), isTrigger: false);
+            EnterRoutine(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), isTrigger: false);
             base.ExplicitVisit(node);
             ExitRoutine();
         }
 
         public override void ExplicitVisit(AlterProcedureStatement node)
         {
-            EnterRoutine(QualifiedName(node.ProcedureReference.Name), isTrigger: false);
+            EnterRoutine(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), isTrigger: false);
             base.ExplicitVisit(node);
             ExitRoutine();
         }
 
         public override void ExplicitVisit(CreateOrAlterProcedureStatement node)
         {
-            EnterRoutine(QualifiedName(node.ProcedureReference.Name), isTrigger: false);
+            EnterRoutine(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), isTrigger: false);
             base.ExplicitVisit(node);
             ExitRoutine();
         }
 
         public override void ExplicitVisit(CreateTriggerStatement node)
         {
-            EnterRoutine(QualifiedName(node.Name), isTrigger: true);
+            EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), isTrigger: true);
             base.ExplicitVisit(node);
             ExitRoutine();
         }
 
         public override void ExplicitVisit(AlterTriggerStatement node)
         {
-            EnterRoutine(QualifiedName(node.Name), isTrigger: true);
+            EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), isTrigger: true);
             base.ExplicitVisit(node);
             ExitRoutine();
         }
 
         public override void ExplicitVisit(CreateOrAlterTriggerStatement node)
         {
-            EnterRoutine(QualifiedName(node.Name), isTrigger: true);
+            EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), isTrigger: true);
             base.ExplicitVisit(node);
             ExitRoutine();
         }
@@ -247,11 +247,6 @@ public static class ControlFlowRiskScanner
 
             base.ExplicitVisit(node);
         }
-
-        private static string QualifiedName(SchemaObjectName name) =>
-            name.SchemaIdentifier is { } schema
-                ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-                : name.BaseIdentifier.Value;
 
         private void EnterRoutine(string name, bool isTrigger)
         {

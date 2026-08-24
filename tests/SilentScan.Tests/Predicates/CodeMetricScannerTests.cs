@@ -315,13 +315,13 @@ public sealed class CodeMetricScannerTests
     }
 
     [Fact]
-    public void UnqualifiedProcedureName_HasNoSchemaPrefix()
+    public void UnqualifiedProcedureName_DefaultsToDboSchema()
     {
         var sql = "CREATE PROCEDURE UnqualifiedProc (@A int, @B int, @C int) AS BEGIN SELECT 1; END;";
         var findings = Scan(sql, new CodeMetricThresholds(MaxParameters: 2));
 
         var finding = Assert.Single(findings, f => f.Kind == CodeMetricFindingKind.TooManyParameters);
-        Assert.Equal("UnqualifiedProc", finding.ModuleQualifiedName);
+        Assert.Equal("dbo.UnqualifiedProc", finding.ModuleQualifiedName);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+
 namespace SilentScan.Core.Predicates;
 
 public enum UnindexedTempTableUsageKind
@@ -13,4 +14,7 @@ public sealed record UnindexedTempTableUsageFinding(
     int DeclarationLine,
     int UsageLine,
     int UsageColumn,
-    FindingConfidence Confidence = FindingConfidence.Medium);
+    FindingConfidence Confidence = FindingConfidence.Medium) : IFinding
+{
+    public SourceSpan Location => new(SourcePath, UsageLine, UsageColumn);
+}

@@ -14,7 +14,7 @@ public sealed record CollationConflictFinding(
     [property: JsonIgnore] int Line,
     [property: JsonIgnore] int ColumnPosition,
     SourceSpan? DynamicSqlCallSite = null,
-    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<CollationConflictFinding>
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<CollationConflictFinding>, IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, ColumnPosition);
     int IRelocatableFinding<CollationConflictFinding>.PositionColumn => ColumnPosition;

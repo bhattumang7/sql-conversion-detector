@@ -16,7 +16,7 @@ public sealed record MaxTypedColumnFinding(
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
     NonIndexableColumnFindingKind Kind = NonIndexableColumnFindingKind.MaxLength,
-    FindingConfidence Confidence = FindingConfidence.High)
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, 1);
 }

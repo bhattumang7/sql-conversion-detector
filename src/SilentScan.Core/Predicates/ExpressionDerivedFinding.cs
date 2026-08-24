@@ -15,7 +15,7 @@ public sealed record ExpressionDerivedFinding(
     string? PredicateFragmentText = null,
     string? ImmediateRelationQualifiedName = null,
     string? ImmediateRelationAlias = null,
-    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<ExpressionDerivedFinding>
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<ExpressionDerivedFinding>, IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, ColumnPosition);
     int IRelocatableFinding<ExpressionDerivedFinding>.PositionColumn => ColumnPosition;

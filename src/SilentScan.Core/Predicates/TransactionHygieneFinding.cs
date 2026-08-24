@@ -1,3 +1,4 @@
+
 namespace SilentScan.Core.Predicates;
 
 public enum TransactionHygieneFindingKind
@@ -12,4 +13,7 @@ public sealed record TransactionHygieneFinding(
     int BeginTransactionColumn,
     int UnresolvedExitLine,
     int UnresolvedExitColumn,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
+{
+    public SourceSpan Location => new(SourcePath, BeginTransactionLine, BeginTransactionColumn);
+}

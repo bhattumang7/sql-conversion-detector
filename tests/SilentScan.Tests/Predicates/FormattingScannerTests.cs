@@ -281,13 +281,13 @@ public sealed class FormattingScannerTests
     }
 
     [Fact]
-    public void UnqualifiedProcedureName_UsedAsModuleName()
+    public void UnqualifiedProcedureName_DefaultsToDboSchema()
     {
         var sql = "CREATE PROCEDURE P AS BEGIN SELECT 1; SELECT 2; END";
         var findings = Scan(sql);
 
         var finding = Assert.Single(findings, f => f.Kind == FormattingFindingKind.MultipleStatementsOnSameLine);
-        Assert.Equal("P", finding.ModuleQualifiedName);
+        Assert.Equal("dbo.P", finding.ModuleQualifiedName);
     }
 
     [Fact]

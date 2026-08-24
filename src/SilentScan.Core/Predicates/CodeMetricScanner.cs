@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Common;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -96,37 +97,37 @@ public static class CodeMetricScanner
 
         public override void ExplicitVisit(CreateProcedureStatement node)
         {
-            AnalyzeRoutine("procedure", QualifiedName(node.ProcedureReference.Name), node.ProcedureReference.Name, node.Parameters, node.StatementList);
+            AnalyzeRoutine("procedure", SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.ProcedureReference.Name, node.Parameters, node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(AlterProcedureStatement node)
         {
-            AnalyzeRoutine("procedure", QualifiedName(node.ProcedureReference.Name), node.ProcedureReference.Name, node.Parameters, node.StatementList);
+            AnalyzeRoutine("procedure", SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.ProcedureReference.Name, node.Parameters, node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(CreateFunctionStatement node)
         {
-            AnalyzeRoutine("function", QualifiedName(node.Name), node.Name, node.Parameters, node.StatementList);
+            AnalyzeRoutine("function", SchemaObjectNameHelper.Qualify(node.Name), node.Name, node.Parameters, node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(AlterFunctionStatement node)
         {
-            AnalyzeRoutine("function", QualifiedName(node.Name), node.Name, node.Parameters, node.StatementList);
+            AnalyzeRoutine("function", SchemaObjectNameHelper.Qualify(node.Name), node.Name, node.Parameters, node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(CreateTriggerStatement node)
         {
-            AnalyzeRoutine("trigger", QualifiedName(node.Name), node.Name, [], node.StatementList);
+            AnalyzeRoutine("trigger", SchemaObjectNameHelper.Qualify(node.Name), node.Name, [], node.StatementList);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(AlterTriggerStatement node)
         {
-            AnalyzeRoutine("trigger", QualifiedName(node.Name), node.Name, [], node.StatementList);
+            AnalyzeRoutine("trigger", SchemaObjectNameHelper.Qualify(node.Name), node.Name, [], node.StatementList);
             base.ExplicitVisit(node);
         }
 
@@ -181,11 +182,6 @@ public static class CodeMetricScanner
             visitChildren(node);
             _nestingDepth--;
         }
-
-        private static string QualifiedName(SchemaObjectName name) =>
-            name.SchemaIdentifier is { } schema
-                ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-                : name.BaseIdentifier.Value;
 
         private void AnalyzeRoutine(
             string kindLabel, string qualifiedName, SchemaObjectName nameNode, IList<ProcedureParameter> parameters, StatementList? statementList)

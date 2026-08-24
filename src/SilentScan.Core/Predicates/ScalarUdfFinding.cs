@@ -24,7 +24,7 @@ public sealed record ScalarUdfFinding(
     int OriginLine = 0,
     string? ReferenceFragmentText = null,
     SourceSpan? DynamicSqlCallSite = null,
-    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<ScalarUdfFinding>
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<ScalarUdfFinding>, IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
     int IRelocatableFinding<ScalarUdfFinding>.PositionColumn => Column;

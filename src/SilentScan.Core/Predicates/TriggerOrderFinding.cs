@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 
+
 namespace SilentScan.Core.Predicates;
 
 public sealed record TriggerOrderFinding(
@@ -8,7 +9,7 @@ public sealed record TriggerOrderFinding(
     IReadOnlyList<string> UnorderedTriggerNames,
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
-    FindingConfidence Confidence = FindingConfidence.Medium)
+    FindingConfidence Confidence = FindingConfidence.Medium) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, 1);
 }

@@ -112,7 +112,7 @@ public sealed class SqlTextValueTests
     [Fact]
     public void Concat_TwoTemplatesWithChoicePiece_NeverDistributesTheChoice()
     {
-        var choice = new SqlTextValue.Template([new TemplatePiece.Choice("guard", [Lit("A"), Lit("B")])]);
+        var choice = new SqlTextValue.Template([new TemplatePiece.Choice(1, [Lit("A"), Lit("B")])]);
 
         var result = (SqlTextValue.Template)SqlTextValue.Concat(choice, Lit("TAIL"));
 
@@ -126,7 +126,7 @@ public sealed class SqlTextValueTests
         var a = Lit("SELECT 1");
         var b = Lit("SELECT 1");
 
-        var result = SqlTextValue.Join(a, b, "guard", cap: 32, at: Origin);
+        var result = SqlTextValue.Join(a, b, guardId: 1, cap: 32, at: Origin);
 
         Assert.True(SqlTextValue.StructurallyEqual(a, result));
     }
@@ -137,10 +137,10 @@ public sealed class SqlTextValueTests
         var a = Lit("A");
         var b = Lit("B");
 
-        var result = (SqlTextValue.Template)SqlTextValue.Join(a, b, "IF @x IS NOT NULL", cap: 32, at: Origin);
+        var result = (SqlTextValue.Template)SqlTextValue.Join(a, b, guardId: 7, cap: 32, at: Origin);
 
         var choice = Assert.IsType<TemplatePiece.Choice>(Assert.Single(result.Pieces));
-        Assert.Equal("IF @x IS NOT NULL", choice.GuardText);
+        Assert.Equal(7, choice.GuardId);
         Assert.Equal(2, choice.Alternatives.Count);
     }
 
@@ -151,8 +151,8 @@ public sealed class SqlTextValueTests
         var b = Lit("B");
         var c = Lit("C");
 
-        var firstJoin = SqlTextValue.Join(a, b, "guard", cap: 32, at: Origin);
-        var secondJoin = SqlTextValue.Join(firstJoin, c, "guard", cap: 32, at: Origin);
+        var firstJoin = SqlTextValue.Join(a, b, guardId: 1, cap: 32, at: Origin);
+        var secondJoin = SqlTextValue.Join(firstJoin, c, guardId: 1, cap: 32, at: Origin);
 
         var template = (SqlTextValue.Template)secondJoin;
         var choice = Assert.IsType<TemplatePiece.Choice>(Assert.Single(template.Pieces));
@@ -165,12 +165,12 @@ public sealed class SqlTextValueTests
         var template = Lit("A");
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin);
 
-        var result = SqlTextValue.Join(template, tainted, "guard", cap: 32, at: Origin);
+        var result = SqlTextValue.Join(template, tainted, guardId: 1, cap: 32, at: Origin);
 
         var resultTainted = Assert.IsType<SqlTextValue.Tainted>(result);
         Assert.Equal("non-literal-expression", resultTainted.Reason);
         var alternative = Assert.Single(resultTainted.GuardedAlternatives!);
-        Assert.Equal("guard", alternative.GuardText);
+        Assert.Equal(1, alternative.GuardId);
         Assert.True(SqlTextValue.StructurallyEqual(template, alternative.Value));
     }
 
@@ -180,7 +180,7 @@ public sealed class SqlTextValueTests
         var a = new SqlTextValue.Tainted("reason-a", Origin);
         var b = new SqlTextValue.Tainted("reason-b", Origin);
 
-        var result = SqlTextValue.Join(a, b, "guard", cap: 32, at: Origin);
+        var result = SqlTextValue.Join(a, b, guardId: 1, cap: 32, at: Origin);
 
         var resultTainted = Assert.IsType<SqlTextValue.Tainted>(result);
         Assert.Equal("reason-a", resultTainted.Reason);
@@ -192,7 +192,7 @@ public sealed class SqlTextValueTests
         var template = Lit("A") with { DeclaredType = NVarChar50 };
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin) { DeclaredType = NVarChar50 };
 
-        var result = (SqlTextValue.Template)SqlTextValue.Join(template, tainted, "guard", cap: 32, at: Origin);
+        var result = (SqlTextValue.Template)SqlTextValue.Join(template, tainted, guardId: 1, cap: 32, at: Origin);
 
         var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(result.Pieces));
         Assert.Equal(NVarChar50, hole.Type);
@@ -205,7 +205,7 @@ public sealed class SqlTextValueTests
         var template = Lit("A") with { DeclaredType = NVarChar50 };
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin) { DeclaredType = Int };
 
-        var result = SqlTextValue.Join(template, tainted, "guard", cap: 32, at: Origin);
+        var result = SqlTextValue.Join(template, tainted, guardId: 1, cap: 32, at: Origin);
 
         var resultTainted = Assert.IsType<SqlTextValue.Tainted>(result);
         Assert.Equal("non-literal-expression", resultTainted.Reason);
@@ -215,7 +215,7 @@ public sealed class SqlTextValueTests
     [Fact]
     public void Widen_BelowCap_ReturnsValueUnchanged()
     {
-        var value = (SqlTextValue.Template)SqlTextValue.Join(Lit("A"), Lit("B"), "guard", cap: 32, at: Origin);
+        var value = (SqlTextValue.Template)SqlTextValue.Join(Lit("A"), Lit("B"), guardId: 1, cap: 32, at: Origin);
 
         var widened = SqlTextValue.Widen(value, cap: 32, at: Origin);
 
@@ -225,7 +225,7 @@ public sealed class SqlTextValueTests
     private static SqlTextValue.Template OverCapChoice(int count, SqlType? declaredType = null)
     {
         var alternatives = Enumerable.Range(0, count).Select(i => Lit($"v{i}") with { DeclaredType = declaredType }).ToList();
-        return new SqlTextValue.Template([new TemplatePiece.Choice("guard", alternatives)]) { DeclaredType = declaredType };
+        return new SqlTextValue.Template([new TemplatePiece.Choice(1, alternatives)]) { DeclaredType = declaredType };
     }
 
     [Fact]
@@ -264,7 +264,7 @@ public sealed class SqlTextValueTests
     [Fact]
     public void Widen_NeverIncreasesExpansionCount()
     {
-        var value = (SqlTextValue.Template)SqlTextValue.Join(Lit("A"), Lit("B"), "guard", cap: 32, at: Origin);
+        var value = (SqlTextValue.Template)SqlTextValue.Join(Lit("A"), Lit("B"), guardId: 1, cap: 32, at: Origin);
         var before = SqlTextValue.ExpansionCount(value);
 
         var widened = (SqlTextValue.Template)SqlTextValue.Widen(value, cap: 32, at: Origin);
@@ -282,7 +282,7 @@ public sealed class SqlTextValueTests
     [Fact]
     public void ExpansionCount_SingleChoice_IsAlternativeCount()
     {
-        var value = (SqlTextValue.Template)SqlTextValue.Join(Lit("A"), Lit("B"), "guard", cap: 32, at: Origin);
+        var value = (SqlTextValue.Template)SqlTextValue.Join(Lit("A"), Lit("B"), guardId: 1, cap: 32, at: Origin);
 
         Assert.Equal(2, SqlTextValue.ExpansionCount(value));
     }
@@ -290,8 +290,8 @@ public sealed class SqlTextValueTests
     [Fact]
     public void ExpansionCount_TwoSequentialChoices_Multiplies()
     {
-        var choiceOne = new SqlTextValue.Template([new TemplatePiece.Choice("g1", [Lit("A"), Lit("B")])]);
-        var choiceTwo = new SqlTextValue.Template([new TemplatePiece.Choice("g2", [Lit("X"), Lit("Y"), Lit("Z")])]);
+        var choiceOne = new SqlTextValue.Template([new TemplatePiece.Choice(1, [Lit("A"), Lit("B")])]);
+        var choiceTwo = new SqlTextValue.Template([new TemplatePiece.Choice(2, [Lit("X"), Lit("Y"), Lit("Z")])]);
         var combined = (SqlTextValue.Template)SqlTextValue.Concat(choiceOne, choiceTwo);
 
         Assert.Equal(6, SqlTextValue.ExpansionCount(combined));
@@ -310,7 +310,7 @@ public sealed class SqlTextValueTests
     [Fact]
     public void Expand_SingleChoice_ProducesOneAssemblyPerAlternative()
     {
-        var value = (SqlTextValue.Template)SqlTextValue.Join(Lit("A"), Lit("B"), "guard", cap: 32, at: Origin);
+        var value = (SqlTextValue.Template)SqlTextValue.Join(Lit("A"), Lit("B"), guardId: 1, cap: 32, at: Origin);
 
         var assemblies = SqlTextValue.Expand(value, maxAssemblies: 32);
 
@@ -322,8 +322,8 @@ public sealed class SqlTextValueTests
     [Fact]
     public void Expand_TwoSequentialChoices_ProducesFullCartesianProduct()
     {
-        var choiceOne = new SqlTextValue.Template([new TemplatePiece.Choice("g1", [Lit("A"), Lit("B")])]);
-        var choiceTwo = new SqlTextValue.Template([new TemplatePiece.Choice("g2", [Lit("X"), Lit("Y"), Lit("Z")])]);
+        var choiceOne = new SqlTextValue.Template([new TemplatePiece.Choice(1, [Lit("A"), Lit("B")])]);
+        var choiceTwo = new SqlTextValue.Template([new TemplatePiece.Choice(2, [Lit("X"), Lit("Y"), Lit("Z")])]);
         var combined = (SqlTextValue.Template)SqlTextValue.Concat(choiceOne, choiceTwo);
 
         var assemblies = SqlTextValue.Expand(combined, maxAssemblies: 32);
@@ -339,9 +339,41 @@ public sealed class SqlTextValueTests
     }
 
     [Fact]
+    public void Expand_TwoChoicesSharingAGuardId_PairsAlternativesInsteadOfCrossProducting()
+    {
+        var x = (SqlTextValue.Template)SqlTextValue.Join(Lit("Xthen"), Lit("Xelse"), guardId: 1, cap: 32, at: Origin);
+        var y = (SqlTextValue.Template)SqlTextValue.Join(Lit("Ythen"), Lit("Yelse"), guardId: 1, cap: 32, at: Origin);
+        var combined = (SqlTextValue.Template)SqlTextValue.Concat(x, y);
+
+        var assemblies = SqlTextValue.Expand(combined, maxAssemblies: 32);
+
+        var pairs = assemblies
+            .Select(a => string.Concat(a.Cast<FlatPiece.Lit>().Select(l => l.Text)))
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToList();
+        Assert.Equal(["XelseYelse", "XthenYthen"], pairs);
+    }
+
+    [Fact]
+    public void Expand_TwoChoicesFromSeparateGuardIdsWithEqualAlternativeText_StillCrossProducts()
+    {
+        var x = (SqlTextValue.Template)SqlTextValue.Join(Lit("Xthen"), Lit("Xelse"), guardId: 1, cap: 32, at: Origin);
+        var y = (SqlTextValue.Template)SqlTextValue.Join(Lit("Ythen"), Lit("Yelse"), guardId: 2, cap: 32, at: Origin);
+        var combined = (SqlTextValue.Template)SqlTextValue.Concat(x, y);
+
+        var assemblies = SqlTextValue.Expand(combined, maxAssemblies: 32);
+
+        var pairs = assemblies
+            .Select(a => string.Concat(a.Cast<FlatPiece.Lit>().Select(l => l.Text)))
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToList();
+        Assert.Equal(["XelseYelse", "XelseYthen", "XthenYelse", "XthenYthen"], pairs);
+    }
+
+    [Fact]
     public void Expand_ExceedingCap_Throws()
     {
-        var choice = new SqlTextValue.Template([new TemplatePiece.Choice("guard", [Lit("A"), Lit("B"), Lit("C")])]);
+        var choice = new SqlTextValue.Template([new TemplatePiece.Choice(1, [Lit("A"), Lit("B"), Lit("C")])]);
 
         Assert.Throws<InvalidOperationException>(() => SqlTextValue.Expand(choice, maxAssemblies: 2));
     }
@@ -364,19 +396,19 @@ public sealed class SqlTextValueTests
         Assert.True(SqlTextValue.ContainsHole(assemblies[0]));
     }
 
-    private static SqlTextValue.Template WithAlternative(SqlTextValue.Template value, string guardText, SqlTextValue.Template alternative) =>
-        value with { GuardedAlternatives = [new GuardedAlternative(guardText, alternative)] };
+    private static SqlTextValue.Template WithAlternative(SqlTextValue.Template value, int guardId, SqlTextValue.Template alternative) =>
+        value with { GuardedAlternatives = [new GuardedAlternative(guardId, alternative)] };
 
     [Fact]
     public void WithGuardedAlternative_BranchValueCarryingAlternatives_StoresItFlattened()
     {
 
-        var nestedBranch = WithAlternative(Lit("outer"), "inner-guard", Lit("inner"));
+        var nestedBranch = WithAlternative(Lit("outer"), guardId: 2, Lit("inner"));
 
-        var result = SqlTextValue.WithGuardedAlternative(Lit("base"), "outer-guard", nestedBranch);
+        var result = SqlTextValue.WithGuardedAlternative(Lit("base"), guardId: 1, nestedBranch);
 
         var stored = Assert.Single(result.GuardedAlternatives!);
-        Assert.Equal("outer-guard", stored.GuardText);
+        Assert.Equal(1, stored.GuardId);
         Assert.Null(stored.Value.GuardedAlternatives);
 
         Assert.Equal("outer", ((TemplatePiece.Lit)Assert.Single(stored.Value.Pieces)).Text);
@@ -388,9 +420,9 @@ public sealed class SqlTextValueTests
 
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin)
         {
-            GuardedAlternatives = [new GuardedAlternative("g1", Lit("SELECT "))],
+            GuardedAlternatives = [new GuardedAlternative(1, Lit("SELECT "))],
         };
-        var addend = WithAlternative(Lit("* FROM T"), "g2", Lit("* FROM U"));
+        var addend = WithAlternative(Lit("* FROM T"), guardId: 2, Lit("* FROM U"));
 
         var result = Assert.IsType<SqlTextValue.Tainted>(SqlTextValue.Concat(tainted, addend));
 
@@ -403,15 +435,15 @@ public sealed class SqlTextValueTests
     public void Concat_TwoTemplatesEachCarryingAlternatives_PropagatedStoredValuesStayFlat()
     {
 
-        var a = WithAlternative(Lit("SELECT "), "ga", Lit("SELECT TOP 1 "));
-        var b = WithAlternative(Lit("* FROM T"), "gb", Lit("* FROM U"));
+        var a = WithAlternative(Lit("SELECT "), guardId: 3, Lit("SELECT TOP 1 "));
+        var b = WithAlternative(Lit("* FROM T"), guardId: 4, Lit("* FROM U"));
 
         var result = Assert.IsType<SqlTextValue.Template>(SqlTextValue.Concat(a, b));
 
         Assert.Equal(2, result.GuardedAlternatives!.Count);
         Assert.All(result.GuardedAlternatives, alt => Assert.Null(alt.Value.GuardedAlternatives));
-        var byGuard = result.GuardedAlternatives.ToDictionary(alt => alt.GuardText);
-        Assert.Equal("SELECT TOP 1 * FROM T", string.Concat(byGuard["ga"].Value.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text)));
-        Assert.Equal("SELECT * FROM U", string.Concat(byGuard["gb"].Value.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text)));
+        var byGuard = result.GuardedAlternatives.ToDictionary(alt => alt.GuardId);
+        Assert.Equal("SELECT TOP 1 * FROM T", string.Concat(byGuard[3].Value.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text)));
+        Assert.Equal("SELECT * FROM U", string.Concat(byGuard[4].Value.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text)));
     }
 }

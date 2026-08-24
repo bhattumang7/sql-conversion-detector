@@ -9,7 +9,7 @@ public sealed record SecurityPredicateIndexFinding(
     IReadOnlyList<string> FilteredColumns,
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
-    FindingConfidence Confidence = FindingConfidence.Medium)
+    FindingConfidence Confidence = FindingConfidence.Medium) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, 1);
 }

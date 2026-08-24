@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using SilentScan.Core.TypeInference;
 
+
 namespace SilentScan.Core.Predicates;
 
 public sealed record StringConcatNullFinding(
@@ -9,7 +10,7 @@ public sealed record StringConcatNullFinding(
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
     [property: JsonIgnore] int Column,
-    FindingConfidence Confidence = FindingConfidence.High)
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
 }

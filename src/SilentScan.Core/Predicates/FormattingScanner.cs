@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Common;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -99,42 +100,42 @@ public static class FormattingScanner
 
         public override void ExplicitVisit(CreateProcedureStatement node)
         {
-            _currentModule = QualifiedName(node.ProcedureReference.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
             CheckStatements(node.StatementList?.Statements);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(AlterProcedureStatement node)
         {
-            _currentModule = QualifiedName(node.ProcedureReference.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
             CheckStatements(node.StatementList?.Statements);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(CreateFunctionStatement node)
         {
-            _currentModule = QualifiedName(node.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
             CheckStatements(node.StatementList?.Statements);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(AlterFunctionStatement node)
         {
-            _currentModule = QualifiedName(node.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
             CheckStatements(node.StatementList?.Statements);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(CreateTriggerStatement node)
         {
-            _currentModule = QualifiedName(node.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
             CheckStatements(node.StatementList?.Statements);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(AlterTriggerStatement node)
         {
-            _currentModule = QualifiedName(node.Name);
+            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
             CheckStatements(node.StatementList?.Statements);
             base.ExplicitVisit(node);
         }
@@ -345,9 +346,5 @@ public static class FormattingScanner
             return after.StartLine;
         }
 
-        private static string QualifiedName(SchemaObjectName name) =>
-            name.SchemaIdentifier is { } schema
-                ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-                : name.BaseIdentifier.Value;
     }
 }

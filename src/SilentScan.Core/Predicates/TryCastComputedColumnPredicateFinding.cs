@@ -1,3 +1,4 @@
+
 namespace SilentScan.Core.Predicates;
 
 public sealed record TryCastComputedColumnPredicateFinding(
@@ -9,4 +10,7 @@ public sealed record TryCastComputedColumnPredicateFinding(
     string PredicateSourcePath,
     int PredicateLine,
     int PredicateColumn,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
+{
+    public SourceSpan Location => new(PredicateSourcePath, PredicateLine, PredicateColumn);
+}

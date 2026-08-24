@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 
+
 namespace SilentScan.Core.Predicates;
 
 public enum UnparameterizedDynamicSqlFindingKind
@@ -14,7 +15,7 @@ public sealed record UnparameterizedDynamicSqlFinding(
     [property: JsonIgnore] int Line,
     [property: JsonIgnore] int Column,
     UnparameterizedDynamicSqlFindingKind Kind,
-    FindingConfidence Confidence = FindingConfidence.High)
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
 }

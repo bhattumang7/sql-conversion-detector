@@ -206,10 +206,11 @@ public static class ExpressionEvaluator
         }
 
         SqlTextValue? union = null;
+        var guardId = SqlTextValue.NewGuardId();
         foreach (var branch in remainingBranches.Append(elseExpression))
         {
             var folded = Fold(branch, state, sourcePath, cap, catalog);
-            union = union is null ? folded : SqlTextValue.Join(union, folded, guardText: string.Empty, cap, at);
+            union = union is null ? folded : SqlTextValue.Join(union, folded, guardId, cap, at);
         }
 
         return union!;
@@ -402,7 +403,7 @@ public static class ExpressionEvaluator
                         transformedAlternatives.Add((SqlTextValue.Template)transformedAlternative);
                     }
 
-                    newPieces.Add(new TemplatePiece.Choice(choice.GuardText, transformedAlternatives));
+                    newPieces.Add(new TemplatePiece.Choice(choice.GuardId, transformedAlternatives));
                     break;
 
                 default:
@@ -500,7 +501,7 @@ public static class ExpressionEvaluator
                 return foldedCall;
             }
 
-            union = union is null ? foldedCall : SqlTextValue.Join(union, foldedCall, embedded.Choice.GuardText, context.Cap, context.Site);
+            union = union is null ? foldedCall : SqlTextValue.Join(union, foldedCall, embedded.Choice.GuardId, context.Cap, context.Site);
         }
 
         return union!;
@@ -675,7 +676,7 @@ public static class ExpressionEvaluator
                 return null;
             }
 
-            return pieces.Skip(index + 1).Prepend(new TemplatePiece.Choice(choice.GuardText, trimmedAlternatives)).ToList();
+            return pieces.Skip(index + 1).Prepend(new TemplatePiece.Choice(choice.GuardId, trimmedAlternatives)).ToList();
         }
 
         return null;
@@ -728,7 +729,7 @@ public static class ExpressionEvaluator
                 return null;
             }
 
-            return pieces.Take(index).Append(new TemplatePiece.Choice(choice.GuardText, trimmedAlternatives)).ToList();
+            return pieces.Take(index).Append(new TemplatePiece.Choice(choice.GuardId, trimmedAlternatives)).ToList();
         }
 
         return null;

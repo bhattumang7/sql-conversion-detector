@@ -14,7 +14,7 @@ public sealed record SargabilityFinding(
     string? TableQualifiedName = null,
     bool? Indexed = null,
     string? PredicateFragmentText = null,
-    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<SargabilityFinding>
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<SargabilityFinding>, IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
     int IRelocatableFinding<SargabilityFinding>.PositionColumn => Column;

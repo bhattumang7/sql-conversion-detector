@@ -1,3 +1,4 @@
+
 namespace SilentScan.Core.Predicates;
 
 public sealed record SelectStarViewFinding(
@@ -10,4 +11,7 @@ public sealed record SelectStarViewFinding(
     int ConsumerLine,
     int ConsumerColumn,
     IReadOnlyList<string> ConsumerSelectedColumns,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
+{
+    public SourceSpan Location => new(ConsumerSourcePath, ConsumerLine, ConsumerColumn);
+}

@@ -2,6 +2,7 @@ using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Rules;
 using System.Text.Json.Serialization;
 
+
 namespace SilentScan.Core.Predicates;
 
 public sealed record TypedPredicateFinding(
@@ -16,7 +17,7 @@ public sealed record TypedPredicateFinding(
     string? UnknownReason = null,
     string? PredicateFragmentText = null,
     string? Fingerprint = null,
-    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<TypedPredicateFinding>
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<TypedPredicateFinding>, IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, ColumnPosition);
     int IRelocatableFinding<TypedPredicateFinding>.PositionColumn => ColumnPosition;

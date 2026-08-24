@@ -30,7 +30,7 @@ public sealed record CodeMetricFinding(
     int MeasuredValue,
     int Threshold,
     string? DetailText = null,
-    FindingConfidence Confidence = FindingConfidence.Low)
+    FindingConfidence Confidence = FindingConfidence.Low) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
 }

@@ -36,7 +36,7 @@ public sealed record ForcedParameterizationFinding(
     [property: JsonIgnore] int Line,
     [property: JsonIgnore] int Column,
     string DetailText,
-    FindingConfidence Confidence = FindingConfidence.High)
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
 }

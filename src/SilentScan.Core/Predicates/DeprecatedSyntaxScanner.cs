@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Common;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -118,38 +119,33 @@ public static class DeprecatedSyntaxScanner
         return collector.Names is [{ } only] ? only : null;
     }
 
-    private static string QualifiedName(SchemaObjectName name) =>
-        name.SchemaIdentifier is { } schema
-            ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-            : name.BaseIdentifier.Value;
-
     private sealed class ModuleNameCollector : TSqlFragmentVisitor
     {
         public List<string> Names { get; } = [];
 
-        public override void Visit(CreateProcedureStatement node) => Names.Add(QualifiedName(node.ProcedureReference.Name));
+        public override void Visit(CreateProcedureStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name));
 
-        public override void Visit(AlterProcedureStatement node) => Names.Add(QualifiedName(node.ProcedureReference.Name));
+        public override void Visit(AlterProcedureStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name));
 
-        public override void Visit(CreateOrAlterProcedureStatement node) => Names.Add(QualifiedName(node.ProcedureReference.Name));
+        public override void Visit(CreateOrAlterProcedureStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name));
 
-        public override void Visit(CreateViewStatement node) => Names.Add(QualifiedName(node.SchemaObjectName));
+        public override void Visit(CreateViewStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
 
-        public override void Visit(AlterViewStatement node) => Names.Add(QualifiedName(node.SchemaObjectName));
+        public override void Visit(AlterViewStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
 
-        public override void Visit(CreateOrAlterViewStatement node) => Names.Add(QualifiedName(node.SchemaObjectName));
+        public override void Visit(CreateOrAlterViewStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
 
-        public override void Visit(CreateFunctionStatement node) => Names.Add(QualifiedName(node.Name));
+        public override void Visit(CreateFunctionStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.Name));
 
-        public override void Visit(AlterFunctionStatement node) => Names.Add(QualifiedName(node.Name));
+        public override void Visit(AlterFunctionStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.Name));
 
-        public override void Visit(CreateOrAlterFunctionStatement node) => Names.Add(QualifiedName(node.Name));
+        public override void Visit(CreateOrAlterFunctionStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.Name));
 
-        public override void Visit(CreateTriggerStatement node) => Names.Add(QualifiedName(node.Name));
+        public override void Visit(CreateTriggerStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.Name));
 
-        public override void Visit(AlterTriggerStatement node) => Names.Add(QualifiedName(node.Name));
+        public override void Visit(AlterTriggerStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.Name));
 
-        public override void Visit(CreateOrAlterTriggerStatement node) => Names.Add(QualifiedName(node.Name));
+        public override void Visit(CreateOrAlterTriggerStatement node) => Names.Add(SchemaObjectNameHelper.Qualify(node.Name));
     }
 
     private sealed class Visitor : TSqlFragmentVisitor
@@ -231,7 +227,7 @@ public static class DeprecatedSyntaxScanner
             if (node.ProcedureReference.Number is not null)
             {
                 Add(DeprecatedSyntaxFindingKind.NumberedProcedureDefinition, node.ProcedureReference,
-                    $"\"{QualifiedName(node.ProcedureReference.Name)}\" is defined as a numbered-procedure-group member - a deprecated T-SQL feature.");
+                    $"\"{SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name)}\" is defined as a numbered-procedure-group member - a deprecated T-SQL feature.");
             }
 
             base.ExplicitVisit(node);
@@ -244,7 +240,7 @@ public static class DeprecatedSyntaxScanner
                 if (procRef.Number is not null)
                 {
                     Add(DeprecatedSyntaxFindingKind.NumberedProcedureExecution, node,
-                        $"\"{QualifiedName(procRef.Name)}\" invoked by its numbered-procedure-group number - a deprecated T-SQL feature.");
+                        $"\"{SchemaObjectNameHelper.Qualify(procRef.Name)}\" invoked by its numbered-procedure-group number - a deprecated T-SQL feature.");
                 }
 
                 var routineName = procRef.Name.BaseIdentifier.Value;

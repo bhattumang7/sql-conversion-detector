@@ -13,7 +13,7 @@ public sealed record CrossTableTypeDriftFinding(
     bool CollationDiffers,
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
-    FindingConfidence Confidence = FindingConfidence.Medium)
+    FindingConfidence Confidence = FindingConfidence.Medium) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, 1);
 }

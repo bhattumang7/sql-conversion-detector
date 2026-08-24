@@ -6,9 +6,9 @@ candidates — is in `detection-reference.md`. Every shipped rule is in
 `rules.html`.
 
 A shipped item's entry is deleted, not annotated. Only two things outlive an
-item: a fact that can't be re-derived from the code, which moves to
-`detection-reference.md`, and a decision that would otherwise be re-proposed,
-which becomes one line under Settled.
+item: a fact that can't be re-derived from the code, and a decision that
+would otherwise be re-proposed — both move to `detection-reference.md`'s
+Settled section.
 
 Competitor tools are referred to generically; real identities are in
 `vendor/tool-references.md` (gitignored).
@@ -481,135 +481,14 @@ and returns findings; the pipeline owns everything else. Phases are ordered by
 value-per-line and are each independently shippable; do them in order, commit
 per phase (Phase 0 commits per fix).
 
-- [x] **Phase 0 — precision hotfixes.** Straight bugs, no architecture; each
-      needs its fires/clean fixture pair per the working agreements. Shipped —
-      every numbered item below landed; only the "deferred to their own
-      decision" trailer remains genuinely open.
-      1. Shipped: all 16 `cteRelations: null` / `CteRelations: null` call
-         sites across the original 11 scanners now resolve real CTE scope
-         (`CteResolver.Resolve` over each statement's own
-         `WithCtesAndXmlNamespaces`, threaded via a per-visitor CTE-scope
-         stack where a `QuerySpecification` has no direct access to its
-         enclosing `SelectStatement`'s WITH clause). Every fix proven
-         against the pre-fix code with `git stash` before landing — three
-         (`CatchAllPredicateScanner`, `PartialCompositeForeignKeyJoinScanner`,
-         `ParameterReassignmentPredicateScanner`) turned out to be worse
-         than "binds to the wrong table": `PartialCompositeForeignKeyJoinScanner`
-         and `IndexHintScanner` had a SECOND, independent bypass
-         (`DirectBaseTableResolver` re-resolving via the catalog directly,
-         never consulting `FromScopeResolver`'s scope at all — fixed at the
-         shared helper, closing six more callers at once, see item 9).
-         `CatchAllPredicateScanner`/`ParameterReassignmentPredicateScanner`
-         don't just stop misfiring once fixed — they now correctly
-         attribute the finding to the CTE's true underlying column instead
-         of the coincidentally-named real one.
-      2. Shipped (decision kept): a parameter DEFAULT seeding is widened like
-         a literal argument — but findings from either are GENUINE (the
-         omitting caller really executes the default), so widening must never
-         suppress them; it only adds the external-caller placeholder
-         accounting. Do not re-propose "suppress findings from
-         corpus-observed parameter values" as a false-positive fix.
-      Deferred to their own decision, not forgotten: guard-correlated branch
-      cross-product in `SqlTextValue.Concat`/`ForkAssemblies` — confirmed real
-      (2026-08-20): `Concat` (`SqlTextValue.cs:151`) juxtaposes two Templates'
-      `Pieces` with no correlation, so two variables each built by an
-      `IF`/`ELSE` under the textually-identical guard (e.g. two separate
-      `IF @Mode = 'A' ... ELSE ...` blocks assigning different variables,
-      later concatenated) land in one Template as two separate
-      `TemplatePiece.Choice`s sharing a `GuardText`; `ForkAssemblies` (:611)
-      then cross-products them as independent, producing assemblies pairing
-      one Choice's guard-true alternative with the other's guard-false
-      alternative — combinations that can never occur at runtime. Still
-      design-first, not a scoped fix: the obvious repair (correlate
-      equal-`GuardText` Choices to the same alternative index) is itself
-      unsound, because `GuardText` is rendered predicate text, not value
-      identity — if the guarded variable is reassigned between the two
-      `IF`s, two textually-identical guards are not the same runtime
-      condition, and index-correlating them would silently drop a real
-      reachable assembly (a false negative) to remove a false positive. A
-      real fix needs guard identity (has anything the guard reads changed
-      since its first occurrence), not `GuardText` string equality — no fix
-      is scoped until that's designed. `sp_prepare`/`sp_execute` recognition
-      (checked 2026-08-20: zero occurrences across the local test database's
-      ~5,000-module real sample set — `sys.sql_modules.definition LIKE
-      '%sp_prepare%'`/`'%sp_execute%'` both return 0; this driver-generated,
-      ODBC-prepared-statement pattern essentially never appears in
-      hand-written T-SQL, so a rule for it would ship unexercised, same
-      reasoning as the partitioned-index item above — stays deferred, now
-      with real evidence rather than only a stated design gap).
-      9. Shipped: `DirectBaseTableResolver` (`ResolveDirectBaseTable`/
-         `ResolveDirectBaseTables`/`ResolveDirectBaseTableName`) was its own,
-         separate instance of the same bug class — it re-qualified and
-         `catalog.Find`'d a table reference directly, never consulting
-         `FromScopeResolver`'s scope at all, so no scanner's own
-         `cteRelations` wiring could fix it. `PartialCompositeForeignKeyJoinScanner`
-         and `IndexHintScanner` were rewritten to consult the already-
-         resolved `byAlias` scope instead of re-deriving their own answer
-         (no `DirectBaseTableResolver` call left). The other six callers
-         (`AggregateDivisionColumnstoreScanner`, `FloatEqualityPredicateScanner`,
-         `DuplicationScanner`, `StringConcatNullScanner`, `QueryAntiPatternScanner`,
-         `NonUniqueUpdateSourceScanner`'s join-source side) were fixed by
-         giving the shared helper itself a required `cteNames` parameter —
-         a name in that set is declined (same as a view/derived table)
-         rather than resolved against the catalog. Five of the six pass a
-         file-wide `CteNameCollector.Collect` over the whole parse result
-         (an intentional over-approximation: a CTE elsewhere in the same
-         file can only cause an extra decline, never a false positive —
-         the safe direction) since none had per-statement CTE tracking to
-         begin with; `NonUniqueUpdateSourceScanner` already threads its own
-         statement's `WithCtesAndXmlNamespaces`, so it collects precisely.
-- [x] **Phase 1 — make naive resolution unrepresentable.** Shipped, narrower
-      than originally scoped. The type system couldn't tell honest
-      resolution from naive: a `ScopeEntry` from `cteRelations: null` looked
-      identical to one resolved with full scope. Killed at compile time:
-      `FromScopeResolver`'s flat `Resolve` overload lost its defaulted
-      `ledger`/`cteRelations`/`procScope` parameters (all three now
-      required), and `ResolutionContext.CteRelations` itself is no longer
-      nullable — every construction site across the codebase must supply a
-      real dictionary (possibly empty, never absent). Every call site
-      already passed a real value by the time this landed (all sixteen
-      Phase-0.1 sites fixed first), so the signature change touched zero
-      call sites and needed exactly one real fix
-      (`QueryExpressionResolver.ResolveQuerySpecification`'s own nullable
-      `cteRelations` parameter, coalesced to empty) — the compiler proved
-      the fleet was clean rather than finding new gaps, which is the
-      point: a future call site that forgets `cteRelations` now fails to
-      build instead of silently defaulting.
-      Descoped from the original plan: full migration onto
-      `ScopedSqlVisitorBase` (11 scanners, each with its own FROM/JOIN
-      handling — real architectural work, not a compile-time gate, and
-      belongs with Phase 2's rule harness instead) and the
-      `StatementVariantParityTests`-style reflection backstop (tried;
-      "does this visitor call `FromScopeResolver`" isn't a reflectable
-      signal the way Create/Alter method-pair existence is, and "does it
-      override `ExplicitVisit(QuerySpecification)`" produces mostly noise —
-      dozens of unrelated scanners visit that node for reasons having
-      nothing to do with FROM-clause resolution). The non-nullable
-      parameter is the real gate; a reflection test would have been a
-      weaker, noisier version of what the compiler already enforces.
-- [ ] **Phase 2 — rule harness.** No `IRule` abstraction exists; 64 scanners,
-      ad-hoc signatures, hand-wired in `ScanReportBuilder`'s 1,327-line
-      method at 3 separate points each (+ SARIF/readable/RuleCatalog = ~9
-      files per new rule); nothing enforces a rule is invoked (implemented-
-      but-never-wired compiles green); zero catch blocks in Core, so one
-      scanner throwing on one module kills the whole scan as an
-      `AggregateException` the CLI handler at `ScanDbCommand.cs:132` doesn't
-      match. Harness owns: registration (reflection-enforced: registered ⇔
-      invoked ⇔ in `RuleCatalog`), per-rule×per-object containment (crash →
-      ledgered unanalyzable, scan continues), skip-ledger threading by
-      default (today 1 of 64 scanners records skips;
-      `DirectBaseTableResolver.cs:31` documents its own silent exclusion for
-      7 dependents), module identity (delete the 6 wrong private copies of
-      `Qualify` — `ControlFlowRiskScanner.cs:271`, `CodeMetricScanner.cs:208`,
-      `DuplicationScanner.cs:412`, `DeprecatedSyntaxScanner.cs:149`,
-      `DeadCodeScanner.cs:122`, `FormattingScanner.cs:387` — which report
-      `usp_X` where every other stream reports `dbo.usp_X`), central
-      deterministic ordering (total-order comparator, one place), confidence
-      filtering (the exact drift `ScanReportBuilder.cs:1238-1247` documents
-      shipping once already). Absorbs the old "Separate rule decisions from
-      ScriptDom traversal" item; its settled sub-decision stands: a generic
-      `CollectorVisitor<T>` was designed and rejected — the `Flatten*`
-      signatures diverge too much for it to pay.
+- [ ] **`ScopedSqlVisitorBase` migration.** Split out of the rule-harness item
+      once that shipped (harness plumbing and this are orthogonal — bundling
+      a mechanical wiring refactor with per-scanner FROM/JOIN/CTE-scope
+      semantic rewrites multiplied regression risk for no plumbing benefit).
+      ~9 scanners still hand-roll their own FROM/JOIN/CTE-scope tracking
+      instead of using the shared base class — real architectural work, each
+      migration is its own semantic change requiring its own verification,
+      not a batch mechanical edit.
 - [ ] **Phase 3 — one findings schema, one emission path.** `ScanReport` is a
       76-positional-list record each writer hand-picks from; SARIF (the CI
       gate) references none of `SkippedConstructs`/`DynamicSqlSummary`/
@@ -638,50 +517,6 @@ per phase (Phase 0 commits per fix).
       `SilentScan.Verify.Oracle`), public types, the `scan-corpus-live` verb,
       fixture dirs, and docs. Mechanical but touches the CLI contract —
       ride it on Phase 3's churn, pick replacement terms with Umang first.
-
----
-
-## Settled (do not re-propose)
-
-* **Always Encrypted: only the non-enclave index/constraint/statistics key
-  case shipped (`AlwaysEncryptedKeyColumnRuleId`).** A general comparison/
-  join/predicate against an enclave-required AE column, and a procedure
-  parameter with mismatched declared type/length/collation/encryption
-  metadata compared against an AE column, both turn out not to be
-  statically decidable from T-SQL source at all: whether a connecting
-  client has Always-Encrypted parameterization enabled, and what CEK/
-  algorithm/type metadata it attaches to a given parameter, are TDS-
-  protocol-level facts the driver supplies at execution time — nothing in
-  a T-SQL script or stored procedure declaration carries them. Oracle-
-  verified (against the standing Docker instance): a plain literal or
-  `@variable` compared to an AE column always fails with the same generic
-  "Operand type clash" (Msg 206) regardless of encryption type, enclave
-  configuration, or whether the parameter's declared type matches the
-  column - the source text alone can't distinguish "would work with an
-  AE-enabled client" from "can never work." The index/constraint/
-  statistics-key case is different and did ship: it's a pure DDL-time
-  catalog fact (RANDOMIZED column + a column encryption key whose column
-  master key lacks `ENCLAVE_COMPUTATIONS`), independent of any client.
-* **Confidence stays.** Load-bearing in the `--confidence` filter, the SARIF
-  tier, and `DynamicSqlPipeline`'s downgrade of findings that rest on an
-  assumption.
-* **Source-context classification** (migration script vs hot-path module) —
-  dropped. No signal precise enough to avoid suppressing real findings.
-* **The incumbent survey is closed.** `detection-reference.md` §7.9–7.11.
-* **Killed candidates stay killed.** Each has its measurement in
-  `detection-reference.md` Appendix 9; re-read it before re-proposing one.
-* **Redundant CAST/CONVERT does not rescue sargability — do not re-propose
-  suppressing it.** Oracle-confirmed: a CAST to a type identical to the
-  wrapped column's own still produces a Table Scan, not a Seek.
-  `detection-reference.md`, "Sargability and index eligibility."
-* **"One binder" shipped.** `FromScopeResolver`/`CteResolver`/`BaseColumnResolver`
-  are now the only name-resolution path predicates go through;
-  `DirectBaseTableResolver` (the second, independent bypass) is deleted.
-  `SelectIntoColumnResolver` was deliberately excluded, not missed — it runs
-  at catalog-build time, before Lineage exists, and CLAUDE.md's pass-ordering
-  rule ("catalog building resolves against tables only, never views... because
-  view resolution is Lineage's job") forbids folding a catalog-time resolver
-  into a Lineage-time binder. Do not re-propose merging it in.
 
 ---
 

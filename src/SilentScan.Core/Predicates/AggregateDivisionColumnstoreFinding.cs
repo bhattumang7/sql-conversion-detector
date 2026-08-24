@@ -8,7 +8,7 @@ public sealed record AggregateDivisionColumnstoreFinding(
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
     [property: JsonIgnore] int Column,
-    FindingConfidence Confidence = FindingConfidence.Low)
+    FindingConfidence Confidence = FindingConfidence.Low) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
 }

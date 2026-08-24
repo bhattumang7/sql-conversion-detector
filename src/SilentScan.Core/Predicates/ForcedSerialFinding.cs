@@ -18,7 +18,7 @@ public sealed record ForcedSerialFinding(
     [property: JsonIgnore] int Line,
     [property: JsonIgnore] int Column,
     string? DetailText = null,
-    FindingConfidence Confidence = FindingConfidence.High)
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
 }

@@ -25,7 +25,7 @@ public sealed record TransferContext(
 
 public static class DynamicSqlTransfer
 {
-    public static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlStatement statement, IReadOnlyList<string> activeGuards, TransferContext context) => statement switch
+    public static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlStatement statement, IReadOnlyList<int> activeGuards, TransferContext context) => statement switch
     {
         DeclareVariableStatement declare => (state, _) => CompileDeclare(declare, context, state),
         SetVariableStatement set => (state, _) => CompileAssignment(set.Variable.Name, set.AssignmentKind, set.Expression, set.FunctionCallExists, set, context, state),
@@ -149,7 +149,7 @@ public static class DynamicSqlTransfer
     }
 
     private static SqlTextValue WidenForPossibleExternalCallers(SqlTextValue seeded, ProcedureParameter formal, TransferContext context) =>
-        SqlTextValue.Join(seeded, SeedSymbolicOrTaint(formal, "parameter-not-seeded:external-caller-possible", context), guardText: string.Empty, context.Cap, context.Span(formal));
+        SqlTextValue.Join(seeded, SeedSymbolicOrTaint(formal, "parameter-not-seeded:external-caller-possible", context), guardId: SqlTextValue.NewGuardId(), context.Cap, context.Span(formal));
 
     private static SqlTextValue SeedFromMultipleEdges(IReadOnlyList<ProcCallEdge> edges, ProcedureParameter formal, TransferContext context)
     {
@@ -158,6 +158,7 @@ public static class DynamicSqlTransfer
         var at = context.Span(formal);
         SqlTextValue combined = new SqlTextValue.Tainted("parameter-not-seeded:cardinality-cap", at) { DeclaredType = declaredType };
         var first = true;
+        var guardId = SqlTextValue.NewGuardId();
 
         foreach (var edge in edges)
         {
@@ -170,7 +171,7 @@ public static class DynamicSqlTransfer
             var literalValue = new SqlTextValue.Template([new TemplatePiece.Lit(
                 literalArgument.Value, new SourceSpan(literalArgument.SourcePath, literalArgument.StartLine, literalArgument.StartColumn), literalArgument.PrefixLength)])
             { DeclaredType = declaredType };
-            combined = first ? literalValue : SqlTextValue.Join(combined, literalValue, guardText: string.Empty, context.Cap, at);
+            combined = first ? literalValue : SqlTextValue.Join(combined, literalValue, guardId, context.Cap, at);
             first = false;
         }
 
@@ -485,12 +486,12 @@ public static class DynamicSqlTransfer
         }
 
         var site = context.Span(selectedColumnRef);
-        var guardText = $"live-fetch:{table.QualifiedName}.{selectedColumn.Name}";
+        var guardId = SqlTextValue.NewGuardId();
         SqlTextValue combined = new SqlTextValue.Template([new TemplatePiece.Lit(fetchedValues[0], site, PrefixLength: 0)]);
         for (var i = 1; i < fetchedValues.Count; i++)
         {
             var next = new SqlTextValue.Template([new TemplatePiece.Lit(fetchedValues[i], site, PrefixLength: 0)]);
-            combined = SqlTextValue.Join(combined, next, guardText, context.Cap, site);
+            combined = SqlTextValue.Join(combined, next, guardId, context.Cap, site);
         }
 
         return combined as SqlTextValue.Template;
@@ -573,7 +574,7 @@ public static class DynamicSqlTransfer
         _ => null,
     };
 
-    private static void CompileExecute(ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state, bool emit)
+    private static void CompileExecute(ExecuteStatement node, IReadOnlyList<int> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state, bool emit)
     {
         switch (node.ExecuteSpecification.ExecutableEntity)
         {
@@ -608,7 +609,7 @@ public static class DynamicSqlTransfer
         }
     }
 
-    private static void CompileStringList(ExecutableStringList stringList, ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state)
+    private static void CompileStringList(ExecutableStringList stringList, ExecuteStatement node, IReadOnlyList<int> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         SqlTextValue combined = new SqlTextValue.Template([]);
         foreach (var element in stringList.Strings)
@@ -628,7 +629,7 @@ public static class DynamicSqlTransfer
         "@stmt", "@statement", "@params", "@parameters",
     };
 
-    private static void CompileSpExecuteSql(ExecutableProcedureReference procRef, ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state)
+    private static void CompileSpExecuteSql(ExecutableProcedureReference procRef, ExecuteStatement node, IReadOnlyList<int> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         if (procRef.Parameters.Count == 0)
         {
@@ -714,7 +715,7 @@ public static class DynamicSqlTransfer
     }
 
     private static void EmitScriptsOrFinding(
-        SqlTextValue value, ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings, bool isExecString)
+        SqlTextValue value, ExecuteStatement node, IReadOnlyList<int> activeGuards, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings, bool isExecString)
     {
         if (TryNarrowByActiveGuard(value, activeGuards) is { } narrowed)
         {
@@ -761,14 +762,14 @@ public static class DynamicSqlTransfer
         }
     }
 
-    private static SqlTextValue.Template? TryNarrowByActiveGuard(SqlTextValue value, IReadOnlyList<string> activeGuards)
+    private static SqlTextValue.Template? TryNarrowByActiveGuard(SqlTextValue value, IReadOnlyList<int> activeGuards)
     {
         if (activeGuards.Count == 0 || value.GuardedAlternatives is not { Count: > 0 } alternatives)
         {
             return null;
         }
 
-        return alternatives.Where(alternative => activeGuards.Contains(alternative.GuardText, StringComparer.Ordinal))
+        return alternatives.Where(alternative => activeGuards.Contains(alternative.GuardId))
             .Select(alternative => alternative.Value)
             .FirstOrDefault();
     }
@@ -874,9 +875,10 @@ public static class DynamicSqlTransfer
             }
 
             SqlTextValue combined = new SqlTextValue.Template([new TemplatePiece.Lit(values[0], span, PrefixLength: 0)]);
+            var guardId = SqlTextValue.NewGuardId();
             foreach (var value in values.Skip(1))
             {
-                combined = SqlTextValue.Join(combined, new SqlTextValue.Template([new TemplatePiece.Lit(value, span, PrefixLength: 0)]), guardText: string.Empty, context.Cap, span);
+                combined = SqlTextValue.Join(combined, new SqlTextValue.Template([new TemplatePiece.Lit(value, span, PrefixLength: 0)]), guardId, context.Cap, span);
             }
 
             state[callerVariable] = combined;

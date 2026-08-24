@@ -18,7 +18,7 @@ public sealed record SelectiveXmlIndexValueColumnFinding(
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
     SelectiveXmlIndexValueColumnFindingKind Kind = SelectiveXmlIndexValueColumnFindingKind.TooWide,
-    FindingConfidence Confidence = FindingConfidence.High)
+    FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
     public SourceSpan Location => new(SourcePath, Line, 1);
 }

@@ -447,3 +447,94 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
   distinguish them from an arbitrary CLR UDT (both resolve to an unresolved/
   null `SqlType`) - not implemented for these three pending that modeling
   gap, to avoid conflating them with a genuinely unrelated CLR UDT column.
+
+## Settled (do not re-propose)
+
+* **Rule harness (`Reporting/RuleHarness/`): 5 catalog rules deliberately skip
+  centralized confidence filtering.** `ColumnstoreUnsupportedColumnTypeScanner`,
+  `MemoryOptimizedUnsupportedColumnTypeScanner`,
+  `MemoryOptimizedUnsupportedIndexOptionScanner`,
+  `MemoryOptimizedForeignKeyScanner`, and `SecurityPredicateIndexScanner`
+  set `ApplyConfidenceFilter => false` on their `RuleRunner` adapter. This is
+  not an oversight — the pre-harness `ScanReportBuilder` never filtered these
+  five finding streams by `minimumConfidence` (confirmed against `git show
+  HEAD` prior to the harness migration), so several of them ship at
+  `FindingConfidence.Medium` by design and would otherwise vanish under the
+  CLI's `--confidence high` default. Do not add these five back to the
+  default-filtered set without checking whether their findings still surface
+  at `high`.
+* **Rule harness registration test does not check `RuleCatalog` linkage.**
+  The original task description wanted reflection-enforced "registered ⇔
+  invoked ⇔ in `RuleCatalog`" three-way equivalence. That third leg isn't
+  soundly checkable: several finding `Kind` enums fan out to multiple SARIF
+  rule ids via a `SarifRuleCatalog.XxxRuleId(kind)` switch, so one `IRule`
+  doesn't map to one `RuleCatalog` entry. `RuleRegistrationTests` only
+  enforces the two legs that are actually 1:1 — every `IRule` implementation
+  in `SilentScan.Core` is present in `RuleRegistry.All`, and every
+  registered `Id` is unique — which is what makes "implemented but never
+  wired" fail loudly. Per-`Kind`→SARIF-id coverage is already exercised by
+  `SarifReportWriterCoverageTests`/`RuleCatalogCoverageTests`.
+* **`IFinding` lives in `Predicates`, not `Reporting`.** `PassOrderTests`
+  enforces that `Predicates` (pass 3) never names the `Reporting` namespace
+  (pass 4). Every finding record implements `IFinding` for the harness's
+  centralized ordering/confidence-filtering, so the marker interface itself
+  has to live at or below `Predicates`'s own pass — it's declared in
+  `src/SilentScan.Core/Predicates/IFinding.cs`, and the harness (`IRule`,
+  `RuleContext`, `RuleRunner`, `RuleRegistry`, one adapter per migrated
+  scanner) lives in `Reporting/RuleHarness/` referencing it forward, not the
+  other way round.
+* **Always Encrypted: only the non-enclave index/constraint/statistics key
+  case shipped (`AlwaysEncryptedKeyColumnRuleId`).** A general comparison/
+  join/predicate against an enclave-required AE column, and a procedure
+  parameter with mismatched declared type/length/collation/encryption
+  metadata compared against an AE column, both turn out not to be
+  statically decidable from T-SQL source at all: whether a connecting
+  client has Always-Encrypted parameterization enabled, and what CEK/
+  algorithm/type metadata it attaches to a given parameter, are TDS-
+  protocol-level facts the driver supplies at execution time — nothing in
+  a T-SQL script or stored procedure declaration carries them. Oracle-
+  verified (against the standing Docker instance): a plain literal or
+  `@variable` compared to an AE column always fails with the same generic
+  "Operand type clash" (Msg 206) regardless of encryption type, enclave
+  configuration, or whether the parameter's declared type matches the
+  column - the source text alone can't distinguish "would work with an
+  AE-enabled client" from "can never work." The index/constraint/
+  statistics-key case is different and did ship: it's a pure DDL-time
+  catalog fact (RANDOMIZED column + a column encryption key whose column
+  master key lacks `ENCLAVE_COMPUTATIONS`), independent of any client.
+* **Confidence stays.** Load-bearing in the `--confidence` filter, the SARIF
+  tier, and `DynamicSqlPipeline`'s downgrade of findings that rest on an
+  assumption.
+* **Source-context classification** (migration script vs hot-path module) —
+  dropped. No signal precise enough to avoid suppressing real findings.
+* **The incumbent survey is closed.** §7.9–7.11.
+* **Killed candidates stay killed.** Each has its measurement in
+  Appendix 9; re-read it before re-proposing one.
+* **Redundant CAST/CONVERT does not rescue sargability — do not re-propose
+  suppressing it.** Oracle-confirmed: a CAST to a type identical to the
+  wrapped column's own still produces a Table Scan, not a Seek. See
+  "Sargability and index eligibility" above.
+* **A `StatementVariantParityTests`-style reflection backstop for FROM-scope
+  resolution was tried and rejected.** "Does this visitor call
+  `FromScopeResolver`" isn't a reflectable signal the way Create/Alter
+  method-pair existence is, and "does it override
+  `ExplicitVisit(QuerySpecification)`" produces mostly noise — dozens of
+  unrelated scanners visit that node for reasons having nothing to do with
+  FROM-clause resolution. `ResolutionContext.CteRelations`'s non-nullable
+  parameter is the real gate; a reflection test would have been a weaker,
+  noisier version of what the compiler already enforces.
+* **"One binder" shipped.** `FromScopeResolver`/`CteResolver`/`BaseColumnResolver`
+  are now the only name-resolution path predicates go through;
+  `DirectBaseTableResolver` (the second, independent bypass) is deleted.
+  `SelectIntoColumnResolver` was deliberately excluded, not missed — it runs
+  at catalog-build time, before Lineage exists, and CLAUDE.md's pass-ordering
+  rule ("catalog building resolves against tables only, never views... because
+  view resolution is Lineage's job") forbids folding a catalog-time resolver
+  into a Lineage-time binder. Do not re-propose merging it in.
+* **`sp_prepare`/`sp_execute` recognition — not worth a rule.** Checked
+  (2026-08-20) against the local test database's ~5,000-module real sample
+  set: `sys.sql_modules.definition LIKE '%sp_prepare%'`/`'%sp_execute%'`
+  both return 0. This driver-generated, ODBC-prepared-statement pattern
+  essentially never appears in hand-written T-SQL, so a rule for it would
+  ship unexercised. Do not re-propose without new evidence it actually
+  occurs in real modules.
