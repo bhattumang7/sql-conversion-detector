@@ -20,24 +20,25 @@ public static class AlwaysEncryptedOrderByScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+#pragma warning disable CS9107
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
+        : ScopedSqlVisitorBase(sourcePath, catalog, PredicateVisitorSupport.EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
     {
-        private readonly CteScopeTracker cteScope = new(sourcePath, catalog);
-
         public List<AlwaysEncryptedOrderByFinding> Findings { get; } = [];
 
         public override void ExplicitVisit(SelectStatement node)
         {
-            cteScope.PushForSelect(node.WithCtesAndXmlNamespaces);
+            PushCteScope(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            cteScope.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(QuerySpecification node)
         {
             if (node.OrderByClause is { OrderByElements.Count: > 0 } orderByClause)
             {
-                var resolutionContext = PredicateVisitorSupport.ResolutionContext(cteScope.Current, sourcePath, catalog);
+                var resolutionContext = PredicateVisitorSupport.ResolutionContext(CurrentCteRelations(), sourcePath, catalog);
                 var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
                 {
                     FromScopeResolver.Resolve(node.FromClause, resolutionContext),

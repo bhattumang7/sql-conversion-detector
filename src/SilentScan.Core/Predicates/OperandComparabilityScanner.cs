@@ -21,22 +21,23 @@ public static class OperandComparabilityScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+#pragma warning disable CS9107
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
+        : ScopedSqlVisitorBase(sourcePath, catalog, PredicateVisitorSupport.EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
     {
-        private readonly CteScopeTracker cteScope = new(sourcePath, catalog);
-
         public List<OperandComparabilityFinding> Findings { get; } = [];
 
         public override void ExplicitVisit(SelectStatement node)
         {
-            cteScope.PushForSelect(node.WithCtesAndXmlNamespaces);
+            PushCteScope(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            cteScope.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var scopeChain = PredicateVisitorSupport.ScopeChainOf(FromScopeResolver.Resolve(node.FromClause, PredicateVisitorSupport.ResolutionContext(cteScope.Current, sourcePath, catalog)));
+            var scopeChain = PredicateVisitorSupport.ScopeChainOf(FromScopeResolver.Resolve(node.FromClause, PredicateVisitorSupport.ResolutionContext(CurrentCteRelations(), sourcePath, catalog)));
 
             if (node.WhereClause?.SearchCondition is { } whereCondition)
             {

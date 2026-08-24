@@ -481,16 +481,6 @@ and returns findings; the pipeline owns everything else. Phases are ordered by
 value-per-line and are each independently shippable; do them in order, commit
 per phase (Phase 0 commits per fix).
 
-- [ ] **`CteScopeTracker` migration.** `PredicateVisitorSupport.cs`'s
-      `CteScopeTracker` is a CTE-only partial reimplementation of
-      `ScopedSqlVisitorBase`'s CTE stack (no `ScopeStack`, no proc/trigger
-      scope). 5 scanners use it: `AggregateDivisionColumnstoreScanner`,
-      `AlwaysEncryptedOrderByScanner`, `OperandComparabilityScanner`,
-      `FloatEqualityPredicateScanner`, `FloatOrderDependentAggregateScanner`.
-      Migrating them onto `ScopedSqlVisitorBase` retires `CteScopeTracker`
-      entirely; lower payoff per scanner than the base-class migration
-      already shipped, since none need `ScopeStack`/proc-scope, so it's its
-      own follow-up rather than bundled in.
 - [ ] **`ConstrainedColumnStatementVisitor` consolidation.**
       `ConstrainedColumnStatementVisitor.cs` is a second, competing
       hand-rolled base class (used by `CompositeIndexLeadingColumnScanner`,

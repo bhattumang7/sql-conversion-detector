@@ -56,16 +56,3 @@ internal static class PredicateVisitorSupport
         }
     }
 }
-
-internal sealed class CteScopeTracker(string sourcePath, DatabaseCatalog catalog)
-{
-    private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _stack = new();
-
-    public IReadOnlyDictionary<string, ResolvedRelation> Current =>
-        _stack.Count > 0 ? _stack.Peek() : PredicateVisitorSupport.EmptyResolvedViews;
-
-    public void PushForSelect(WithCtesAndXmlNamespaces? withClause) =>
-        _stack.Push(CteResolver.Resolve(withClause, catalog, PredicateVisitorSupport.EmptyResolvedViews, sourcePath, ledger: null));
-
-    public void Pop() => _stack.Pop();
-}
