@@ -253,5 +253,14 @@ public static class RuleDocCatalog
         [Catalog.MemoryOptimizedUnsupportedColumnType.RuleId] = Catalog.MemoryOptimizedUnsupportedColumnType.Content,
         [IndexShape.CompositeIndexLeadingColumn.RuleId] = IndexShape.CompositeIndexLeadingColumn.Content,
         [Statistics.MissingStatistics.RuleId] = Statistics.MissingStatistics.Content,
+
+        [CodeMetric.LineTooLong.RuleId] = CodeMetric.LineTooLong.Content,
+        [CodeMetric.ModuleTooLong.RuleId] = CodeMetric.ModuleTooLong.Content,
+        [CodeMetric.RoutineTooLong.RuleId] = CodeMetric.RoutineTooLong.Content,
+        [CodeMetric.TooManyParameters.RuleId] = CodeMetric.TooManyParameters.Content,
+        [CodeMetric.NestingTooDeep.RuleId] = CodeMetric.NestingTooDeep.Content,
+        [CodeMetric.TooManyConditionalOperators.RuleId] = CodeMetric.TooManyConditionalOperators.Content,
+        [CodeMetric.TooManyCaseBranches.RuleId] = CodeMetric.TooManyCaseBranches.Content,
+        [CodeMetric.CaseBranchTooLong.RuleId] = CodeMetric.CaseBranchTooLong.Content,
     };
 }
