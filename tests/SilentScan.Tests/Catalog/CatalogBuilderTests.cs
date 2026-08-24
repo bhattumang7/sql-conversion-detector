@@ -1665,4 +1665,143 @@ public sealed class CatalogBuilderTests
         Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CREATE COLUMNSTORE INDEX" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Build_MemoryOptimizedTable_FlagIsCaptured()
+    {
+        var catalog = BuildFrom(
+            "CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY NONCLUSTERED) WITH (MEMORY_OPTIMIZED = ON);");
+
+        Assert.True(catalog.Find("dbo.T")!.IsMemoryOptimized);
+    }
+
+    [Fact]
+    public void Build_OrdinaryTable_IsNotFlaggedMemoryOptimized()
+    {
+        var catalog = BuildFrom("CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY);");
+
+        Assert.False(catalog.Find("dbo.T")!.IsMemoryOptimized);
+    }
+
+    [Fact]
+    public void Build_ColumnsWithMixedEncryption_EachResolvesToItsOwnEncryptionType()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Customers
+            (
+                Ssn NVARCHAR(20)
+                    ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = CEK1, ENCRYPTION_TYPE = DETERMINISTIC, ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256')
+                    NOT NULL,
+                Notes NVARCHAR(20)
+                    ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = CEK1, ENCRYPTION_TYPE = RANDOMIZED, ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256')
+                    NULL,
+                Plain NVARCHAR(20) NULL
+            );
+            """);
+
+        var table = catalog.Find("dbo.Customers")!;
+
+        Assert.Equal(ColumnEncryptionType.Deterministic, table.FindColumn("Ssn")!.EncryptionType);
+        Assert.Equal(ColumnEncryptionType.Randomized, table.FindColumn("Notes")!.EncryptionType);
+        Assert.Equal(ColumnEncryptionType.None, table.FindColumn("Plain")!.EncryptionType);
+    }
+
+    [Fact]
+    public void Build_InlineTableValuedFunction_RegistersInlineKind()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_GetActive()
+            RETURNS TABLE
+            AS
+            RETURN (SELECT 1 AS Id);
+            """);
+
+        Assert.True(catalog.TryGetTableValuedFunctionKind("dbo.fn_GetActive", out var kind));
+        Assert.Equal(TableValuedFunctionKind.Inline, kind);
+    }
+
+    [Fact]
+    public void Build_MultiStatementTableValuedFunction_RegistersMultiStatementKind()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_GetCodes()
+            RETURNS @t TABLE (Code VARCHAR(20) NOT NULL)
+            AS
+            BEGIN
+                RETURN;
+            END
+            """);
+
+        Assert.True(catalog.TryGetTableValuedFunctionKind("dbo.fn_GetCodes", out var kind));
+        Assert.Equal(TableValuedFunctionKind.MultiStatement, kind);
+    }
+
+    [Fact]
+    public void Build_ClrTableValuedFunction_RegistersClrKind()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("CREATE FUNCTION dbo.fn_Clr() RETURNS TABLE (Col INT NOT NULL) AS EXTERNAL NAME MyAssembly.[MyClass].[MyMethod];")]);
+
+        Assert.True(catalog.TryGetTableValuedFunctionKind("dbo.fn_Clr", out var kind));
+        Assert.Equal(TableValuedFunctionKind.Clr, kind);
+    }
+
+    [Fact]
+    public void Build_TableValuedParameterOfUnresolvableType_IsNotRegisteredAsTableValued()
+    {
+        var catalog = BuildFrom(
+            """
+            CREATE PROCEDURE dbo.usp_Ordinary (@Codes dbo.NotACatalogedType READONLY, @After INT)
+            AS
+            BEGIN
+                RETURN;
+            END
+            """);
+
+        Assert.Null(catalog.Find("@Codes", "dbo.usp_Ordinary"));
+
+        Assert.True(catalog.TryGetProcedureParameters("dbo.usp_Ordinary", out var parameters));
+        Assert.Equal("@Codes", parameters[0].Name);
+        Assert.Null(parameters[0].Type);
+    }
+
+    [Fact]
+    public void Build_AlterTableDropConstraint_RemovesTheIndexBackingIt()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T (Id INT NOT NULL, CONSTRAINT UQ_T_Id UNIQUE (Id));
+            ALTER TABLE dbo.T DROP CONSTRAINT UQ_T_Id;
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+
+        Assert.DoesNotContain(table.Indexes, i => i.Name == "UQ_T_Id");
+        Assert.False(table.IsIndexedColumn("Id"));
+    }
+
+    [Fact]
+    public void Build_CaseSensitiveTempdbCollationOnly_LedgersWarningNamingIt()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("CREATE TABLE #Staging (Col VARCHAR(20) NOT NULL);")],
+            manifestDeclaredCollation: "Latin1_General_CI_AS",
+            manifestTempdbCollation: "Latin1_General_CS_AS");
+
+        Assert.Contains(
+            catalog.Skipped.Entries,
+            e => e.ConstructKind == "case-sensitive collation" && e.Reason.Contains("Latin1_General_CS_AS", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_BothDatabaseAndTempdbCollationsCaseSensitiveWithDifferentNames_WarningNamesBoth()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);")],
+            manifestDeclaredCollation: "Latin1_General_CS_AS",
+            manifestTempdbCollation: "Latin1_General_BIN2");
+
+        var entry = Assert.Single(catalog.Skipped.Entries, e => e.ConstructKind == "case-sensitive collation");
+        Assert.Contains("Latin1_General_CS_AS", entry.Reason, StringComparison.Ordinal);
+        Assert.Contains("Latin1_General_BIN2", entry.Reason, StringComparison.Ordinal);
+    }
+
 }
