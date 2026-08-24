@@ -97,6 +97,7 @@ public static class SarifReportWriter
         results.AddRange(report.ForcedParameterizationFindings.Select(ToResult));
         results.AddRange(report.IdentityRangeFindings.Select(ToResult));
         results.AddRange(report.FloatEqualityFindings.Select(ToResult));
+        results.AddRange(report.FloatOrderDependentAggregateFindings.Select(ToResult));
         results.AddRange(report.AlwaysEncryptedOrderByFindings.Select(ToResult));
         results.AddRange(report.OperandComparabilityFindings.Select(ToResult));
         results.AddRange(report.MemoryOptimizedUnsupportedColumnTypeFindings.Select(ToResult));
@@ -1166,6 +1167,16 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FloatEqualityRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TypeDisplay}) is compared with = in this predicate - IEEE-754 floating-point representation error means two values a person would call the same number can compare unequal, silently returning the wrong rows.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(FloatOrderDependentAggregateFinding finding)
+    {
+
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FloatOrderDependentAggregateRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TypeDisplay}) is passed to {finding.AggregateFunctionName}() - this aggregate's running result accumulates in an order that depends on plan shape, so the identical aggregate over identical data can return a different bit pattern across runs.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

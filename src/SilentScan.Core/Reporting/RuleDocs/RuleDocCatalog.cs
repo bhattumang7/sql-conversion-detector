@@ -110,6 +110,7 @@ public static class RuleDocCatalog
         [Catalog.TableValuedFunctionReturnUsesDatabaseCollation.RuleId] = Catalog.TableValuedFunctionReturnUsesDatabaseCollation.Content,
         [Catalog.DanglingObjectReference.RuleId] = Catalog.DanglingObjectReference.Content,
         [Predicates.FloatEquality.RuleId] = Predicates.FloatEquality.Content,
+        [Predicates.FloatOrderDependentAggregate.RuleId] = Predicates.FloatOrderDependentAggregate.Content,
         [Predicates.AlwaysEncryptedOrderBy.RuleId] = Predicates.AlwaysEncryptedOrderBy.Content,
         [Predicates.XmlOperandNotComparable.RuleId] = Predicates.XmlOperandNotComparable.Content,
         [Predicates.LegacyLobOperandNotComparable.RuleId] = Predicates.LegacyLobOperandNotComparable.Content,

@@ -127,6 +127,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ForcedParameterization(report, headingLevel, pathBase));
         blocks.AddRange(IdentityRange(report, headingLevel, pathBase));
         blocks.AddRange(FloatEquality(report, headingLevel, pathBase));
+        blocks.AddRange(FloatOrderDependentAggregate(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedOrderBy(report, headingLevel, pathBase));
         blocks.AddRange(OperandComparability(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
@@ -216,6 +217,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Forced-parameterization-defeating query shapes", report.ForcedParameterizationFindings.Count);
         AddCount(counts, "Identity/sequence range signals", report.IdentityRangeFindings.Count);
         AddCount(counts, "Float/real equality predicates", report.FloatEqualityFindings.Count);
+        AddCount(counts, "Float/real columns in order-dependent aggregates", report.FloatOrderDependentAggregateFindings.Count);
         AddCount(counts, "Always Encrypted ORDER BY", report.AlwaysEncryptedOrderByFindings.Count);
         AddCount(counts, "Operand not comparable (xml/legacy large object)", report.OperandComparabilityFindings.Count);
         AddCount(counts, "Query anti-patterns", report.QueryAntiPatternFindings.Count);
@@ -1321,6 +1323,29 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.TypeDisplay,
                 $"Compared with = at line {f.Line}, column {f.Column}.",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> FloatOrderDependentAggregate(ScanReport report, int level, string? pathBase)
+    {
+        if (report.FloatOrderDependentAggregateFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Float/real columns in order-dependent aggregates ({report.FloatOrderDependentAggregateFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "SUM/AVG/VAR/VARP/STDEV/STDEVP is applied to a float/real (IEEE-754 approximate) column - these aggregates accumulate their running result in an order that depends on plan shape (serial vs parallel, degree of parallelism), so the identical aggregate over identical data can return a different bit pattern across runs, silently. MIN/MAX/COUNT are unaffected and not flagged.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Type", "Aggregate", DetailHeader],
+            [.. report.FloatOrderDependentAggregateFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.TypeDisplay,
+                f.AggregateFunctionName,
+                $"Aggregated at line {f.Line}, column {f.Column}.",
             })]);
     }
 

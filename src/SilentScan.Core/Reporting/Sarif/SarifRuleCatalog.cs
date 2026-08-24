@@ -43,6 +43,7 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SelectiveXmlIndexValueColumnFindingKind."),
     };
     public const string FloatEqualityRuleId = "silentscan/predicates/float-equality";
+    public const string FloatOrderDependentAggregateRuleId = "silentscan/predicates/float-order-dependent-aggregate";
     public const string AlwaysEncryptedOrderByRuleId = "silentscan/predicates/always-encrypted-order-by";
     public const string TriggerOrderRuleId = "silentscan/catalog/trigger-firing-order-undefined";
     public static string OperandComparabilityRuleId(OperandComparabilityFindingKind kind) => kind switch

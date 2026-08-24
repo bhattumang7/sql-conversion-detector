@@ -904,6 +904,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<FloatOrderDependentAggregateFinding> floatOrderDependentAggregateFindings;
+        using (var floatOrderDependentAggregateStage = progress.Begin("scanning float/real columns fed into order-dependent aggregates", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = FloatOrderDependentAggregateScanner.Scan(r, catalog);
+                    floatOrderDependentAggregateStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            floatOrderDependentAggregateFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<AlwaysEncryptedOrderByFinding> alwaysEncryptedOrderByFindings;
         using (var alwaysEncryptedOrderByStage = progress.Begin("scanning ORDER BY against Always Encrypted columns", usableCount))
         {
@@ -1299,6 +1317,7 @@ public static class ScanReportBuilder
         missingStatisticsFindings = [.. missingStatisticsFindings.Where(f => f.Confidence <= minimumConfidence)];
         operandComparabilityFindings = [.. operandComparabilityFindings.Where(f => f.Confidence <= minimumConfidence)];
         selectiveXmlIndexValueColumnFindings = [.. selectiveXmlIndexValueColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
+        floatOrderDependentAggregateFindings = [.. floatOrderDependentAggregateFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
@@ -1362,6 +1381,7 @@ public static class ScanReportBuilder
             memoryOptimizedForeignKeyFindings,
             windowFunctionArgumentFindings,
             selectiveXmlIndexValueColumnFindings,
+            floatOrderDependentAggregateFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

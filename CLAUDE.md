@@ -60,6 +60,28 @@ published. This holds regardless of scope changes above.
   `vendor/sql2025/reading_from_folder.md`. Do the high-confidence work only —
   don't skip things that would cost more later. Being correct and thorough
   matters most.
+  
+## Codebase map — what is where
+  - src/SilentScan.Core/Predicates/ — one <Name>Finding.cs (enum+record) and <Name>Scanner.cs
+    (TSqlFragmentVisitor) per rule family; scanners here are the source of every finding.
+  - src/SilentScan.Core/Reporting/ScanReport.cs + ScanReportBuilder.cs — the report's finding-list
+    fields and the scan pipeline that populates them; every new finding list threads through both.
+  - src/SilentScan.Core/Reporting/RuleCatalog.cs — canonical rule id/rationale/fix-guidance list.
+  - src/SilentScan.Core/Reporting/Sarif/SarifRuleCatalog.cs (rule id strings) and
+    SarifReportWriter.cs (finding -> SARIF result) — SARIF output wiring.
+  - src/SilentScan.Core/Reporting/RuleDocs/<Family>/*.cs — per-rule doc content, registered in
+    RuleDocs/RuleDocCatalog.cs; regenerate docs/rules.html + docs/rules/*.html via
+    `dotnet-safe.sh run --project src/SilentScan.Cli -- rules-doc` after editing.
+  - src/SilentScan.Core/Reporting/Readable/ReadableScanReportWriter.cs — human-readable text/
+    markdown report sections, one method per finding family, dispatched from a central list.
+  - tests/SilentScan.Tests/Support/TestScanReports.cs — the one place to build a ScanReport in
+    tests; grep for stray `new ScanReport(` positional call sites too, they don't use it.
+  - docs/detection-tasklist.md — open work items; docs/rules.html/rules/ — published rule docs.
+  - Undocumented ScriptDom AST shape: `DOTNET_ROLL_FORWARD=LatestMajor ilspycmd -t
+    Microsoft.SqlServer.TransactSql.ScriptDom.<TypeName> <scriptdom.dll under ~/.nuget/packages>`.
+  - Oracle-verify actual engine behavior: `docker exec <container> sqlcmd ...` against the local
+    Docker SQL instances, self-contained VALUES-based queries only (no real schema/data).
+
 
 ## Rules for unit and integration tests
 `test-check.md` has rules for unit and integration tests. Whenever you write tests, read them first.

@@ -19,16 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`FloatEqualityRuleId` sibling: float/real column fed into an
-      aggregate.** Distinct footgun from the shipped equality-predicate
-      rule: parallel-plan accumulation order for `SUM`/`AVG`/etc. over a
-      float/real column is not guaranteed, so the identical aggregate over
-      identical data can return a different result across runs/plans.
-      Catalog-decidable from the column's type and its use as an aggregate
-      argument; needs an oracle check of which aggregate functions are
-      actually affected (order-dependent accumulation) versus which aren't
-      (e.g. `MIN`/`MAX`).
-
 - [ ] **Always Encrypted comparison/index legality beyond the shipped
       `ORDER BY` rule.** Three related, catalog+config-decidable gaps in the
       same family as `AlwaysEncryptedOrderByRuleId`: (1) a comparison/join/
