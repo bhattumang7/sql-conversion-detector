@@ -83,29 +83,29 @@ public static class TryCastComputedColumnPredicateScanner
         ];
     }
 
+#pragma warning disable CS9107
     private sealed class Visitor(
         string sourcePath, DatabaseCatalog catalog,
-        IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> candidates) : TSqlFragmentVisitor
+        IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> candidates)
+        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
     {
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
-
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public List<TryCastComputedColumnPredicateFinding> Findings { get; } = [];
 
         public override void ExplicitVisit(SelectStatement node)
         {
-            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            PushCteScope(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            cteScopeStack.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(QuerySpecification node)
         {
             if (node.FromClause is not null)
             {
-                var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
-                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, procScope: null);
+                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, CurrentCteRelations(), procScope: null);
                 var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
 
                 InspectSearchCondition(node.WhereClause?.SearchCondition, scopeChain);

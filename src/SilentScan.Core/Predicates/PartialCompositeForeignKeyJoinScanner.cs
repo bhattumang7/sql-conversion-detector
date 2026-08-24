@@ -46,23 +46,23 @@ public static class PartialCompositeForeignKeyJoinScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyList<CompositeForeignKey> compositeForeignKeys) : TSqlFragmentVisitor
+#pragma warning disable CS9107
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyList<CompositeForeignKey> compositeForeignKeys)
+        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
     {
         public List<PartialCompositeForeignKeyJoinFinding> Findings { get; } = [];
 
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
-
         public override void ExplicitVisit(SelectStatement node)
         {
-            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            PushCteScope(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            cteScopeStack.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
-            InspectFromClause(node.FromClause, node.WhereClause, cteRelations);
+            InspectFromClause(node.FromClause, node.WhereClause, CurrentCteRelations());
             base.ExplicitVisit(node);
         }
 

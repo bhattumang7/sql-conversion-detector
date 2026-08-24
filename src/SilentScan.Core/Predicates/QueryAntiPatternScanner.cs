@@ -44,15 +44,16 @@ public static class QueryAntiPatternScanner
         "master", "tempdb", "msdb", "model",
     };
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, HashSet<string> cteNames) : TSqlFragmentVisitor
+#pragma warning disable CS9107
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, HashSet<string> cteNames)
+        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
     {
         public List<QueryAntiPatternFinding> Findings { get; } = [];
 
         private readonly HashSet<string> _tableVariableNames = new(StringComparer.OrdinalIgnoreCase);
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
-
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteScopeStack = new();
 
         private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
             new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
@@ -182,9 +183,9 @@ public static class QueryAntiPatternScanner
         public override void ExplicitVisit(SelectStatement node)
         {
             InspectRecursiveCteMaxRecursion(node);
-            _cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            PushCteScope(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            _cteScopeStack.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(WhileStatement node)
@@ -230,8 +231,7 @@ public static class QueryAntiPatternScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var cteRelations = _cteScopeStack.Count > 0 ? _cteScopeStack.Peek() : EmptyResolvedViews;
-            var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, ResolutionContext(cteRelations));
+            var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, ResolutionContext(CurrentCteRelations()));
             var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
             {
                 (byAlias, ordered),
@@ -290,10 +290,6 @@ public static class QueryAntiPatternScanner
                 base.ExplicitVisit(node);
             }
         }
-
-        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
-            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain) =>
-            PredicateVisitorSupport.ResolveColumnFacts(columnRef, scopeChain, sourcePath, catalog);
 
         private void InspectSiteIfNamedTable(TableReference? tableReference)
         {
@@ -974,8 +970,7 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
-            var cteRelations = _cteScopeStack.Count > 0 ? _cteScopeStack.Peek() : EmptyResolvedViews;
-            var (mergeByAlias, mergeOrdered) = FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, ResolutionContext(cteRelations));
+            var (mergeByAlias, mergeOrdered) = FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, ResolutionContext(CurrentCteRelations()));
             var mergeScopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
             {
                 (mergeByAlias, mergeOrdered),

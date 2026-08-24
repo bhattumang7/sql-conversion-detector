@@ -23,7 +23,10 @@ public static class CatchAllPredicateScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+#pragma warning disable CS9107
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
+        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
     {
         public List<CatchAllPredicateFinding> Findings { get; } = [];
 
@@ -34,8 +37,6 @@ public static class CatchAllPredicateScanner
         private bool _statementHasOptionRecompile;
 
         private bool HasActiveRecompileGuard => _procedureHasWithRecompile || _statementHasOptionRecompile;
-
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public override void ExplicitVisit(CreateProcedureStatement node) =>
             VisitProcedureOrFunctionBody(node.Parameters, node.Options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile), node);
@@ -61,9 +62,9 @@ public static class CatchAllPredicateScanner
         public override void ExplicitVisit(SelectStatement node)
         {
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
-            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            PushCteScope(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            cteScopeStack.Pop();
+            PopCteScope();
             _statementHasOptionRecompile = previous;
         }
 
@@ -71,8 +72,7 @@ public static class CatchAllPredicateScanner
         {
             if (!HasActiveRecompileGuard)
             {
-                var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
-                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, procScope: null);
+                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, CurrentCteRelations(), procScope: null);
                 InspectSearchCondition(node.WhereClause?.SearchCondition, byAlias, ordered);
             }
 

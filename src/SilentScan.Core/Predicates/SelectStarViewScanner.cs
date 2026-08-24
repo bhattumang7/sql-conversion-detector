@@ -68,19 +68,18 @@ public static class SelectStarViewScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SelectStarViewCandidate> candidates) : TSqlFragmentVisitor
+#pragma warning disable CS9107
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SelectStarViewCandidate> candidates)
+        : ScopedSqlVisitorBase(sourcePath, catalog, lineage.AllRelations, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
     {
         public List<SelectStarViewFinding> Findings { get; } = [];
 
-        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyCteRelations = new Dictionary<string, ResolvedRelation>();
-
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
-
         public override void ExplicitVisit(SelectStatement node)
         {
-            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, lineage.AllRelations, sourcePath, ledger: null));
+            PushCteScope(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            cteScopeStack.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(QuerySpecification node)
@@ -96,8 +95,7 @@ public static class SelectStarViewScanner
                 return;
             }
 
-            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyCteRelations;
-            var (byAlias, _) = FromScopeResolver.Resolve(node.FromClause, catalog, lineage.AllRelations, sourcePath, ledger: null, cteRelations, procScope: null);
+            var (byAlias, _) = FromScopeResolver.Resolve(node.FromClause, catalog, lineage.AllRelations, sourcePath, ledger: null, CurrentCteRelations(), procScope: null);
 
             var wholeQueryStar = node.SelectElements.OfType<SelectStarExpression>().FirstOrDefault(s => s.Qualifier is not { Count: > 0 });
 

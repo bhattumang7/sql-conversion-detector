@@ -110,12 +110,13 @@ public static class DuplicationScanner
             && script.Batches.Any(b => b.Statements.Count > 0);
     }
 
-    private sealed class Visitor : TSqlFragmentVisitor
+    private sealed class Visitor : ScopedSqlVisitorBase
     {
         private readonly string sourcePath;
         private readonly DatabaseCatalog catalog;
 
         public Visitor(string sourcePath, DatabaseCatalog catalog)
+            : base(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
         {
             this.sourcePath = sourcePath;
             this.catalog = catalog;
@@ -128,12 +129,8 @@ public static class DuplicationScanner
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteScopeStack = new();
-
         private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
             new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
-
-        private readonly Stack<IReadOnlyDictionary<string, ScopeEntry>> _tableScopeStack = new();
 
         private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqualityComparer.Instance);
 
@@ -261,38 +258,34 @@ public static class DuplicationScanner
 
         public override void ExplicitVisit(SelectStatement node)
         {
-            _cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            PushCteScope(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            _cteScopeStack.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var cteRelations = _cteScopeStack.Count > 0 ? _cteScopeStack.Peek() : EmptyResolvedViews;
-            var (byAlias, _) = FromScopeResolver.Resolve(node.FromClause, ResolutionContext(cteRelations));
-            _tableScopeStack.Push(byAlias);
+            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, ResolutionContext(CurrentCteRelations())));
             base.ExplicitVisit(node);
-            _tableScopeStack.Pop();
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
             var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            var (byAlias, _) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
-            _tableScopeStack.Push(byAlias);
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations)));
             base.ExplicitVisit(node);
-            _tableScopeStack.Pop();
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
             var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            var (byAlias, _) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
-            _tableScopeStack.Push(byAlias);
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations)));
             base.ExplicitVisit(node);
-            _tableScopeStack.Pop();
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(BooleanComparisonExpression node)
@@ -408,12 +401,12 @@ public static class DuplicationScanner
 
         private CatalogColumn? ResolveColumn(ColumnReferenceExpression columnRef)
         {
-            if (columnRef.MultiPartIdentifier is not { Identifiers: { Count: > 0 } identifiers } || _tableScopeStack.Count == 0)
+            if (columnRef.MultiPartIdentifier is not { Identifiers: { Count: > 0 } identifiers } || ScopeStack.Count == 0)
             {
                 return null;
             }
 
-            var scope = _tableScopeStack.Peek();
+            var scope = ScopeStack.Peek().ByAlias;
             var columnName = identifiers[^1].Value;
 
             if (identifiers.Count >= 2 && scope.TryGetValue(identifiers[^2].Value, out var qualifiedEntry))

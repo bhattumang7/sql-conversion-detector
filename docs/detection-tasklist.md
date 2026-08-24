@@ -481,14 +481,25 @@ and returns findings; the pipeline owns everything else. Phases are ordered by
 value-per-line and are each independently shippable; do them in order, commit
 per phase (Phase 0 commits per fix).
 
-- [ ] **`ScopedSqlVisitorBase` migration.** Split out of the rule-harness item
-      once that shipped (harness plumbing and this are orthogonal — bundling
-      a mechanical wiring refactor with per-scanner FROM/JOIN/CTE-scope
-      semantic rewrites multiplied regression risk for no plumbing benefit).
-      ~9 scanners still hand-roll their own FROM/JOIN/CTE-scope tracking
-      instead of using the shared base class — real architectural work, each
-      migration is its own semantic change requiring its own verification,
-      not a batch mechanical edit.
+- [ ] **`CteScopeTracker` migration.** `PredicateVisitorSupport.cs`'s
+      `CteScopeTracker` is a CTE-only partial reimplementation of
+      `ScopedSqlVisitorBase`'s CTE stack (no `ScopeStack`, no proc/trigger
+      scope). 5 scanners use it: `AggregateDivisionColumnstoreScanner`,
+      `AlwaysEncryptedOrderByScanner`, `OperandComparabilityScanner`,
+      `FloatEqualityPredicateScanner`, `FloatOrderDependentAggregateScanner`.
+      Migrating them onto `ScopedSqlVisitorBase` retires `CteScopeTracker`
+      entirely; lower payoff per scanner than the base-class migration
+      already shipped, since none need `ScopeStack`/proc-scope, so it's its
+      own follow-up rather than bundled in.
+- [ ] **`ConstrainedColumnStatementVisitor` consolidation.**
+      `ConstrainedColumnStatementVisitor.cs` is a second, competing
+      hand-rolled base class (used by `CompositeIndexLeadingColumnScanner`,
+      `MissingStatisticsScanner`, `IndexCoverageScanner`) with the same
+      CTE-stack duplication `ScopedSqlVisitorBase` centralizes, plus its own
+      `ConstrainedStatement`/`ScopeChain`/`JoinNodes` bundling that
+      `ScopedSqlVisitorBase` doesn't provide. Needs a design decision first
+      (merge into `ScopedSqlVisitorBase` vs. leave standalone) before any
+      scanner migration.
 - [ ] **Phase 3 — one findings schema, one emission path.** `ScanReport` is a
       76-positional-list record each writer hand-picks from; SARIF (the CI
       gate) references none of `SkippedConstructs`/`DynamicSqlSummary`/
