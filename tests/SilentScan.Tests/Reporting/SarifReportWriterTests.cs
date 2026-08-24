@@ -1,5 +1,6 @@
 using System.Text.Json;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
@@ -322,6 +323,9 @@ public sealed class SarifReportWriterTests
         Assert.True(notifications.GetArrayLength() >= 1);
         var messages = notifications.EnumerateArray().Select(n => n.GetProperty("message").GetProperty("text").GetString()).ToList();
         Assert.Contains(messages, m => m!.Contains("broken.sql", StringComparison.Ordinal));
+
+        var invocation = document.RootElement.GetProperty("runs")[0].GetProperty("invocations")[0];
+        Assert.False(invocation.GetProperty("executionSuccessful").GetBoolean());
     }
 
     [Fact]
@@ -365,5 +369,91 @@ public sealed class SarifReportWriterTests
         var invocation = document.RootElement.GetProperty("runs")[0].GetProperty("invocations")[0];
         Assert.True(invocation.GetProperty("executionSuccessful").GetBoolean());
         Assert.Equal(0, invocation.GetProperty("toolExecutionNotifications").GetArrayLength());
+    }
+
+    [Fact]
+    public void Write_SkippedConstructs_EmitsWarningNotificationAndFlagsExecutionUnsuccessful()
+    {
+        var skipped = new SkippedConstruct(AnalysisPass.Predicates, "test.sql", 1, 1, "MERGE", "unsupported-syntax");
+        var report = TestScanReports.Build(
+            SkippedConstructs: [skipped],
+            SkippedConstructSummary: SkippedConstructSummary.From([skipped]));
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var invocation = document.RootElement.GetProperty("runs")[0].GetProperty("invocations")[0];
+        Assert.False(invocation.GetProperty("executionSuccessful").GetBoolean());
+
+        var notifications = invocation.GetProperty("toolExecutionNotifications").EnumerateArray().ToList();
+        Assert.Contains(notifications, n =>
+            n.GetProperty("message").GetProperty("text").GetString()!.Contains("1 construct(s) skipped", StringComparison.Ordinal)
+            && n.GetProperty("level").GetString() == "warning");
+    }
+
+    [Fact]
+    public void Write_UnanalyzableDynamicSql_EmitsWarningNotification()
+    {
+        var summary = DynamicSqlSummary.From([new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.Unanalyzable, "non-literal-argument")]);
+        var report = TestScanReports.Build(DynamicSqlSummary: summary);
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var notifications = document.RootElement.GetProperty("runs")[0]
+            .GetProperty("invocations")[0]
+            .GetProperty("toolExecutionNotifications")
+            .EnumerateArray()
+            .ToList();
+
+        Assert.Contains(notifications, n =>
+            n.GetProperty("message").GetProperty("text").GetString()!.Contains("dynamic-SQL call site(s) could not be fully analyzed", StringComparison.Ordinal)
+            && n.GetProperty("level").GetString() == "warning");
+    }
+
+    [Fact]
+    public void Write_AnalyzedDynamicSqlOnly_EmitsNoDynamicSqlNotification()
+    {
+        var summary = DynamicSqlSummary.From([new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.AnalyzedLiteral, Reason: null)]);
+        var report = TestScanReports.Build(DynamicSqlSummary: summary);
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var notifications = document.RootElement.GetProperty("runs")[0]
+            .GetProperty("invocations")[0]
+            .GetProperty("toolExecutionNotifications")
+            .EnumerateArray()
+            .ToList();
+
+        Assert.DoesNotContain(notifications, n =>
+            n.GetProperty("message").GetProperty("text").GetString()!.Contains("dynamic-SQL call site(s)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Write_UnknownTypedPredicates_EmitsNoteNotification()
+    {
+        var summary = TypedPredicateSummary.From([new TypedPredicateFinding(
+            Verdict.Unknown,
+            new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar), Indexed: true, Depth: 0, Provenance: null!),
+            new PredicateOperand.Value(null),
+            "=",
+            "test.sql",
+            1,
+            1)]);
+        var report = TestScanReports.Build(TypedPredicateSummary: summary);
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var notifications = document.RootElement.GetProperty("runs")[0]
+            .GetProperty("invocations")[0]
+            .GetProperty("toolExecutionNotifications")
+            .EnumerateArray()
+            .ToList();
+
+        Assert.Contains(notifications, n =>
+            n.GetProperty("message").GetProperty("text").GetString()!.Contains("could not be resolved to a seek/scan verdict", StringComparison.Ordinal)
+            && n.GetProperty("level").GetString() == "note");
     }
 }

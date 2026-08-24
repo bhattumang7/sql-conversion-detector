@@ -123,7 +123,13 @@ public static class SarifReportWriter
         results.AddRange(report.MissingStatisticsFindings.Select(ToResult));
 
         var notifications = BuildParseHealthNotifications(report.ParseHealth);
-        var invocation = new SarifInvocation(ExecutionSuccessful: true, notifications);
+        notifications.AddRange(BuildSkippedConstructNotifications(report.SkippedConstructSummary));
+        notifications.AddRange(BuildDynamicSqlNotifications(report.DynamicSqlSummary));
+        notifications.AddRange(BuildTypedPredicateNotifications(report.TypedPredicateSummary));
+
+        var hasParseIssues = report.ParseHealth.Files.Any(f => f.Errors.Count > 0 || f.UnanalyzedBatches.Count > 0);
+        var executionSuccessful = !hasParseIssues && report.SkippedConstructSummary.TotalCount == 0;
+        var invocation = new SarifInvocation(executionSuccessful, notifications);
 
         var log = new SarifLog(
             "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
@@ -160,6 +166,48 @@ public static class SarifReportWriter
         }
 
         return notifications;
+    }
+
+    private static List<SarifNotification> BuildSkippedConstructNotifications(SkippedConstructSummary summary)
+    {
+        if (summary.TotalCount == 0)
+        {
+            return [];
+        }
+
+        var breakdown = string.Join(", ", summary.CountsByConstructKind
+            .OrderByDescending(kv => kv.Value)
+            .ThenBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => $"{kv.Key}: {kv.Value}"));
+
+        return [new SarifNotification(
+            new SarifMessage($"{summary.TotalCount} construct(s) skipped during analysis ({breakdown}) - findings that would have come from these constructs are not represented in this report."),
+            LevelWarning)];
+    }
+
+    private static List<SarifNotification> BuildDynamicSqlNotifications(DynamicSqlSummary summary)
+    {
+        var unanalyzedCount = summary.UnanalyzableCount + summary.InnerParseFailedCount + summary.PartiallyAnalyzedCount;
+        if (unanalyzedCount == 0)
+        {
+            return [];
+        }
+
+        return [new SarifNotification(
+            new SarifMessage($"{unanalyzedCount} of {summary.TotalCallSites} dynamic-SQL call site(s) could not be fully analyzed ({summary.UnanalyzableCount} unanalyzable, {summary.InnerParseFailedCount} inner-parse-failed, {summary.PartiallyAnalyzedCount} partially analyzed) - predicates inside those statements are not represented in this report."),
+            LevelWarning)];
+    }
+
+    private static List<SarifNotification> BuildTypedPredicateNotifications(TypedPredicateSummary summary)
+    {
+        if (summary.UnknownCount == 0)
+        {
+            return [];
+        }
+
+        return [new SarifNotification(
+            new SarifMessage($"{summary.UnknownCount} of {summary.TotalClassified} classified predicate(s) could not be resolved to a seek/scan verdict - their sargability is unknown, not confirmed clean."),
+            LevelNote)];
     }
 
     private static SarifLocation ToLocation(string sourcePath, int line, int? startColumn) =>
