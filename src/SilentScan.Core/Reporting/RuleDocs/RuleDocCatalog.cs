@@ -247,5 +247,11 @@ public static class RuleDocCatalog
         [DeadCode.UnusedLocalVariable.RuleId] = DeadCode.UnusedLocalVariable.Content,
         [DeadCode.UnusedParameter.RuleId] = DeadCode.UnusedParameter.Content,
         [DeadCode.RedundantJump.RuleId] = DeadCode.RedundantJump.Content,
+
+        [Verdict.CollationConflict.RuleId] = Verdict.CollationConflict.Content,
+        [Catalog.TriggerOrder.RuleId] = Catalog.TriggerOrder.Content,
+        [Catalog.MemoryOptimizedUnsupportedColumnType.RuleId] = Catalog.MemoryOptimizedUnsupportedColumnType.Content,
+        [IndexShape.CompositeIndexLeadingColumn.RuleId] = IndexShape.CompositeIndexLeadingColumn.Content,
+        [Statistics.MissingStatistics.RuleId] = Statistics.MissingStatistics.Content,
     };
 }
