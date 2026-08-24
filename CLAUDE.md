@@ -73,3 +73,12 @@ Run sonar-scan.ps1 and make sure that 0 issues are reported in all aspects. Also
 
 ### Sonar MCP
 If sonar MCP is enabled, get info about all issues and code duplication and then ask the user to disable the MCP to save tokens.
+
+# Final response: be concise and action-oriented.
+Separate into: Done, Not Done/Unverified, Issues, Next.
+Do not include a chronological work log or repeat details.
+Never call something done unless it was actually verified.
+
+End with a concise status summary:
+Done | Not Done/Unverified | Issues | Next.
+No work-log narration. Distinguish implemented from verified.
