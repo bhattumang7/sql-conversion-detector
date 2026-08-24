@@ -481,15 +481,6 @@ and returns findings; the pipeline owns everything else. Phases are ordered by
 value-per-line and are each independently shippable; do them in order, commit
 per phase (Phase 0 commits per fix).
 
-- [ ] **`ConstrainedColumnStatementVisitor` consolidation.**
-      `ConstrainedColumnStatementVisitor.cs` is a second, competing
-      hand-rolled base class (used by `CompositeIndexLeadingColumnScanner`,
-      `MissingStatisticsScanner`, `IndexCoverageScanner`) with the same
-      CTE-stack duplication `ScopedSqlVisitorBase` centralizes, plus its own
-      `ConstrainedStatement`/`ScopeChain`/`JoinNodes` bundling that
-      `ScopedSqlVisitorBase` doesn't provide. Needs a design decision first
-      (merge into `ScopedSqlVisitorBase` vs. leave standalone) before any
-      scanner migration.
 - [ ] **Phase 3 — one findings schema, one emission path.** `ScanReport` is a
       76-positional-list record each writer hand-picks from; SARIF (the CI
       gate) references none of `SkippedConstructs`/`DynamicSqlSummary`/

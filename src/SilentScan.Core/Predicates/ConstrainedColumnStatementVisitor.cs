@@ -12,7 +12,10 @@ internal sealed record ConstrainedStatement(
     BooleanExpression? WhereCondition,
     TSqlFragment Node);
 
-internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+#pragma warning disable CS9107
+internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, DatabaseCatalog catalog)
+    : ScopedSqlVisitorBase(sourcePath, catalog, ConstrainedColumnStatementVisitor.EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
 {
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
@@ -20,15 +23,13 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
 
     protected DatabaseCatalog Catalog { get; } = catalog;
 
-    private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
-
     protected abstract void InspectStatement(ConstrainedStatement statement);
 
     public override void ExplicitVisit(SelectStatement node)
     {
-        cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, Catalog, EmptyResolvedViews, SourcePath, ledger: null));
+        PushCteScope(node.WithCtesAndXmlNamespaces);
         base.ExplicitVisit(node);
-        cteScopeStack.Pop();
+        PopCteScope();
     }
 
     public override void ExplicitVisit(QuerySpecification node)
@@ -65,8 +66,7 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
             return;
         }
 
-        var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
-        var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, ResolutionContext(cteRelations));
+        var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, ResolutionContext(CurrentCteRelations()));
         Inspect(byAlias, ordered, fromClause, whereCondition, node);
     }
 
