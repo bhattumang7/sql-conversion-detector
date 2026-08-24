@@ -119,6 +119,38 @@ confirmed independently of any one tool's output.
   comparable" in a `CASE`/`COALESCE` branch would be a false positive; do
   not re-propose it.
 
+- **`ALTER TABLE ... ALTER COLUMN` between a char-family type
+  (`char`/`varchar`/`nchar`/`nvarchar`) and `binary`/`varbinary` only fails
+  in one direction, and length/collation differences on their own never
+  fail.** Oracle-confirmed (standing Docker instance): retyping a char-
+  family column directly to `binary`/`varbinary` raises Msg 257 ("Implicit
+  conversion from data type ... is not allowed. Use the CONVERT function to
+  run this query.") - there is no implicit conversion that way, and
+  `ALTER COLUMN`'s own syntax has no way to carry an explicit
+  `CONVERT`/`CAST` alongside the new type. The reverse direction
+  (`binary`/`varbinary` retyped to a char-family type) always deploys - the
+  implicit conversion exists that way. Independently, an `ALTER COLUMN`
+  that changes only length, or only collation (same string family, e.g.
+  `Latin1_General_CI_AS` to `Latin1_General_CS_AS`), always deploys too;
+  neither is a real risk on its own. `AlterColumnSafetyScanner`'s
+  `IncompatibleFamilyConversion` kind flags exactly the one failing
+  direction.
+
+- **`ALTER TABLE ... ALTER COLUMN` narrowing a `DECIMAL`/`NUMERIC` column's
+  declared precision or scale below its current catalog value is a DDL-time
+  risk decided by the actual stored data, not just the declared range.**
+  Oracle-confirmed: if any existing row's whole-number part no longer fits
+  the narrower precision, the `ALTER COLUMN` statement itself fails with Msg
+  8115 ("Arithmetic overflow error converting numeric to data type
+  numeric"). If every value fits, the statement succeeds silently and any
+  digits past the new scale are rounded away with no warning. A
+  `TIME`/`DATETIME2`/`DATETIMEOFFSET` column's fractional-seconds scale
+  narrowing only ever takes the silent-rounding path - truncating digits
+  past a time value's seconds can't overflow. `AlterColumnSafetyScanner`'s
+  `PrecisionOrScaleNarrowing` kind flags the declared-type narrowing itself
+  (source-text comparison, no data inspection), since either outcome is a
+  real risk.
+
 ## Sargability and index eligibility
 
 - **The engine's comparison-operator sargability gate treats every non-bare-column operand

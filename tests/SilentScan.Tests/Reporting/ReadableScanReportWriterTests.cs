@@ -333,6 +333,7 @@ public sealed class ReadableScanReportWriterTests
             [],
             [],
             [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -443,6 +444,7 @@ public sealed class ReadableScanReportWriterTests
             [],
         [],
         [],
+        [],
         SkippedConstructSummary.From([]),
         TypedPredicateSummary.From([]),
         DynamicSqlSummary.From([]));
@@ -551,6 +553,7 @@ public sealed class ReadableScanReportWriterTests
         SelectiveXmlIndexValueColumnFindings: [],
         FloatOrderDependentAggregateFindings: [],
         AlwaysEncryptedKeyColumnFindings: [],
+        AlterColumnSafetyFindings: [],
         SkippedConstructs: [],
         SkippedConstructSummary: SkippedConstructSummary.From([]),
         TypedPredicateSummary: TypedPredicateSummary.From([]),

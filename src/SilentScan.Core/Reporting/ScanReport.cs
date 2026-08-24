@@ -95,11 +95,12 @@ public sealed record ScanReport(
     IReadOnlyList<SelectiveXmlIndexValueColumnFinding> SelectiveXmlIndexValueColumnFindings,
     IReadOnlyList<FloatOrderDependentAggregateFinding> FloatOrderDependentAggregateFindings,
     IReadOnlyList<AlwaysEncryptedKeyColumnFinding> AlwaysEncryptedKeyColumnFindings,
+    IReadOnlyList<AlterColumnSafetyFinding> AlterColumnSafetyFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
     DynamicSqlSummary DynamicSqlSummary,
     int SchemaVersion = ScanReport.CurrentSchemaVersion)
 {
-    public const int CurrentSchemaVersion = 72;
+    public const int CurrentSchemaVersion = 73;
 }

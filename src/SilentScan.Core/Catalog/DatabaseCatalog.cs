@@ -29,6 +29,7 @@ public sealed class DatabaseCatalog
 
     private readonly List<CatalogCheckConstraint> _checkConstraints = [];
     private readonly List<CatalogTriggerEvent> _triggerEvents = [];
+    private readonly List<CatalogAlterColumnEvent> _alterColumnEvents = [];
 
     private readonly List<CatalogSecurityPredicate> _securityPredicates = [];
 
@@ -136,6 +137,10 @@ public sealed class DatabaseCatalog
     public void AddTriggerEvent(CatalogTriggerEvent triggerEvent) => _triggerEvents.Add(triggerEvent);
 
     public IReadOnlyList<CatalogTriggerEvent> TriggerEvents => _triggerEvents;
+
+    public void AddAlterColumnEvent(CatalogAlterColumnEvent alterColumnEvent) => _alterColumnEvents.Add(alterColumnEvent);
+
+    public IReadOnlyList<CatalogAlterColumnEvent> AlterColumnEvents => _alterColumnEvents;
 
     public void AddTemporalTablePair(TemporalTablePair pair) => _temporalTablePairs.Add(pair);
 

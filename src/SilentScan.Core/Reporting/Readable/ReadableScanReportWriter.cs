@@ -130,6 +130,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(FloatOrderDependentAggregate(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedOrderBy(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedKeyColumn(report, headingLevel, pathBase));
+        blocks.AddRange(AlterColumnSafety(report, headingLevel, pathBase));
         blocks.AddRange(OperandComparability(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
         blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
@@ -221,6 +222,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Float/real columns in order-dependent aggregates", report.FloatOrderDependentAggregateFindings.Count);
         AddCount(counts, "Always Encrypted ORDER BY", report.AlwaysEncryptedOrderByFindings.Count);
         AddCount(counts, "Always Encrypted non-enclave key column", report.AlwaysEncryptedKeyColumnFindings.Count);
+        AddCount(counts, "ALTER COLUMN safety", report.AlterColumnSafetyFindings.Count);
         AddCount(counts, "Operand not comparable (xml/legacy large object)", report.OperandComparabilityFindings.Count);
         AddCount(counts, "Query anti-patterns", report.QueryAntiPatternFindings.Count);
         AddCount(counts, "Index-coverage shapes", report.IndexCoverageFindings.Count);
@@ -1397,6 +1399,34 @@ public static class ReadableScanReportWriter
                     AlwaysEncryptedKeyColumnKind.UniqueConstraint => "UNIQUE constraint",
                     AlwaysEncryptedKeyColumnKind.Statistics => "statistics",
                     _ => "index",
+                },
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> AlterColumnSafety(ScanReport report, int level, string? pathBase)
+    {
+        if (report.AlterColumnSafetyFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"ALTER COLUMN safety ({report.AlterColumnSafetyFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An ALTER TABLE ... ALTER COLUMN either narrows a DECIMAL/NUMERIC or var-time column's declared precision/scale below its current catalog value, or retypes a char/nchar/varchar/nvarchar column directly to binary/varbinary - both fail or silently lose data at DDL time.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Previous type", "New type", "Kind"],
+            [.. report.AlterColumnSafetyFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.PreviousType.ToString(),
+                f.NewType.ToString(),
+                f.Kind switch
+                {
+                    AlterColumnSafetyKind.PrecisionOrScaleNarrowing => "precision/scale narrowing",
+                    AlterColumnSafetyKind.IncompatibleFamilyConversion => "incompatible family conversion",
+                    _ => "unknown",
                 },
             })]);
     }

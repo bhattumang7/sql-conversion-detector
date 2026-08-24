@@ -47,6 +47,12 @@ public static class SarifRuleCatalog
     public const string AlwaysEncryptedOrderByRuleId = "silentscan/predicates/always-encrypted-order-by";
     public const string AlwaysEncryptedKeyColumnRuleId = "silentscan/catalog/always-encrypted-non-enclave-key-column";
     public const string TriggerOrderRuleId = "silentscan/catalog/trigger-firing-order-undefined";
+    public static string AlterColumnSafetyRuleId(AlterColumnSafetyKind kind) => kind switch
+    {
+        AlterColumnSafetyKind.PrecisionOrScaleNarrowing => "silentscan/catalog/alter-column-precision-scale-narrowing",
+        AlterColumnSafetyKind.IncompatibleFamilyConversion => "silentscan/catalog/alter-column-incompatible-family-conversion",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled AlterColumnSafetyKind."),
+    };
     public static string OperandComparabilityRuleId(OperandComparabilityFindingKind kind) => kind switch
     {
         OperandComparabilityFindingKind.Xml => "silentscan/predicates/xml-operand-not-comparable",

@@ -100,6 +100,7 @@ public static class SarifReportWriter
         results.AddRange(report.FloatOrderDependentAggregateFindings.Select(ToResult));
         results.AddRange(report.AlwaysEncryptedOrderByFindings.Select(ToResult));
         results.AddRange(report.AlwaysEncryptedKeyColumnFindings.Select(ToResult));
+        results.AddRange(report.AlterColumnSafetyFindings.Select(ToResult));
         results.AddRange(report.OperandComparabilityFindings.Select(ToResult));
         results.AddRange(report.MemoryOptimizedUnsupportedColumnTypeFindings.Select(ToResult));
         results.AddRange(report.MemoryOptimizedUnsupportedIndexOptionFindings.Select(ToResult));
@@ -1202,6 +1203,21 @@ public static class SarifReportWriter
             _ => "index",
         };
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is a key column of {objectKind} '{finding.ObjectName}' - the column is RANDOMIZED-encrypted with a column encryption key whose column master key was not declared with ENCLAVE_COMPUTATIONS, so it cannot be used as a key column in a constraint, index, or statistics; the statement does not deploy.";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(AlterColumnSafetyFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AlterColumnSafetyRuleId(finding.Kind), finding.Confidence);
+        var message = finding.Kind switch
+        {
+            AlterColumnSafetyKind.PrecisionOrScaleNarrowing =>
+                $"'{finding.TableQualifiedName}.{finding.ColumnName}' is narrowed from {finding.PreviousType} to {finding.NewType} - this fails at DDL time if an existing value no longer fits, or silently rounds away digits past the new scale if it does.",
+            AlterColumnSafetyKind.IncompatibleFamilyConversion =>
+                $"'{finding.TableQualifiedName}.{finding.ColumnName}' is retyped from {finding.PreviousType} to {finding.NewType} - there is no implicit conversion between the character and binary families, and ALTER COLUMN has no syntax to carry an explicit CONVERT; the statement does not compile.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled AlterColumnSafetyKind."),
+        };
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: 1);
     }

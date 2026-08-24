@@ -976,6 +976,9 @@ public static class CatalogBuilder
                 newType = newType with { Collation = catalog.DefaultCollation };
             }
 
+            catalog.AddAlterColumnEvent(new CatalogAlterColumnEvent(
+                qualifiedName, columnName, existingColumn.Type, newType, sourcePath, alterColumn.StartLine));
+
             var updatedColumns = existing.Columns
                 .Select(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase) ? c with { Type = newType } : c)
                 .ToList();

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alter Column Incompatible Family Conversion - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Alter Column Incompatible Family Conversion</h1>
+  <p class="rule-key"><code>silentscan/catalog/alter-column-incompatible-family-conversion</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">An ALTER TABLE ... ALTER COLUMN retypes a char/nchar/varchar/nvarchar column directly to binary/varbinary - oracle-confirmed (Msg 257) this never compiles, because there is no implicit conversion between the two families and ALTER COLUMN&#x27;s own syntax has no way to carry an explicit CONVERT alongside the new type. The reverse direction (binary/varbinary to char/nchar/varchar/nvarchar) is not flagged - oracle-confirmed that direction succeeds.</p>
+  <p class="rationale">ALTER TABLE ... ALTER COLUMN can retype a column from any char/nchar/varchar/nvarchar type directly to binary/varbinary. Unlike a plain SELECT expression, ALTER COLUMN&#x27;s syntax has no way to carry an explicit CAST/CONVERT alongside the new type - it can only name the target type. The engine has no implicit conversion from the character types to the binary types, so this direction fails to compile outright (oracle- confirmed, Msg 257, &quot;Implicit conversion from data type ... to ... is not allowed. Use the CONVERT function to run this query.&quot;) - a query-level workaround that ALTER COLUMN itself has no syntax to apply.</p>
+  <p class="rationale">The reverse direction - binary/varbinary retyped to char/nchar/varchar/nvarchar - is not flagged: the engine does have an implicit conversion that way, so the same ALTER COLUMN statement deploys without error.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">ALTER COLUMN cannot make this change directly. Add a new column of the target binary type, populate it with an explicit CONVERT() from the existing character column, drop the old column, and rename the new one into its place.</p>
+  <h3>ALTER COLUMN from VARCHAR to VARBINARY never compiles</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Document&#xA;(&#xA;    DocumentId INT NOT NULL PRIMARY KEY,&#xA;    Payload    VARCHAR(50) NOT NULL&#xA;);&#xA;&#xA;ALTER TABLE dbo.Document ALTER COLUMN Payload VARBINARY(50);</code></pre></div>
+  <p class="example-explanation">There is no implicit conversion from varchar to varbinary, and ALTER COLUMN has no syntax to supply an explicit CONVERT - this fails with Msg 257.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>ALTER TABLE dbo.Document ADD PayloadBinary VARBINARY(50) NULL;&#xA;UPDATE dbo.Document SET PayloadBinary = CONVERT(VARBINARY(50), Payload);&#xA;ALTER TABLE dbo.Document DROP COLUMN Payload;&#xA;EXEC sp_rename &#x27;dbo.Document.PayloadBinary&#x27;, &#x27;Payload&#x27;, &#x27;COLUMN&#x27;;</code></pre></div>
+  <p class="example-explanation">An explicit CONVERT() in an UPDATE statement, followed by dropping the old column and renaming the new one, achieves the same retype outside ALTER COLUMN&#x27;s own syntax.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/predicates/ALTER_COLUMN_INCOMPATIBLE_FAMILY_CONVERSION_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Oracle-confirmed against the standing Docker instance: ALTER COLUMN from a char/nchar/varchar/&#xA;-- nvarchar column to a binary/varbinary column fails to compile with Msg 257 (&quot;Implicit&#xA;-- conversion from data type ... to ... is not allowed. Use the CONVERT function to run this&#xA;-- query.&quot;) - and ALTER COLUMN&#x27;s own syntax has no way to carry an explicit CAST/CONVERT alongside&#xA;-- the new type. The reverse direction (binary/varbinary to char/nchar/varchar/nvarchar) is not&#xA;-- flagged - oracle-confirmed that direction succeeds.&#xA;CREATE TABLE dbo.Document&#xA;(&#xA;    DocumentId INT NOT NULL PRIMARY KEY,&#xA;    Payload    VARCHAR(50) NOT NULL&#xA;);&#xA;GO&#xA;ALTER TABLE dbo.Document ALTER COLUMN Payload VARBINARY(50);</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

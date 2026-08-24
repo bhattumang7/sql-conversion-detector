@@ -19,18 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **New rule family: `ALTER TABLE ALTER COLUMN` safety.** Two related,
-      catalog-diffable DDL-time risks not covered by any shipped rule: (1)
-      narrowing a numeric column's precision/scale, or a var-time column's
-      fractional-seconds precision, below its current catalog-declared value
-      (`sys.columns` before vs. the statement's target type) risks a DDL
-      failure or silent truncation of existing data; (2) an `ALTER COLUMN`
-      between string/wstring/binary families whose length, collation, or
-      binary-flag differs needs an explicit `CAST` or the statement fails
-      outright. Likely ships as one unified `ALTER COLUMN`-safety rule
-      rather than two. Needs an oracle matrix per narrowing shape (numeric,
-      var-time, string-family) before scoping.
-
 - [ ] **`STRING_SPLIT` separator must be exactly one character.** A literal
       (or constant-folded) separator argument of any length other than 1 is
       a compile-error fact, pure source-level analysis, no catalog needed.

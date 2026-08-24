@@ -209,6 +209,13 @@ public static class ScanReportBuilder
             alwaysEncryptedKeyColumnStage.Complete($"{alwaysEncryptedKeyColumnFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<AlterColumnSafetyFinding> alterColumnSafetyFindings;
+        using (var alterColumnSafetyStage = progress.Begin("scanning ALTER COLUMN safety"))
+        {
+            alterColumnSafetyFindings = AlterColumnSafetyScanner.Scan(catalog);
+            alterColumnSafetyStage.Complete($"{alterColumnSafetyFindings.Count:N0} findings");
+        }
+
         IReadOnlyList<MemoryOptimizedForeignKeyFinding> memoryOptimizedForeignKeyFindings;
         using (var memoryOptimizedForeignKeyStage = progress.Begin("scanning memory-optimized foreign keys"))
         {
@@ -1326,6 +1333,7 @@ public static class ScanReportBuilder
         selectiveXmlIndexValueColumnFindings = [.. selectiveXmlIndexValueColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
         floatOrderDependentAggregateFindings = [.. floatOrderDependentAggregateFindings.Where(f => f.Confidence <= minimumConfidence)];
         alwaysEncryptedKeyColumnFindings = [.. alwaysEncryptedKeyColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
+        alterColumnSafetyFindings = [.. alterColumnSafetyFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
@@ -1391,6 +1399,7 @@ public static class ScanReportBuilder
             selectiveXmlIndexValueColumnFindings,
             floatOrderDependentAggregateFindings,
             alwaysEncryptedKeyColumnFindings,
+            alterColumnSafetyFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

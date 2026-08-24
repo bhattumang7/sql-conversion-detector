@@ -113,6 +113,8 @@ public static class RuleDocCatalog
         [Predicates.FloatOrderDependentAggregate.RuleId] = Predicates.FloatOrderDependentAggregate.Content,
         [Predicates.AlwaysEncryptedOrderBy.RuleId] = Predicates.AlwaysEncryptedOrderBy.Content,
         [Predicates.AlwaysEncryptedKeyColumn.RuleId] = Predicates.AlwaysEncryptedKeyColumn.Content,
+        [Predicates.AlterColumnPrecisionScaleNarrowing.RuleId] = Predicates.AlterColumnPrecisionScaleNarrowing.Content,
+        [Predicates.AlterColumnIncompatibleFamilyConversion.RuleId] = Predicates.AlterColumnIncompatibleFamilyConversion.Content,
         [Predicates.XmlOperandNotComparable.RuleId] = Predicates.XmlOperandNotComparable.Content,
         [Predicates.LegacyLobOperandNotComparable.RuleId] = Predicates.LegacyLobOperandNotComparable.Content,
 
