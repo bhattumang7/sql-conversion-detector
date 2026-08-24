@@ -262,5 +262,15 @@ public static class RuleDocCatalog
         [CodeMetric.TooManyConditionalOperators.RuleId] = CodeMetric.TooManyConditionalOperators.Content,
         [CodeMetric.TooManyCaseBranches.RuleId] = CodeMetric.TooManyCaseBranches.Content,
         [CodeMetric.CaseBranchTooLong.RuleId] = CodeMetric.CaseBranchTooLong.Content,
+
+        [Formatting.TabCharacterUsed.RuleId] = Formatting.TabCharacterUsed.Content,
+        [Formatting.MultipleStatementsOnSameLine.RuleId] = Formatting.MultipleStatementsOnSameLine.Content,
+        [Formatting.MultipleDeclarationsOnSameLine.RuleId] = Formatting.MultipleDeclarationsOnSameLine.Content,
+        [Formatting.MissingBeginEndBlock.RuleId] = Formatting.MissingBeginEndBlock.Content,
+        [Formatting.SingleLineConditionalBody.RuleId] = Formatting.SingleLineConditionalBody.Content,
+        [Formatting.DanglingStatementAfterUnbracedBody.RuleId] = Formatting.DanglingStatementAfterUnbracedBody.Content,
+        [Formatting.IfImmediatelyFollowingPriorBlockEnd.RuleId] = Formatting.IfImmediatelyFollowingPriorBlockEnd.Content,
+        [Formatting.RedundantParentheses.RuleId] = Formatting.RedundantParentheses.Content,
+        [Formatting.MissingFileHeaderComment.RuleId] = Formatting.MissingFileHeaderComment.Content,
     };
 }
