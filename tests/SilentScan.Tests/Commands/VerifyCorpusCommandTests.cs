@@ -80,4 +80,101 @@ public sealed class VerifyCorpusCommandTests : IDisposable
         Assert.Equal(1, exitCode);
         Assert.Contains("unknown --confidence", stderr.ToString());
     }
+
+    [Fact]
+    public async Task RunAsync_RepoFilterDiffersOnlyByCase_StillMatchesManifestEntry()
+    {
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        var exitCode = await VerifyCorpusCommand.RunAsync(
+            new VerifyCorpusCommand.VerifyCorpusOptions(_manifestPath, "corpus/_clones", RepoFilter: "EXAMPLE", "high"),
+            SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
+
+        Assert.Equal(1, exitCode);
+        var output = stderr.ToString();
+        Assert.DoesNotContain("no manifest entry matches", output);
+        Assert.Contains("no local clone at", output);
+    }
+
+    [Fact]
+    public async Task RunAsync_RepoFilterSet_OnlyMatchingRepoIsProcessed()
+    {
+        var manifestPath = Path.Combine(Path.GetTempPath(), $"silentscan-verify-corpus-multi-test-{Guid.NewGuid():N}.json");
+        File.WriteAllText(manifestPath, """
+            {
+              "repos": [
+                {
+                  "name": "alpha-repo",
+                  "url": "https://github.com/example/alpha-repo",
+                  "commitSha": "abcdef0123456789abcdef0123456789abcdef01",
+                  "license": "MIT",
+                  "ddlPaths": ["db/schema/**/*.sql"]
+                },
+                {
+                  "name": "beta-repo",
+                  "url": "https://github.com/example/beta-repo",
+                  "commitSha": "abcdef0123456789abcdef0123456789abcdef01",
+                  "license": "MIT",
+                  "ddlPaths": ["db/schema/**/*.sql"]
+                }
+              ]
+            }
+            """);
+        try
+        {
+            var stdout = new StringWriter();
+            var stderr = new StringWriter();
+
+            var exitCode = await VerifyCorpusCommand.RunAsync(
+                new VerifyCorpusCommand.VerifyCorpusOptions(manifestPath, "corpus/_clones", RepoFilter: "alpha-repo", "high"),
+                SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
+
+            Assert.Equal(1, exitCode);
+            var output = stderr.ToString();
+            Assert.Contains("alpha-repo", output);
+            Assert.DoesNotContain("beta-repo", output);
+        }
+        finally
+        {
+            File.Delete(manifestPath);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_RepoUrlHasTrailingSlash_CloneDirectoryNameDropsTheSlash()
+    {
+        var manifestPath = Path.Combine(Path.GetTempPath(), $"silentscan-verify-corpus-trailing-slash-test-{Guid.NewGuid():N}.json");
+        File.WriteAllText(manifestPath, """
+            {
+              "repos": [
+                {
+                  "name": "trailing-slash-repo",
+                  "url": "https://github.com/example/trailing-slash-repo/",
+                  "commitSha": "abcdef0123456789abcdef0123456789abcdef01",
+                  "license": "MIT",
+                  "ddlPaths": ["db/schema/**/*.sql"]
+                }
+              ]
+            }
+            """);
+        var clonesRoot = Path.Combine(Path.GetTempPath(), $"silentscan-verify-corpus-clones-root-{Guid.NewGuid():N}");
+        try
+        {
+            var stdout = new StringWriter();
+            var stderr = new StringWriter();
+
+            var exitCode = await VerifyCorpusCommand.RunAsync(
+                new VerifyCorpusCommand.VerifyCorpusOptions(manifestPath, clonesRoot, RepoFilter: null, "high"),
+                SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
+
+            Assert.Equal(1, exitCode);
+            var expectedRepoRoot = Path.Combine(clonesRoot, "trailing-slash-repo");
+            Assert.Contains($"no local clone at {expectedRepoRoot}", stderr.ToString());
+        }
+        finally
+        {
+            File.Delete(manifestPath);
+        }
+    }
 }
