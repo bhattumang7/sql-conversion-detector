@@ -167,6 +167,53 @@ public sealed class ProcCallGraphBuilderTests
     }
 
     [Fact]
+    public void Build_CallerVariableAssignedInEarlierSiblingBeginEndBlock_PropagatesLiteral()
+    {
+
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+            BEGIN
+                DECLARE @v NVARCHAR(20) = N'Active';
+            END
+            BEGIN
+                EXEC dbo.Callee @v;
+            END
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("@v", argument.CallerVariableName);
+        Assert.NotNull(argument.LiteralArgument);
+        Assert.Equal("Active", argument.LiteralArgument!.Value);
+    }
+
+    [Fact]
+    public void Build_CallerVariableAssignedInsideNestedBeginEndInsideIf_DoesNotPropagateLiteral()
+    {
+
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller @flag INT AS
+            BEGIN
+                DECLARE @v NVARCHAR(20) = N'Active';
+                IF @flag = 1
+                BEGIN
+                    SET @v = N'Archived';
+                END
+                EXEC dbo.Callee @v;
+            END
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("@v", argument.CallerVariableName);
+        Assert.Null(argument.LiteralArgument);
+    }
+
+    [Fact]
     public void Build_CallerVariableReassignedInsideIf_DoesNotPropagateLiteral()
     {
 
@@ -343,6 +390,20 @@ public sealed class ProcCallGraphBuilderTests
             CREATE PROCEDURE dbo.Callee (@P int) AS SELECT 1;
             GO
             EXEC dbo.Callee @Undeclared;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Null(argument.CallerArgumentType);
+    }
+
+    [Fact]
+    public void Build_DirectLiteralArgument_CallerArgumentTypeStaysNull()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@P int) AS SELECT 1;
+            GO
+            EXEC dbo.Callee @P = 1;
             """);
 
         var edge = Assert.Single(graph.Edges);

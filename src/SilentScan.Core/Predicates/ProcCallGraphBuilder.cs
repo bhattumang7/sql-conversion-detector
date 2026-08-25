@@ -92,9 +92,7 @@ public static class ProcCallGraphBuilder
                 }
             }
 
-            _currentScopeStatements = statementList?.Statements is [BeginEndBlockStatement singleBlock]
-                ? singleBlock.StatementList.Statements
-                : statementList?.Statements;
+            _currentScopeStatements = FlattenBeginEndBlocks(statementList?.Statements);
 
             statementList?.AcceptChildren(this);
             _currentScope = previous;
@@ -103,6 +101,33 @@ public static class ProcCallGraphBuilder
             foreach (var (variableName, variableType) in previousVariableTypes)
             {
                 _variableTypes[variableName] = variableType;
+            }
+        }
+
+        private static List<TSqlStatement>? FlattenBeginEndBlocks(IList<TSqlStatement>? statements)
+        {
+            if (statements is null)
+            {
+                return null;
+            }
+
+            var flattened = new List<TSqlStatement>(statements.Count);
+            AppendFlattened(statements, flattened);
+            return flattened;
+        }
+
+        private static void AppendFlattened(IList<TSqlStatement> statements, List<TSqlStatement> flattened)
+        {
+            foreach (var statement in statements)
+            {
+                if (statement is BeginEndBlockStatement block)
+                {
+                    AppendFlattened(block.StatementList.Statements, flattened);
+                }
+                else
+                {
+                    flattened.Add(statement);
+                }
             }
         }
 

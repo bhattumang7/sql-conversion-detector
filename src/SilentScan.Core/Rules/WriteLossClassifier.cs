@@ -51,37 +51,58 @@ public static class WriteLossClassifier
     private static bool IsUnicodeReplacementRisk(SqlType target, SqlType source, Literal? literal) =>
         source.IsUnicodeString && target.IsNonUnicodeString && !IsAsciiOnlyLiteral(literal);
 
-    private static Predicates.WriteLossKind? NumericNarrowingKind(SqlType target, SqlType source, Literal? literal)
+    private enum NumericFamily
     {
-        if (!target.IsNumericFamily || !source.IsNumericFamily)
-        {
-            return null;
-        }
-
-        var targetScale = EffectiveNumericScale(target);
-        if (targetScale is not { } resolvedTargetScale)
-        {
-            return null;
-        }
-
-        var sourceScale = EffectiveNumericScale(source);
-        if (sourceScale is not { } resolvedSourceScale)
-        {
-            return IsWithinScaleLiteral(literal, resolvedTargetScale) ? null : Predicates.WriteLossKind.ApproximateToExactTruncation;
-        }
-
-        return resolvedTargetScale < resolvedSourceScale && !IsWithinScaleLiteral(literal, resolvedTargetScale)
-            ? Predicates.WriteLossKind.NumericScaleNarrowing
-            : null;
+        Exact,
+        Approximate,
     }
 
-    private static int? EffectiveNumericScale(SqlType type) => type.Category switch
+    private static readonly Dictionary<SqlTypeCategory, (NumericFamily Family, Func<SqlType, int> Rank)> NumericProfiles =
+        new Dictionary<SqlTypeCategory, (NumericFamily, Func<SqlType, int>)>
+        {
+            [SqlTypeCategory.TinyInt] = (NumericFamily.Exact, _ => 0),
+            [SqlTypeCategory.SmallInt] = (NumericFamily.Exact, _ => 0),
+            [SqlTypeCategory.Int] = (NumericFamily.Exact, _ => 0),
+            [SqlTypeCategory.BigInt] = (NumericFamily.Exact, _ => 0),
+            [SqlTypeCategory.SmallMoney] = (NumericFamily.Exact, _ => 4),
+            [SqlTypeCategory.Money] = (NumericFamily.Exact, _ => 4),
+            [SqlTypeCategory.Decimal] = (NumericFamily.Exact, type => type.Scale ?? 0),
+            [SqlTypeCategory.Real] = (NumericFamily.Approximate, _ => 24),
+            [SqlTypeCategory.Float] = (NumericFamily.Approximate, _ => 53),
+        };
+
+    private static Predicates.WriteLossKind? NumericNarrowingKind(SqlType target, SqlType source, Literal? literal)
     {
-        SqlTypeCategory.TinyInt or SqlTypeCategory.SmallInt or SqlTypeCategory.Int or SqlTypeCategory.BigInt => 0,
-        SqlTypeCategory.Money or SqlTypeCategory.SmallMoney => 4,
-        SqlTypeCategory.Decimal => type.Scale ?? 0,
-        _ => null,
-    };
+        if (!NumericProfiles.TryGetValue(target.Category, out var targetProfile) || !NumericProfiles.TryGetValue(source.Category, out var sourceProfile))
+        {
+            return null;
+        }
+
+        if (targetProfile.Family == NumericFamily.Exact && sourceProfile.Family == NumericFamily.Approximate)
+        {
+            var targetScale = targetProfile.Rank(target);
+            return IsWithinScaleLiteral(literal, targetScale) ? null : Predicates.WriteLossKind.ApproximateToExactTruncation;
+        }
+
+        if (targetProfile.Family != sourceProfile.Family)
+        {
+            return null;
+        }
+
+        var targetRank = targetProfile.Rank(target);
+        var sourceRank = sourceProfile.Rank(source);
+        if (targetRank >= sourceRank)
+        {
+            return null;
+        }
+
+        if (targetProfile.Family == NumericFamily.Exact && IsWithinScaleLiteral(literal, targetRank))
+        {
+            return null;
+        }
+
+        return Predicates.WriteLossKind.NumericScaleNarrowing;
+    }
 
     private static bool IsTemporalPrecisionLossRisk(SqlType target, SqlType source, Literal? literal) =>
         target.Category == SqlTypeCategory.Date && (IsWiderTemporal(source.Category) || source.IsStringFamily) && !IsDateOnlyLiteral(literal);

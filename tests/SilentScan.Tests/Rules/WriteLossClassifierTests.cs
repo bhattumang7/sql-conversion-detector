@@ -36,9 +36,31 @@ public sealed class WriteLossClassifierTests
     }
 
     [Fact]
-    public void FloatSource_IntoFloatTarget_NeverFlags()
+    public void FloatSource_IntoNarrowerRealTarget_Flags()
     {
         var target = new SqlType(SqlTypeCategory.Real);
+        var source = new SqlType(SqlTypeCategory.Float);
+
+        var kind = WriteLossClassifier.Classify(target, source, sourceExpression: null, isVariableTarget: true);
+
+        Assert.Equal(WriteLossKind.NumericScaleNarrowing, kind);
+    }
+
+    [Fact]
+    public void RealSource_IntoFloatTarget_NeverFlags()
+    {
+        var target = new SqlType(SqlTypeCategory.Float);
+        var source = new SqlType(SqlTypeCategory.Real);
+
+        var kind = WriteLossClassifier.Classify(target, source, sourceExpression: null, isVariableTarget: true);
+
+        Assert.Null(kind);
+    }
+
+    [Fact]
+    public void FloatSource_IntoFloatTarget_NeverFlags()
+    {
+        var target = new SqlType(SqlTypeCategory.Float);
         var source = new SqlType(SqlTypeCategory.Float);
 
         var kind = WriteLossClassifier.Classify(target, source, sourceExpression: null, isVariableTarget: true);
