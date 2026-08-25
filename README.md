@@ -62,19 +62,6 @@ uploaded anywhere, the scan is read-only, and every finding is machine-
 readable enough for an assistant to fix the SQL and re-scan to confirm the
 finding is gone.
 
-## Corpus study pipeline
-
-`corpus/manifest.json` pins a set of public SQL Server repositories. Clone
-them into `corpus/_clones/`, then:
-
-```
-dotnet run --project src/SilentScan.Cli -- scan-corpus-live [--manifest corpus/manifest.json]
-```
-
-Deploys each repo's DDL to the disposable Docker oracle and reports findings
-across every stream, to quantify prevalence and cost across real codebases
-rather than one database at a time.
-
 ## Verification oracle (Docker SQL Server)
 
 ```
@@ -92,7 +79,7 @@ against this instance's real plan XML before it ships.
   reporting.
 * `src/SilentScan.Live` — the live, engine-authoritative catalog reader and
   live-only scanners.
-* `src/SilentScan.Cli` — `scan-db` / `scan-corpus-live` / `rules-doc`.
+* `src/SilentScan.Cli` — `scan-db` / `rules-doc`.
 * `src/SilentScan.Verify` — the Docker-backed verification oracle.
 * `src/SilentScan.Bench` — benchmark harness.
 * `tests/SilentScan.Tests` — xUnit tests and fixtures.

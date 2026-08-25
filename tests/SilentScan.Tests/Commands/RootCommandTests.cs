@@ -46,18 +46,4 @@ public sealed class RootCommandTests
         Assert.Contains(command.Options, o => o.Name == "--plan-cache-evidence");
         Assert.Contains(command.Options, o => o.Name == "--fetch-sql-from-tables");
     }
-
-    [Fact]
-    public void ScanCorpusLiveCommand_Create_HasNameAndExpectedOptions()
-    {
-        var command = ScanCorpusLiveCommand.Create();
-
-        Assert.Equal("scan-corpus-live", command.Name);
-        Assert.Contains(command.Options, o => o.Name == "--manifest");
-        Assert.Contains(command.Options, o => o.Name == "--clones-root");
-        Assert.Contains(command.Options, o => o.Name == "--format");
-        Assert.Contains(command.Options, o => o.Name == "--confidence");
-        Assert.Contains(command.Options, o => o.Name == "--verbosity");
-        Assert.Contains(command.Options, o => o.Name == "--output");
-    }
 }

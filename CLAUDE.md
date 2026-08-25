@@ -6,7 +6,7 @@ Static analyser for SQL Server code.
 configuration/catalog data, it's in scope.** That's the whole rule — nothing
 else restricts what SilentScan can detect or how it detects it.
 
-**Tool-first.** The tool (`silentscan scan-db`/`scan-corpus-live`, JSON + SARIF
+**Tool-first.** The tool (`silentscan scan-db`, JSON + SARIF
 findings) is the deliverable. **Precision beats recall everywhere** — one false
 positive in a published finding is worse than ten missed true positives.
 

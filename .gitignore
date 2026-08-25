@@ -7,11 +7,6 @@ TestResults/
 .idea/
 .vscode/
 
-# Cloned corpus repositories are never checked in; only the manifest is.
-corpus/*
-!corpus/manifest.json
-!corpus/manifest.schema.json
-
 # Sonar scanner working data
 .sonarqube/
 .scannerwork/

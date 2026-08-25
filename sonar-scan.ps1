@@ -8,8 +8,8 @@
     Uses SonarScanner for .NET (dotnet-sonarscanner), which is the ONLY scanner
     that can analyze C#: it hooks into the MSBuild compilation so the Roslyn
     analyzers run. In the same pass it also picks up the non-.NET files
-    (corpus manifest, docs, test fixture .sql), so this is the single entry
-    point for the whole repo.
+    (docs, test fixture .sql), so this is the single entry point for the
+    whole repo.
 
     Layers covered:
       - .NET (Core/Cli/Verify/Bench/Tests) .. C#
@@ -253,7 +253,7 @@ try {
         "/d:sonar.token=$Token"
         "/d:sonar.scanner.scanAll=true"
         "/d:sonar.sourceEncoding=UTF-8"
-        "/d:sonar.exclusions=**/bin/**,**/obj/**,**/corpus/**,**/.sonarqube/**,**/*.scanbak,**/tests/SilentScan.Tests/fixtures/**/*.sql"
+        "/d:sonar.exclusions=**/bin/**,**/obj/**,**/.sonarqube/**,**/*.scanbak,**/tests/SilentScan.Tests/fixtures/**/*.sql"
         "/d:sonar.cpd.exclusions=docs/rules/**"
     )
     if ($WithCoverage) {
