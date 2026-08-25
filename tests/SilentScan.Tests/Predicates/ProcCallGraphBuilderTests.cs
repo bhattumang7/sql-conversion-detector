@@ -106,13 +106,65 @@ public sealed class ProcCallGraphBuilderTests
     }
 
     [Fact]
-    public void Build_SpExecuteSqlCall_ProducesNoEdge()
+    public void Build_SpExecuteSqlCall_RecordsNoEdgeButLedgersTheGap()
     {
-
         var (graph, ledger) = BuildFrom("EXEC sp_executesql N'SELECT 1';");
 
         Assert.Empty(graph.Edges);
-        Assert.DoesNotContain(ledger.Entries, e => e.ConstructKind == "procedure call graph edge");
+        Assert.Contains(ledger.Entries, e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("sp_executesql", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_DynamicStringExecCall_RecordsNoEdgeButLedgersTheGap()
+    {
+        var (graph, ledger) = BuildFrom("EXEC ('SELECT 1');");
+
+        Assert.Empty(graph.Edges);
+        Assert.Contains(ledger.Entries, e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("dynamic SQL string", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_ExecCallThroughProcedureNameVariable_RecordsNoEdgeButLedgersTheGap()
+    {
+        var (graph, ledger) = BuildFrom("""
+            DECLARE @ProcName sysname = N'dbo.SomeProc';
+            EXEC @ProcName;
+            """);
+
+        Assert.Empty(graph.Edges);
+        Assert.Contains(ledger.Entries, e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("variable holding the procedure name", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_NamedArgumentNotMatchingAnyFormalParameter_LedgersTheUnmatchedArgument()
+    {
+        var (graph, ledger) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Real int) AS SELECT 1;
+            GO
+            EXEC dbo.Callee @Typo = 5;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        Assert.Empty(edge.Arguments);
+        Assert.Contains(
+            ledger.Entries,
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("@Typo", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_ExcessPositionalArgument_LedgersTheUnmatchedArgument()
+    {
+        var (graph, ledger) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Only int) AS SELECT 1;
+            GO
+            EXEC dbo.Callee 1, 2;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        Assert.Single(edge.Arguments);
+        Assert.Contains(
+            ledger.Entries,
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("positional argument", StringComparison.Ordinal));
     }
 
     [Fact]

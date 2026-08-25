@@ -64,17 +64,37 @@ public static class ProcCallGraphBuilder
 
         public override void ExplicitVisit(ExecuteStatement node)
         {
-            if (node.ExecuteSpecification.ExecutableEntity is ExecutableProcedureReference
+            switch (node.ExecuteSpecification.ExecutableEntity)
+            {
+                case ExecutableProcedureReference
                 {
                     ProcedureReference.ProcedureReference.Name: { } calleeName,
                 } procedureReference
-                && !string.Equals(calleeName.BaseIdentifier.Value, "sp_executesql", StringComparison.OrdinalIgnoreCase))
-            {
-                VisitProcedureCall(node, procedureReference, calleeName);
+                    when !string.Equals(calleeName.BaseIdentifier.Value, "sp_executesql", StringComparison.OrdinalIgnoreCase):
+                    VisitProcedureCall(node, procedureReference, calleeName);
+                    break;
+
+                case ExecutableProcedureReference { ProcedureReference.ProcedureVariable: { } }:
+                    RecordUnresolvableCall(node, "EXEC target is a variable holding the procedure name - resolved dynamically, not statically");
+                    break;
+
+                case ExecutableProcedureReference
+                {
+                    ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: var spExecutesqlName,
+                } when string.Equals(spExecutesqlName, "sp_executesql", StringComparison.OrdinalIgnoreCase):
+                    RecordUnresolvableCall(node, "EXEC target is sp_executesql - the executed statement text is dynamic, not a statically known procedure");
+                    break;
+
+                case ExecutableStringList:
+                    RecordUnresolvableCall(node, "EXEC target is a dynamic SQL string, not a statically known procedure");
+                    break;
             }
 
             node.AcceptChildren(this);
         }
+
+        private void RecordUnresolvableCall(ExecuteStatement node, string reason) =>
+            ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, CallGraphConstructKind, reason);
 
         private void VisitScopedBody(SchemaObjectName name, StatementList? statementList)
         {
@@ -143,14 +163,15 @@ public static class ProcCallGraphBuilder
             }
 
             var arguments = MatchArguments(
-                procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements, node, _variableTypes, catalog.TypeAliases);
+                procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements, node, _variableTypes, catalog.TypeAliases,
+                qualifiedName, ledger);
             Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
 
         private static List<ProcCallArgument> MatchArguments(
             IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, string sourcePath,
             IList<TSqlStatement>? currentScopeStatements, ExecuteStatement callSite, IReadOnlyDictionary<string, SqlType?> variableTypes,
-            IReadOnlyDictionary<string, SqlType>? typeAliases)
+            IReadOnlyDictionary<string, SqlType>? typeAliases, string qualifiedCalleeName, SkipLedger ledger)
         {
             var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
             var positionalCursor = 0;
@@ -171,6 +192,10 @@ public static class ProcCallGraphBuilder
 
                 if (formal is null)
                 {
+                    var reason = actual.Variable is { } unmatchedName
+                        ? $"argument '{unmatchedName.Name}' does not match any declared parameter of '{qualifiedCalleeName}' - argument not matched to a formal parameter"
+                        : $"positional argument does not match any declared parameter of '{qualifiedCalleeName}' - argument not matched to a formal parameter";
+                    ledger.Record(AnalysisPass.Predicates, sourcePath, actual.StartLine, actual.StartColumn, CallGraphConstructKind, reason);
                     continue;
                 }
 

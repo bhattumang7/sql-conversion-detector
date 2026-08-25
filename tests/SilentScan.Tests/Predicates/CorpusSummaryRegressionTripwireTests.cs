@@ -39,8 +39,9 @@ public sealed class CorpusSummaryRegressionTripwireTests
         Assert.Equal(1, Assert.Contains("symbolic-value-not-positionable:whole-statement", dynamicSql.UnanalyzableReasonCounts));
 
         var skipped = report.SkippedConstructSummary;
-        Assert.Equal(1, skipped.TotalCount);
+        Assert.Equal(6, skipped.TotalCount);
         Assert.Equal(1, Assert.Contains("no column operand", skipped.CountsByConstructKind));
+        Assert.Equal(5, Assert.Contains("procedure call graph edge", skipped.CountsByConstructKind));
 
         Assert.Single(report.Tier1Findings);
         Assert.Equal(6, report.TypedFindings.Count);
@@ -48,6 +49,6 @@ public sealed class CorpusSummaryRegressionTripwireTests
         Assert.Empty(report.CollationConflictFindings);
         Assert.Empty(report.WriteLossFindings);
         Assert.Equal(5, report.DynamicSqlFindings.Count);
-        Assert.Single(report.SkippedConstructs);
+        Assert.Equal(6, report.SkippedConstructs.Count);
     }
 }
