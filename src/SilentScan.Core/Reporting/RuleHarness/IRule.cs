@@ -26,7 +26,7 @@ public interface ICatalogRule : IRule
     IReadOnlyList<IFinding> Scan(RuleContext context);
 }
 
-public interface ICorpusRule : IRule
+public interface ICrossModuleRule : IRule
 {
     IReadOnlyList<IFinding> Scan(IReadOnlyList<SqlParseResult> parseResults, RuleContext context);
 }

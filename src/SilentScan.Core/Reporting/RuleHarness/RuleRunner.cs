@@ -71,8 +71,8 @@ public static class RuleRunner
             {
                 IPerFileRule perFileRule => RunPerFileRule(perFileRule, parseResults, context, progress, crashes, out comparer),
                 ICatalogRule catalogRule => RunCatalogRule(catalogRule, context, crashes),
-                ICorpusRule corpusRule => RunCorpusRule(corpusRule, parseResults, context, crashes),
-                _ => throw new InvalidOperationException($"Rule '{rule.Id}' does not implement IPerFileRule, ICatalogRule, or ICorpusRule."),
+                ICrossModuleRule crossModuleRule => RunCrossModuleRule(crossModuleRule, parseResults, context, crashes),
+                _ => throw new InvalidOperationException($"Rule '{rule.Id}' does not implement IPerFileRule, ICatalogRule, or ICrossModuleRule."),
             };
 
             var filtered = rule.ApplyConfidenceFilter ? raw.Where(f => f.Confidence <= minimumConfidence) : raw;
@@ -156,7 +156,7 @@ public static class RuleRunner
         }
     }
 
-    private static IReadOnlyList<IFinding> RunCorpusRule(ICorpusRule rule, IReadOnlyList<SqlParseResult> parseResults, RuleContext context, List<SkippedConstruct> crashes)
+    private static IReadOnlyList<IFinding> RunCrossModuleRule(ICrossModuleRule rule, IReadOnlyList<SqlParseResult> parseResults, RuleContext context, List<SkippedConstruct> crashes)
     {
         try
         {
