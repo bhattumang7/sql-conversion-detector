@@ -66,9 +66,6 @@ public static class AlterColumnSafetyScanner
     private static bool IsIncompatibleFamilyConversion(SqlType previous, SqlType next) =>
         IsCharFamily(previous.Category) && next.IsBinaryFamily;
 
-    private static bool IsFractionalSecondsFamily(SqlTypeCategory category) => category is
-        SqlTypeCategory.Time or SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset;
-
     private static bool IsPrecisionOrScaleNarrowing(SqlType previous, SqlType next)
     {
         if (previous.Category == SqlTypeCategory.Decimal && next.Category == SqlTypeCategory.Decimal)
@@ -80,11 +77,9 @@ public static class AlterColumnSafetyScanner
             return nextPrecision < previousPrecision || nextScale < previousScale;
         }
 
-        if (IsFractionalSecondsFamily(previous.Category) && next.Category == previous.Category)
+        if (WriteLossClassifier.IsTemporalScaleNarrowingRisk(next, previous))
         {
-            var previousScale = previous.Scale ?? 7;
-            var nextScale = next.Scale ?? 7;
-            return nextScale < previousScale;
+            return true;
         }
 
         return NumericFamilyNarrowing.Classify(next, previous) is not null;

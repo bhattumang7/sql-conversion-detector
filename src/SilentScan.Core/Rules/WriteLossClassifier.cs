@@ -76,7 +76,7 @@ public static class WriteLossClassifier
         && target.Category is SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTime or SqlTypeCategory.SmallDateTime
             or SqlTypeCategory.Date or SqlTypeCategory.Time;
 
-    private static bool IsTemporalScaleNarrowingRisk(SqlType target, SqlType source) =>
+    public static bool IsTemporalScaleNarrowingRisk(SqlType target, SqlType source) =>
         target.IsFractionalSecondsFamily && source.IsFractionalSecondsFamily
         && target.Scale is { } targetScale && source.Scale is { } sourceScale && targetScale < sourceScale;
 
