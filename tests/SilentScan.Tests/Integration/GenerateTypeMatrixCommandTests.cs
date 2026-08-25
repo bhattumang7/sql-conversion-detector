@@ -34,12 +34,13 @@ public sealed class GenerateTypeMatrixCommandTests : IDisposable
             _outputPath,
             Options,
             stdout,
-            numericFamily: numericSubset,
-            dateTimeFamily: [],
-            stringFamily: [],
-            collations: [],
-            crossFamilyOther: [],
-            binaryFamily: []);
+            new TypeMatrixFamilies(
+                NumericFamily: numericSubset,
+                DateTimeFamily: [],
+                StringFamily: [],
+                Collations: [],
+                CrossFamilyOther: [],
+                BinaryFamily: []));
 
         Assert.Equal(0, exitCode);
 
@@ -86,12 +87,13 @@ public sealed class GenerateTypeMatrixCommandTests : IDisposable
             _outputPath,
             Options,
             stdout,
-            numericFamily: [],
-            dateTimeFamily: [],
-            stringFamily: [],
-            collations: [],
-            crossFamilyOther: [],
-            binaryFamily: []);
+            new TypeMatrixFamilies(
+                NumericFamily: [],
+                DateTimeFamily: [],
+                StringFamily: [],
+                Collations: [],
+                CrossFamilyOther: [],
+                BinaryFamily: []));
 
         Assert.Equal(0, exitCode);
 

@@ -109,16 +109,14 @@ public sealed class DanglingObjectReferenceChecker
         }
         catch (SqlException ex) when (ex.Number == 2020)
         {
-
+            _ = ex;
         }
         catch (SqlException ex) when (ex.Number == 208)
         {
-
             stillUnresolved = ex.Message.Contains(candidate.ReferencedEntityName, StringComparison.OrdinalIgnoreCase);
         }
         catch (SqlException ex) when (ex.Number == 207)
         {
-
             stillUnresolved = ex.Message.Contains(candidate.ReferencedEntityName, StringComparison.OrdinalIgnoreCase);
         }
 

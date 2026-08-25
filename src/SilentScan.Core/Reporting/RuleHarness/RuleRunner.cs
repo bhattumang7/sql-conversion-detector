@@ -51,6 +51,8 @@ public sealed class RuleRunResult(
 
 public static class RuleRunner
 {
+    private const string RuleCrashKind = "RuleCrash";
+
     public static RuleRunResult Run(
         IReadOnlyList<IRule> rules,
         IReadOnlyList<SqlParseResult> parseResults,
@@ -99,7 +101,7 @@ public static class RuleRunner
         {
             lock (crashes)
             {
-                crashes.Add(new SkippedConstruct(AnalysisPass.Predicates, string.Empty, 0, 0, "RuleCrash", $"{rule.Id}: {ex.Message}"));
+                crashes.Add(new SkippedConstruct(AnalysisPass.Predicates, string.Empty, 0, 0, RuleCrashKind, $"{rule.Id}: {ex.Message}"));
             }
             return [];
         }
@@ -119,7 +121,7 @@ public static class RuleRunner
                 {
                     lock (crashes)
                     {
-                        crashes.Add(new SkippedConstruct(AnalysisPass.Predicates, parseResult.SourcePath, 0, 0, "RuleCrash", $"{rule.Id}: {ex.Message}"));
+                        crashes.Add(new SkippedConstruct(AnalysisPass.Predicates, parseResult.SourcePath, 0, 0, RuleCrashKind, $"{rule.Id}: {ex.Message}"));
                     }
                     perFileFindings = [];
                 }
@@ -135,7 +137,7 @@ public static class RuleRunner
         }
         catch (Exception ex)
         {
-            crashes.Add(new SkippedConstruct(AnalysisPass.Predicates, string.Empty, 0, 0, "RuleCrash", $"{rule.Id}: {ex.Message}"));
+            crashes.Add(new SkippedConstruct(AnalysisPass.Predicates, string.Empty, 0, 0, RuleCrashKind, $"{rule.Id}: {ex.Message}"));
         }
 
         return findings;
@@ -149,7 +151,7 @@ public static class RuleRunner
         }
         catch (Exception ex)
         {
-            crashes.Add(new SkippedConstruct(AnalysisPass.Predicates, string.Empty, 0, 0, "RuleCrash", $"{rule.Id}: {ex.Message}"));
+            crashes.Add(new SkippedConstruct(AnalysisPass.Predicates, string.Empty, 0, 0, RuleCrashKind, $"{rule.Id}: {ex.Message}"));
             return [];
         }
     }
@@ -162,7 +164,7 @@ public static class RuleRunner
         }
         catch (Exception ex)
         {
-            crashes.Add(new SkippedConstruct(AnalysisPass.Predicates, string.Empty, 0, 0, "RuleCrash", $"{rule.Id}: {ex.Message}"));
+            crashes.Add(new SkippedConstruct(AnalysisPass.Predicates, string.Empty, 0, 0, RuleCrashKind, $"{rule.Id}: {ex.Message}"));
             return [];
         }
     }

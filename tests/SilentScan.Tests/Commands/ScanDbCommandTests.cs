@@ -12,7 +12,7 @@ public sealed class ScanDbCommandTests
         var options = new ReportOptions("xml", "high", null, "brief");
 
         var exitCode = await ScanDbCommand.RunAsync(
-            "Server=nonexistent-host;Database=db", includePlanCacheEvidence: false, fetchSqlFromTables: false, strict: false, options, stdout, stderr, CancellationToken.None);
+            "Server=nonexistent-host;Database=db", new ScanFlags(false, false, false), options, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("unknown --format", stderr.ToString());
@@ -27,7 +27,7 @@ public sealed class ScanDbCommandTests
         var options = new ReportOptions("text", "extreme", null, "brief");
 
         var exitCode = await ScanDbCommand.RunAsync(
-            "Server=nonexistent-host;Database=db", includePlanCacheEvidence: false, fetchSqlFromTables: false, strict: false, options, stdout, stderr, CancellationToken.None);
+            "Server=nonexistent-host;Database=db", new ScanFlags(false, false, false), options, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("unknown --confidence", stderr.ToString());
@@ -41,7 +41,7 @@ public sealed class ScanDbCommandTests
         var options = new ReportOptions("text", "high", null, "verbose");
 
         var exitCode = await ScanDbCommand.RunAsync(
-            "Server=nonexistent-host;Database=db", includePlanCacheEvidence: false, fetchSqlFromTables: false, strict: false, options, stdout, stderr, CancellationToken.None);
+            "Server=nonexistent-host;Database=db", new ScanFlags(false, false, false), options, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("unknown --verbosity", stderr.ToString());
@@ -56,7 +56,7 @@ public sealed class ScanDbCommandTests
 
         var exitCode = await ScanDbCommand.RunAsync(
             "Server=127.0.0.1,1;Database=db;Connect Timeout=1;TrustServerCertificate=true",
-            includePlanCacheEvidence: false, fetchSqlFromTables: false, strict: false, options, stdout, stderr, CancellationToken.None);
+            new ScanFlags(false, false, false), options, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("error: could not scan the live database", stderr.ToString());

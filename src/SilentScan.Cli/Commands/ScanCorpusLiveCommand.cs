@@ -99,32 +99,69 @@ public static class ScanCorpusLiveCommand
             return 1;
         }
 
+        var validated = await ValidateOptionsAsync(options, stderr);
+        if (validated.ExitCode is { } earlyExitCode)
+        {
+            return earlyExitCode;
+        }
+
+        var manifest = CorpusManifestLoader.Load(manifestPath);
+        var sqlOptions = SqlServerOptions.LocalDocker;
+        var scan = await ScanAllReposAsync(manifest, clonesRoot, sqlOptions, stderr, validated.Confidence, cancellationToken);
+
+        var content = validated.Format == ReportFormat.Json
+            ? JsonSerializer.Serialize(scan.ReportsByRepo, JsonOptions)
+            : ReadableCorpusReportWriter.Write(
+                [.. scan.ReadableRepos.OrderBy(r => r.Name, StringComparer.Ordinal)],
+                [.. scan.MissingRepos.OrderBy(name => name, StringComparer.Ordinal)],
+                ReportOutput.ToStyle(validated.Format),
+                validated.Verbosity);
+
+        if (!ReportOutput.Emit(content, options.OutputPath, stdout, stderr))
+        {
+            return 1;
+        }
+
+        if (scan.HadMissingRepo || scan.HadUnexpectedFailure)
+        {
+            return 1;
+        }
+
+        return strict && scan.ReportsByRepo.Values.Any(r => ReportOutput.HasCoverageGaps(r.Report)) ? 1 : 0;
+    }
+
+    private static async Task<ValidatedOptions> ValidateOptionsAsync(ReportOptions options, TextWriter stderr)
+    {
         if (!ReportOutput.TryParseFormat(options.Format, out var reportFormat))
         {
             await stderr.WriteLineAsync(ReportOutput.UnknownFormatMessage(options.Format));
-            return 1;
+            return new ValidatedOptions(1, default, default, default);
         }
 
         if (reportFormat == ReportFormat.Sarif)
         {
             await stderr.WriteLineAsync("error: scan-corpus-live does not support --format sarif; run `scan-db` against a single database for a SARIF log.");
-            return 1;
+            return new ValidatedOptions(1, default, default, default);
         }
 
         if (!ReportOutput.TryParseConfidence(options.Confidence, out var minimumConfidence))
         {
             await stderr.WriteLineAsync(ReportOutput.UnknownConfidenceMessage(options.Confidence));
-            return 1;
+            return new ValidatedOptions(1, default, default, default);
         }
 
         if (!ReportOutput.TryParseVerbosity(options.Verbosity, out var verbosity))
         {
             await stderr.WriteLineAsync(ReportOutput.UnknownVerbosityMessage(options.Verbosity));
-            return 1;
+            return new ValidatedOptions(1, default, default, default);
         }
 
-        var manifest = CorpusManifestLoader.Load(manifestPath);
-        var sqlOptions = SqlServerOptions.LocalDocker;
+        return new ValidatedOptions(null, reportFormat, minimumConfidence, verbosity);
+    }
+
+    private static async Task<CorpusScanAccumulator> ScanAllReposAsync(
+        CorpusManifest manifest, string clonesRoot, SqlServerOptions sqlOptions, TextWriter stderr, FindingConfidence minimumConfidence, CancellationToken cancellationToken)
+    {
         var reportsByRepo = new SortedDictionary<string, CorpusLiveRepoResult>(StringComparer.Ordinal);
         var readableRepos = new List<ReadableCorpusRepo>();
         var missingRepos = new List<string>();
@@ -153,26 +190,17 @@ public static class ScanCorpusLiveCommand
             readableRepos.Add(new ReadableCorpusRepo(repo.Name, outcome.Report, repoRoot));
         }
 
-        var content = reportFormat == ReportFormat.Json
-            ? JsonSerializer.Serialize(reportsByRepo, JsonOptions)
-            : ReadableCorpusReportWriter.Write(
-                [.. readableRepos.OrderBy(r => r.Name, StringComparer.Ordinal)],
-                [.. missingRepos.OrderBy(name => name, StringComparer.Ordinal)],
-                ReportOutput.ToStyle(reportFormat),
-                verbosity);
-
-        if (!ReportOutput.Emit(content, options.OutputPath, stdout, stderr))
-        {
-            return 1;
-        }
-
-        if (hadMissingRepo || hadUnexpectedFailure)
-        {
-            return 1;
-        }
-
-        return strict && reportsByRepo.Values.Any(r => ReportOutput.HasCoverageGaps(r.Report)) ? 1 : 0;
+        return new CorpusScanAccumulator(reportsByRepo, readableRepos, missingRepos, hadMissingRepo, hadUnexpectedFailure);
     }
+
+    private sealed record ValidatedOptions(int? ExitCode, ReportFormat Format, FindingConfidence Confidence, ReadableVerbosity Verbosity);
+
+    private sealed record CorpusScanAccumulator(
+        SortedDictionary<string, CorpusLiveRepoResult> ReportsByRepo,
+        List<ReadableCorpusRepo> ReadableRepos,
+        List<string> MissingRepos,
+        bool HadMissingRepo,
+        bool HadUnexpectedFailure);
 
     private static async Task<CorpusLiveRepoResult?> ScanOneRepoAsync(
         CorpusRepoEntry repo, string repoRoot, SqlServerOptions sqlOptions, TextWriter stderr, FindingConfidence minimumConfidence,

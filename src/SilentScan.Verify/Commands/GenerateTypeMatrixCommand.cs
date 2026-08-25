@@ -6,6 +6,14 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Verify.Commands;
 
+public sealed record TypeMatrixFamilies(
+    IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? NumericFamily = null,
+    IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? DateTimeFamily = null,
+    IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? StringFamily = null,
+    IReadOnlyList<string>? Collations = null,
+    IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? CrossFamilyOther = null,
+    IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? BinaryFamily = null);
+
 public static class GenerateTypeMatrixCommand
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -38,22 +46,18 @@ public static class GenerateTypeMatrixCommand
         string outputPath,
         SqlServerOptions sqlOptions,
         TextWriter stdout,
-        IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? numericFamily = null,
-        IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? dateTimeFamily = null,
-        IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? stringFamily = null,
-        IReadOnlyList<string>? collations = null,
-        IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? crossFamilyOther = null,
-        IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? binaryFamily = null,
+        TypeMatrixFamilies? families = null,
         CancellationToken cancellationToken = default)
     {
+        families ??= new TypeMatrixFamilies();
         var generator = new TypeMatrixGenerator(sqlOptions);
         var (entries, serverVersion) = await generator.GenerateAsync(
-            numericFamily ?? TypeMatrixGenerator.NumericFamily,
-            dateTimeFamily ?? TypeMatrixGenerator.DateTimeFamily,
-            stringFamily ?? TypeMatrixGenerator.StringFamily,
-            collations ?? TypeMatrixGenerator.Collations,
-            crossFamilyOther ?? TypeMatrixGenerator.CrossFamilyOther,
-            binaryFamily ?? TypeMatrixGenerator.BinaryFamily,
+            families.NumericFamily ?? TypeMatrixGenerator.NumericFamily,
+            families.DateTimeFamily ?? TypeMatrixGenerator.DateTimeFamily,
+            families.StringFamily ?? TypeMatrixGenerator.StringFamily,
+            families.Collations ?? TypeMatrixGenerator.Collations,
+            families.CrossFamilyOther ?? TypeMatrixGenerator.CrossFamilyOther,
+            families.BinaryFamily ?? TypeMatrixGenerator.BinaryFamily,
             cancellationToken);
 
         var document = new

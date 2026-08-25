@@ -30,7 +30,7 @@ public sealed class ScanDbCommandOracleTests : OracleTestFixture
         var options = new ReportOptions("text", "high", null, "brief");
 
         var exitCode = await ScanDbCommand.RunAsync(
-            Options.BuildConnectionString(DatabaseName), includePlanCacheEvidence: false, fetchSqlFromTables: false, strict: false, options, stdout, stderr, CancellationToken.None);
+            Options.BuildConnectionString(DatabaseName), new ScanFlags(false, false, false), options, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("usp_FindWidget", stdout.ToString());
@@ -46,7 +46,7 @@ public sealed class ScanDbCommandOracleTests : OracleTestFixture
         var options = new ReportOptions("json", "high", null, "brief");
 
         var exitCode = await ScanDbCommand.RunAsync(
-            Options.BuildConnectionString(DatabaseName), includePlanCacheEvidence: false, fetchSqlFromTables: false, strict: false, options, stdout, stderr, CancellationToken.None);
+            Options.BuildConnectionString(DatabaseName), new ScanFlags(false, false, false), options, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         using var document = JsonDocument.Parse(stdout.ToString());
@@ -61,7 +61,7 @@ public sealed class ScanDbCommandOracleTests : OracleTestFixture
         var options = new ReportOptions("sarif", "high", null, "brief");
 
         var exitCode = await ScanDbCommand.RunAsync(
-            Options.BuildConnectionString(DatabaseName), includePlanCacheEvidence: false, fetchSqlFromTables: false, strict: false, options, stdout, stderr, CancellationToken.None);
+            Options.BuildConnectionString(DatabaseName), new ScanFlags(false, false, false), options, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         using var document = JsonDocument.Parse(stdout.ToString());
@@ -80,7 +80,7 @@ public sealed class ScanDbCommandOracleTests : OracleTestFixture
             var options = new ReportOptions("text", "high", outputPath, "brief");
 
             var exitCode = await ScanDbCommand.RunAsync(
-                Options.BuildConnectionString(DatabaseName), includePlanCacheEvidence: false, fetchSqlFromTables: false, strict: false, options, stdout, stderr, CancellationToken.None);
+                Options.BuildConnectionString(DatabaseName), new ScanFlags(false, false, false), options, stdout, stderr, CancellationToken.None);
 
             Assert.Equal(0, exitCode);
             Assert.DoesNotContain("usp_FindWidget", stdout.ToString());
@@ -106,7 +106,7 @@ public sealed class ScanDbCommandOracleTests : OracleTestFixture
         var options = new ReportOptions("text", "high", outputPath, "brief");
 
         var exitCode = await ScanDbCommand.RunAsync(
-            Options.BuildConnectionString(DatabaseName), includePlanCacheEvidence: false, fetchSqlFromTables: false, strict: false, options, stdout, stderr, CancellationToken.None);
+            Options.BuildConnectionString(DatabaseName), new ScanFlags(false, false, false), options, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains($"error: could not write the report to {outputPath}", stderr.ToString());
@@ -121,7 +121,7 @@ public sealed class ScanDbCommandOracleTests : OracleTestFixture
         var options = new ReportOptions("text", "high", null, "brief");
 
         var exitCode = await ScanDbCommand.RunAsync(
-            Options.BuildConnectionString(DatabaseName), includePlanCacheEvidence: true, fetchSqlFromTables: false, strict: false, options, stdout, stderr, CancellationToken.None);
+            Options.BuildConnectionString(DatabaseName), new ScanFlags(true, false, false), options, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("usp_FindWidget", stdout.ToString());

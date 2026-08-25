@@ -797,12 +797,9 @@ public sealed class DynamicSqlCfg
 
         public override void ExplicitVisit(DeclareVariableStatement node)
         {
-            foreach (var element in node.Declarations)
+            foreach (var element in node.Declarations.Where(element => element.Value is not null))
             {
-                if (element.Value is not null)
-                {
-                    Names.Add(element.VariableName.Value);
-                }
+                Names.Add(element.VariableName.Value);
             }
 
             base.ExplicitVisit(node);

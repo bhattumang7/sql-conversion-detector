@@ -8,6 +8,8 @@ using SilentScan.Live;
 
 namespace SilentScan.Cli.Commands;
 
+public readonly record struct ScanFlags(bool IncludePlanCacheEvidence, bool FetchSqlFromTables, bool Strict);
+
 public static class ScanDbCommand
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -87,14 +89,14 @@ public static class ScanDbCommand
                 parseResult.GetValue(confidenceOption)!,
                 parseResult.GetValue(outputOption),
                 parseResult.GetValue(verbosityOption)!);
-            return await RunAsync(connectionString, planCacheEvidence, fetchSqlFromTables, strict, options, Console.Out, Console.Error, cancellationToken);
+            return await RunAsync(connectionString, new ScanFlags(planCacheEvidence, fetchSqlFromTables, strict), options, Console.Out, Console.Error, cancellationToken);
         });
 
         return command;
     }
 
     internal static async Task<int> RunAsync(
-        string connectionString, bool includePlanCacheEvidence, bool fetchSqlFromTables, bool strict, ReportOptions options, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken = default)
+        string connectionString, ScanFlags flags, ReportOptions options, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken = default)
     {
         if (!ReportOutput.TryParseFormat(options.Format, out var reportFormat))
         {
@@ -120,7 +122,7 @@ public static class ScanDbCommand
         LiveScanResult result;
         try
         {
-            result = await LiveScanRunner.RunAsync(connectionString, includePlanCacheEvidence, minimumConfidence, progress, fetchSqlFromTables, cancellationToken);
+            result = await LiveScanRunner.RunAsync(connectionString, flags.IncludePlanCacheEvidence, minimumConfidence, progress, flags.FetchSqlFromTables, cancellationToken);
         }
         catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
         {
@@ -154,7 +156,7 @@ public static class ScanDbCommand
             return 1;
         }
 
-        return strict && ReportOutput.HasCoverageGaps(result.Report) ? 1 : 0;
+        return flags.Strict && ReportOutput.HasCoverageGaps(result.Report) ? 1 : 0;
     }
 
     private static async Task WarnOnParseHealthAsync(LiveScanResult result, TextWriter stderr)
