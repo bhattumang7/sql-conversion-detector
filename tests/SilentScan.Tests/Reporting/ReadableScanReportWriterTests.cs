@@ -250,109 +250,18 @@ public sealed class ReadableScanReportWriterTests
             "the finding with a real index underneath its expression must print before the one with none, regardless of source path order");
     }
 
-    private static ScanReport ReportWithFindingAt(string sourcePath) => new(
-        new ParseHealthReport([]),
-            [],
-        [new TypedPredicateFinding(
-            Verdict.ScanForced,
-            new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar), Indexed: true, Depth: 0, Provenance: null!),
-            new PredicateOperand.Value(null),
-            "=",
-            sourcePath,
-            1,
-            1)],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-            [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-            [],
-            [],
-            [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-            [],
-        [],
-        [],
-        [],
-        SkippedConstructSummary.From([]),
-        TypedPredicateSummary.From([]),
-        DynamicSqlSummary.From([]));
+    private static ScanReport ReportWithFindingAt(string sourcePath) => TestScanReports.Build(
+        TypedFindings:
+        [
+            new TypedPredicateFinding(
+                Verdict.ScanForced,
+                new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar), Indexed: true, Depth: 0, Provenance: null!),
+                new PredicateOperand.Value(null),
+                "=",
+                sourcePath,
+                1,
+                1),
+        ]);
 
     private static int CountOccurrences(string haystack, string needle)
     {
@@ -413,7 +322,6 @@ public sealed class ReadableScanReportWriterTests
         IndexHintFindings: [],
         SessionDateSettingFindings: [],
         CartesianJoinFindings: [],
-        UndersizedDeclarationFindings: [],
         TruncateSwallowedFindings: [],
         UnindexedTempTableUsageFindings: [],
         OutputParameterFindings: [],
@@ -714,7 +622,7 @@ public sealed class ReadableScanReportWriterTests
             "a.sql", 10, 1);
         var report = Blank() with { WriteLossFindings = [finding] };
 
-        var table = TableAfterHeading(BuildBlocks(report), "Assignments risking silent data loss");
+        var table = TableAfterHeading(BuildBlocks(report), "Numeric scale narrowing");
 
         Assert.Equal("a.sql:10", Assert.Single(table.Rows)[0]);
     }
@@ -728,7 +636,7 @@ public sealed class ReadableScanReportWriterTests
             "a.sql", 10, 1, Confidence: FindingConfidence.Low);
         var report = Blank() with { WriteLossFindings = [finding] };
 
-        var table = TableAfterHeading(BuildBlocks(report), "Assignments risking silent data loss");
+        var table = TableAfterHeading(BuildBlocks(report), "Numeric scale narrowing");
 
         Assert.Equal("a.sql:10 [LOW CONFIDENCE]", Assert.Single(table.Rows)[0]);
     }
@@ -742,7 +650,7 @@ public sealed class ReadableScanReportWriterTests
             "inner.sql", 3, 1, DynamicSqlCallSite: new SourceSpan("caller.sql", 40, 1));
         var report = Blank() with { WriteLossFindings = [throughDynamicSql] };
 
-        var table = TableAfterHeading(BuildBlocks(report), "Assignments risking silent data loss");
+        var table = TableAfterHeading(BuildBlocks(report), "Numeric scale narrowing");
 
         Assert.Equal("inner.sql:3 (in dynamic SQL run at caller.sql:40)", Assert.Single(table.Rows)[0]);
     }
@@ -918,8 +826,9 @@ public sealed class ReadableScanReportWriterTests
         };
         var report = Blank() with { WriteLossFindings = findings };
 
-        var table = TableAfterHeading(BuildBlocks(report), "Assignments risking silent data loss");
-        var byColumn = table.Rows.ToDictionary(r => r[1]);
+        var byColumn = TablesUnderHeading(BuildBlocks(report), "Assignments risking silent data loss")
+            .SelectMany(t => t.Rows)
+            .ToDictionary(r => r[1]);
 
         Assert.Equal("Unicode characters outside the target's codepage become '?'", byColumn["dbo.T.A"][4]);
         Assert.Equal("fractional part silently dropped", byColumn["dbo.T.B"][4]);
@@ -937,11 +846,12 @@ public sealed class ReadableScanReportWriterTests
         };
         var report = Blank() with { IndexDesignFindings = findings };
 
-        var table = TableAfterHeading(BuildBlocks(report), "Physical/schema index design");
+        var blocks = BuildBlocks(report);
+        var unindexedForeignKeyTable = TableAfterHeading(blocks, "Unindexed foreign key");
+        var duplicateIndexTable = TableAfterHeading(blocks, "Duplicate index");
 
-        var byKind = table.Rows.ToDictionary(r => r[1]);
-        Assert.Equal("(table-level)", byKind["UnindexedForeignKey"][2]);
-        Assert.Equal("<unnamed>", byKind["DuplicateIndex"][2]);
+        Assert.Equal("(table-level)", Assert.Single(unindexedForeignKeyTable.Rows)[1]);
+        Assert.Equal("<unnamed>", Assert.Single(duplicateIndexTable.Rows)[1]);
     }
 
     [Fact]
@@ -952,7 +862,7 @@ public sealed class ReadableScanReportWriterTests
             "TestDb", AffectedObjectName: "dbo.T.GeoCol", Dependency: "geography", TargetCompatibilityLevel: 160);
         var report = Blank() with { DatabaseConfigurationFindings = [finding] };
 
-        var table = TableAfterHeading(BuildBlocks(report), "Database-level configuration flags");
+        var table = TableAfterHeading(BuildBlocks(report), "Spatial persisted computed column disabled on compatibility level change");
 
         Assert.Equal("dbo.T.GeoCol disabled at compatibility level 160 (geography)", Assert.Single(table.Rows)[1]);
     }
@@ -990,14 +900,13 @@ public sealed class ReadableScanReportWriterTests
         var heading = blocks.OfType<ReadableBlock.Heading>().First(h => h.Text.Contains("Dynamic SQL not fully analyzed", StringComparison.Ordinal));
         Assert.Equal("Dynamic SQL not fully analyzed (3)", heading.Text);
 
-        var table = TableAfterHeading(blocks, "Dynamic SQL not fully analyzed");
-        Assert.Equal(3, table.Rows.Count);
-        Assert.DoesNotContain(table.Rows, r => r[0] == "a.sql:1");
+        var rows = TablesUnderHeading(blocks, "Dynamic SQL not fully analyzed").SelectMany(t => t.Rows).ToList();
+        Assert.Equal(3, rows.Count);
+        Assert.DoesNotContain(rows, r => r[0] == "a.sql:1");
 
-        var byLine = table.Rows.ToDictionary(r => r[0]);
-        Assert.Equal("not provably constant", byLine["a.sql:2"][1]);
-        Assert.Equal("partially analyzed - an unresolvable fragment was elided", byLine["a.sql:3"][1]);
-        Assert.Equal("constant, but did not parse as T-SQL", byLine["a.sql:4"][1]);
+        Assert.Equal("runtime value", Assert.Single(TableAfterHeading(blocks, "not provably constant").Rows)[1]);
+        Assert.Single(TableAfterHeading(blocks, "partially analyzed - an unresolvable fragment was elided").Rows);
+        Assert.Single(TableAfterHeading(blocks, "constant, but did not parse as T-SQL").Rows);
     }
 
     [Fact]

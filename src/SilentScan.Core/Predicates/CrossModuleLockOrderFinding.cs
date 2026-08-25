@@ -1,4 +1,5 @@
 
+using SilentScan.Core.Rules;
 namespace SilentScan.Core.Predicates;
 
 public sealed record LockOrderProcedureSite(
@@ -11,5 +12,7 @@ public sealed record CrossModuleLockOrderFinding(
     LockOrderProcedureSite SecondTableFirstOrdering,
     FindingConfidence Confidence = FindingConfidence.Medium) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.CrossModuleLockOrderRuleId;
+
     public SourceSpan Location => new(FirstTableFirstOrdering.SourcePath, FirstTableFirstOrdering.ProcedureLine, 1);
 }

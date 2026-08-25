@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -18,6 +19,8 @@ public sealed record IdentityRangeFinding(
     [property: JsonIgnore] int Line,
     FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.IdentityRangeRuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, Line, 1);
 }
 

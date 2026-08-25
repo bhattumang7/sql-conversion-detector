@@ -1,3 +1,4 @@
+using SilentScan.Core.Rules;
 namespace SilentScan.Core.Predicates;
 
 public enum DatabaseConfigurationFindingKind
@@ -29,4 +30,8 @@ public sealed record DatabaseConfigurationFinding(
     FindingConfidence Confidence = FindingConfidence.High,
     string? AffectedObjectName = null,
     string? Dependency = null,
-    int? TargetCompatibilityLevel = null);
+    int? TargetCompatibilityLevel = null)
+{
+    public string RuleId { get; } = FindingRuleIds.DatabaseConfigurationRuleId(Kind);
+}
+

@@ -1,4 +1,5 @@
 
+using SilentScan.Core.Rules;
 namespace SilentScan.Core.Predicates;
 
 public enum UnindexedTempTableUsageKind
@@ -16,5 +17,7 @@ public sealed record UnindexedTempTableUsageFinding(
     int UsageColumn,
     FindingConfidence Confidence = FindingConfidence.Medium) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.UnindexedTempTableUsageRuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, UsageLine, UsageColumn);
 }

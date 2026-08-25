@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -13,6 +14,8 @@ public sealed record CompositeIndexLeadingColumnFinding(
     [property: JsonIgnore] int Column,
     FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.CompositeIndexLeadingColumnRuleId;
+
     public SourceSpan Location => new(SourcePath, Line, Column);
 }
 

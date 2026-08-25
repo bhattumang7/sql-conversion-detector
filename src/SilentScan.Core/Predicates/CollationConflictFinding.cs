@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -16,6 +17,8 @@ public sealed record CollationConflictFinding(
     SourceSpan? DynamicSqlCallSite = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<CollationConflictFinding>, IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.CollationConflictRuleId;
+
     public SourceSpan Location => new(SourcePath, Line, ColumnPosition);
     int IRelocatableFinding<CollationConflictFinding>.PositionColumn => ColumnPosition;
 

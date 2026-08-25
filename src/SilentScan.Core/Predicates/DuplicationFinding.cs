@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using SilentScan.Core.Common;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -45,6 +46,8 @@ public sealed record DuplicationFinding(
     string? DetailText = null,
     FindingConfidence Confidence = FindingConfidence.Medium) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.DuplicationRuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, Line, Column);
 }
 

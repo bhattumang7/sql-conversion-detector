@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -14,6 +15,8 @@ public sealed record PostExpansionJoinWidthFinding(
     [property: JsonIgnore] int Column,
     FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.PostExpansionJoinWidthRuleId;
+
     public SourceSpan Location => new(SourcePath, Line, Column);
 }
 

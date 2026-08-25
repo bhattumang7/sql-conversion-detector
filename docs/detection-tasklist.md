@@ -447,22 +447,6 @@ Competitor tools are referred to generically; real identities are in
       column, non-equivalent partition function, reference-count mismatch)
       before implementing.
 
-### Docs
-
-- [ ] **Per-rule pages: remaining follow-up.** All 284/284 rules now have a
-      `RuleDocContent` entry under `RuleDocs/<Family>/<RuleName>.cs`, wired
-      into `RuleDocCatalog.ByRuleId`. Every readable/console report heading
-      now links to its own rule doc page too - the originally-shipped 5
-      `Kind`-grouped families, 46 single-rule-id headings, and the remaining
-      ~40 multi-kind headings (`QueryAntiPattern`, `Formatting`,
-      `TriggerCorrectness`, `Duplication`, etc.), each restructured to
-      `GroupBy(f => f.Kind)` with a per-kind sub-heading and
-      `RuleDocSite.Url(SarifRuleCatalog.*RuleId(group.Key))`. Still open:
-      `helpUri` on the JSON findings schema - deliberately deferred behind
-      the later findings-schema-unification pass, not piecemeal, since no
-      finding record carries a rule id today and adding one means touching
-      all ~90 finding types in one pass, not one at a time.
-
 ---
 
 ## Out of scope

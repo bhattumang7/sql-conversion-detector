@@ -4,7 +4,7 @@ namespace SilentScan.Tests.Reporting;
 
 public sealed class ScanReportSchemaVersionTests
 {
-    private const int ExpectedSchemaVersion = 73;
+    private const int ExpectedSchemaVersion = 75;
 
     [Fact]
     public void CurrentSchemaVersion_MatchesRecordedValue()

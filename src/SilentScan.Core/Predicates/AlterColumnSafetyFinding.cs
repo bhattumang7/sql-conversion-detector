@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using SilentScan.Core.TypeInference;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -19,5 +20,7 @@ public sealed record AlterColumnSafetyFinding(
     [property: JsonIgnore] int Line,
     FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.AlterColumnSafetyRuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, Line, 1);
 }

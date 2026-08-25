@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -15,6 +16,8 @@ public sealed record CrossTableTypeDriftFinding(
     [property: JsonIgnore] int Line,
     FindingConfidence Confidence = FindingConfidence.Medium) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.CrossTableTypeDriftRuleId;
+
     public SourceSpan Location => new(SourcePath, Line, 1);
 }
 

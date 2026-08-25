@@ -1,6 +1,6 @@
 using SilentScan.Core.Diagnostics;
-using SilentScan.Core.Rules;
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 
 namespace SilentScan.Core.Predicates;
@@ -19,6 +19,8 @@ public sealed record TypedPredicateFinding(
     string? Fingerprint = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<TypedPredicateFinding>, IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.VerdictRuleId(Verdict);
+
     public SourceSpan Location => new(SourcePath, Line, ColumnPosition);
     int IRelocatableFinding<TypedPredicateFinding>.PositionColumn => ColumnPosition;
 

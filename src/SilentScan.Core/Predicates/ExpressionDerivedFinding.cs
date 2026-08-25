@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Common;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -17,6 +18,8 @@ public sealed record ExpressionDerivedFinding(
     string? ImmediateRelationAlias = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<ExpressionDerivedFinding>, IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.ExpressionDerivedRuleId;
+
     public SourceSpan Location => new(SourcePath, Line, ColumnPosition);
     int IRelocatableFinding<ExpressionDerivedFinding>.PositionColumn => ColumnPosition;
 

@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -15,6 +16,8 @@ public sealed record SessionDateSettingFinding(
     [property: JsonIgnore] int Column,
     FindingConfidence Confidence = FindingConfidence.Low) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.SessionDateSettingRuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, Line, Column);
 }
 

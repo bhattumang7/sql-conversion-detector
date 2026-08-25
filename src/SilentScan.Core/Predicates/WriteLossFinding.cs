@@ -2,6 +2,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using System.Text.Json.Serialization;
 using SilentScan.Core.TypeInference;
+using SilentScan.Core.Rules;
 
 
 namespace SilentScan.Core.Predicates;
@@ -18,6 +19,8 @@ public sealed record WriteLossFinding(
     SourceSpan? DynamicSqlCallSite = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<WriteLossFinding>, IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.WriteLossRuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, Line, ColumnPosition);
     int IRelocatableFinding<WriteLossFinding>.PositionColumn => ColumnPosition;
 

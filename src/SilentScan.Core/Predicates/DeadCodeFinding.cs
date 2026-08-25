@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -24,6 +25,8 @@ public sealed record DeadCodeFinding(
     string? DetailText = null,
     FindingConfidence Confidence = FindingConfidence.Medium) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.DeadCodeRuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, Line, Column);
 }
 

@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 
 namespace SilentScan.Core.Predicates;
@@ -18,6 +19,8 @@ public sealed record ViewOrderingFinding(
     [property: JsonIgnore] int Column,
     FindingConfidence Confidence) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.ViewOrderingRuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, Line, Column);
 }
 

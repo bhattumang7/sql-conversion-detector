@@ -1,6 +1,7 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -26,6 +27,8 @@ public sealed record ScalarUdfFinding(
     SourceSpan? DynamicSqlCallSite = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<ScalarUdfFinding>, IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.ScalarUdfRuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, Line, Column);
     int IRelocatableFinding<ScalarUdfFinding>.PositionColumn => Column;
 

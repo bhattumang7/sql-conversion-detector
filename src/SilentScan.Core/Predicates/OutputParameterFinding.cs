@@ -1,4 +1,5 @@
 
+using SilentScan.Core.Rules;
 namespace SilentScan.Core.Predicates;
 
 public enum OutputParameterFindingKind
@@ -16,5 +17,7 @@ public sealed record OutputParameterFinding(
     int UnresolvedExitColumn,
     FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.OutputParameterRuleId;
+
     public SourceSpan Location => new(SourcePath, ProcedureLine, ProcedureColumn);
 }

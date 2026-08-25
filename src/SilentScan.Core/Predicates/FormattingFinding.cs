@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -32,6 +33,8 @@ public sealed record FormattingFinding(
     string? DetailText = null,
     FindingConfidence Confidence = FindingConfidence.Low) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.FormattingRuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, Line, Column);
 }
 

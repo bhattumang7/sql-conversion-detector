@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using SilentScan.Core.Common;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -16,6 +17,8 @@ public sealed record SargabilityFinding(
     string? PredicateFragmentText = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<SargabilityFinding>, IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.Tier1RuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, Line, Column);
     int IRelocatableFinding<SargabilityFinding>.PositionColumn => Column;
 

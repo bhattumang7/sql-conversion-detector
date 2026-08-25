@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -32,6 +33,8 @@ public sealed record CodeMetricFinding(
     string? DetailText = null,
     FindingConfidence Confidence = FindingConfidence.Low) : IFinding
 {
+    public string RuleId { get; } = FindingRuleIds.CodeMetricRuleId(Kind);
+
     public SourceSpan Location => new(SourcePath, Line, Column);
 }
 

@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SilentScan — detect the bugs SQL Server never warns you about</title>
-<meta name="description" content="A free static analyzer for SQL Server / T-SQL. 284 rules across 11 families, read from your code and schema — no execution plan needed. Runs locally against a dev copy, so silent defects are caught on your machine, not in production.">
+<meta name="description" content="A free static analyzer for SQL Server / T-SQL. 282 rules across 11 families, read from your code and schema — no execution plan needed. Runs locally against a dev copy, so silent defects are caught on your machine, not in production.">
 <meta property="og:title" content="SilentScan — detect the bugs SQL Server never warns you about">
-<meta property="og:description" content="Free static analyzer for SQL Server / T-SQL. 284 rules read from code and schema — no execution plan needed. Runs locally and read-only.">
+<meta property="og:description" content="Free static analyzer for SQL Server / T-SQL. 282 rules read from code and schema — no execution plan needed. Runs locally and read-only.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#08090c" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#fbfbfd" media="(prefers-color-scheme: light)">
@@ -647,7 +647,7 @@
   <div class="wrap">
     <nav class="navbar surface">
       <a class="brand" href="#top"><span class="caret" aria-hidden="true"></span>silentscan</a>
-      <a class="navlink" href="rules.html">284 rules</a>
+      <a class="navlink" href="rules.html">282 rules</a>
       <a class="navlink hide-sm" href="#loop">How it works</a>
       <a class="navlink" href="https://github.com/bhattumang7/mssql-silentscan">GitHub</a>
     </nav>
@@ -662,7 +662,7 @@
     </div>
     <h1 class="rise in d1">Detect the bugs SQL Server never warns you about.</h1>
     <p class="lede rise in d2">
-      SilentScan is a static analyzer for T-SQL. <strong>284 rules</strong> read
+      SilentScan is a static analyzer for T-SQL. <strong>282 rules</strong> read
       your code and your database's real catalog, and resolve lineage through
       views and functions down to the base column. <strong>No execution plan
       needed</strong> — nothing has to run first. Point it at a dev copy and it
@@ -717,7 +717,7 @@
     </div>
 
     <div class="rail surface rise">
-      <div><div class="n">284</div><div class="l">rules</div></div>
+      <div><div class="n">282</div><div class="l">rules</div></div>
       <div><div class="n">11</div><div class="l">families</div></div>
       <div><div class="n">150</div><div class="l">fire / near-miss fixtures</div></div>
       <div><div class="n">0</div><div class="l">guessed verdicts</div></div>
@@ -811,7 +811,7 @@
         <p>Structural metrics, dataflow-based dead code, duplication, naming, deprecated syntax, hard-coded credentials and weak hash algorithms — same finding schema as everything above.</p>
       </div>
       <a class="fam fam-cta" href="rules.html">
-        <h3>All 284 rules &rarr;</h3>
+        <h3>All 282 rules &rarr;</h3>
         <p>Every rule gets its own page: what it finds, why it matters, and how to fix it.</p>
       </a>
     </div>
@@ -897,7 +897,7 @@
     <p class="sub rise">
       SilentScan connects to a live database, reads its catalog from engine
       metadata instead of guessing from parsed DDL, and runs every readable
-      view, procedure, function and trigger through all 284 rules in a single pass.
+      view, procedure, function and trigger through all 282 rules in a single pass.
     </p>
     <pre class="rise"><code>silentscan scan-db &lt;connection-string&gt;                  <span class="c"># readable report</span>
 silentscan scan-db &lt;connection-string&gt; --format json    <span class="c"># for a tool or an assistant</span>
