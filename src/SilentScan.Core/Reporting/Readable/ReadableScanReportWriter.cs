@@ -682,7 +682,7 @@ public static class ReadableScanReportWriter
                 f.CalleeQualifiedName,
                 f.FormalParameterName,
                 f.IsOutputWriteback ? "OUTPUT writeback (callee -> caller)" : "input (caller -> callee)",
-                f.CallerVariableName,
+                f.CallerExpressionDisplay,
                 f.CallerTypeDisplay,
                 f.FormalParameterTypeDisplay,
                 DescribeWriteLossKind(f.Kind),

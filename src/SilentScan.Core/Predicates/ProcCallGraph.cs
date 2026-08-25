@@ -1,3 +1,4 @@
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.TypeInference;
 
@@ -8,7 +9,8 @@ public sealed record ProcCallLiteralArgument(string Value, string SourcePath, in
 public sealed record ProcCallArgument(
     string FormalParameterName, SqlType? FormalParameterType, bool FormalParameterIsOutput,
     string? CallerVariableName, bool IsLiteral, ProcCallLiteralArgument? LiteralArgument = null,
-    SqlType? CallerArgumentType = null, bool CallSiteHasOutputKeyword = true);
+    SqlType? CallerArgumentType = null, bool CallSiteHasOutputKeyword = true,
+    ScalarExpression? CallerArgumentExpression = null);
 
 public sealed record ProcCallEdge(
     string? CallerScopeQualifiedName, string CalleeQualifiedName, SourceSpan CallSite, IReadOnlyList<ProcCallArgument> Arguments);

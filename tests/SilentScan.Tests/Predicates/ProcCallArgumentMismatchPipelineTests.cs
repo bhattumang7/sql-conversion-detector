@@ -34,7 +34,7 @@ public sealed class ProcCallArgumentMismatchPipelineTests : OracleTestFixture
         Assert.Equal("dbo.usp_Caller", finding.CallerScopeQualifiedName);
         Assert.Equal("dbo.usp_Callee", finding.CalleeQualifiedName);
         Assert.Equal("@Code", finding.FormalParameterName);
-        Assert.Equal("@LocalCode", finding.CallerVariableName);
+        Assert.Equal("@LocalCode", finding.CallerExpressionDisplay);
         Assert.Equal(WriteLossKind.UnicodeToNonUnicodeReplacement, finding.Kind);
         Assert.False(finding.IsOutputWriteback);
     }

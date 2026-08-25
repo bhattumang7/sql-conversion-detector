@@ -7,7 +7,7 @@ public sealed record ProcCallArgumentMismatchFinding(
     string? CallerScopeQualifiedName,
     string CalleeQualifiedName,
     string FormalParameterName,
-    string CallerVariableName,
+    string CallerExpressionDisplay,
     string CallerTypeDisplay,
     string FormalParameterTypeDisplay,
     WriteLossKind Kind,

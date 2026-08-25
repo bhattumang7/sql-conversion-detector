@@ -398,7 +398,7 @@ public sealed class ProcCallGraphBuilderTests
     }
 
     [Fact]
-    public void Build_DirectLiteralArgument_CallerArgumentTypeStaysNull()
+    public void Build_DirectLiteralArgument_ResolvesCallerArgumentTypeFromTheLiteralItself()
     {
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@P int) AS SELECT 1;
@@ -408,7 +408,58 @@ public sealed class ProcCallGraphBuilderTests
 
         var edge = Assert.Single(graph.Edges);
         var argument = Assert.Single(edge.Arguments);
-        Assert.Null(argument.CallerArgumentType);
+        Assert.NotNull(argument.CallerArgumentType);
+        Assert.Equal(SqlTypeCategory.Int, argument.CallerArgumentType!.Category);
+    }
+
+    [Fact]
+    public void Build_NegativeDecimalLiteralArgument_ResolvesCallerArgumentType()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@P decimal(4,1)) AS SELECT 1;
+            GO
+            EXEC dbo.Callee @P = -123.456;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Null(argument.CallerVariableName);
+        Assert.NotNull(argument.CallerArgumentType);
+        Assert.Equal(SqlTypeCategory.Decimal, argument.CallerArgumentType!.Category);
+    }
+
+    [Fact]
+    public void RealCallerCalleePair_LiteralArgumentNarrowing_ArgumentMismatchScannerFires()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Code varchar(3)) AS SELECT @Code;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                EXEC dbo.Callee @Code = 'abcdef';
+            """);
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(graph);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.LengthTruncation, finding.Kind);
+        Assert.Equal("'abcdef'", finding.CallerExpressionDisplay);
+    }
+
+    [Fact]
+    public void RealCallerCalleePair_DecimalLiteralArgumentScaleNarrowing_ArgumentMismatchScannerFires()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Amount decimal(4,1)) AS SELECT @Amount;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                EXEC dbo.Callee @Amount = 123.456;
+            """);
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(graph);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+        Assert.Equal("123.456", finding.CallerExpressionDisplay);
     }
 
     [Fact]

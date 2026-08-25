@@ -22,7 +22,7 @@ public sealed class ProcCallArgumentMismatchScannerTests
         Assert.Equal("dbo.Caller", finding.CallerScopeQualifiedName);
         Assert.Equal("dbo.Callee", finding.CalleeQualifiedName);
         Assert.Equal("@P", finding.FormalParameterName);
-        Assert.Equal("@Local", finding.CallerVariableName);
+        Assert.Equal("@Local", finding.CallerExpressionDisplay);
         Assert.Equal(WriteLossKind.UnicodeToNonUnicodeReplacement, finding.Kind);
         Assert.False(finding.IsOutputWriteback);
         Assert.Equal("test.sql", finding.SourcePath);
@@ -55,7 +55,7 @@ public sealed class ProcCallArgumentMismatchScannerTests
     }
 
     [Fact]
-    public void LiteralArgument_NeverFires()
+    public void LiteralArgumentWithUnresolvedType_NeverFires()
     {
 
         var argument = new ProcCallArgument(
@@ -65,6 +65,20 @@ public sealed class ProcCallArgumentMismatchScannerTests
         var findings = ProcCallArgumentMismatchScanner.Scan(GraphWith(argument));
 
         Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void LiteralArgumentWithResolvedNarrowingType_Fires()
+    {
+        var argument = new ProcCallArgument(
+            "@P", new SqlType(SqlTypeCategory.VarChar, Length: 3), FormalParameterIsOutput: false,
+            CallerVariableName: null, IsLiteral: true, CallerArgumentType: new SqlType(SqlTypeCategory.VarChar, Length: 10));
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(GraphWith(argument));
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.LengthTruncation, finding.Kind);
+        Assert.Equal("@P", finding.CallerExpressionDisplay);
     }
 
     [Fact]
@@ -130,7 +144,7 @@ public sealed class ProcCallArgumentMismatchScannerTests
         var finding = Assert.Single(findings);
         Assert.Equal(WriteLossKind.LengthTruncation, finding.Kind);
         Assert.True(finding.IsOutputWriteback);
-        Assert.Equal("@Local", finding.CallerVariableName);
+        Assert.Equal("@Local", finding.CallerExpressionDisplay);
     }
 
     [Fact]

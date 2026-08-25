@@ -142,13 +142,15 @@ public static class ProcCallGraphBuilder
                 return;
             }
 
-            var arguments = MatchArguments(procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements, node, _variableTypes);
+            var arguments = MatchArguments(
+                procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements, node, _variableTypes, catalog.TypeAliases);
             Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
 
         private static List<ProcCallArgument> MatchArguments(
             IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, string sourcePath,
-            IList<TSqlStatement>? currentScopeStatements, ExecuteStatement callSite, IReadOnlyDictionary<string, SqlType?> variableTypes)
+            IList<TSqlStatement>? currentScopeStatements, ExecuteStatement callSite, IReadOnlyDictionary<string, SqlType?> variableTypes,
+            IReadOnlyDictionary<string, SqlType>? typeAliases)
         {
             var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
             var positionalCursor = 0;
@@ -175,12 +177,13 @@ public static class ProcCallGraphBuilder
                 var callerVariableName = actual.ParameterValue is VariableReference variableRef ? variableRef.Name : null;
                 var literalArgument = TryGetDirectLiteralArgument(actual.ParameterValue, sourcePath)
                     ?? ResolvePropagatedLiteral(callerVariableName, currentScopeStatements, sourcePath, callSite);
-                var callerArgumentType = callerVariableName is not null
-                    ? variableTypes.GetValueOrDefault(callerVariableName)
-                    : null;
+                var callerArgumentType = ExpressionTypeInferencer.Resolve(
+                    actual.ParameterValue,
+                    leaf => leaf is VariableReference leafVariable ? variableTypes.GetValueOrDefault(leafVariable.Name) : null,
+                    typeAliases);
                 matched.Add(new ProcCallArgument(
                     formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal, literalArgument,
-                    callerArgumentType, actual.IsOutput));
+                    callerArgumentType, actual.IsOutput, actual.ParameterValue));
             }
 
             return matched;

@@ -1,3 +1,4 @@
+using SilentScan.Core.Common;
 using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
@@ -27,14 +28,13 @@ public static class ProcCallArgumentMismatchScanner
 
     private static void AddIfNarrowing(List<ProcCallArgumentMismatchFinding> findings, ProcCallEdge edge, ProcCallArgument argument)
     {
-        if (argument.CallerVariableName is { } callerDisplay
-            && argument.CallerArgumentType is { } callerType
+        if (argument.CallerArgumentType is { } callerType
             && argument.FormalParameterType is { } formalType
-            && WriteLossClassifier.Classify(formalType, callerType, sourceExpression: null, isVariableTarget: true) is { } passedInKind)
+            && WriteLossClassifier.Classify(formalType, callerType, argument.CallerArgumentExpression, isVariableTarget: true) is { } passedInKind)
         {
             findings.Add(new ProcCallArgumentMismatchFinding(
                 edge.CallerScopeQualifiedName, edge.CalleeQualifiedName, argument.FormalParameterName,
-                callerDisplay, callerType.ToString(), formalType.ToString(), passedInKind, IsOutputWriteback: false,
+                DisplayFor(argument), callerType.ToString(), formalType.ToString(), passedInKind, IsOutputWriteback: false,
                 edge.CallSite.SourcePath, edge.CallSite.Line, edge.CallSite.Column));
         }
 
@@ -50,4 +50,8 @@ public static class ProcCallArgumentMismatchScanner
                 edge.CallSite.SourcePath, edge.CallSite.Line, edge.CallSite.Column));
         }
     }
+
+    private static string DisplayFor(ProcCallArgument argument) =>
+        argument.CallerVariableName
+        ?? (argument.CallerArgumentExpression is { } expression ? FragmentTextRenderer.Render(expression) : argument.FormalParameterName);
 }

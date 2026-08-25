@@ -312,8 +312,8 @@ public static class SarifReportWriter
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var callerLabel = finding.CallerScopeQualifiedName ?? "a top-level batch";
         var message = finding.IsOutputWriteback
-            ? $"EXEC '{finding.CalleeQualifiedName}': OUTPUT parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) writes its final value back into '{finding.CallerVariableName}' ({finding.CallerTypeDisplay}) in {callerLabel} - {DescribeWriteLossKind(finding.Kind)}."
-            : $"EXEC '{finding.CalleeQualifiedName}': parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) receives '{finding.CallerVariableName}' ({finding.CallerTypeDisplay}) from {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";
+            ? $"EXEC '{finding.CalleeQualifiedName}': OUTPUT parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) writes its final value back into '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) in {callerLabel} - {DescribeWriteLossKind(finding.Kind)}."
+            : $"EXEC '{finding.CalleeQualifiedName}': parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) receives '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) from {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
