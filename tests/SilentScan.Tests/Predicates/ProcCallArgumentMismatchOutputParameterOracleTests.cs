@@ -155,6 +155,28 @@ public sealed class ProcCallArgumentMismatchOutputParameterOracleTests : OracleT
     }
 
     [Fact]
+    public async Task OutputParameter_NeverAssignedWiderCallerVariable_EngineCopiesInNullNotData_ScannerMustNotFlag()
+    {
+        await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));
+        await connection.OpenAsync();
+
+        await using var command = new SqlCommand(
+            "DECLARE @CallerWide DECIMAL(10,4); EXEC dbo.EchoAmountOnEntry @Amount = @CallerWide OUTPUT;",
+            connection);
+        var engineResult = await command.ExecuteScalarAsync();
+        Assert.Equal(DBNull.Value, engineResult);
+
+        var findings = ScanArgumentMismatch($"""
+            {EchoAmountOnEntryProcedureText}
+            GO
+            DECLARE @CallerWide DECIMAL(10,4);
+            EXEC dbo.EchoAmountOnEntry @Amount = @CallerWide OUTPUT;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public async Task OutputParameter_CopiedBackIntoNarrowerVarcharCallerVariable_EngineSilentlyTruncatesIt_ScannerMustFlag()
     {
         await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));

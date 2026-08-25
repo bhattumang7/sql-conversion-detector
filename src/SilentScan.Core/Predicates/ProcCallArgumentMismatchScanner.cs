@@ -28,7 +28,8 @@ public static class ProcCallArgumentMismatchScanner
 
     private static void AddIfNarrowing(List<ProcCallArgumentMismatchFinding> findings, ProcCallEdge edge, ProcCallArgument argument)
     {
-        if (argument.CallerArgumentType is { } callerType
+        if (argument.CallerVariableWasAssignedBeforeCall
+            && argument.CallerArgumentType is { } callerType
             && argument.FormalParameterType is { } formalType
             && WriteLossClassifier.Classify(formalType, callerType, argument.CallerArgumentExpression, isVariableTarget: true) is { } passedInKind)
         {

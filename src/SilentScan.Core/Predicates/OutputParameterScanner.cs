@@ -109,20 +109,13 @@ public static class OutputParameterScanner
 
         private (FlowState State, bool Terminal) AnalyzeStatement(TSqlStatement statement, FlowState state)
         {
+            foreach (var (name, _) in VariableWriteSites.InStatement(statement))
+            {
+                state.Unassigned!.Remove(name);
+            }
+
             switch (statement)
             {
-                case SetVariableStatement set:
-                    state.Unassigned!.Remove(set.Variable.Name);
-                    return (state, false);
-
-                case SelectStatement { QueryExpression: QuerySpecification spec }:
-                    RemoveSelectAssignedVariables(spec, state.Unassigned!);
-                    return (state, false);
-
-                case ExecuteStatement exec:
-                    RemoveForwardedOutputArguments(exec, state.Unassigned!);
-                    return (state, false);
-
                 case ReturnStatement:
                     EmitUnassignedFindings(state.Unassigned!, statement);
                     return (state with { Unassigned = [] }, true);
@@ -151,14 +144,6 @@ public static class OutputParameterScanner
             }
         }
 
-        private static void RemoveSelectAssignedVariables(QuerySpecification spec, HashSet<string> unassigned)
-        {
-            foreach (var element in spec.SelectElements.OfType<SelectSetVariable>())
-            {
-                unassigned.Remove(element.Variable.Name);
-            }
-        }
-
         private void EmitUnassignedFindings(HashSet<string> unassigned, TSqlStatement statement)
         {
             foreach (var name in unassigned)
@@ -171,22 +156,6 @@ public static class OutputParameterScanner
                     _procedureColumn,
                     statement.StartLine,
                     statement.StartColumn));
-            }
-        }
-
-        private static void RemoveForwardedOutputArguments(ExecuteStatement exec, HashSet<string> unassigned)
-        {
-            if (exec.ExecuteSpecification?.ExecutableEntity is not ExecutableProcedureReference procRef)
-            {
-                return;
-            }
-
-            foreach (var parameter in procRef.Parameters)
-            {
-                if (parameter is { IsOutput: true, ParameterValue: VariableReference variable })
-                {
-                    unassigned.Remove(variable.Name);
-                }
             }
         }
 

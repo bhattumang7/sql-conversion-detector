@@ -42,7 +42,7 @@ public sealed class ProcCallArgumentMismatchApproximateNumericOracleTests : Orac
         var findings = ScanArgumentMismatch($"""
             {RoundTripApproximateInputProcedureText}
             GO
-            DECLARE @CallerFloat FLOAT;
+            DECLARE @CallerFloat FLOAT = SQRT(2.0);
             DECLARE @Echo FLOAT;
             EXEC dbo.RoundTripApproximateInput @Value = @CallerFloat, @Echo = @Echo OUTPUT;
             """);

@@ -148,6 +148,19 @@ public sealed class ProcCallArgumentMismatchScannerTests
     }
 
     [Fact]
+    public void UnassignedCallerVariable_NarrowerThanFormal_NeverFiresInputNarrowing()
+    {
+        var argument = new ProcCallArgument(
+            "@P", new SqlType(SqlTypeCategory.VarChar, Length: 3), FormalParameterIsOutput: true,
+            "@Local", IsLiteral: false, CallerArgumentType: new SqlType(SqlTypeCategory.VarChar, Length: 10),
+            CallSiteHasOutputKeyword: true, CallerVariableWasAssignedBeforeCall: false);
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(GraphWith(argument));
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void OutputParameter_CallSiteOmitsOutputKeyword_NeverFiresAsWriteback()
     {
         var argument = new ProcCallArgument(

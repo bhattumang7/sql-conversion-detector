@@ -10,7 +10,7 @@ public sealed record ProcCallArgument(
     string FormalParameterName, SqlType? FormalParameterType, bool FormalParameterIsOutput,
     string? CallerVariableName, bool IsLiteral, ProcCallLiteralArgument? LiteralArgument = null,
     SqlType? CallerArgumentType = null, bool CallSiteHasOutputKeyword = true,
-    ScalarExpression? CallerArgumentExpression = null);
+    ScalarExpression? CallerArgumentExpression = null, bool CallerVariableWasAssignedBeforeCall = true);
 
 public sealed record ProcCallEdge(
     string? CallerScopeQualifiedName, string CalleeQualifiedName, SourceSpan CallSite, IReadOnlyList<ProcCallArgument> Arguments);

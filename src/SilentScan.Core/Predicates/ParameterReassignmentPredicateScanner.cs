@@ -82,20 +82,13 @@ public static class ParameterReassignmentPredicateScanner
                     InspectStatementForFindings(statement, state);
                 }
 
+                foreach (var (name, site) in VariableWriteSites.InStatement(statement))
+                {
+                    Reassign(state, name, site);
+                }
+
                 switch (statement)
                 {
-                    case SetVariableStatement set:
-                        Reassign(state, set.Variable.Name, set);
-                        break;
-
-                    case SelectStatement { QueryExpression: QuerySpecification spec }:
-                        foreach (var element in spec.SelectElements.OfType<SelectSetVariable>())
-                        {
-                            Reassign(state, element.Variable.Name, statement);
-                        }
-
-                        break;
-
                     case ReturnStatement or ThrowStatement:
                         return state with { Reassigned = [] };
 

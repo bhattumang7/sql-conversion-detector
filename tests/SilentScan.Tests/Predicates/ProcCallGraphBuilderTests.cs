@@ -536,6 +536,23 @@ public sealed class ProcCallGraphBuilderTests
     }
 
     [Fact]
+    public void Build_TopLevelDeclareInEarlierBatch_DoesNotLeakVariableTypeIntoLaterBatch()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@P int) AS SELECT 1;
+            GO
+            DECLARE @Shared varchar(20) = 'x';
+            SELECT @Shared;
+            GO
+            EXEC dbo.Callee @Shared;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Null(argument.CallerArgumentType);
+    }
+
+    [Fact]
     public void RealCallerCalleePair_MatchingDeclaredTypes_ArgumentMismatchScannerNeverFires()
     {
 
@@ -769,6 +786,88 @@ public sealed class ProcCallGraphBuilderTests
     }
 
     [Fact]
+    public void Build_CallerVariableDeclaredWithoutInitializerAndNeverWritten_WasNotAssignedBeforeCall()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @v NVARCHAR(20);
+                EXEC dbo.Callee @v OUTPUT;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.False(argument.CallerVariableWasAssignedBeforeCall);
+    }
+
+    [Fact]
+    public void Build_CallerVariableDeclaredWithInitializer_WasAssignedBeforeCall()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @v NVARCHAR(20) = N'x';
+                EXEC dbo.Callee @v OUTPUT;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.True(argument.CallerVariableWasAssignedBeforeCall);
+    }
+
+    [Fact]
+    public void Build_CallerVariableConditionallyWrittenBeforeCall_WasAssignedBeforeCall()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller @flag INT AS
+                DECLARE @v NVARCHAR(20);
+                IF @flag = 1
+                    SET @v = N'Archived';
+                EXEC dbo.Callee @v OUTPUT;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.True(argument.CallerVariableWasAssignedBeforeCall);
+    }
+
+    [Fact]
+    public void Build_CallerVariableIsEnclosingFormalParameter_WasAssignedBeforeCall()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller (@Outer nvarchar(20)) AS
+                EXEC dbo.Callee @Outer OUTPUT;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.True(argument.CallerVariableWasAssignedBeforeCall);
+    }
+
+    [Fact]
+    public void Build_CallerVariableWrittenAfterCallOnly_WasNotAssignedBeforeCall()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @v NVARCHAR(20);
+                EXEC dbo.Callee @v OUTPUT;
+                SET @v = N'Archived';
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.False(argument.CallerVariableWasAssignedBeforeCall);
+    }
+
+    [Fact]
     public void Build_CallerVariableDeclaredInsideConditional_DoesNotPropagateLiteral()
     {
         var (graph, _) = BuildFrom("""
@@ -785,5 +884,80 @@ public sealed class ProcCallGraphBuilderTests
         var edge = Assert.Single(graph.Edges);
         var argument = edge.Arguments.Single();
         Assert.Null(argument.LiteralArgument);
+    }
+
+    [Fact]
+    public void Build_CallerVariableAssignedViaSelectSetVariable_WasAssignedBeforeCall()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @v NVARCHAR(20);
+                SELECT @v = N'Archived';
+                EXEC dbo.Callee @v OUTPUT;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.True(argument.CallerVariableWasAssignedBeforeCall);
+    }
+
+    [Fact]
+    public void Build_CallerVariableAssignedViaFetchInto_WasAssignedBeforeCall()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @v NVARCHAR(20);
+                DECLARE cur CURSOR FOR SELECT N'x';
+                OPEN cur;
+                FETCH NEXT FROM cur INTO @v;
+                EXEC dbo.Callee @v OUTPUT;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.True(argument.CallerVariableWasAssignedBeforeCall);
+    }
+
+    [Fact]
+    public void Build_CallerVariableAssignedViaExecOutputEarlier_WasAssignedBeforeCall()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Other (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @v NVARCHAR(20);
+                EXEC dbo.Other @v OUTPUT;
+                EXEC dbo.Callee @v OUTPUT;
+            """);
+
+        var edge = graph.Edges.Single(e => e.CalleeQualifiedName == "dbo.Callee");
+        var argument = edge.Arguments.Single();
+        Assert.True(argument.CallerVariableWasAssignedBeforeCall);
+    }
+
+    [Fact]
+    public void Build_CallerVariableWrittenEarlierInSameIfBranchAsCall_WasAssignedBeforeCall()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller @flag INT AS
+                DECLARE @v NVARCHAR(20);
+                IF @flag = 1
+                BEGIN
+                    SET @v = N'Archived';
+                    EXEC dbo.Callee @v OUTPUT;
+                END
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.True(argument.CallerVariableWasAssignedBeforeCall);
     }
 }
