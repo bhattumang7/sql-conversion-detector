@@ -8,6 +8,8 @@ namespace SilentScan.Core.Predicates;
 
 public static class FloatEqualityPredicateScanner
 {
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     public static IReadOnlyList<FloatEqualityFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog);
@@ -23,7 +25,7 @@ public static class FloatEqualityPredicateScanner
 
 #pragma warning disable CS9107
     private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
-        : ScopedSqlVisitorBase(sourcePath, catalog, PredicateVisitorSupport.EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
 #pragma warning restore CS9107
     {
         public List<FloatEqualityFinding> Findings { get; } = [];
@@ -37,14 +39,17 @@ public static class FloatEqualityPredicateScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var scopeChain = PredicateVisitorSupport.ScopeChainOf(FromScopeResolver.Resolve(node.FromClause, PredicateVisitorSupport.ResolutionContext(CurrentCteRelations(), sourcePath, catalog)));
+            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
+            {
+                FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()),
+            };
 
             if (node.WhereClause?.SearchCondition is { } whereCondition)
             {
                 Inspect(whereCondition, scopeChain);
             }
 
-            PredicateVisitorSupport.InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain, Inspect);
+            InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain, Inspect);
 
             base.ExplicitVisit(node);
         }
@@ -52,15 +57,19 @@ public static class FloatEqualityPredicateScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, PredicateVisitorSupport.EmptyResolvedViews, sourcePath, ledger: null);
-            var scopeChain = PredicateVisitorSupport.ScopeChainOf(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, PredicateVisitorSupport.ResolutionContext(cteRelations, sourcePath, catalog)));
+            PushCteScope(node.WithCtesAndXmlNamespaces);
+            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
+            {
+                FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()),
+            };
+            PopCteScope();
 
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
             {
                 Inspect(whereCondition, scopeChain);
             }
 
-            PredicateVisitorSupport.InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, Inspect);
+            InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, Inspect);
 
             base.ExplicitVisit(node);
         }
@@ -68,15 +77,19 @@ public static class FloatEqualityPredicateScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, PredicateVisitorSupport.EmptyResolvedViews, sourcePath, ledger: null);
-            var scopeChain = PredicateVisitorSupport.ScopeChainOf(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, PredicateVisitorSupport.ResolutionContext(cteRelations, sourcePath, catalog)));
+            PushCteScope(node.WithCtesAndXmlNamespaces);
+            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
+            {
+                FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()),
+            };
+            PopCteScope();
 
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
             {
                 Inspect(whereCondition, scopeChain);
             }
 
-            PredicateVisitorSupport.InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, Inspect);
+            InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, Inspect);
 
             base.ExplicitVisit(node);
         }

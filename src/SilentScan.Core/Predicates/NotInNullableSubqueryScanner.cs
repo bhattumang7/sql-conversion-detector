@@ -39,7 +39,7 @@ public static class NotInNullableSubqueryScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, CurrentCteRelations(), procScope: null);
+            var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext());
             InspectSearchCondition(node.WhereClause?.SearchCondition, byAlias, ordered);
             base.ExplicitVisit(node);
         }
@@ -48,7 +48,7 @@ public static class NotInNullableSubqueryScanner
         {
             PushCteScope(node.WithCtesAndXmlNamespaces);
             var spec = node.UpdateSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext());
             InspectSearchCondition(spec.WhereClause?.SearchCondition, byAlias, ordered);
             base.ExplicitVisit(node);
             PopCteScope();
@@ -58,14 +58,11 @@ public static class NotInNullableSubqueryScanner
         {
             PushCteScope(node.WithCtesAndXmlNamespaces);
             var spec = node.DeleteSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext());
             InspectSearchCondition(spec.WhereClause?.SearchCondition, byAlias, ordered);
             base.ExplicitVisit(node);
             PopCteScope();
         }
-
-        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
-            PredicateVisitorSupport.ResolutionContext(withClause, sourcePath, catalog);
 
         private void InspectSearchCondition(
             BooleanExpression? searchCondition, IReadOnlyDictionary<string, ScopeEntry> byAlias, IReadOnlyList<ScopeEntry> ordered)
@@ -76,7 +73,7 @@ public static class NotInNullableSubqueryScanner
             }
 
             var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
-            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(searchCondition, columnRef => PredicateVisitorSupport.ResolveColumnFacts(columnRef, scopeChain, sourcePath, catalog)))
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
             {
                 return;
             }
@@ -100,7 +97,7 @@ public static class NotInNullableSubqueryScanner
                 return;
             }
 
-            var (innerByAlias, innerOrdered) = FromScopeResolver.Resolve(subquerySpec.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, CurrentCteRelations(), procScope: null);
+            var (innerByAlias, innerOrdered) = FromScopeResolver.Resolve(subquerySpec.FromClause, CurrentResolutionContext());
             var innerProvenance = ScalarExpressionResolver.ResolveColumnReference(innerColumnRef, [(innerByAlias, innerOrdered)], sourcePath, ledger: null);
             if (innerProvenance is not ColumnProvenance.BaseColumn { Depth: 0 } innerColumn)
             {

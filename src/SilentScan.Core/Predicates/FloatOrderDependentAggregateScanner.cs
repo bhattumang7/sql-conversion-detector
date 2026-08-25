@@ -8,6 +8,8 @@ namespace SilentScan.Core.Predicates;
 
 public static class FloatOrderDependentAggregateScanner
 {
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     private static readonly HashSet<string> OrderDependentAggregateFunctionNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "SUM", "AVG", "VAR", "VARP", "STDEV", "STDEVP",
@@ -28,7 +30,7 @@ public static class FloatOrderDependentAggregateScanner
 
 #pragma warning disable CS9107
     private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
-        : ScopedSqlVisitorBase(sourcePath, catalog, PredicateVisitorSupport.EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
 #pragma warning restore CS9107
     {
         public List<FloatOrderDependentAggregateFinding> Findings { get; } = [];
@@ -42,7 +44,10 @@ public static class FloatOrderDependentAggregateScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var scopeChain = PredicateVisitorSupport.ScopeChainOf(FromScopeResolver.Resolve(node.FromClause, PredicateVisitorSupport.ResolutionContext(CurrentCteRelations(), sourcePath, catalog)));
+            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
+            {
+                FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()),
+            };
 
             foreach (var element in node.SelectElements.OfType<SelectScalarExpression>())
             {

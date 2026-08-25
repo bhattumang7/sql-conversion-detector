@@ -72,7 +72,7 @@ public static class CatchAllPredicateScanner
         {
             if (!HasActiveRecompileGuard)
             {
-                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, CurrentCteRelations(), procScope: null);
+                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext());
                 InspectSearchCondition(node.WhereClause?.SearchCondition, byAlias, ordered);
             }
 
@@ -138,8 +138,13 @@ public static class CatchAllPredicateScanner
             _procedureHasWithRecompile = previousProcedureHasWithRecompile;
         }
 
-        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
-            PredicateVisitorSupport.ResolutionContext(withClause, sourcePath, catalog);
+        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause)
+        {
+            PushCteScope(withClause);
+            var context = CurrentResolutionContext();
+            PopCteScope();
+            return context;
+        }
 
         private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)
         {
@@ -159,7 +164,7 @@ public static class CatchAllPredicateScanner
             }
 
             var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
-            var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => PredicateVisitorSupport.ResolveColumnFacts(columnRef, scopeChain, sourcePath, catalog));
+            var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
 
             foreach (var orClause in FlattenOr(searchCondition))
             {

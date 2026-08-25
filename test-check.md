@@ -13,3 +13,9 @@ Rules for each test:
 6. RIGHT ARTIFACT: for plan-SHAPE claims (operator, seek vs scan, CONVERT_IMPLICIT), does the test read SHOWPLAN_XML/actual plan attributes — not cached SQL text or a catalog view that's merely correlated? Conversion findings: oracle is plan-XML based, never plan-shape based.
 
 7. TEXT-FORMAT BRITTLENESS: for normalized/cached-SQL-text assertions, could exact spacing/casing/punctuation assumptions (e.g. "dbo.T" vs "dbo . T") cause silent over- or under-matching? Verify by actually running one, don't assume existing tests got it right.
+
+New scanners with type/narrowing logic must route through Rules/WriteLossClassifier,
+Rules/NumericFamilyNarrowing, TypeInference/ExpressionTypeInferencer (via
+Lineage/ScalarExpressionResolver, not directly), or ScopedSqlVisitorBase's own
+ResolveColumnFacts/CurrentResolutionContext - never hand-roll a resolveLeaf closure or a
+parallel scope-resolution helper. See tests/SilentScan.Tests/Architecture/TypeInferenceConventionTests.cs.

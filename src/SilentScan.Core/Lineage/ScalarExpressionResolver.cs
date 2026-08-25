@@ -10,12 +10,13 @@ namespace SilentScan.Core.Lineage;
 public static class ScalarExpressionResolver
 {
     internal readonly record struct ExpressionContext(
-        IReadOnlyDictionary<string, ScopeEntry> Scope,
-        IReadOnlyList<ScopeEntry> OrderedRelations,
+        IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> ScopeChain,
         string SourcePath,
         SkipLedger? Ledger,
         IReadOnlyDictionary<string, SqlType>? TypeAliases,
-        DatabaseCatalog? Catalog = null);
+        DatabaseCatalog? Catalog = null,
+        IReadOnlyDictionary<string, SqlType?>? Variables = null,
+        Func<ScalarSubquery, SqlType?>? ResolveSubquery = null);
 
     public static ColumnProvenance Resolve(
         ScalarExpression expression,
@@ -25,11 +26,26 @@ public static class ScalarExpressionResolver
         SkipLedger? ledger = null,
         IReadOnlyDictionary<string, SqlType>? typeAliases = null,
         DatabaseCatalog? catalog = null) =>
-        Resolve(expression, new ExpressionContext(scope, orderedRelations, sourcePath, ledger, typeAliases, catalog));
+        Resolve(expression, new ExpressionContext([(scope, orderedRelations)], sourcePath, ledger, typeAliases, catalog));
+
+    public static SqlType? ResolveScalarType(
+        ScalarExpression expression,
+        IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+        string sourcePath,
+        SkipLedger? ledger,
+        IReadOnlyDictionary<string, SqlType>? typeAliases,
+        DatabaseCatalog? catalog,
+        IReadOnlyDictionary<string, SqlType?>? variables = null,
+        Func<ScalarSubquery, SqlType?>? resolveSubquery = null) =>
+        ColumnProvenanceAnalysis.TryGetScalarType(
+            Resolve(expression, new ExpressionContext(scopeChain, sourcePath, ledger, typeAliases, catalog, variables, resolveSubquery)));
 
     private static ColumnProvenance Resolve(ScalarExpression expression, ExpressionContext context) => expression switch
     {
-        ColumnReferenceExpression columnRef => ResolveColumnReference(columnRef, context.Scope, context.OrderedRelations, context.SourcePath, context.Ledger),
+        ColumnReferenceExpression columnRef => ResolveColumnReference(columnRef, context.ScopeChain, context.SourcePath, context.Ledger),
+        VariableReference variableRef => ResolveVariableReference(variableRef, context),
+        GlobalVariableExpression globalVariable => ResolveGlobalVariableExpression(globalVariable, context),
+        ScalarSubquery scalarSubquery => ResolveScalarSubquery(scalarSubquery, context),
         CastCall castCall => ResolveCastOrConvert(castCall.DataType, castCall.Parameter, context, castCall.StartLine),
         ConvertCall convertCall => ResolveCastOrConvert(convertCall.DataType, convertCall.Parameter, context, convertCall.StartLine),
         Literal literal => new ColumnProvenance.Expression(LiteralTypeResolver.Resolve(literal), Inputs: []),
@@ -43,6 +59,27 @@ public static class ScalarExpressionResolver
 
         _ => ResolveGenericExpression(expression, context),
     };
+
+    private static ColumnProvenance ResolveVariableReference(VariableReference variableRef, ExpressionContext context) =>
+        context.Variables?.GetValueOrDefault(variableRef.Name) is { } type
+            ? new ColumnProvenance.Declared(type)
+            : ResolveGenericExpression(variableRef, context);
+
+    private static ColumnProvenance.Expression ResolveGlobalVariableExpression(GlobalVariableExpression globalVariable, ExpressionContext context)
+    {
+        var type = BuiltinFunctionTypeResolver.ResolveGlobalVariable(globalVariable.Name);
+        return type is null
+            ? ResolveGenericExpression(globalVariable, context)
+            : new ColumnProvenance.Expression(type, Inputs: [], context.SourcePath, globalVariable.StartLine);
+    }
+
+    private static ColumnProvenance.Expression ResolveScalarSubquery(ScalarSubquery scalarSubquery, ExpressionContext context)
+    {
+        var type = context.ResolveSubquery?.Invoke(scalarSubquery);
+        return type is null
+            ? ResolveGenericExpression(scalarSubquery, context)
+            : new ColumnProvenance.Expression(type, Inputs: [], context.SourcePath, scalarSubquery.StartLine);
+    }
 
     private static ColumnProvenance.Expression ResolveFunctionCall(FunctionCall functionCall, ExpressionContext context)
     {
@@ -108,7 +145,7 @@ public static class ScalarExpressionResolver
     {
         var collector = new ColumnReferenceCollector();
         expression.Accept(collector);
-        return collector.References.Select(columnRef => ResolveColumnReference(columnRef, context.Scope, context.OrderedRelations, context.SourcePath, context.Ledger)).ToList();
+        return collector.References.Select(columnRef => ResolveColumnReference(columnRef, context.ScopeChain, context.SourcePath, context.Ledger)).ToList();
     }
 
     private sealed class ColumnReferenceCollector : TSqlFragmentVisitor

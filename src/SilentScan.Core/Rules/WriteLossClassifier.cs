@@ -71,7 +71,7 @@ public static class WriteLossClassifier
     private static bool IsTemporalPrecisionLossRisk(SqlType target, SqlType source, Literal? literal) =>
         target.Category == SqlTypeCategory.Date && (IsWiderTemporal(source.Category) || source.IsStringFamily) && !IsDateOnlyLiteral(literal);
 
-    private static bool IsTemporalOffsetDroppedRisk(SqlType target, SqlType source) =>
+    public static bool IsTemporalOffsetDroppedRisk(SqlType target, SqlType source) =>
         source.Category == SqlTypeCategory.DateTimeOffset
         && target.Category is SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTime or SqlTypeCategory.SmallDateTime
             or SqlTypeCategory.Date or SqlTypeCategory.Time;

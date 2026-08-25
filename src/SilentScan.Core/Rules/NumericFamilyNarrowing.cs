@@ -32,6 +32,12 @@ public static class NumericFamilyNarrowing
             [SqlTypeCategory.Float] = (Family.Approximate, _ => 53),
         };
 
+    private const int DefaultDecimalPrecision = 18;
+
+    public static bool IsDecimalPrecisionNarrowed(SqlType target, SqlType source) =>
+        target.Category == SqlTypeCategory.Decimal && source.Category == SqlTypeCategory.Decimal
+        && (target.Precision ?? DefaultDecimalPrecision) < (source.Precision ?? DefaultDecimalPrecision);
+
     public static Result? Classify(SqlType target, SqlType source)
     {
         if (!Profiles.TryGetValue(target.Category, out var targetProfile) || !Profiles.TryGetValue(source.Category, out var sourceProfile))

@@ -7,6 +7,8 @@ namespace SilentScan.Core.Predicates;
 
 public static class AggregateDivisionColumnstoreScanner
 {
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     private static readonly HashSet<string> AggregateFunctionNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "SUM", "AVG", "COUNT", "COUNT_BIG", "MIN", "MAX",
@@ -27,7 +29,7 @@ public static class AggregateDivisionColumnstoreScanner
 
 #pragma warning disable CS9107
     private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
-        : ScopedSqlVisitorBase(sourcePath, catalog, PredicateVisitorSupport.EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
 #pragma warning restore CS9107
     {
         public List<AggregateDivisionColumnstoreFinding> Findings { get; } = [];
@@ -41,8 +43,7 @@ public static class AggregateDivisionColumnstoreScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var context = PredicateVisitorSupport.ResolutionContext(CurrentCteRelations(), sourcePath, catalog);
-            var (_, ordered) = FromScopeResolver.Resolve(node.FromClause, context);
+            var (_, ordered) = FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext());
             var tables = ordered
                 .Where(e => !e.IsViewLayer && e.Relation.QualifiedName is not null)
                 .Select(e => e.Relation.QualifiedName!)

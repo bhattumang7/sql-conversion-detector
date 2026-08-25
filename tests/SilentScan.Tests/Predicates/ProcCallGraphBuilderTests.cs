@@ -116,7 +116,7 @@ public sealed class ProcCallGraphBuilderTests
         Assert.Empty(graph.Edges);
         Assert.Contains(
             ledger.Entries,
-            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a deterministic literal string", StringComparison.Ordinal));
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a single deterministic literal string", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public sealed class ProcCallGraphBuilderTests
         Assert.Empty(graph.Edges);
         Assert.Contains(
             ledger.Entries,
-            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a deterministic literal string", StringComparison.Ordinal));
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a single deterministic literal string", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -297,7 +297,7 @@ public sealed class ProcCallGraphBuilderTests
         Assert.Empty(graph.Edges);
         Assert.Contains(
             ledger.Entries,
-            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a deterministic literal string", StringComparison.Ordinal));
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a single deterministic literal string", StringComparison.Ordinal));
     }
 
     [Fact]

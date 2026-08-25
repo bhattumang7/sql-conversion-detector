@@ -47,18 +47,13 @@ public static class AlterColumnSafetyScanner
             return AlterColumnSafetyKind.PrecisionOrScaleNarrowing;
         }
 
-        if (IsTemporalOffsetDropped(previous, next))
+        if (WriteLossClassifier.IsTemporalOffsetDroppedRisk(next, previous))
         {
             return AlterColumnSafetyKind.TemporalOffsetDropped;
         }
 
         return null;
     }
-
-    private static bool IsTemporalOffsetDropped(SqlType previous, SqlType next) =>
-        previous.Category == SqlTypeCategory.DateTimeOffset
-        && next.Category is SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTime or SqlTypeCategory.SmallDateTime
-            or SqlTypeCategory.Date or SqlTypeCategory.Time;
 
     private static bool IsCharFamily(SqlTypeCategory category) => category is
         SqlTypeCategory.Char or SqlTypeCategory.VarChar or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar;
@@ -68,13 +63,9 @@ public static class AlterColumnSafetyScanner
 
     private static bool IsPrecisionOrScaleNarrowing(SqlType previous, SqlType next)
     {
-        if (previous.Category == SqlTypeCategory.Decimal && next.Category == SqlTypeCategory.Decimal)
+        if (NumericFamilyNarrowing.IsDecimalPrecisionNarrowed(next, previous))
         {
-            var previousPrecision = previous.Precision ?? 18;
-            var nextPrecision = next.Precision ?? 18;
-            var previousScale = previous.Scale ?? 0;
-            var nextScale = next.Scale ?? 0;
-            return nextPrecision < previousPrecision || nextScale < previousScale;
+            return true;
         }
 
         if (WriteLossClassifier.IsTemporalScaleNarrowingRisk(next, previous))

@@ -104,7 +104,9 @@ internal static class ComputedColumnMatcher
             : null;
 
     private static bool TypeEqual(DataTypeReference a, DataTypeReference b) =>
-        a is SqlDataTypeReference sqlA && b is SqlDataTypeReference sqlB && sqlA.SqlDataTypeOption == sqlB.SqlDataTypeOption;
+        SqlTypeReferenceResolver.Resolve(a, columnCollation: null) is { } resolvedA
+        && SqlTypeReferenceResolver.Resolve(b, columnCollation: null) is { } resolvedB
+        && resolvedA == resolvedB;
 
     private static string? LastIdentifier(ColumnReferenceExpression columnRef) =>
         columnRef.MultiPartIdentifier?.Identifiers is { Count: > 0 } identifiers ? identifiers[^1].Value : null;

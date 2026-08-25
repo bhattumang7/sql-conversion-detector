@@ -98,7 +98,7 @@ public static class PartialCompositeForeignKeyJoinScanner
                 (byAlias, ordered),
             };
 
-            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(whereClause?.SearchCondition, columnRef => PredicateVisitorSupport.ResolveColumnFacts(columnRef, scopeChain, sourcePath, catalog)))
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(whereClause?.SearchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
             {
                 return;
             }

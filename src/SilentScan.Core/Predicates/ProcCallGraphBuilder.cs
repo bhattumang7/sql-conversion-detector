@@ -1,6 +1,7 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates.DynamicSqlValue;
 using SilentScan.Core.TypeInference;
@@ -120,7 +121,7 @@ public static class ProcCallGraphBuilder
         private void TryFoldDynamicCall(ExecuteStatement node, IReadOnlyList<ScalarExpression> statementExpressions)
         {
             var site = new SourceSpan(sourcePath, node.StartLine, node.StartColumn);
-            var state = BuildLiteralVariableState(statementExpressions, node);
+            var state = ResolveVariableStateAtCallSite(node);
 
             SqlTextValue combined = new SqlTextValue.Template([]);
             foreach (var expression in statementExpressions)
@@ -197,7 +198,8 @@ public static class ProcCallGraphBuilder
                     };
                 }
 
-                var callerArgumentType = ExpressionTypeInferencer.Resolve(actual.ParameterValue, _ => null, catalog.TypeAliases);
+                var callerArgumentType = ScalarExpressionResolver.ResolveScalarType(
+                    actual.ParameterValue, [], sourcePath, ledger: null, catalog.TypeAliases, catalog, _variableTypes);
                 matched.Add(new ProcCallArgument(
                     formal.Name, formal.Type, formal.IsOutput, CallerVariableName: null, actual.ParameterValue is Literal, literalArgument,
                     callerArgumentType, actual.IsOutput, actual.ParameterValue, CallerVariableWasAssignedBeforeCall: true));
@@ -206,32 +208,49 @@ public static class ProcCallGraphBuilder
             Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, site, matched));
         }
 
-        private Dictionary<string, SqlTextValue> BuildLiteralVariableState(IReadOnlyList<ScalarExpression> statementExpressions, ExecuteStatement callSite)
+        private Dictionary<string, SqlTextValue> ResolveVariableStateAtCallSite(ExecuteStatement callSite)
         {
-            var collector = new VariableNameCollector();
-            foreach (var expression in statementExpressions)
+            var emptyState = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
+            if (_currentScopeStatements is null)
             {
-                expression.Accept(collector);
+                return emptyState;
             }
 
-            var state = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
-            foreach (var name in collector.Names)
+            var declaredTypes = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, type) in _variableTypes)
             {
-                if (ScopeVariableFlowTracker.ResolvePropagatedLiteral(name, _currentScopeStatements, sourcePath, callSite) is { } literal)
+                if (type is not null)
                 {
-                    state[name] = new SqlTextValue.Template(
-                        [new TemplatePiece.Lit(literal.Value, new SourceSpan(literal.SourcePath, literal.StartLine, literal.StartColumn), literal.PrefixLength)]);
+                    declaredTypes[name] = type;
                 }
             }
 
-            return state;
-        }
+            var context = new TransferContext(
+                declaredTypes, sourcePath, DynamicSqlFoldCap, new DynamicSqlScope(_currentScope, TriggerTarget: null),
+                Findings: [], Scripts: [], OutputSummaries: [], CallGraph: null, OutputSummaryIndex: null, Catalog: catalog);
 
-        private sealed class VariableNameCollector : TSqlFragmentVisitor
-        {
-            public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, SqlTextValue>? capturedState = null;
+            Action<Dictionary<string, SqlTextValue>, bool> CompileLeafCapturing(TSqlStatement statement, IReadOnlyList<int> activeGuards)
+            {
+                if (ReferenceEquals(statement, callSite))
+                {
+                    return (state, emit) =>
+                    {
+                        if (emit)
+                        {
+                            capturedState = new Dictionary<string, SqlTextValue>(state, StringComparer.OrdinalIgnoreCase);
+                        }
+                    };
+                }
 
-            public override void Visit(VariableReference node) => Names.Add(node.Name);
+                return DynamicSqlTransfer.CompileLeaf(statement, activeGuards, context);
+            }
+
+            var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
+            DynamicSqlTransfer.SeedBatchDeclaredVariables(_currentScopeStatements, context, seed);
+            new DynamicSqlCfg(sourcePath, DynamicSqlFoldCap, CompileLeafCapturing).Solve(_currentScopeStatements, seed);
+
+            return capturedState ?? emptyState;
         }
 
         private void RecordUnresolvableCall(ExecuteStatement node, string reason) =>
@@ -304,7 +323,7 @@ public static class ProcCallGraphBuilder
             }
 
             var arguments = MatchArguments(
-                procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements, node, _variableTypes, catalog.TypeAliases,
+                procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements, node, _variableTypes, catalog,
                 qualifiedName, ledger);
             Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
@@ -312,7 +331,7 @@ public static class ProcCallGraphBuilder
         private static List<ProcCallArgument> MatchArguments(
             IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, string sourcePath,
             IList<TSqlStatement>? currentScopeStatements, ExecuteStatement callSite, IReadOnlyDictionary<string, SqlType?> variableTypes,
-            IReadOnlyDictionary<string, SqlType>? typeAliases, string qualifiedCalleeName, SkipLedger ledger)
+            DatabaseCatalog catalog, string qualifiedCalleeName, SkipLedger ledger)
         {
             var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
             var positionalCursor = 0;
@@ -343,10 +362,8 @@ public static class ProcCallGraphBuilder
                 var callerVariableName = actual.ParameterValue is VariableReference variableRef ? variableRef.Name : null;
                 var literalArgument = ScopeVariableFlowTracker.TryGetDirectLiteralArgument(actual.ParameterValue, sourcePath)
                     ?? ScopeVariableFlowTracker.ResolvePropagatedLiteral(callerVariableName, currentScopeStatements, sourcePath, callSite);
-                var callerArgumentType = ExpressionTypeInferencer.Resolve(
-                    actual.ParameterValue,
-                    leaf => leaf is VariableReference leafVariable ? variableTypes.GetValueOrDefault(leafVariable.Name) : null,
-                    typeAliases);
+                var callerArgumentType = ScalarExpressionResolver.ResolveScalarType(
+                    actual.ParameterValue, [], sourcePath, ledger: null, catalog.TypeAliases, catalog, variableTypes);
                 var wasAssignedBeforeCall = callerVariableName is null
                     || ScopeVariableFlowTracker.WasAssignedBeforeCall(currentScopeStatements, callerVariableName, callSite);
                 matched.Add(new ProcCallArgument(

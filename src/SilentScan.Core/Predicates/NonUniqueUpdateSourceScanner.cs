@@ -8,6 +8,8 @@ namespace SilentScan.Core.Predicates;
 
 public static class NonUniqueUpdateSourceScanner
 {
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     public static IReadOnlyList<NonUniqueUpdateSourceFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog);
@@ -21,7 +23,10 @@ public static class NonUniqueUpdateSourceScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+#pragma warning disable CS9107
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
+        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
     {
         public List<NonUniqueUpdateSourceFinding> Findings { get; } = [];
 
@@ -45,7 +50,9 @@ public static class NonUniqueUpdateSourceScanner
 
             var targetAlias = targetRef.Alias?.Value ?? targetRef.SchemaObject.BaseIdentifier.Value;
 
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(withClause));
+            PushCteScope(withClause);
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext());
+            PopCteScope();
             if (!byAlias.TryGetValue(targetAlias, out var targetEntry) || targetEntry.Relation.QualifiedName is not { } targetQualifiedName)
             {
                 return;
@@ -56,7 +63,7 @@ public static class NonUniqueUpdateSourceScanner
                 (byAlias, ordered),
             };
 
-            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(spec.WhereClause?.SearchCondition, columnRef => PredicateVisitorSupport.ResolveColumnFacts(columnRef, scopeChain, sourcePath, catalog)))
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(spec.WhereClause?.SearchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
             {
                 return;
             }
@@ -66,9 +73,6 @@ public static class NonUniqueUpdateSourceScanner
                 InspectJoin(join, targetAlias, targetQualifiedName, spec.SetClauses, byAlias);
             }
         }
-
-        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
-            PredicateVisitorSupport.ResolutionContext(withClause, sourcePath, catalog);
 
         private static string? AliasOf(TableReference reference) =>
             reference is NamedTableReference named ? named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value : null;

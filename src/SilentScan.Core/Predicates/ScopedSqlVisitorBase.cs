@@ -76,6 +76,25 @@ internal abstract class ScopedSqlVisitorBase(
     protected FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
         new(catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), CurrentProcScope, callerScopeByCalleeScope);
 
+    protected static void InspectJoinOnClauses(
+        IList<TableReference>? tableReferences,
+        IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+        Action<BooleanExpression, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>> inspect)
+    {
+        if (tableReferences is null)
+        {
+            return;
+        }
+
+        foreach (var reference in tableReferences)
+        {
+            foreach (var join in PredicateTreeWalker.FlattenJoinNodes(reference).Where(j => j.SearchCondition is not null))
+            {
+                inspect(join.SearchCondition!, scopeChain);
+            }
+        }
+    }
+
     protected static Dictionary<string, ResolvedRelation> MergeCtes(
         IReadOnlyDictionary<string, ResolvedRelation> outer, IReadOnlyDictionary<string, ResolvedRelation> inner)
     {

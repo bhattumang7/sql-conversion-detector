@@ -7,6 +7,8 @@ namespace SilentScan.Core.Predicates;
 
 public static class AlwaysEncryptedOrderByScanner
 {
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     public static IReadOnlyList<AlwaysEncryptedOrderByFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog);
@@ -22,7 +24,7 @@ public static class AlwaysEncryptedOrderByScanner
 
 #pragma warning disable CS9107
     private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
-        : ScopedSqlVisitorBase(sourcePath, catalog, PredicateVisitorSupport.EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
 #pragma warning restore CS9107
     {
         public List<AlwaysEncryptedOrderByFinding> Findings { get; } = [];
@@ -38,10 +40,9 @@ public static class AlwaysEncryptedOrderByScanner
         {
             if (node.OrderByClause is { OrderByElements.Count: > 0 } orderByClause)
             {
-                var resolutionContext = PredicateVisitorSupport.ResolutionContext(CurrentCteRelations(), sourcePath, catalog);
                 var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
                 {
-                    FromScopeResolver.Resolve(node.FromClause, resolutionContext),
+                    FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()),
                 };
 
                 foreach (var element in orderByClause.OrderByElements)
