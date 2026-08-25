@@ -63,28 +63,13 @@ internal static class ComputedColumnTypeResolver
 
     private static SqlType? Resolve(
         ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases) =>
-        TypeInference.ExpressionTypeInferencer.Resolve(expression, e => ResolveLeaf(e, columnTypes, typeAliases), typeAliases);
+        TypeInference.ExpressionTypeInferencer.Resolve(expression, e => ResolveLeaf(e, columnTypes), typeAliases);
 
-    private static SqlType? ResolveLeaf(ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases) => expression switch
+    private static SqlType? ResolveLeaf(ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes) => expression switch
     {
         ColumnReferenceExpression { MultiPartIdentifier.Identifiers: [.., { } last] } =>
             columnTypes.GetValueOrDefault(last.Value),
 
-        FunctionCall functionCall => ResolveFunctionCall(functionCall, columnTypes, typeAliases),
-
         _ => null,
     };
-
-    private static SqlType? ResolveFunctionCall(FunctionCall functionCall, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases)
-    {
-        var name = functionCall.FunctionName.Value;
-
-        if (TypeInference.BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
-        {
-            var argumentType = Resolve(functionCall.Parameters[argumentIndex], columnTypes, typeAliases);
-            return argumentType is null ? null : TypeInference.BuiltinFunctionTypeResolver.AdjustArgumentTypeFunctionResult(name, argumentType);
-        }
-
-        return TypeInference.BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
-    }
 }

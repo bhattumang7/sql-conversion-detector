@@ -106,21 +106,231 @@ public sealed class ProcCallGraphBuilderTests
     }
 
     [Fact]
-    public void Build_SpExecuteSqlCall_RecordsNoEdgeButLedgersTheGap()
+    public void Build_SpExecuteSqlCallWithUnresolvableStatementText_RecordsNoEdgeButLedgersTheGap()
+    {
+        var (graph, ledger) = BuildFrom("""
+            DECLARE @sql nvarchar(100);
+            EXEC sp_executesql @sql;
+            """);
+
+        Assert.Empty(graph.Edges);
+        Assert.Contains(
+            ledger.Entries,
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a deterministic literal string", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_SpExecuteSqlLiteralNotFoldingToAStaticExecCall_RecordsNoEdgeButLedgersTheGap()
     {
         var (graph, ledger) = BuildFrom("EXEC sp_executesql N'SELECT 1';");
 
         Assert.Empty(graph.Edges);
-        Assert.Contains(ledger.Entries, e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("sp_executesql", StringComparison.Ordinal));
+        Assert.Contains(
+            ledger.Entries,
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a single statically named EXEC call", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void Build_DynamicStringExecCall_RecordsNoEdgeButLedgersTheGap()
+    public void Build_DynamicStringExecCallWithUnresolvableText_RecordsNoEdgeButLedgersTheGap()
+    {
+        var (graph, ledger) = BuildFrom("""
+            DECLARE @sql nvarchar(100);
+            EXEC (@sql);
+            """);
+
+        Assert.Empty(graph.Edges);
+        Assert.Contains(
+            ledger.Entries,
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a deterministic literal string", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_DynamicStringExecCallLiteralNotFoldingToAStaticExecCall_RecordsNoEdgeButLedgersTheGap()
     {
         var (graph, ledger) = BuildFrom("EXEC ('SELECT 1');");
 
         Assert.Empty(graph.Edges);
-        Assert.Contains(ledger.Entries, e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("dynamic SQL string", StringComparison.Ordinal));
+        Assert.Contains(
+            ledger.Entries,
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a single statically named EXEC call", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_ExecOfLiteralStringCallingKnownProcedure_FoldsIntoCallGraphEdgeAtTheOuterCallSite()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Code varchar(3)) AS SELECT @Code;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                EXEC ('EXEC dbo.Callee @Code = ''AB''');
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        Assert.Equal("dbo.Caller", edge.CallerScopeQualifiedName);
+        Assert.Equal("dbo.Callee", edge.CalleeQualifiedName);
+        Assert.Equal(4, edge.CallSite.Line);
+
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("@Code", argument.FormalParameterName);
+        Assert.Null(argument.CallerVariableName);
+        Assert.Equal("AB", argument.LiteralArgument?.Value);
+    }
+
+    [Fact]
+    public void Build_SpExecuteSqlOfLiteralStringCallingKnownProcedure_FoldsIntoCallGraphEdge()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Code varchar(3)) AS SELECT @Code;
+            GO
+            EXEC sp_executesql N'EXEC dbo.Callee @Code = ''AB''';
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        Assert.Equal("dbo.Callee", edge.CalleeQualifiedName);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("AB", argument.LiteralArgument?.Value);
+    }
+
+    [Fact]
+    public void Build_FoldedLiteralCallNarrowingArgument_ArgumentMismatchScannerFiresAtTheOuterCallSite()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Code varchar(3)) AS SELECT @Code;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                EXEC ('EXEC dbo.Callee @Code = ''abcdef''');
+            """);
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(graph);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.LengthTruncation, finding.Kind);
+        Assert.Equal(4, finding.Line);
+        Assert.NotEqual(1, finding.Line);
+    }
+
+    [Fact]
+    public void Build_FoldedLiteralCallArgumentPosition_TranslatesBackThroughTheEscapedQuotesToTheRealSourceOffset()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Code varchar(20)) AS SELECT @Code;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                EXEC ('EXEC dbo.Callee @Code = ''late''');
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.NotNull(argument.LiteralArgument);
+        Assert.Equal(4, argument.LiteralArgument!.StartLine);
+        Assert.Equal(36, argument.LiteralArgument.StartColumn);
+    }
+
+    [Fact]
+    public void Build_FoldedLiteralCallWithOutputParameter_DoesNotClaimACallerVariable()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Result int OUTPUT) AS SELECT 1;
+            GO
+            EXEC ('EXEC dbo.Callee @Result = @Out OUTPUT');
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.True(argument.FormalParameterIsOutput);
+        Assert.Null(argument.CallerVariableName);
+    }
+
+    [Fact]
+    public void Build_ExecOfLiteralStringWithMultipleStatements_FallsBackToUnresolvable()
+    {
+        var (graph, ledger) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Code varchar(3)) AS SELECT @Code;
+            GO
+            EXEC ('EXEC dbo.Callee @Code = ''AB''; SELECT 1;');
+            """);
+
+        Assert.Empty(graph.Edges);
+        Assert.Contains(
+            ledger.Entries,
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a single statically named EXEC call", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_ExecOfLiteralStringCallingUndeclaredProcedure_FallsBackToUnresolvable()
+    {
+        var (graph, ledger) = BuildFrom("EXEC ('EXEC dbo.NeverDeclared @X = 1');");
+
+        Assert.Empty(graph.Edges);
+        Assert.Contains(
+            ledger.Entries,
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("dbo.NeverDeclared", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_ExecOfConcatenatedLiteralStrings_FoldsIntoCallGraphEdge()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Code varchar(3)) AS SELECT @Code;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                EXEC ('EXEC dbo.Callee @Code = ''' + 'AB' + '''');
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        Assert.Equal("dbo.Callee", edge.CalleeQualifiedName);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("AB", argument.LiteralArgument?.Value);
+    }
+
+    [Fact]
+    public void Build_ExecOfVariableAssignedViaCastExpression_FallsBackToUnresolvable()
+    {
+        var (graph, ledger) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Code int) AS SELECT @Code;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @sql nvarchar(100) = N'EXEC dbo.Callee @Code = ' + CAST(65536 AS nvarchar(10));
+                EXEC sp_executesql @sql;
+            """);
+
+        Assert.Empty(graph.Edges);
+        Assert.Contains(
+            ledger.Entries,
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a deterministic literal string", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_ExecOfConcatenationWithLiteralAssignedVariable_TranslatesArgumentPositionToTheVariablesLiteral()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Code varchar(5)) AS SELECT @Code;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @Value varchar(5) = '''AB''';
+                EXEC ('EXEC dbo.Callee @Code = ' + @Value);
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("AB", argument.LiteralArgument?.Value);
+        Assert.Equal(4, argument.LiteralArgument!.StartLine);
+    }
+
+    [Fact]
+    public void Build_ExecOfConcatenationWithNonLiteralVariable_FallsBackToUnresolvable()
+    {
+        var (graph, ledger) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Code varchar(3)) AS SELECT @Code;
+            GO
+            CREATE PROCEDURE dbo.Caller (@Value varchar(3)) AS
+                EXEC ('EXEC dbo.Callee @Code = ''' + @Value + '''');
+            """);
+
+        Assert.Empty(graph.Edges);
+        Assert.Contains(
+            ledger.Entries,
+            e => e.ConstructKind == "procedure call graph edge" && e.Reason.Contains("does not fold to a deterministic literal string", StringComparison.Ordinal));
     }
 
     [Fact]

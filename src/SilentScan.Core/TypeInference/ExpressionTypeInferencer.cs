@@ -36,8 +36,26 @@ public static class ExpressionTypeInferencer
 
         SimpleCaseExpression simple => CombineCase(simple.WhenClauses, simple.ElseExpression, resolveLeaf, typeAliases),
 
+        FunctionCall functionCall => ResolveBuiltinCall(functionCall.FunctionName.Value, functionCall.Parameters, resolveLeaf, typeAliases),
+
+        LeftFunctionCall left => ResolveBuiltinCall("LEFT", left.Parameters, resolveLeaf, typeAliases),
+
+        RightFunctionCall right => ResolveBuiltinCall("RIGHT", right.Parameters, resolveLeaf, typeAliases),
+
         _ => resolveLeaf(expression),
     };
+
+    private static SqlType? ResolveBuiltinCall(
+        string name, IList<ScalarExpression> parameters, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases)
+    {
+        if (BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && parameters.Count > argumentIndex)
+        {
+            var argumentType = Resolve(parameters[argumentIndex], resolveLeaf, typeAliases);
+            return BuiltinFunctionTypeResolver.AdjustArgumentTypeFunctionResult(name, argumentType);
+        }
+
+        return BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
+    }
 
     private static SqlType? ResolveBinary(BinaryExpression binary, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases)
     {

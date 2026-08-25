@@ -2,6 +2,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates.DynamicSqlValue;
 using SilentScan.Core.TypeInference;
 using SilentScan.Core.Common;
 
@@ -90,8 +91,20 @@ public static class ProcCallGraphBuilder
                 case ExecutableProcedureReference
                 {
                     ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: var spExecutesqlName,
+                    Parameters: [{ ParameterValue: { } statementExpression }, ..],
+                } when string.Equals(spExecutesqlName, "sp_executesql", StringComparison.OrdinalIgnoreCase):
+                    TryFoldDynamicCall(node, [statementExpression]);
+                    break;
+
+                case ExecutableProcedureReference
+                {
+                    ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: var spExecutesqlName,
                 } when string.Equals(spExecutesqlName, "sp_executesql", StringComparison.OrdinalIgnoreCase):
                     RecordUnresolvableCall(node, "EXEC target is sp_executesql - the executed statement text is dynamic, not a statically known procedure");
+                    break;
+
+                case ExecutableStringList { Strings.Count: > 0 } stringList:
+                    TryFoldDynamicCall(node, [.. stringList.Strings]);
                     break;
 
                 case ExecutableStringList:
@@ -100,6 +113,125 @@ public static class ProcCallGraphBuilder
             }
 
             node.AcceptChildren(this);
+        }
+
+        private const int DynamicSqlFoldCap = 32;
+
+        private void TryFoldDynamicCall(ExecuteStatement node, IReadOnlyList<ScalarExpression> statementExpressions)
+        {
+            var site = new SourceSpan(sourcePath, node.StartLine, node.StartColumn);
+            var state = BuildLiteralVariableState(statementExpressions, node);
+
+            SqlTextValue combined = new SqlTextValue.Template([]);
+            foreach (var expression in statementExpressions)
+            {
+                combined = SqlTextValue.Concat(combined, ExpressionEvaluator.Fold(expression, state, sourcePath, DynamicSqlFoldCap, catalog));
+            }
+
+            if (SqlTextValue.Widen(combined, DynamicSqlFoldCap, site) is not SqlTextValue.Template widenedTemplate)
+            {
+                RecordUnresolvableCall(node, "dynamic SQL statement text does not fold to a deterministic literal string - call graph edge not recorded");
+                return;
+            }
+
+            var assemblies = SqlTextValue.Expand(widenedTemplate, DynamicSqlFoldCap);
+            if (assemblies.Count != 1 || SqlTextValue.ContainsHole(assemblies[0]))
+            {
+                RecordUnresolvableCall(node, "dynamic SQL statement text does not fold to a single deterministic literal string - call graph edge not recorded");
+                return;
+            }
+
+            var rendered = TemplateRenderer.Render(assemblies[0]);
+            var parseResult = SqlScriptParser.ParseText(sourcePath, rendered.InnerText);
+            if (parseResult.Errors.Count > 0
+                || parseResult.Fragment is not TSqlScript { Batches: [{ Statements: [ExecuteStatement innerExecute] }] }
+                || innerExecute.ExecuteSpecification.ExecutableEntity is not ExecutableProcedureReference
+                {
+                    ProcedureReference.ProcedureReference.Name: { } innerCalleeName,
+                    ProcedureReference.ProcedureVariable: null,
+                } innerProcedureReference
+                || string.Equals(innerCalleeName.BaseIdentifier.Value, "sp_executesql", StringComparison.OrdinalIgnoreCase))
+            {
+                RecordUnresolvableCall(node, "dynamic SQL literal does not fold to a single statically named EXEC call");
+                return;
+            }
+
+            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(innerCalleeName));
+            if (!catalog.TryGetProcedureParameters(qualifiedName, out var formalParameters))
+            {
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, CallGraphConstructKind,
+                    $"EXEC target '{qualifiedName}' folded from a dynamic SQL string is not a procedure this scan saw declared - call graph edge not recorded");
+                return;
+            }
+
+            var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+            var positionalCursor = 0;
+            var matched = new List<ProcCallArgument>(innerProcedureReference.Parameters.Count);
+
+            foreach (var actual in innerProcedureReference.Parameters)
+            {
+                ProcedureParameterInfo? formal = null;
+                if (actual.Variable is { } namedFormal && byName.TryGetValue(namedFormal.Name, out var byNameFormal))
+                {
+                    formal = byNameFormal;
+                }
+                else if (actual.Variable is null && positionalCursor < formalParameters.Count)
+                {
+                    formal = formalParameters[positionalCursor];
+                    positionalCursor++;
+                }
+
+                if (formal is null)
+                {
+                    continue;
+                }
+
+                var literalArgument = ScopeVariableFlowTracker.TryGetDirectLiteralArgument(actual.ParameterValue, sourcePath);
+                if (literalArgument is { } rawLiteralArgument)
+                {
+                    var translated = rendered.SegmentMap.Map(rawLiteralArgument.StartLine, rawLiteralArgument.StartColumn);
+                    literalArgument = rawLiteralArgument with
+                    {
+                        SourcePath = translated.SourcePath, StartLine = translated.Line, StartColumn = translated.Column,
+                    };
+                }
+
+                var callerArgumentType = ExpressionTypeInferencer.Resolve(actual.ParameterValue, _ => null, catalog.TypeAliases);
+                matched.Add(new ProcCallArgument(
+                    formal.Name, formal.Type, formal.IsOutput, CallerVariableName: null, actual.ParameterValue is Literal, literalArgument,
+                    callerArgumentType, actual.IsOutput, actual.ParameterValue, CallerVariableWasAssignedBeforeCall: true));
+            }
+
+            Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, site, matched));
+        }
+
+        private Dictionary<string, SqlTextValue> BuildLiteralVariableState(IReadOnlyList<ScalarExpression> statementExpressions, ExecuteStatement callSite)
+        {
+            var collector = new VariableNameCollector();
+            foreach (var expression in statementExpressions)
+            {
+                expression.Accept(collector);
+            }
+
+            var state = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in collector.Names)
+            {
+                if (ScopeVariableFlowTracker.ResolvePropagatedLiteral(name, _currentScopeStatements, sourcePath, callSite) is { } literal)
+                {
+                    state[name] = new SqlTextValue.Template(
+                        [new TemplatePiece.Lit(literal.Value, new SourceSpan(literal.SourcePath, literal.StartLine, literal.StartColumn), literal.PrefixLength)]);
+                }
+            }
+
+            return state;
+        }
+
+        private sealed class VariableNameCollector : TSqlFragmentVisitor
+        {
+            public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+            public override void Visit(VariableReference node) => Names.Add(node.Name);
         }
 
         private void RecordUnresolvableCall(ExecuteStatement node, string reason) =>

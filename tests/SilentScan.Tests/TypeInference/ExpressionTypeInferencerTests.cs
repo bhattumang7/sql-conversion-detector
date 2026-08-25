@@ -533,4 +533,63 @@ public sealed class ExpressionTypeInferencerTests
         Assert.Equal(9, result.Precision);
         Assert.Null(result.Scale);
     }
+
+    [Fact]
+    public void Resolve_FunctionCall_FixedReturnTypeBuiltin_ResolvesToBuiltinRegistryType()
+    {
+        var result = Resolve("GETDATE()", new Dictionary<string, SqlType?>());
+
+        Assert.Equal(SqlTypeCategory.DateTime, result!.Category);
+    }
+
+    [Fact]
+    public void Resolve_FunctionCall_ArgumentTypeBuiltin_ResolvesArgumentExpressionRecursively()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["IntCol"] = IntType, ["DecCol"] = DecimalType };
+
+        var result = Resolve("ISNULL(IntCol * DecCol, 0)", typesByName);
+
+        Assert.Equal(SqlTypeCategory.Decimal, result!.Category);
+    }
+
+    [Fact]
+    public void Resolve_FunctionCall_LengthVaryingBuiltin_ClearsLengthRatherThanKeepingArgumentLength()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = VarCharType };
+
+        var result = Resolve("SUBSTRING(A, 1, 5)", typesByName);
+
+        Assert.Equal(SqlTypeCategory.VarChar, result!.Category);
+        Assert.False(result.LengthKnown);
+    }
+
+    [Fact]
+    public void Resolve_FunctionCall_UnknownFunction_ResolvesToNullRatherThanGuessing()
+    {
+        var result = Resolve("dbo.SomeScalarFunction(1)", new Dictionary<string, SqlType?>());
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Resolve_LeftFunctionCall_ParsesToItsOwnScriptDomNodeType_StillResolvesArgumentType()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = VarCharType };
+
+        var result = Resolve("LEFT(A, 5)", typesByName);
+
+        Assert.Equal(SqlTypeCategory.VarChar, result!.Category);
+        Assert.False(result.LengthKnown);
+    }
+
+    [Fact]
+    public void Resolve_RightFunctionCall_ParsesToItsOwnScriptDomNodeType_StillResolvesArgumentType()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = VarCharType };
+
+        var result = Resolve("RIGHT(A, 5)", typesByName);
+
+        Assert.Equal(SqlTypeCategory.VarChar, result!.Category);
+        Assert.False(result.LengthKnown);
+    }
 }
