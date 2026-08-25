@@ -1518,7 +1518,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"ALTER COLUMN safety ({report.AlterColumnSafetyFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "An ALTER TABLE ... ALTER COLUMN either narrows a DECIMAL/NUMERIC or var-time column's declared precision/scale below its current catalog value, or retypes a char/nchar/varchar/nvarchar column directly to binary/varbinary - both fail or silently lose data at DDL time.");
+            "An ALTER TABLE ... ALTER COLUMN either narrows a numeric or var-time column's declared precision/scale below its current catalog value, retypes a char/nchar/varchar/nvarchar column directly to binary/varbinary, or retypes a DATETIMEOFFSET column into an offset-unaware temporal type - all either fail or silently lose data at DDL time.");
 
         foreach (var group in report.AlterColumnSafetyFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
         {
@@ -1541,6 +1541,7 @@ public static class ReadableScanReportWriter
     {
         AlterColumnSafetyKind.PrecisionOrScaleNarrowing => "Precision/scale narrowing",
         AlterColumnSafetyKind.IncompatibleFamilyConversion => "Incompatible family conversion",
+        AlterColumnSafetyKind.TemporalOffsetDropped => "Temporal offset dropped",
         _ => "Unknown",
     };
 

@@ -1254,6 +1254,8 @@ public static class SarifReportWriter
                 $"'{finding.TableQualifiedName}.{finding.ColumnName}' is narrowed from {finding.PreviousType} to {finding.NewType} - this fails at DDL time if an existing value no longer fits, or silently rounds away digits past the new scale if it does.",
             AlterColumnSafetyKind.IncompatibleFamilyConversion =>
                 $"'{finding.TableQualifiedName}.{finding.ColumnName}' is retyped from {finding.PreviousType} to {finding.NewType} - there is no implicit conversion between the character and binary families, and ALTER COLUMN has no syntax to carry an explicit CONVERT; the statement does not compile.",
+            AlterColumnSafetyKind.TemporalOffsetDropped =>
+                $"'{finding.TableQualifiedName}.{finding.ColumnName}' is retyped from {finding.PreviousType} to {finding.NewType} - the UTC offset is silently dropped, keeping the local date/time digits unchanged rather than normalizing to UTC.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled AlterColumnSafetyKind."),
         };
 

@@ -1,4 +1,5 @@
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Rules;
 using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
@@ -46,17 +47,24 @@ public static class AlterColumnSafetyScanner
             return AlterColumnSafetyKind.PrecisionOrScaleNarrowing;
         }
 
+        if (IsTemporalOffsetDropped(previous, next))
+        {
+            return AlterColumnSafetyKind.TemporalOffsetDropped;
+        }
+
         return null;
     }
+
+    private static bool IsTemporalOffsetDropped(SqlType previous, SqlType next) =>
+        previous.Category == SqlTypeCategory.DateTimeOffset
+        && next.Category is SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTime or SqlTypeCategory.SmallDateTime
+            or SqlTypeCategory.Date or SqlTypeCategory.Time;
 
     private static bool IsCharFamily(SqlTypeCategory category) => category is
         SqlTypeCategory.Char or SqlTypeCategory.VarChar or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar;
 
-    private static bool IsBinaryFamily(SqlTypeCategory category) => category is
-        SqlTypeCategory.Binary or SqlTypeCategory.VarBinary;
-
     private static bool IsIncompatibleFamilyConversion(SqlType previous, SqlType next) =>
-        IsCharFamily(previous.Category) && IsBinaryFamily(next.Category);
+        IsCharFamily(previous.Category) && next.IsBinaryFamily;
 
     private static bool IsFractionalSecondsFamily(SqlTypeCategory category) => category is
         SqlTypeCategory.Time or SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset;
@@ -79,6 +87,6 @@ public static class AlterColumnSafetyScanner
             return nextScale < previousScale;
         }
 
-        return false;
+        return NumericFamilyNarrowing.Classify(next, previous) is not null;
     }
 }

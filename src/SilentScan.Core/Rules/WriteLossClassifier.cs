@@ -51,57 +51,21 @@ public static class WriteLossClassifier
     private static bool IsUnicodeReplacementRisk(SqlType target, SqlType source, Literal? literal) =>
         source.IsUnicodeString && target.IsNonUnicodeString && !IsAsciiOnlyLiteral(literal);
 
-    private enum NumericFamily
-    {
-        Exact,
-        Approximate,
-    }
-
-    private static readonly Dictionary<SqlTypeCategory, (NumericFamily Family, Func<SqlType, int> Rank)> NumericProfiles =
-        new Dictionary<SqlTypeCategory, (NumericFamily, Func<SqlType, int>)>
-        {
-            [SqlTypeCategory.TinyInt] = (NumericFamily.Exact, _ => 0),
-            [SqlTypeCategory.SmallInt] = (NumericFamily.Exact, _ => 0),
-            [SqlTypeCategory.Int] = (NumericFamily.Exact, _ => 0),
-            [SqlTypeCategory.BigInt] = (NumericFamily.Exact, _ => 0),
-            [SqlTypeCategory.SmallMoney] = (NumericFamily.Exact, _ => 4),
-            [SqlTypeCategory.Money] = (NumericFamily.Exact, _ => 4),
-            [SqlTypeCategory.Decimal] = (NumericFamily.Exact, type => type.Scale ?? 0),
-            [SqlTypeCategory.Real] = (NumericFamily.Approximate, _ => 24),
-            [SqlTypeCategory.Float] = (NumericFamily.Approximate, _ => 53),
-        };
-
     private static Predicates.WriteLossKind? NumericNarrowingKind(SqlType target, SqlType source, Literal? literal)
     {
-        if (!NumericProfiles.TryGetValue(target.Category, out var targetProfile) || !NumericProfiles.TryGetValue(source.Category, out var sourceProfile))
+        if (NumericFamilyNarrowing.Classify(target, source) is not { } result)
         {
             return null;
         }
 
-        if (targetProfile.Family == NumericFamily.Exact && sourceProfile.Family == NumericFamily.Approximate)
-        {
-            var targetScale = targetProfile.Rank(target);
-            return IsWithinScaleLiteral(literal, targetScale) ? null : Predicates.WriteLossKind.ApproximateToExactTruncation;
-        }
-
-        if (targetProfile.Family != sourceProfile.Family)
+        if (result.TargetIsExact && IsWithinScaleLiteral(literal, result.TargetScale))
         {
             return null;
         }
 
-        var targetRank = targetProfile.Rank(target);
-        var sourceRank = sourceProfile.Rank(source);
-        if (targetRank >= sourceRank)
-        {
-            return null;
-        }
-
-        if (targetProfile.Family == NumericFamily.Exact && IsWithinScaleLiteral(literal, targetRank))
-        {
-            return null;
-        }
-
-        return Predicates.WriteLossKind.NumericScaleNarrowing;
+        return result.Kind == NumericFamilyNarrowing.Kind.ApproximateToExactTruncation
+            ? Predicates.WriteLossKind.ApproximateToExactTruncation
+            : Predicates.WriteLossKind.NumericScaleNarrowing;
     }
 
     private static bool IsTemporalPrecisionLossRisk(SqlType target, SqlType source, Literal? literal) =>

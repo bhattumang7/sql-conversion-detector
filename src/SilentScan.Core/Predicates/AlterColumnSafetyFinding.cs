@@ -8,6 +8,7 @@ public enum AlterColumnSafetyKind
 {
     PrecisionOrScaleNarrowing,
     IncompatibleFamilyConversion,
+    TemporalOffsetDropped,
 }
 
 public sealed record AlterColumnSafetyFinding(

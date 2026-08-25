@@ -145,4 +145,99 @@ public sealed class AlterColumnSafetyScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void DecimalColumn_ScaleNarrowedIntoMoney_Fires()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Payment (Amount DECIMAL(18, 6) NOT NULL);
+            ALTER TABLE dbo.Payment ALTER COLUMN Amount MONEY;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Amount", finding.ColumnName);
+        Assert.Equal(AlterColumnSafetyKind.PrecisionOrScaleNarrowing, finding.Kind);
+    }
+
+    [Fact]
+    public void FloatColumn_AlteredToDecimal_Fires()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Measurement (Reading FLOAT NOT NULL);
+            ALTER TABLE dbo.Measurement ALTER COLUMN Reading DECIMAL(18, 4);
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Reading", finding.ColumnName);
+        Assert.Equal(AlterColumnSafetyKind.PrecisionOrScaleNarrowing, finding.Kind);
+    }
+
+    [Fact]
+    public void RealColumn_AlteredToFloat_NegativeControl_DoesNotFire()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Measurement (Reading REAL NOT NULL);
+            ALTER TABLE dbo.Measurement ALTER COLUMN Reading FLOAT;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void MoneyColumn_AlteredToSmallMoney_NegativeControl_DoesNotFire()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Payment (Amount MONEY NOT NULL);
+            ALTER TABLE dbo.Payment ALTER COLUMN Amount SMALLMONEY;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void DecimalColumn_AlteredToFloat_NegativeControl_DoesNotFire()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Payment (Amount DECIMAL(18, 6) NOT NULL);
+            ALTER TABLE dbo.Payment ALTER COLUMN Amount FLOAT;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void DateTimeOffsetColumn_AlteredToDateTime2_Fires()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Appointment (ScheduledAt DATETIMEOFFSET NOT NULL);
+            ALTER TABLE dbo.Appointment ALTER COLUMN ScheduledAt DATETIME2;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("ScheduledAt", finding.ColumnName);
+        Assert.Equal(AlterColumnSafetyKind.TemporalOffsetDropped, finding.Kind);
+    }
+
+    [Fact]
+    public void DateTimeOffsetColumn_AlteredToDate_Fires()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Appointment (ScheduledAt DATETIMEOFFSET NOT NULL);
+            ALTER TABLE dbo.Appointment ALTER COLUMN ScheduledAt DATE;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(AlterColumnSafetyKind.TemporalOffsetDropped, finding.Kind);
+    }
+
+    [Fact]
+    public void DateTime2Column_AlteredToDateTimeOffset_NegativeControl_DoesNotFire()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Appointment (ScheduledAt DATETIME2 NOT NULL);
+            ALTER TABLE dbo.Appointment ALTER COLUMN ScheduledAt DATETIMEOFFSET;
+            """);
+
+        Assert.Empty(findings);
+    }
 }

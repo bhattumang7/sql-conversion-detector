@@ -51,6 +51,7 @@ public static class FindingRuleIds
     {
         AlterColumnSafetyKind.PrecisionOrScaleNarrowing => "silentscan/catalog/alter-column-precision-scale-narrowing",
         AlterColumnSafetyKind.IncompatibleFamilyConversion => "silentscan/catalog/alter-column-incompatible-family-conversion",
+        AlterColumnSafetyKind.TemporalOffsetDropped => "silentscan/catalog/alter-column-temporal-offset-dropped",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled AlterColumnSafetyKind."),
     };
     public static string OperandComparabilityRuleId(OperandComparabilityFindingKind kind) => kind switch
