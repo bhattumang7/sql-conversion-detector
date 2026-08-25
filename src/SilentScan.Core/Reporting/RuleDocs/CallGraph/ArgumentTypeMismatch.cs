@@ -29,6 +29,12 @@ internal static class ArgumentTypeMismatch
             the loss happens - which is also why it's easy to miss in review, since neither the
             caller's variable declaration nor the callee's parameter declaration looks wrong in
             isolation, only the pairing across the call site does.
+
+            The same assignment happens in reverse for an OUTPUT parameter: at the end of the call,
+            SQL Server implicitly converts the callee's own final parameter value to the caller-side
+            variable's declared type and assigns it back. A narrower caller-side variable loses
+            information at that point exactly as it would on the way in - the direction is reported
+            on each finding so it's clear which side of the call is silently narrowing.
             """,
         Examples:
         [
@@ -53,5 +59,26 @@ internal static class ArgumentTypeMismatch
                     EXEC dbo.usp_ApplyDiscount @DiscountRate = @rate;
                     """,
                 CompliantExplanation: "The caller's variable now matches the parameter's declared type and scale exactly - the value crosses the call boundary with no implicit narrowing conversion."),
+            new RuleDocExample(
+                Title: "An OUTPUT parameter's final value silently rounded on the way back",
+                NoncompliantSql: """
+                    CREATE PROCEDURE dbo.usp_ComputeTax
+                        @Tax DECIMAL(10,4) OUTPUT
+                    AS
+                    BEGIN
+                        SET @Tax = 12.3456;
+                    END;
+
+                    -- Caller:
+                    DECLARE @tax DECIMAL(4,1);
+                    EXEC dbo.usp_ComputeTax @Tax = @tax OUTPUT;
+                    """,
+                NoncompliantExplanation: "@usp_ComputeTax computes a DECIMAL(10,4) result, but @tax can only hold one fractional digit - the value is silently rounded when SQL Server copies the callee's final parameter value back into @tax at the end of the call, not when @usp_ComputeTax itself runs.",
+                CompliantSql: """
+                    -- Caller:
+                    DECLARE @tax DECIMAL(10,4);
+                    EXEC dbo.usp_ComputeTax @Tax = @tax OUTPUT;
+                    """,
+                CompliantExplanation: "@tax now matches the OUTPUT parameter's declared type and scale exactly - the final value crosses back over the call boundary with no implicit narrowing conversion."),
         ]);
 }

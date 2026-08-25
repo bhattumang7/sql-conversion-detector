@@ -24,6 +24,7 @@ public sealed class ProcCallArgumentMismatchScannerTests
         Assert.Equal("@P", finding.FormalParameterName);
         Assert.Equal("@Local", finding.CallerVariableName);
         Assert.Equal(WriteLossKind.UnicodeToNonUnicodeReplacement, finding.Kind);
+        Assert.False(finding.IsOutputWriteback);
         Assert.Equal("test.sql", finding.SourcePath);
         Assert.Equal(3, finding.Line);
     }
@@ -110,6 +111,35 @@ public sealed class ProcCallArgumentMismatchScannerTests
         var argument = new ProcCallArgument(
             "@P", null, FormalParameterIsOutput: false,
             "@Local", IsLiteral: false, CallerArgumentType: new SqlType(SqlTypeCategory.Int));
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(GraphWith(argument));
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void OutputParameter_NarrowerCallerVariable_FiresAsWriteback()
+    {
+        var argument = new ProcCallArgument(
+            "@P", new SqlType(SqlTypeCategory.VarChar, Length: 10), FormalParameterIsOutput: true,
+            "@Local", IsLiteral: false, CallerArgumentType: new SqlType(SqlTypeCategory.VarChar, Length: 3),
+            CallSiteHasOutputKeyword: true);
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(GraphWith(argument));
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.LengthTruncation, finding.Kind);
+        Assert.True(finding.IsOutputWriteback);
+        Assert.Equal("@Local", finding.CallerVariableName);
+    }
+
+    [Fact]
+    public void OutputParameter_CallSiteOmitsOutputKeyword_NeverFiresAsWriteback()
+    {
+        var argument = new ProcCallArgument(
+            "@P", new SqlType(SqlTypeCategory.VarChar, Length: 10), FormalParameterIsOutput: true,
+            "@Local", IsLiteral: false, CallerArgumentType: new SqlType(SqlTypeCategory.VarChar, Length: 3),
+            CallSiteHasOutputKeyword: false);
 
         var findings = ProcCallArgumentMismatchScanner.Scan(GraphWith(argument));
 

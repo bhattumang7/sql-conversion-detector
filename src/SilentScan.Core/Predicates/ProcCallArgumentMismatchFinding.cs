@@ -11,6 +11,7 @@ public sealed record ProcCallArgumentMismatchFinding(
     string CallerTypeDisplay,
     string FormalParameterTypeDisplay,
     WriteLossKind Kind,
+    bool IsOutputWriteback,
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
     [property: JsonIgnore] int Column,

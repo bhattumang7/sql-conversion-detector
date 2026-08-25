@@ -671,16 +671,17 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"EXEC call-site argument mismatches ({report.ProcCallArgumentMismatchFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "A real EXEC call site's caller-side variable has a declared type that risks silent data loss against the callee's own declared parameter type - an assignment-shaped conversion at parameter marshalling, not a predicate. This also primes the exact mismatched value for any comparison the callee's own body makes against a column using this parameter.");
+            "A real EXEC call site has a silent narrowing conversion at parameter marshalling, not a predicate - an assignment-shaped conversion, classified the same way an INSERT/UPDATE assignment's silent data loss is. Two distinct directions can trigger it: an input parameter whose caller-side variable's declared type risks losing information on the way in (which also primes the exact mismatched value for any comparison the callee's own body makes against it), or an OUTPUT parameter whose final value risks losing information on the way back into a narrower caller-side variable after the call returns.");
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ProcCallArgumentMismatchRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Callee", ParameterHeader, "Caller variable", "Caller type", "Parameter type", "Risk"],
+            [WhereHeader, "Callee", ParameterHeader, "Direction", "Caller-side expression", "Caller type", "Parameter type", "Risk"],
             [.. report.ProcCallArgumentMismatchFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.CalleeQualifiedName,
                 f.FormalParameterName,
+                f.IsOutputWriteback ? "OUTPUT writeback (callee -> caller)" : "input (caller -> callee)",
                 f.CallerVariableName,
                 f.CallerTypeDisplay,
                 f.FormalParameterTypeDisplay,

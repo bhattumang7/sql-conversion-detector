@@ -54,6 +54,7 @@ public sealed class ProcCallArgumentMismatchMoneyOracleTests : OracleTestFixture
 
         var finding = Assert.Single(findings);
         Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+        Assert.False(finding.IsOutputWriteback);
     }
 
     [Fact]
@@ -77,6 +78,7 @@ public sealed class ProcCallArgumentMismatchMoneyOracleTests : OracleTestFixture
 
         var finding = Assert.Single(findings);
         Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+        Assert.True(finding.IsOutputWriteback);
     }
 
     private static IReadOnlyList<ProcCallArgumentMismatchFinding> ScanArgumentMismatch(string sql)

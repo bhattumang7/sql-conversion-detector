@@ -36,5 +36,6 @@ public sealed class ProcCallArgumentMismatchPipelineTests : OracleTestFixture
         Assert.Equal("@Code", finding.FormalParameterName);
         Assert.Equal("@LocalCode", finding.CallerVariableName);
         Assert.Equal(WriteLossKind.UnicodeToNonUnicodeReplacement, finding.Kind);
+        Assert.False(finding.IsOutputWriteback);
     }
 }

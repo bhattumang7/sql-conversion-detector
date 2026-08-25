@@ -105,6 +105,7 @@ public sealed class ProcCallArgumentMismatchOutputParameterOracleTests : OracleT
 
         var finding = Assert.Single(findings);
         Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+        Assert.True(finding.IsOutputWriteback);
     }
 
     [Fact]
@@ -150,6 +151,7 @@ public sealed class ProcCallArgumentMismatchOutputParameterOracleTests : OracleT
 
         var finding = Assert.Single(findings);
         Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+        Assert.False(finding.IsOutputWriteback);
     }
 
     [Fact]
@@ -173,6 +175,7 @@ public sealed class ProcCallArgumentMismatchOutputParameterOracleTests : OracleT
 
         var finding = Assert.Single(findings);
         Assert.Equal(WriteLossKind.LengthTruncation, finding.Kind);
+        Assert.True(finding.IsOutputWriteback);
     }
 
     [Fact]
@@ -196,6 +199,7 @@ public sealed class ProcCallArgumentMismatchOutputParameterOracleTests : OracleT
 
         var finding = Assert.Single(findings);
         Assert.Equal(WriteLossKind.TemporalScaleNarrowing, finding.Kind);
+        Assert.True(finding.IsOutputWriteback);
     }
 
     [Fact]
@@ -219,6 +223,7 @@ public sealed class ProcCallArgumentMismatchOutputParameterOracleTests : OracleT
 
         var finding = Assert.Single(findings);
         Assert.Equal(WriteLossKind.TemporalOffsetDropped, finding.Kind);
+        Assert.True(finding.IsOutputWriteback);
     }
 
     private static IReadOnlyList<ProcCallArgumentMismatchFinding> ScanArgumentMismatch(string sql)

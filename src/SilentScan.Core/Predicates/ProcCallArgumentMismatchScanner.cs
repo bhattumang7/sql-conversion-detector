@@ -12,35 +12,7 @@ public static class ProcCallArgumentMismatchScanner
         {
             foreach (var argument in edge.Arguments)
             {
-                if (argument.CallerVariableName is not { } callerVariableName
-                    || argument.CallerArgumentType is not { } callerType
-                    || argument.FormalParameterType is not { } formalType)
-                {
-                    continue;
-                }
-
-                var passedInKind = WriteLossClassifier.Classify(formalType, callerType, sourceExpression: null, isVariableTarget: true);
-                if (passedInKind is { } kind)
-                {
-                    findings.Add(new ProcCallArgumentMismatchFinding(
-                        edge.CallerScopeQualifiedName, edge.CalleeQualifiedName, argument.FormalParameterName,
-                        callerVariableName, callerType.ToString(), formalType.ToString(), kind,
-                        edge.CallSite.SourcePath, edge.CallSite.Line, edge.CallSite.Column));
-                }
-
-                if (!argument.FormalParameterIsOutput || !argument.CallSiteHasOutputKeyword)
-                {
-                    continue;
-                }
-
-                var passedBackKind = WriteLossClassifier.Classify(callerType, formalType, sourceExpression: null, isVariableTarget: true);
-                if (passedBackKind is { } outputKind)
-                {
-                    findings.Add(new ProcCallArgumentMismatchFinding(
-                        edge.CallerScopeQualifiedName, edge.CalleeQualifiedName, argument.FormalParameterName,
-                        callerVariableName, callerType.ToString(), formalType.ToString(), outputKind,
-                        edge.CallSite.SourcePath, edge.CallSite.Line, edge.CallSite.Column));
-                }
+                AddIfNarrowing(findings, edge, argument);
             }
         }
 
@@ -51,5 +23,31 @@ public static class ProcCallArgumentMismatchScanner
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
+    }
+
+    private static void AddIfNarrowing(List<ProcCallArgumentMismatchFinding> findings, ProcCallEdge edge, ProcCallArgument argument)
+    {
+        if (argument.CallerVariableName is { } callerDisplay
+            && argument.CallerArgumentType is { } callerType
+            && argument.FormalParameterType is { } formalType
+            && WriteLossClassifier.Classify(formalType, callerType, sourceExpression: null, isVariableTarget: true) is { } passedInKind)
+        {
+            findings.Add(new ProcCallArgumentMismatchFinding(
+                edge.CallerScopeQualifiedName, edge.CalleeQualifiedName, argument.FormalParameterName,
+                callerDisplay, callerType.ToString(), formalType.ToString(), passedInKind, IsOutputWriteback: false,
+                edge.CallSite.SourcePath, edge.CallSite.Line, edge.CallSite.Column));
+        }
+
+        if (argument.FormalParameterIsOutput && argument.CallSiteHasOutputKeyword
+            && argument.CallerVariableName is { } callerVariableName
+            && argument.CallerArgumentType is { } outputCallerType
+            && argument.FormalParameterType is { } outputFormalType
+            && WriteLossClassifier.Classify(outputCallerType, outputFormalType, sourceExpression: null, isVariableTarget: true) is { } passedBackKind)
+        {
+            findings.Add(new ProcCallArgumentMismatchFinding(
+                edge.CallerScopeQualifiedName, edge.CalleeQualifiedName, argument.FormalParameterName,
+                callerVariableName, outputCallerType.ToString(), outputFormalType.ToString(), passedBackKind, IsOutputWriteback: true,
+                edge.CallSite.SourcePath, edge.CallSite.Line, edge.CallSite.Column));
+        }
     }
 }
