@@ -171,7 +171,6 @@ public static class FindingRuleIds
     public const string DeprecatedSyntaxDeprecatedSetRowcountRuleId = "silentscan/deprecated-syntax/deprecated-set-rowcount";
     public const string StatementShapeInsertWithoutColumnListRuleId = "silentscan/statement-shape/insert-without-column-list";
     public const string StatementShapeOrdinalOrderByRuleId = "silentscan/statement-shape/ordinal-order-by";
-    public const string StatementShapeTopWithoutOrderByRuleId = "silentscan/statement-shape/top-without-order-by";
     public const string StatementShapeTableWithNoPrimaryKeyRuleId = "silentscan/statement-shape/table-with-no-primary-key";
     public const string StatementShapeMissingSetNocountOnRuleId = "silentscan/statement-shape/missing-set-nocount-on";
     public const string StatementShapeBareSelectStarRuleId = "silentscan/statement-shape/bare-select-star";
@@ -296,18 +295,12 @@ public static class FindingRuleIds
         IndexDesignFindingKind.HeapWithNonclusteredIndexes => "silentscan/index-design/heap-with-nonclustered-indexes",
         IndexDesignFindingKind.HeapWithNonclusteredPrimaryKey => "silentscan/index-design/heap-with-nonclustered-primary-key",
         IndexDesignFindingKind.NonUniqueClusteredIndex => "silentscan/index-design/non-unique-clustered-index",
-        IndexDesignFindingKind.WideClusteredKey => "silentscan/index-design/wide-clustered-key",
         IndexDesignFindingKind.RandomClusteredKeyGuidDefault => "silentscan/index-design/random-clustered-key-guid-default",
         IndexDesignFindingKind.DuplicateIndex => "silentscan/index-design/duplicate-index",
         IndexDesignFindingKind.SubsumedIndex => "silentscan/index-design/subsumed-index",
         IndexDesignFindingKind.UnindexedForeignKey => "silentscan/index-design/unindexed-foreign-key",
         IndexDesignFindingKind.DisabledIndex => "silentscan/index-design/disabled-index",
         IndexDesignFindingKind.HypotheticalIndex => "silentscan/index-design/hypothetical-index",
-        IndexDesignFindingKind.ManyNonclusteredIndexes => "silentscan/index-design/many-nonclustered-indexes",
-        IndexDesignFindingKind.ManyKeyColumnsIndex => "silentscan/index-design/many-key-columns-index",
-        IndexDesignFindingKind.WideTable => "silentscan/index-design/wide-table",
-        IndexDesignFindingKind.HighNullableColumnRatio => "silentscan/index-design/high-nullable-column-ratio",
-        IndexDesignFindingKind.HighStringColumnRatio => "silentscan/index-design/high-string-column-ratio",
         IndexDesignFindingKind.FilterColumnNotInIndex => "silentscan/index-design/filter-column-not-in-index",
         IndexDesignFindingKind.DeprecatedLobColumnType => "silentscan/index-design/deprecated-lob-column-type",
         IndexDesignFindingKind.TimestampColumnNaming => "silentscan/index-design/timestamp-column-naming",
@@ -338,7 +331,6 @@ public static class FindingRuleIds
     };
     public static string IdentityRangeRuleId(IdentityRangeFindingKind kind) => kind switch
     {
-        IdentityRangeFindingKind.IdentitySeedOrIncrementAnomaly => "silentscan/identity/seed-or-increment-anomaly",
         IdentityRangeFindingKind.IdentityRangeNearExhaustion => "silentscan/identity/range-near-exhaustion",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
@@ -453,7 +445,6 @@ public static class FindingRuleIds
     {
         StatementShapeFindingKind.InsertWithoutColumnList => StatementShapeInsertWithoutColumnListRuleId,
         StatementShapeFindingKind.OrdinalOrderBy => StatementShapeOrdinalOrderByRuleId,
-        StatementShapeFindingKind.TopWithoutOrderBy => StatementShapeTopWithoutOrderByRuleId,
         StatementShapeFindingKind.TableWithNoPrimaryKey => StatementShapeTableWithNoPrimaryKeyRuleId,
         StatementShapeFindingKind.MissingSetNocountOn => StatementShapeMissingSetNocountOnRuleId,
         StatementShapeFindingKind.BareSelectStar => StatementShapeBareSelectStarRuleId,

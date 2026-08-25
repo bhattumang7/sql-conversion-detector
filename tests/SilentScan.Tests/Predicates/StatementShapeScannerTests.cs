@@ -54,30 +54,6 @@ public sealed class StatementShapeScannerTests
     }
 
     [Fact]
-    public void TopWithNoOrderBy_Fires()
-    {
-        var findings = Scan("SELECT TOP (5) A FROM dbo.T;");
-
-        Assert.Contains(findings, f => f.Kind == StatementShapeFindingKind.TopWithoutOrderBy);
-    }
-
-    [Fact]
-    public void TopWithOrderBy_NeverFires()
-    {
-        var findings = Scan("SELECT TOP (5) A FROM dbo.T ORDER BY A;");
-
-        Assert.DoesNotContain(findings, f => f.Kind == StatementShapeFindingKind.TopWithoutOrderBy);
-    }
-
-    [Fact]
-    public void NoTopNoOrderBy_NeverFiresTopWithoutOrderBy()
-    {
-        var findings = Scan("SELECT A FROM dbo.T;");
-
-        Assert.DoesNotContain(findings, f => f.Kind == StatementShapeFindingKind.TopWithoutOrderBy);
-    }
-
-    [Fact]
     public void BareSelectStar_FiresAtLowConfidence()
     {
         var findings = Scan("SELECT * FROM dbo.T;");

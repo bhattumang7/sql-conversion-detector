@@ -10,8 +10,6 @@ public enum StatementShapeFindingKind
 
     OrdinalOrderBy,
 
-    TopWithoutOrderBy,
-
     TableWithNoPrimaryKey,
 
     MissingSetNocountOn,

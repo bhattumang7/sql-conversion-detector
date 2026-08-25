@@ -160,16 +160,6 @@ public static class StatementShapeScanner
                         "ORDER BY references a SELECT-list position by ordinal number - silently wrong if the SELECT list's own column order changes."));
                 }
             }
-            else if (node.TopRowFilter is not null)
-            {
-                Findings.Add(new StatementShapeFinding(
-                    StatementShapeFindingKind.TopWithoutOrderBy,
-                    _currentModule,
-                    sourcePath,
-                    node.TopRowFilter.StartLine,
-                    node.TopRowFilter.StartColumn,
-                    "TOP with no ORDER BY anywhere in the query - Microsoft's own documentation for TOP (Transact-SQL) states the rows returned are not guaranteed in this shape."));
-            }
 
             if (node.SelectElements.Any(e => e is SelectStarExpression))
             {

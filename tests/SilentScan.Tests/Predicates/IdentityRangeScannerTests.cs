@@ -18,40 +18,6 @@ public sealed class IdentityRangeScannerTests
     private static readonly SqlType TinyIntType = new(SqlTypeCategory.TinyInt);
 
     [Fact]
-    public void NegativeSeed_FiresAnomalyAtLowConfidence()
-    {
-        var catalog = new DatabaseCatalog();
-        catalog.AddOrReplace(Table("dbo", "Orders", [IdentityColumn("Id", IntType, seed: -1, increment: 1, currentValue: 5)]));
-
-        var findings = IdentityRangeScanner.Scan(catalog);
-
-        var finding = Assert.Single(findings, f => f.Kind == IdentityRangeFindingKind.IdentitySeedOrIncrementAnomaly);
-        Assert.Equal(FindingConfidence.Low, finding.Confidence);
-    }
-
-    [Fact]
-    public void NonOneIncrement_FiresAnomalyAtLowConfidence()
-    {
-        var catalog = new DatabaseCatalog();
-        catalog.AddOrReplace(Table("dbo", "Orders", [IdentityColumn("Id", IntType, seed: 1, increment: 2, currentValue: 5)]));
-
-        var findings = IdentityRangeScanner.Scan(catalog);
-
-        Assert.Single(findings, f => f.Kind == IdentityRangeFindingKind.IdentitySeedOrIncrementAnomaly);
-    }
-
-    [Fact]
-    public void OrdinarySeedAndIncrement_NeverFiresAnomaly()
-    {
-        var catalog = new DatabaseCatalog();
-        catalog.AddOrReplace(Table("dbo", "Orders", [IdentityColumn("Id", IntType, seed: 1, increment: 1, currentValue: 5)]));
-
-        var findings = IdentityRangeScanner.Scan(catalog);
-
-        Assert.Empty(findings);
-    }
-
-    [Fact]
     public void NearTypeCeiling_FiresExhaustion()
     {
         var catalog = new DatabaseCatalog();

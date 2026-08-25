@@ -12,8 +12,6 @@ public enum IndexDesignFindingKind
 
     NonUniqueClusteredIndex,
 
-    WideClusteredKey,
-
     RandomClusteredKeyGuidDefault,
 
     DuplicateIndex,
@@ -25,16 +23,6 @@ public enum IndexDesignFindingKind
     DisabledIndex,
 
     HypotheticalIndex,
-
-    ManyNonclusteredIndexes,
-
-    ManyKeyColumnsIndex,
-
-    WideTable,
-
-    HighNullableColumnRatio,
-
-    HighStringColumnRatio,
 
     FilterColumnNotInIndex,
 

@@ -4,9 +4,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
-using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
-using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Reporting.Sarif;
 
@@ -1181,8 +1179,6 @@ public static class SarifReportWriter
 
         var baseLevel = finding.Kind switch
         {
-            IndexDesignFindingKind.WideClusteredKey => LevelWarning,
-
             IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable => LevelWarning,
             IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization => LevelWarning,
             IndexDesignFindingKind.TimestampColumnNaming => LevelNote,

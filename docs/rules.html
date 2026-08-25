@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">282 rules. 191 carry fix guidance; 27 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">274 rules. 188 carry fix guidance; 27 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -308,7 +308,6 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <h2>identity</h2>
     <ul class="rule-list">
       <li><a class="id" href="rules/identity-range-near-exhaustion.html">Range Near Exhaustion</a> <code class="rule-key">silentscan/identity/range-near-exhaustion</code><span class="snippet">An IDENTITY column has consumed most of its declared type&#x27;s representable range.</span></li>
-      <li><a class="id" href="rules/identity-seed-or-increment-anomaly.html">Seed Or Increment Anomaly</a> <code class="rule-key">silentscan/identity/seed-or-increment-anomaly</code><span class="snippet">An IDENTITY column carries a negative seed or a non-1 increment.</span></li>
     </ul>
   </section>
 
@@ -330,11 +329,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/index-design-float-or-real-index-key-column.html">Float Or Real Index Key Column</a> <code class="rule-key">silentscan/index-design/float-or-real-index-key-column</code><span class="snippet">An index&#x27;s key carries a float/real (approximate) column.</span></li>
       <li><a class="id" href="rules/index-design-heap-with-nonclustered-indexes.html">Heap With Nonclustered Indexes</a> <code class="rule-key">silentscan/index-design/heap-with-nonclustered-indexes</code><span class="snippet">A table has no clustered index anywhere but carries one or more nonclustered indexes.</span></li>
       <li><a class="id" href="rules/index-design-heap-with-nonclustered-primary-key.html">Heap With Nonclustered Primary Key</a> <code class="rule-key">silentscan/index-design/heap-with-nonclustered-primary-key</code><span class="snippet">A table has no clustered index anywhere because its own PRIMARY KEY constraint is declared NONCLUSTERED.</span></li>
-      <li><a class="id" href="rules/index-design-high-nullable-column-ratio.html">High Nullable Column Ratio</a> <code class="rule-key">silentscan/index-design/high-nullable-column-ratio</code><span class="snippet">A table&#x27;s columns are mostly nullable.</span></li>
-      <li><a class="id" href="rules/index-design-high-string-column-ratio.html">High String Column Ratio</a> <code class="rule-key">silentscan/index-design/high-string-column-ratio</code><span class="snippet">A table&#x27;s columns are mostly string-typed.</span></li>
       <li><a class="id" href="rules/index-design-hypothetical-index.html">Hypothetical Index</a> <code class="rule-key">silentscan/index-design/hypothetical-index</code><span class="snippet">A Database Engine Tuning Advisor/missing-index-wizard hypothetical index (sys.indexes.is_hypothetical = 1) was left behind.</span></li>
-      <li><a class="id" href="rules/index-design-many-key-columns-index.html">Many Key Columns Index</a> <code class="rule-key">silentscan/index-design/many-key-columns-index</code><span class="snippet">A single index carries an unusually high number of key columns.</span></li>
-      <li><a class="id" href="rules/index-design-many-nonclustered-indexes.html">Many Nonclustered Indexes</a> <code class="rule-key">silentscan/index-design/many-nonclustered-indexes</code><span class="snippet">A table carries an unusually high number of active nonclustered indexes.</span></li>
       <li><a class="id" href="rules/index-design-mergeable-indexes-differing-include-only.html">Mergeable Indexes Differing Include Only</a> <code class="rule-key">silentscan/index-design/mergeable-indexes-differing-include-only</code><span class="snippet">Two active indexes share an identical key list and sort direction but carry different, non-overlapping INCLUDE columns.</span></li>
       <li><a class="id" href="rules/index-design-monotonic-clustered-key-missing-sequential-optimization.html">Monotonic Clustered Key Missing Sequential Optimization</a> <code class="rule-key">silentscan/index-design/monotonic-clustered-key-missing-sequential-optimization</code><span class="snippet">A clustered index leads on an always-ascending IDENTITY column with OPTIMIZE_FOR_SEQUENTIAL_KEY not enabled.</span></li>
       <li><a class="id" href="rules/index-design-no-recompute-statistics.html">No Recompute Statistics</a> <code class="rule-key">silentscan/index-design/no-recompute-statistics</code><span class="snippet">A statistics object is marked NORECOMPUTE.</span></li>
@@ -345,8 +340,6 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/index-design-timestamp-column-naming.html">Timestamp Column Naming</a> <code class="rule-key">silentscan/index-design/timestamp-column-naming</code><span class="snippet">A column is declared timestamp.</span></li>
       <li><a class="id" href="rules/index-design-unindexed-foreign-key.html">Unindexed Foreign Key</a> <code class="rule-key">silentscan/index-design/unindexed-foreign-key</code><span class="snippet">A real FOREIGN KEY constraint&#x27;s own parent-side column set has no active index leading on it.</span></li>
       <li><a class="id" href="rules/index-design-variable-length-key-column-exceeds-key-limit.html">Variable Length Key Column Exceeds Key Limit</a> <code class="rule-key">silentscan/index-design/variable-length-key-column-exceeds-key-limit</code><span class="snippet">A varchar/nvarchar/varbinary index key column&#x27;s declared max byte width exceeds the engine&#x27;s key-length ceiling (900 bytes clustered, 1700 bytes nonclustered).</span></li>
-      <li><a class="id" href="rules/index-design-wide-clustered-key.html">Wide Clustered Key</a> <code class="rule-key">silentscan/index-design/wide-clustered-key</code><span class="snippet">A CLUSTERED index&#x27;s key is wide (more than 3 key columns, or more than 16 estimated bytes).</span></li>
-      <li><a class="id" href="rules/index-design-wide-table.html">Wide Table</a> <code class="rule-key">silentscan/index-design/wide-table</code><span class="snippet">A table has an unusually large column count or estimated non-LOB row width.</span></li>
     </ul>
   </section>
 
@@ -512,7 +505,6 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/statement-shape-missing-set-nocount-on.html">Missing Set Nocount On</a> <code class="rule-key">silentscan/statement-shape/missing-set-nocount-on</code><span class="snippet">A procedure or trigger never sets NOCOUNT ON.</span></li>
       <li><a class="id" href="rules/statement-shape-ordinal-order-by.html">Ordinal Order By</a> <code class="rule-key">silentscan/statement-shape/ordinal-order-by</code><span class="snippet">An ORDER BY references a SELECT-list position by ordinal number.</span></li>
       <li><a class="id" href="rules/statement-shape-table-with-no-primary-key.html">Table With No Primary Key</a> <code class="rule-key">silentscan/statement-shape/table-with-no-primary-key</code><span class="snippet">A base table has no PRIMARY KEY constraint.</span></li>
-      <li><a class="id" href="rules/statement-shape-top-without-order-by.html">TOP Without Order By</a> <code class="rule-key">silentscan/statement-shape/top-without-order-by</code><span class="snippet">A TOP row-limiting clause has no ORDER BY anywhere in the query.</span></li>
     </ul>
   </section>
 

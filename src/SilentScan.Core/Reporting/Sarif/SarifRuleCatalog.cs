@@ -1,5 +1,4 @@
 using SilentScan.Core.Predicates;
-using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Reporting.Sarif;
@@ -143,7 +142,6 @@ public static class SarifRuleCatalog
     public const string DeprecatedSyntaxDeprecatedSetRowcountRuleId = FindingRuleIds.DeprecatedSyntaxDeprecatedSetRowcountRuleId;
     public const string StatementShapeInsertWithoutColumnListRuleId = FindingRuleIds.StatementShapeInsertWithoutColumnListRuleId;
     public const string StatementShapeOrdinalOrderByRuleId = FindingRuleIds.StatementShapeOrdinalOrderByRuleId;
-    public const string StatementShapeTopWithoutOrderByRuleId = FindingRuleIds.StatementShapeTopWithoutOrderByRuleId;
     public const string StatementShapeTableWithNoPrimaryKeyRuleId = FindingRuleIds.StatementShapeTableWithNoPrimaryKeyRuleId;
     public const string StatementShapeMissingSetNocountOnRuleId = FindingRuleIds.StatementShapeMissingSetNocountOnRuleId;
     public const string StatementShapeBareSelectStarRuleId = FindingRuleIds.StatementShapeBareSelectStarRuleId;

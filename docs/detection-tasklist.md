@@ -175,27 +175,6 @@ Competitor tools are referred to generically; real identities are in
       `INSERT INTO #temp EXEC` rules already use) is the `WITH RESULT SETS`
       analogue of that shipped family.
 
-- [ ] **Review low-precision rules for removal.** `statement-shape/top-without-order-by`
-      duplicates `bare-top-no-order-by` (same TOP-without-ORDER-BY detection,
-      near-identical rationale text) and is strictly worse — it's missing the
-      `TOP (100) PERCENT ... ORDER BY` exclusion its sibling already has.
-      Separately, several flat magic-number thresholds fire with no
-      comparison against any other catalog/usage data, the same shape as the
-      now-removed `declaration/undersized-column` and
-      `declaration/undersized-variable-or-parameter` rules:
-      `identity/seed-or-increment-anomaly` (any non-1 increment or negative
-      seed, while its own message concedes interleaved-writer sharding is
-      legitimate), `index-design/high-nullable-column-ratio` and
-      `high-string-column-ratio` (flat 0.8 ratio, no baseline),
-      `index-design/many-nonclustered-indexes` (>=7), `many-key-columns-index`
-      (>=7), `wide-table` (>=35 columns or >2000 bytes), and
-      `index-design/wide-clustered-key` (>3 key columns or >16 bytes, at
-      least tied to Microsoft's own published guidance rather than an
-      invented number). All are already labeled advisory/informational, not
-      asserting "almost always a mistake" - so this is a judgment call on
-      how much honestly-labeled heuristic noise the project tolerates, not a
-      correctness bug.
-
 - [ ] **Lower-confidence/niche backlog from the 2026-08-22 gap survey — one
       line each, group before scoping.** These didn't clear the bar for a
       full write-up above (medium/low survey confidence, a narrower feature

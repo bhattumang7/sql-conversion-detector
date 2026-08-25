@@ -25,7 +25,6 @@ public static class IdentityRangeScanner
                     continue;
                 }
 
-                ScanSeedOrIncrementAnomaly(table, column, findings);
                 ScanNearExhaustion(table, column, findings);
             }
         }
@@ -37,28 +36,6 @@ public static class IdentityRangeScanner
                 .ThenBy(f => f.ColumnName, StringComparer.Ordinal)
                 .ThenBy(f => f.Kind),
         ];
-    }
-
-    private static void ScanSeedOrIncrementAnomaly(CatalogTable table, CatalogColumn column, List<IdentityRangeFinding> findings)
-    {
-        var seed = column.IdentitySeed;
-        var increment = column.IdentityIncrement;
-
-        var seedIsNegative = seed is { } s && s < 0;
-        var incrementIsNotOne = increment is { } i && i != 1;
-        if (!seedIsNegative && !incrementIsNotOne)
-        {
-            return;
-        }
-
-        findings.Add(new IdentityRangeFinding(
-            IdentityRangeFindingKind.IdentitySeedOrIncrementAnomaly,
-            table.QualifiedName,
-            column.Name,
-            $"'{table.QualifiedName}.{column.Name}' is IDENTITY(seed={FormatValue(seed)}, increment={FormatValue(increment)}) - a negative seed or a non-1 increment is an unusual data-modeling choice worth a second look (a reversed-numbering scheme, an interleaved-writer scheme, or similar are all legitimate deliberate reasons this could be intentional).",
-            table.SourcePath,
-            table.SourceLine,
-            FindingConfidence.Low));
     }
 
     private static void ScanNearExhaustion(CatalogTable table, CatalogColumn column, List<IdentityRangeFinding> findings)
@@ -116,6 +93,4 @@ public static class IdentityRangeScanner
 
         return max - 1m;
     }
-
-    private static string FormatValue(decimal? value) => value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unknown";
 }

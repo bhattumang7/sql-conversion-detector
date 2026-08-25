@@ -709,7 +709,6 @@ public sealed class SarifReportWriterCoverageTests
     }
 
     [Theory]
-    [InlineData(IndexDesignFindingKind.WideClusteredKey, "warning")]
     [InlineData(IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable, "warning")]
     [InlineData(IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization, "warning")]
     [InlineData(IndexDesignFindingKind.TimestampColumnNaming, "note")]
@@ -979,7 +978,7 @@ public sealed class SarifReportWriterCoverageTests
 
     [Theory]
     [InlineData(StatementShapeFindingKind.BareSelectStar, "note")]
-    [InlineData(StatementShapeFindingKind.TopWithoutOrderBy, "warning")]
+    [InlineData(StatementShapeFindingKind.TableWithNoPrimaryKey, "warning")]
     public void Write_StatementShapeFinding_OnlyBareSelectStarIsDowngradedToNote(StatementShapeFindingKind kind, string expectedLevel)
     {
         var finding = new StatementShapeFinding(kind, "dbo.usp_Test", "test.sql", 1, 1, "detail", FindingConfidence.High);

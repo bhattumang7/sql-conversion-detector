@@ -1277,7 +1277,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Statement-shape risks ({report.StatementShapeFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "An INSERT with no explicit column list, an ordinal ORDER BY, a TOP with no ORDER BY, a base table with no PRIMARY KEY, a routine missing SET NOCOUNT ON, or a bare SELECT *. The first three are correctness-adjacent (silently wrong the moment the target's/source's own column shape changes, or genuinely unspecified row selection); the rest are maintainability/cost signals.");
+            "An INSERT with no explicit column list, an ordinal ORDER BY, a base table with no PRIMARY KEY, a routine missing SET NOCOUNT ON, or a bare SELECT *. The first two are correctness-adjacent (silently wrong the moment the target's/source's own column shape changes); the rest are maintainability/cost signals.");
 
         foreach (var group in report.StatementShapeFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
         {
@@ -1355,7 +1355,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Physical/schema index design ({report.IndexDesignFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "Live-mode only. A heap (no clustered index) carrying nonclustered indexes, and the sharper sibling, a heap whose own PRIMARY KEY is declared NONCLUSTERED - both pay an 8-byte RID lookup instead of a clustering-key seek. Clustering-key quality: a non-unique clustered index (hidden 4-byte uniquifier), a wide clustered key (>3 key columns or >16 estimated bytes - every nonclustered index on the table carries a copy of it), and a uniqueidentifier clustered key defaulted to NEWID() (random insert order fragments the B-tree; NEWSEQUENTIALID() does not fire here). Also: duplicate/prefix-subsumed indexes, unindexed foreign keys, disabled/hypothetical indexes, over-indexing (many nonclustered indexes on one table, or a single index with too many key columns), three low-confidence, listed-for-completeness table-shape signals (wide table, high nullable-column ratio, high string-column ratio), a filtered index whose filter columns are absent from its own key/INCLUDE list, deprecated LOB column types (text/ntext/image, and timestamp vs. rowversion as a naming-only note), a float/real column used as an index key, and a statistics object marked NORECOMPUTE.");
+            "Live-mode only. A heap (no clustered index) carrying nonclustered indexes, and the sharper sibling, a heap whose own PRIMARY KEY is declared NONCLUSTERED - both pay an 8-byte RID lookup instead of a clustering-key seek. Clustering-key quality: a non-unique clustered index (hidden 4-byte uniquifier), and a uniqueidentifier clustered key defaulted to NEWID() (random insert order fragments the B-tree; NEWSEQUENTIALID() does not fire here). Also: duplicate/prefix-subsumed indexes, unindexed foreign keys, disabled/hypothetical indexes, a filtered index whose filter columns are absent from its own key/INCLUDE list, deprecated LOB column types (text/ntext/image, and timestamp vs. rowversion as a naming-only note), a float/real column used as an index key, and a statistics object marked NORECOMPUTE.");
 
         foreach (var group in report.IndexDesignFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
         {
@@ -1375,11 +1375,7 @@ public static class ReadableScanReportWriter
 
     private static bool IsTableLevelIndexDesignKind(IndexDesignFindingKind kind) => kind switch
     {
-        IndexDesignFindingKind.UnindexedForeignKey
-            or IndexDesignFindingKind.ManyNonclusteredIndexes
-            or IndexDesignFindingKind.WideTable
-            or IndexDesignFindingKind.HighNullableColumnRatio
-            or IndexDesignFindingKind.HighStringColumnRatio => true,
+        IndexDesignFindingKind.UnindexedForeignKey => true,
         _ => false,
     };
 
@@ -1392,7 +1388,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Identity/sequence range signals ({report.IdentityRangeFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "Live-mode only. A negative seed or a non-1 increment on an IDENTITY column - schema-decidable, informational, not a proven defect. An IDENTITY column that has consumed most of its declared type's representable range - data-state-decidable, meaningful ONLY against a production-shaped target; never read the absence of this finding as a passing signal on a low-value development database.");
+            "Live-mode only. An IDENTITY column that has consumed most of its declared type's representable range - data-state-decidable, meaningful ONLY against a production-shaped target; never read the absence of this finding as a passing signal on a low-value development database.");
 
         foreach (var group in report.IdentityRangeFindings.GroupBy(f => f.Kind).OrderBy(g => g.Key))
         {

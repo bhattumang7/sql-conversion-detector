@@ -7,25 +7,7 @@ namespace SilentScan.Core.Predicates;
 
 public static class IndexDesignScanner
 {
-    public const int WideClusteredKeyMaxColumns = 3;
-
     private const string UnnamedIndexPlaceholder = "<unnamed>";
-
-    public const int WideClusteredKeyMaxBytes = 16;
-
-    public const int ManyNonclusteredIndexesThreshold = 7;
-
-    public const int ManyKeyColumnsThreshold = 7;
-
-    public const int WideTableMinColumns = 35;
-
-    public const int WideTableMaxNonLobBytes = 2000;
-
-    public const int RatioChecksMinColumns = 5;
-
-    public const double HighNullableColumnRatioThreshold = 0.8;
-
-    public const double HighStringColumnRatioThreshold = 0.8;
 
     public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IReadOnlySet<string>? dmlTargetTables = null)
     {
@@ -55,8 +37,6 @@ public static class IndexDesignScanner
             ScanClusteringKeyQuality(table, defaultTextByColumn, findings);
             ScanDuplicateAndSubsumedIndexes(table, findings);
             ScanDisabledAndHypotheticalIndexes(table, findings);
-            ScanOverIndexing(table, findings);
-            ScanTableShape(table, findings);
             ScanFilteredIndexColumnCoverage(table, findings);
             ScanColumnTypeSignals(table, findings);
             ScanFloatOrRealIndexKeyColumns(table, findings);
@@ -135,7 +115,6 @@ public static class IndexDesignScanner
         }
 
         CheckNonUniqueClusteredIndex(table, clusteredIndex, findings);
-        CheckWideClusteredKey(table, clusteredIndex, findings);
         CheckRandomClusteredKeyGuidDefault(table, clusteredIndex, defaultTextByColumn, findings);
     }
 
@@ -153,42 +132,6 @@ public static class IndexDesignScanner
             $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? UnnamedIndexPlaceholder}' ({string.Join(", ", clusteredIndex.KeyColumns)}) is not unique - the engine adds a hidden 4-byte uniquifier to every duplicate-keyed row, widening the clustering key that every nonclustered index on this table also carries in its own leaf rows.",
             table.SourcePath,
             table.SourceLine));
-    }
-
-    private static void CheckWideClusteredKey(CatalogTable table, CatalogIndex clusteredIndex, List<IndexDesignFinding> findings)
-    {
-        var keyColumnTypes = clusteredIndex.KeyColumns.Select(table.FindColumn).ToList();
-        var wideByColumnCount = clusteredIndex.KeyColumns.Count > WideClusteredKeyMaxColumns;
-
-        int? totalBytes = 0;
-        foreach (var column in keyColumnTypes)
-        {
-            var columnBytes = column?.Type is { } type ? EstimateColumnKeyBytes(type) : null;
-            if (columnBytes is null)
-            {
-
-                totalBytes = null;
-                break;
-            }
-
-            totalBytes += columnBytes;
-        }
-
-        var wideByBytes = totalBytes is { } bytes && bytes > WideClusteredKeyMaxBytes;
-        if (!wideByColumnCount && !wideByBytes)
-        {
-            return;
-        }
-
-        var bytesText = totalBytes is { } b ? $"{b} bytes" : "byte width unresolved for at least one key column";
-        findings.Add(new IndexDesignFinding(
-            IndexDesignFindingKind.WideClusteredKey,
-            table.QualifiedName,
-            clusteredIndex.Name,
-            $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? UnnamedIndexPlaceholder}' has {clusteredIndex.KeyColumns.Count} key column(s) ({string.Join(", ", clusteredIndex.KeyColumns)}, {bytesText}) - every nonclustered index on this table carries a full copy of this key in every leaf row.",
-            table.SourcePath,
-            table.SourceLine,
-            FindingConfidence.Medium));
     }
 
     private static void CheckRandomClusteredKeyGuidDefault(
@@ -313,99 +256,6 @@ public static class IndexDesignScanner
                     table.SourcePath,
                     table.SourceLine));
             }
-        }
-    }
-
-    private static void ScanOverIndexing(CatalogTable table, List<IndexDesignFinding> findings)
-    {
-        var activeNonclustered = table.Indexes.Where(i => !i.IsClustered && !i.IsDisabled).ToList();
-        if (activeNonclustered.Count >= ManyNonclusteredIndexesThreshold)
-        {
-            findings.Add(new IndexDesignFinding(
-                IndexDesignFindingKind.ManyNonclusteredIndexes,
-                table.QualifiedName,
-                IndexName: null,
-                $"'{table.QualifiedName}' carries {activeNonclustered.Count} nonclustered indexes - each one is paid for on every INSERT/UPDATE/DELETE against this table. This does not identify which (if any) index is safe to drop - that needs production usage statistics this catalog-only pass cannot see.",
-                table.SourcePath,
-                table.SourceLine,
-                FindingConfidence.Medium));
-        }
-
-        foreach (var index in table.Indexes)
-        {
-            if (!index.IsClustered && !index.IsDisabled && !index.IsColumnstore
-                && index.KeyColumns.Count >= ManyKeyColumnsThreshold)
-            {
-                findings.Add(new IndexDesignFinding(
-                    IndexDesignFindingKind.ManyKeyColumnsIndex,
-                    table.QualifiedName,
-                    index.Name,
-                    $"'{table.QualifiedName}' index '{index.Name ?? UnnamedIndexPlaceholder}' has {index.KeyColumns.Count} key columns ({string.Join(", ", index.KeyColumns)}) - every one is carried in every leaf-level lookup and update against this index.",
-                    table.SourcePath,
-                    table.SourceLine,
-                    FindingConfidence.Medium));
-            }
-        }
-    }
-
-    private static void ScanTableShape(CatalogTable table, List<IndexDesignFinding> findings)
-    {
-        var columnCount = table.Columns.Count;
-        if (columnCount == 0)
-        {
-            return;
-        }
-
-        var nonLobBytes = 0;
-        foreach (var column in table.Columns)
-        {
-
-            nonLobBytes += column.Type is { } type ? EstimateColumnKeyBytes(type) ?? 0 : 0;
-        }
-
-        if (columnCount >= WideTableMinColumns || nonLobBytes > WideTableMaxNonLobBytes)
-        {
-            findings.Add(new IndexDesignFinding(
-                IndexDesignFindingKind.WideTable,
-                table.QualifiedName,
-                IndexName: null,
-                $"'{table.QualifiedName}' has {columnCount} columns and an estimated {nonLobBytes} non-LOB bytes per row - a data-modeling signal (normalization, or separating hot/cold columns), not a specific, provable defect this pass can point at.",
-                table.SourcePath,
-                table.SourceLine,
-                FindingConfidence.Low));
-        }
-
-        if (columnCount < RatioChecksMinColumns)
-        {
-            return;
-        }
-
-        var nullableCount = table.Columns.Count(c => c.IsNullable);
-        var nullableRatio = (double)nullableCount / columnCount;
-        if (nullableRatio >= HighNullableColumnRatioThreshold)
-        {
-            findings.Add(new IndexDesignFinding(
-                IndexDesignFindingKind.HighNullableColumnRatio,
-                table.QualifiedName,
-                IndexName: null,
-                $"'{table.QualifiedName}' has {nullableCount}/{columnCount} columns ({nullableRatio:P0}) nullable - often a sign of several optional sub-entities crammed into one table, though this pass cannot confirm that for any specific column here.",
-                table.SourcePath,
-                table.SourceLine,
-                FindingConfidence.Low));
-        }
-
-        var stringCount = table.Columns.Count(c => c.Type?.IsStringFamily == true);
-        var stringRatio = (double)stringCount / columnCount;
-        if (stringRatio >= HighStringColumnRatioThreshold)
-        {
-            findings.Add(new IndexDesignFinding(
-                IndexDesignFindingKind.HighStringColumnRatio,
-                table.QualifiedName,
-                IndexName: null,
-                $"'{table.QualifiedName}' has {stringCount}/{columnCount} columns ({stringRatio:P0}) string-typed - often correlates with under-typed data (dates/numbers/enums stored as text with no CHECK/FK narrowing), though this pass cannot confirm that for any specific column here.",
-                table.SourcePath,
-                table.SourceLine,
-                FindingConfidence.Low));
         }
     }
 

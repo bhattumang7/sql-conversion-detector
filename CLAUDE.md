@@ -10,6 +10,9 @@ else restricts what SilentScan can detect or how it detects it.
 findings) is the deliverable. **Precision beats recall everywhere** — one false
 positive in a published finding is worse than ten missed true positives.
 
+## Do not launch agents
+Keep the urge to spin up agents in control. For very small tasks do not spin up agents.
+
 ## Comments
 Remove any existing comments and do not write any new comments in the code. Not optional.
 
