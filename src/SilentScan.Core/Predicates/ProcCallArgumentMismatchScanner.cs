@@ -19,7 +19,9 @@ public static class ProcCallArgumentMismatchScanner
                     continue;
                 }
 
-                var kind = WriteLossClassifier.Classify(formalType, callerType, sourceExpression: null);
+                var kind = argument.FormalParameterIsOutput
+                    ? WriteLossClassifier.Classify(callerType, formalType, sourceExpression: null)
+                    : WriteLossClassifier.Classify(formalType, callerType, sourceExpression: null);
                 if (kind is null)
                 {
                     continue;
