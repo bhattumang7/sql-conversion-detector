@@ -25,6 +25,7 @@ public static class ProcCallGraphBuilder
     }
 
     private const string CallGraphConstructKind = "procedure call graph edge";
+    private const string SpExecuteSqlName = "sp_executesql";
 
     private sealed class Visitor(DatabaseCatalog catalog, SkipLedger ledger, string sourcePath) : TSqlFragmentVisitor
     {
@@ -81,7 +82,7 @@ public static class ProcCallGraphBuilder
                 {
                     ProcedureReference.ProcedureReference.Name: { } calleeName,
                 } procedureReference
-                    when !string.Equals(calleeName.BaseIdentifier.Value, "sp_executesql", StringComparison.OrdinalIgnoreCase):
+                    when !string.Equals(calleeName.BaseIdentifier.Value, SpExecuteSqlName, StringComparison.OrdinalIgnoreCase):
                     VisitProcedureCall(node, procedureReference, calleeName);
                     break;
 
@@ -93,14 +94,14 @@ public static class ProcCallGraphBuilder
                 {
                     ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: var spExecutesqlName,
                     Parameters: [{ ParameterValue: { } statementExpression }, ..],
-                } when string.Equals(spExecutesqlName, "sp_executesql", StringComparison.OrdinalIgnoreCase):
+                } when string.Equals(spExecutesqlName, SpExecuteSqlName, StringComparison.OrdinalIgnoreCase):
                     TryFoldDynamicCall(node, [statementExpression]);
                     break;
 
                 case ExecutableProcedureReference
                 {
                     ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: var spExecutesqlName,
-                } when string.Equals(spExecutesqlName, "sp_executesql", StringComparison.OrdinalIgnoreCase):
+                } when string.Equals(spExecutesqlName, SpExecuteSqlName, StringComparison.OrdinalIgnoreCase):
                     RecordUnresolvableCall(node, "EXEC target is sp_executesql - the executed statement text is dynamic, not a statically known procedure");
                     break;
 
@@ -143,21 +144,13 @@ public static class ProcCallGraphBuilder
             }
 
             var rendered = TemplateRenderer.Render(assemblies[0]);
-            var parseResult = SqlScriptParser.ParseText(sourcePath, rendered.InnerText);
-            if (parseResult.Errors.Count > 0
-                || parseResult.Fragment is not TSqlScript { Batches: [{ Statements: [ExecuteStatement innerExecute] }] }
-                || innerExecute.ExecuteSpecification.ExecutableEntity is not ExecutableProcedureReference
-                {
-                    ProcedureReference.ProcedureReference.Name: { } innerCalleeName,
-                    ProcedureReference.ProcedureVariable: null,
-                } innerProcedureReference
-                || string.Equals(innerCalleeName.BaseIdentifier.Value, "sp_executesql", StringComparison.OrdinalIgnoreCase))
+            if (!TryResolveFoldedProcedureCall(rendered.InnerText, out var innerProcedureReference))
             {
                 RecordUnresolvableCall(node, "dynamic SQL literal does not fold to a single statically named EXEC call");
                 return;
             }
 
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(innerCalleeName));
+            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(innerProcedureReference.ProcedureReference.ProcedureReference.Name));
             if (!catalog.TryGetProcedureParameters(qualifiedName, out var formalParameters))
             {
                 ledger.Record(
@@ -166,11 +159,38 @@ public static class ProcCallGraphBuilder
                 return;
             }
 
+            var matched = MatchFoldedArguments(innerProcedureReference.Parameters, formalParameters, rendered.SegmentMap);
+            Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, site, matched));
+        }
+
+        private bool TryResolveFoldedProcedureCall(string innerText, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ExecutableProcedureReference? procedureReference)
+        {
+            procedureReference = null;
+            var parseResult = SqlScriptParser.ParseText(sourcePath, innerText);
+            if (parseResult.Errors.Count > 0
+                || parseResult.Fragment is not TSqlScript { Batches: [{ Statements: [ExecuteStatement innerExecute] }] }
+                || innerExecute.ExecuteSpecification.ExecutableEntity is not ExecutableProcedureReference
+                {
+                    ProcedureReference.ProcedureReference.Name: { } innerCalleeName,
+                    ProcedureReference.ProcedureVariable: null,
+                } candidate
+                || string.Equals(innerCalleeName.BaseIdentifier.Value, SpExecuteSqlName, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            procedureReference = candidate;
+            return true;
+        }
+
+        private List<ProcCallArgument> MatchFoldedArguments(
+            IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, DynamicSqlSegmentMap segmentMap)
+        {
             var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
             var positionalCursor = 0;
-            var matched = new List<ProcCallArgument>(innerProcedureReference.Parameters.Count);
+            var matched = new List<ProcCallArgument>(actualParameters.Count);
 
-            foreach (var actual in innerProcedureReference.Parameters)
+            foreach (var actual in actualParameters)
             {
                 ProcedureParameterInfo? formal = null;
                 if (actual.Variable is { } namedFormal && byName.TryGetValue(namedFormal.Name, out var byNameFormal))
@@ -191,7 +211,7 @@ public static class ProcCallGraphBuilder
                 var literalArgument = ScopeVariableFlowTracker.TryGetDirectLiteralArgument(actual.ParameterValue, sourcePath);
                 if (literalArgument is { } rawLiteralArgument)
                 {
-                    var translated = rendered.SegmentMap.Map(rawLiteralArgument.StartLine, rawLiteralArgument.StartColumn);
+                    var translated = segmentMap.Map(rawLiteralArgument.StartLine, rawLiteralArgument.StartColumn);
                     literalArgument = rawLiteralArgument with
                     {
                         SourcePath = translated.SourcePath, StartLine = translated.Line, StartColumn = translated.Column,
@@ -199,13 +219,13 @@ public static class ProcCallGraphBuilder
                 }
 
                 var callerArgumentType = ScalarExpressionResolver.ResolveScalarType(
-                    actual.ParameterValue, [], sourcePath, ledger: null, catalog.TypeAliases, catalog, _variableTypes);
+                    actual.ParameterValue, [], sourcePath, new ScalarExpressionResolver.ScalarTypeContext(null, catalog.TypeAliases, catalog, _variableTypes));
                 matched.Add(new ProcCallArgument(
                     formal.Name, formal.Type, formal.IsOutput, CallerVariableName: null, actual.ParameterValue is Literal, literalArgument,
                     callerArgumentType, actual.IsOutput, actual.ParameterValue, CallerVariableWasAssignedBeforeCall: true));
             }
 
-            Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, site, matched));
+            return matched;
         }
 
         private Dictionary<string, SqlTextValue> ResolveVariableStateAtCallSite(ExecuteStatement callSite)
@@ -323,15 +343,22 @@ public static class ProcCallGraphBuilder
             }
 
             var arguments = MatchArguments(
-                procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements, node, _variableTypes, catalog,
-                qualifiedName, ledger);
+                procedureReference.Parameters, formalParameters,
+                new MatchArgumentsContext(sourcePath, _currentScopeStatements, node, _variableTypes, catalog, qualifiedName, ledger));
             Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
 
+        private readonly record struct MatchArgumentsContext(
+            string SourcePath,
+            IList<TSqlStatement>? CurrentScopeStatements,
+            ExecuteStatement CallSite,
+            IReadOnlyDictionary<string, SqlType?> VariableTypes,
+            DatabaseCatalog Catalog,
+            string QualifiedCalleeName,
+            SkipLedger Ledger);
+
         private static List<ProcCallArgument> MatchArguments(
-            IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, string sourcePath,
-            IList<TSqlStatement>? currentScopeStatements, ExecuteStatement callSite, IReadOnlyDictionary<string, SqlType?> variableTypes,
-            DatabaseCatalog catalog, string qualifiedCalleeName, SkipLedger ledger)
+            IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, MatchArgumentsContext context)
         {
             var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
             var positionalCursor = 0;
@@ -353,19 +380,20 @@ public static class ProcCallGraphBuilder
                 if (formal is null)
                 {
                     var reason = actual.Variable is { } unmatchedName
-                        ? $"argument '{unmatchedName.Name}' does not match any declared parameter of '{qualifiedCalleeName}' - argument not matched to a formal parameter"
-                        : $"positional argument does not match any declared parameter of '{qualifiedCalleeName}' - argument not matched to a formal parameter";
-                    ledger.Record(AnalysisPass.Predicates, sourcePath, actual.StartLine, actual.StartColumn, CallGraphConstructKind, reason);
+                        ? $"argument '{unmatchedName.Name}' does not match any declared parameter of '{context.QualifiedCalleeName}' - argument not matched to a formal parameter"
+                        : $"positional argument does not match any declared parameter of '{context.QualifiedCalleeName}' - argument not matched to a formal parameter";
+                    context.Ledger.Record(AnalysisPass.Predicates, context.SourcePath, actual.StartLine, actual.StartColumn, CallGraphConstructKind, reason);
                     continue;
                 }
 
                 var callerVariableName = actual.ParameterValue is VariableReference variableRef ? variableRef.Name : null;
-                var literalArgument = ScopeVariableFlowTracker.TryGetDirectLiteralArgument(actual.ParameterValue, sourcePath)
-                    ?? ScopeVariableFlowTracker.ResolvePropagatedLiteral(callerVariableName, currentScopeStatements, sourcePath, callSite);
+                var literalArgument = ScopeVariableFlowTracker.TryGetDirectLiteralArgument(actual.ParameterValue, context.SourcePath)
+                    ?? ScopeVariableFlowTracker.ResolvePropagatedLiteral(callerVariableName, context.CurrentScopeStatements, context.SourcePath, context.CallSite);
                 var callerArgumentType = ScalarExpressionResolver.ResolveScalarType(
-                    actual.ParameterValue, [], sourcePath, ledger: null, catalog.TypeAliases, catalog, variableTypes);
+                    actual.ParameterValue, [], context.SourcePath,
+                    new ScalarExpressionResolver.ScalarTypeContext(null, context.Catalog.TypeAliases, context.Catalog, context.VariableTypes));
                 var wasAssignedBeforeCall = callerVariableName is null
-                    || ScopeVariableFlowTracker.WasAssignedBeforeCall(currentScopeStatements, callerVariableName, callSite);
+                    || ScopeVariableFlowTracker.WasAssignedBeforeCall(context.CurrentScopeStatements, callerVariableName, context.CallSite);
                 matched.Add(new ProcCallArgument(
                     formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal, literalArgument,
                     callerArgumentType, actual.IsOutput, actual.ParameterValue, wasAssignedBeforeCall));

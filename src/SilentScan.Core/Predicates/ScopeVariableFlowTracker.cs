@@ -88,12 +88,9 @@ public static class ScopeVariableFlowTracker
                 return true;
             }
 
-            foreach (var nested in NestedLists(statement))
+            if (NestedLists(statement).Any(nested => DeclaresVariable(nested, variableName)))
             {
-                if (DeclaresVariable(nested, variableName))
-                {
-                    return true;
-                }
+                return true;
             }
         }
 
@@ -212,12 +209,9 @@ public static class ScopeVariableFlowTracker
                 return true;
             }
 
-            foreach (var nested in NestedLists(statement))
+            if (NestedLists(statement).Any(nested => TouchesVariable(nested, variableName)))
             {
-                if (TouchesVariable(nested, variableName))
-                {
-                    return true;
-                }
+                return true;
             }
         }
 

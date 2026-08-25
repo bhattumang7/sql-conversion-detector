@@ -147,18 +147,16 @@ public static class StatementShapeScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            if (node.OrderByClause is { OrderByElements.Count: > 0 } orderBy)
+            if (node.OrderByClause is { OrderByElements.Count: > 0 } orderBy
+                && orderBy.OrderByElements.FirstOrDefault(e => e.Expression is IntegerLiteral) is { } ordinalElement)
             {
-                if (orderBy.OrderByElements.FirstOrDefault(e => e.Expression is IntegerLiteral) is { } ordinalElement)
-                {
-                    Findings.Add(new StatementShapeFinding(
-                        StatementShapeFindingKind.OrdinalOrderBy,
-                        _currentModule,
-                        sourcePath,
-                        ordinalElement.StartLine,
-                        ordinalElement.StartColumn,
-                        "ORDER BY references a SELECT-list position by ordinal number - silently wrong if the SELECT list's own column order changes."));
-                }
+                Findings.Add(new StatementShapeFinding(
+                    StatementShapeFindingKind.OrdinalOrderBy,
+                    _currentModule,
+                    sourcePath,
+                    ordinalElement.StartLine,
+                    ordinalElement.StartColumn,
+                    "ORDER BY references a SELECT-list position by ordinal number - silently wrong if the SELECT list's own column order changes."));
             }
 
             if (node.SelectElements.Any(e => e is SelectStarExpression))

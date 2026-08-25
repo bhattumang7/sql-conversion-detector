@@ -28,17 +28,23 @@ public static class ScalarExpressionResolver
         DatabaseCatalog? catalog = null) =>
         Resolve(expression, new ExpressionContext([(scope, orderedRelations)], sourcePath, ledger, typeAliases, catalog));
 
+    public readonly record struct ScalarTypeContext(
+        SkipLedger? Ledger,
+        IReadOnlyDictionary<string, SqlType>? TypeAliases,
+        DatabaseCatalog? Catalog,
+        IReadOnlyDictionary<string, SqlType?>? Variables = null,
+        Func<ScalarSubquery, SqlType?>? ResolveSubquery = null);
+
     public static SqlType? ResolveScalarType(
         ScalarExpression expression,
         IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
         string sourcePath,
-        SkipLedger? ledger,
-        IReadOnlyDictionary<string, SqlType>? typeAliases,
-        DatabaseCatalog? catalog,
-        IReadOnlyDictionary<string, SqlType?>? variables = null,
-        Func<ScalarSubquery, SqlType?>? resolveSubquery = null) =>
+        ScalarTypeContext context) =>
         ColumnProvenanceAnalysis.TryGetScalarType(
-            Resolve(expression, new ExpressionContext(scopeChain, sourcePath, ledger, typeAliases, catalog, variables, resolveSubquery)));
+            Resolve(
+                expression,
+                new ExpressionContext(
+                    scopeChain, sourcePath, context.Ledger, context.TypeAliases, context.Catalog, context.Variables, context.ResolveSubquery)));
 
     private static ColumnProvenance Resolve(ScalarExpression expression, ExpressionContext context) => expression switch
     {
