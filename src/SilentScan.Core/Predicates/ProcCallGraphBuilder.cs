@@ -155,7 +155,7 @@ public static class ProcCallGraphBuilder
                     : null;
                 matched.Add(new ProcCallArgument(
                     formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal, literalArgument,
-                    callerArgumentType));
+                    callerArgumentType, actual.IsOutput));
             }
 
             return matched;

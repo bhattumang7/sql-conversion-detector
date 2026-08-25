@@ -333,6 +333,27 @@ public sealed class WriteLossExtractionTests
     }
 
     [Fact]
+    public void Extract_SetVariableFromWiderVariable_FlagsLengthTruncation()
+    {
+        var findings = Extract("DECLARE @src VARCHAR(10) = 'HelloWorld'; DECLARE @v VARCHAR(3); SET @v = @src;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.LengthTruncation, finding.Kind);
+        Assert.Null(finding.TableQualifiedName);
+        Assert.Equal("@v", finding.ColumnName);
+    }
+
+    [Fact]
+    public void Extract_UpdateColumnFromWiderVariable_TableColumnTarget_NeverFlagsLengthTruncation()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col VARCHAR(3) NULL);",
+            "DECLARE @src VARCHAR(10) = 'HelloWorld'; UPDATE dbo.T SET Col = @src;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void Extract_SetVariableUndeclared_LedgeredOrSkippedWithoutThrowing()
     {
         var findings = Extract("SET @never_declared = 123.456;");

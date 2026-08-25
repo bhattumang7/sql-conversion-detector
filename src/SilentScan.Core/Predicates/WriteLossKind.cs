@@ -9,4 +9,10 @@ public enum WriteLossKind
     NumericScaleNarrowing,
 
     TemporalPrecisionLoss,
+
+    LengthTruncation,
+
+    TemporalScaleNarrowing,
+
+    TemporalOffsetDropped,
 }

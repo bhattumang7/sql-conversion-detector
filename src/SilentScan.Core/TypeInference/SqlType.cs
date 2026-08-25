@@ -24,6 +24,11 @@ public sealed record SqlType(
         or SqlTypeCategory.Int or SqlTypeCategory.BigInt or SqlTypeCategory.SmallMoney
         or SqlTypeCategory.Money or SqlTypeCategory.Decimal or SqlTypeCategory.Real or SqlTypeCategory.Float;
 
+    public bool IsBinaryFamily => Category is SqlTypeCategory.Binary or SqlTypeCategory.VarBinary;
+
+    public bool IsFractionalSecondsFamily => Category is SqlTypeCategory.Time
+        or SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset;
+
     public bool IsDateTimeFamily => Category is SqlTypeCategory.Date or SqlTypeCategory.Time
         or SqlTypeCategory.SmallDateTime or SqlTypeCategory.DateTime or SqlTypeCategory.DateTime2
         or SqlTypeCategory.DateTimeOffset;

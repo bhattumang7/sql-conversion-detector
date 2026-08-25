@@ -13,6 +13,9 @@ public static class FindingRuleIds
     public const string WriteLossApproximateTruncationRuleId = "silentscan/write-loss/approximate-to-exact-truncation";
     public const string WriteLossNumericScaleNarrowingRuleId = "silentscan/write-loss/numeric-scale-narrowing";
     public const string WriteLossTemporalPrecisionLossRuleId = "silentscan/write-loss/temporal-precision-loss";
+    public const string WriteLossLengthTruncationRuleId = "silentscan/write-loss/length-truncation";
+    public const string WriteLossTemporalScaleNarrowingRuleId = "silentscan/write-loss/temporal-scale-narrowing";
+    public const string WriteLossTemporalOffsetDroppedRuleId = "silentscan/write-loss/temporal-offset-dropped";
     public const string TvfFenceCorrelatedApplyRuleId = "silentscan/tvf-fence/correlated-apply";
     public const string TvfFenceNestedUnderViewOrTvfRuleId = "silentscan/tvf-fence/nested-under-view-or-tvf";
     public const string TvfFenceFromOrJoinRuleId = "silentscan/tvf-fence/from-or-join";
@@ -546,6 +549,9 @@ public static class FindingRuleIds
         WriteLossKind.ApproximateToExactTruncation => WriteLossApproximateTruncationRuleId,
         WriteLossKind.NumericScaleNarrowing => WriteLossNumericScaleNarrowingRuleId,
         WriteLossKind.TemporalPrecisionLoss => WriteLossTemporalPrecisionLossRuleId,
+        WriteLossKind.LengthTruncation => WriteLossLengthTruncationRuleId,
+        WriteLossKind.TemporalScaleNarrowing => WriteLossTemporalScaleNarrowingRuleId,
+        WriteLossKind.TemporalOffsetDropped => WriteLossTemporalOffsetDroppedRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled WriteLossKind."),
     };
     public static string DynamicSqlRuleId(DynamicSqlOutcome outcome) => outcome switch

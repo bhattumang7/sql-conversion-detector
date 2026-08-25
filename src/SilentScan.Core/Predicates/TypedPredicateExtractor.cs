@@ -528,7 +528,7 @@ public static class TypedPredicateExtractor
 
         private void EmitWriteLossFinding(string? tableQualifiedName, string columnName, SqlType targetType, SqlType? sourceType, ScalarExpression sourceExpression)
         {
-            var kind = Rules.WriteLossClassifier.Classify(targetType, sourceType, sourceExpression);
+            var kind = Rules.WriteLossClassifier.Classify(targetType, sourceType, sourceExpression, isVariableTarget: tableQualifiedName is null);
             if (kind is null)
             {
                 return;

@@ -21,6 +21,9 @@ public static class RuleDocCatalog
         [WriteLoss.ApproximateTruncation.RuleId] = WriteLoss.ApproximateTruncation.Content,
         [WriteLoss.NumericScaleNarrowing.RuleId] = WriteLoss.NumericScaleNarrowing.Content,
         [WriteLoss.TemporalPrecisionLoss.RuleId] = WriteLoss.TemporalPrecisionLoss.Content,
+        [WriteLoss.LengthTruncation.RuleId] = WriteLoss.LengthTruncation.Content,
+        [WriteLoss.TemporalScaleNarrowing.RuleId] = WriteLoss.TemporalScaleNarrowing.Content,
+        [WriteLoss.TemporalOffsetDropped.RuleId] = WriteLoss.TemporalOffsetDropped.Content,
 
         [Correctness.NotInNullableSubquery.RuleId] = Correctness.NotInNullableSubquery.Content,
         [Correctness.NonUniqueUpdateSource.RuleId] = Correctness.NonUniqueUpdateSource.Content,

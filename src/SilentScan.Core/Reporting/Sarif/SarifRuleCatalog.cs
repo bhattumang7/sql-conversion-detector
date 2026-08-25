@@ -15,6 +15,9 @@ public static class SarifRuleCatalog
     public const string WriteLossApproximateTruncationRuleId = FindingRuleIds.WriteLossApproximateTruncationRuleId;
     public const string WriteLossNumericScaleNarrowingRuleId = FindingRuleIds.WriteLossNumericScaleNarrowingRuleId;
     public const string WriteLossTemporalPrecisionLossRuleId = FindingRuleIds.WriteLossTemporalPrecisionLossRuleId;
+    public const string WriteLossLengthTruncationRuleId = FindingRuleIds.WriteLossLengthTruncationRuleId;
+    public const string WriteLossTemporalScaleNarrowingRuleId = FindingRuleIds.WriteLossTemporalScaleNarrowingRuleId;
+    public const string WriteLossTemporalOffsetDroppedRuleId = FindingRuleIds.WriteLossTemporalOffsetDroppedRuleId;
     public const string TvfFenceCorrelatedApplyRuleId = FindingRuleIds.TvfFenceCorrelatedApplyRuleId;
     public const string TvfFenceNestedUnderViewOrTvfRuleId = FindingRuleIds.TvfFenceNestedUnderViewOrTvfRuleId;
     public const string TvfFenceFromOrJoinRuleId = FindingRuleIds.TvfFenceFromOrJoinRuleId;

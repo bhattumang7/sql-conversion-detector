@@ -98,7 +98,7 @@ public sealed class TempTableExecShapeChecker
                 describedColumns[i].Column.TypeName, describedColumns[i].Column.MaxLength,
                 describedColumns[i].Column.Precision, describedColumns[i].Column.Scale, describedColumns[i].Column.CollationName);
 
-            var kind = WriteLossClassifier.Classify(tempColumn.Type, describedType, sourceExpression: null);
+            var kind = WriteLossClassifier.Classify(tempColumn.Type, describedType, sourceExpression: null, isVariableTarget: false);
             if (kind is null)
             {
                 continue;

@@ -8,7 +8,7 @@ public sealed record ProcCallLiteralArgument(string Value, string SourcePath, in
 public sealed record ProcCallArgument(
     string FormalParameterName, SqlType? FormalParameterType, bool FormalParameterIsOutput,
     string? CallerVariableName, bool IsLiteral, ProcCallLiteralArgument? LiteralArgument = null,
-    SqlType? CallerArgumentType = null);
+    SqlType? CallerArgumentType = null, bool CallSiteHasOutputKeyword = true);
 
 public sealed record ProcCallEdge(
     string? CallerScopeQualifiedName, string CalleeQualifiedName, SourceSpan CallSite, IReadOnlyList<ProcCallArgument> Arguments);

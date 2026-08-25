@@ -6,7 +6,7 @@ namespace SilentScan.Core.Rules;
 
 public static class WriteLossClassifier
 {
-    public static Predicates.WriteLossKind? Classify(SqlType? target, SqlType? source, ScalarExpression? sourceExpression)
+    public static Predicates.WriteLossKind? Classify(SqlType? target, SqlType? source, ScalarExpression? sourceExpression, bool isVariableTarget)
     {
         if (target is null || source is null)
         {
@@ -20,19 +20,29 @@ public static class WriteLossClassifier
             return Predicates.WriteLossKind.UnicodeToNonUnicodeReplacement;
         }
 
-        if (IsApproximateTruncationRisk(target, source, literal))
+        if (NumericNarrowingKind(target, source, literal) is { } numericKind)
         {
-            return Predicates.WriteLossKind.ApproximateToExactTruncation;
-        }
-
-        if (IsNumericScaleNarrowingRisk(target, source, literal))
-        {
-            return Predicates.WriteLossKind.NumericScaleNarrowing;
+            return numericKind;
         }
 
         if (IsTemporalPrecisionLossRisk(target, source, literal))
         {
             return Predicates.WriteLossKind.TemporalPrecisionLoss;
+        }
+
+        if (IsTemporalOffsetDroppedRisk(target, source))
+        {
+            return Predicates.WriteLossKind.TemporalOffsetDropped;
+        }
+
+        if (IsTemporalScaleNarrowingRisk(target, source))
+        {
+            return Predicates.WriteLossKind.TemporalScaleNarrowing;
+        }
+
+        if (isVariableTarget && IsLengthTruncationRisk(target, source))
+        {
+            return Predicates.WriteLossKind.LengthTruncation;
         }
 
         return null;
@@ -41,23 +51,54 @@ public static class WriteLossClassifier
     private static bool IsUnicodeReplacementRisk(SqlType target, SqlType source, Literal? literal) =>
         source.IsUnicodeString && target.IsNonUnicodeString && !IsAsciiOnlyLiteral(literal);
 
-    private static bool IsApproximateTruncationRisk(SqlType target, SqlType source, Literal? literal) =>
-        IsApproximateNumeric(source.Category) && IsExactIntegerCategory(target.Category) && !IsWithinScaleLiteral(literal, 0);
-
-    private static bool IsNumericScaleNarrowingRisk(SqlType target, SqlType source, Literal? literal)
+    private static Predicates.WriteLossKind? NumericNarrowingKind(SqlType target, SqlType source, Literal? literal)
     {
-        if (source.Category != SqlTypeCategory.Decimal || (target.Category != SqlTypeCategory.Decimal && !IsExactIntegerCategory(target.Category)))
+        if (!target.IsNumericFamily || !source.IsNumericFamily)
         {
-            return false;
+            return null;
         }
 
-        var targetScale = target.Category == SqlTypeCategory.Decimal ? target.Scale ?? 0 : 0;
-        var sourceScale = source.Scale ?? 0;
-        return targetScale < sourceScale && !IsWithinScaleLiteral(literal, targetScale);
+        var targetScale = EffectiveNumericScale(target);
+        if (targetScale is not { } resolvedTargetScale)
+        {
+            return null;
+        }
+
+        var sourceScale = EffectiveNumericScale(source);
+        if (sourceScale is not { } resolvedSourceScale)
+        {
+            return IsWithinScaleLiteral(literal, resolvedTargetScale) ? null : Predicates.WriteLossKind.ApproximateToExactTruncation;
+        }
+
+        return resolvedTargetScale < resolvedSourceScale && !IsWithinScaleLiteral(literal, resolvedTargetScale)
+            ? Predicates.WriteLossKind.NumericScaleNarrowing
+            : null;
     }
+
+    private static int? EffectiveNumericScale(SqlType type) => type.Category switch
+    {
+        SqlTypeCategory.TinyInt or SqlTypeCategory.SmallInt or SqlTypeCategory.Int or SqlTypeCategory.BigInt => 0,
+        SqlTypeCategory.Money or SqlTypeCategory.SmallMoney => 4,
+        SqlTypeCategory.Decimal => type.Scale ?? 0,
+        _ => null,
+    };
 
     private static bool IsTemporalPrecisionLossRisk(SqlType target, SqlType source, Literal? literal) =>
         target.Category == SqlTypeCategory.Date && (IsWiderTemporal(source.Category) || source.IsStringFamily) && !IsDateOnlyLiteral(literal);
+
+    private static bool IsTemporalOffsetDroppedRisk(SqlType target, SqlType source) =>
+        source.Category == SqlTypeCategory.DateTimeOffset
+        && target.Category is SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTime or SqlTypeCategory.SmallDateTime
+            or SqlTypeCategory.Date or SqlTypeCategory.Time;
+
+    private static bool IsTemporalScaleNarrowingRisk(SqlType target, SqlType source) =>
+        target.IsFractionalSecondsFamily && source.IsFractionalSecondsFamily
+        && target.Scale is { } targetScale && source.Scale is { } sourceScale && targetScale < sourceScale;
+
+    private static bool IsLengthTruncationRisk(SqlType target, SqlType source) =>
+        (target.IsStringFamily && source.IsStringFamily || target.IsBinaryFamily && source.IsBinaryFamily)
+        && !target.IsMax && !source.IsMax
+        && target.Length is { } targetLength && source.Length is { } sourceLength && targetLength < sourceLength;
 
     private static ScalarExpression? Unwrap(ScalarExpression? expression) => expression switch
     {
@@ -65,12 +106,6 @@ public static class WriteLossClassifier
         UnaryExpression unary => Unwrap(unary.Expression),
         _ => expression,
     };
-
-    private static bool IsApproximateNumeric(SqlTypeCategory category) =>
-        category is SqlTypeCategory.Real or SqlTypeCategory.Float;
-
-    private static bool IsExactIntegerCategory(SqlTypeCategory category) =>
-        category is SqlTypeCategory.TinyInt or SqlTypeCategory.SmallInt or SqlTypeCategory.Int or SqlTypeCategory.BigInt;
 
     private static bool IsWiderTemporal(SqlTypeCategory category) =>
         category is SqlTypeCategory.DateTime or SqlTypeCategory.DateTime2 or SqlTypeCategory.SmallDateTime or SqlTypeCategory.DateTimeOffset;

@@ -19,18 +19,28 @@ public static class ProcCallArgumentMismatchScanner
                     continue;
                 }
 
-                var kind = argument.FormalParameterIsOutput
-                    ? WriteLossClassifier.Classify(callerType, formalType, sourceExpression: null)
-                    : WriteLossClassifier.Classify(formalType, callerType, sourceExpression: null);
-                if (kind is null)
+                var passedInKind = WriteLossClassifier.Classify(formalType, callerType, sourceExpression: null, isVariableTarget: true);
+                if (passedInKind is { } kind)
+                {
+                    findings.Add(new ProcCallArgumentMismatchFinding(
+                        edge.CallerScopeQualifiedName, edge.CalleeQualifiedName, argument.FormalParameterName,
+                        callerVariableName, callerType.ToString(), formalType.ToString(), kind,
+                        edge.CallSite.SourcePath, edge.CallSite.Line, edge.CallSite.Column));
+                }
+
+                if (!argument.FormalParameterIsOutput || !argument.CallSiteHasOutputKeyword)
                 {
                     continue;
                 }
 
-                findings.Add(new ProcCallArgumentMismatchFinding(
-                    edge.CallerScopeQualifiedName, edge.CalleeQualifiedName, argument.FormalParameterName,
-                    callerVariableName, callerType.ToString(), formalType.ToString(), kind.Value,
-                    edge.CallSite.SourcePath, edge.CallSite.Line, edge.CallSite.Column));
+                var passedBackKind = WriteLossClassifier.Classify(callerType, formalType, sourceExpression: null, isVariableTarget: true);
+                if (passedBackKind is { } outputKind)
+                {
+                    findings.Add(new ProcCallArgumentMismatchFinding(
+                        edge.CallerScopeQualifiedName, edge.CalleeQualifiedName, argument.FormalParameterName,
+                        callerVariableName, callerType.ToString(), formalType.ToString(), outputKind,
+                        edge.CallSite.SourcePath, edge.CallSite.Line, edge.CallSite.Column));
+                }
             }
         }
 

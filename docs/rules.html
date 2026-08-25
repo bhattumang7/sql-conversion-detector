@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">274 rules. 188 carry fix guidance; 27 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">277 rules. 191 carry fix guidance; 27 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -601,9 +601,12 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
   <section class="family-section">
     <h2>write-loss</h2>
     <ul class="rule-list">
-      <li><a class="id" href="rules/write-loss-approximate-to-exact-truncation.html">Approximate To Exact Truncation</a> <code class="rule-key">silentscan/write-loss/approximate-to-exact-truncation</code><span class="snippet">An INSERT/UPDATE or SET variable assignment assigns an approximate-numeric (REAL/FLOAT) value to an exact integer target.</span></li>
-      <li><a class="id" href="rules/write-loss-numeric-scale-narrowing.html">Numeric Scale Narrowing</a> <code class="rule-key">silentscan/write-loss/numeric-scale-narrowing</code><span class="snippet">An INSERT/UPDATE or SET variable assignment assigns a DECIMAL/NUMERIC value to a target with a smaller scale.</span></li>
+      <li><a class="id" href="rules/write-loss-approximate-to-exact-truncation.html">Approximate To Exact Truncation</a> <code class="rule-key">silentscan/write-loss/approximate-to-exact-truncation</code><span class="snippet">An INSERT/UPDATE, SET variable assignment, or proc-call argument assigns an approximate-numeric (REAL/FLOAT) value to an exact numeric target (an integer, DECIMAL/NUMERIC, or MONEY/SMALLMONEY).</span></li>
+      <li><a class="id" href="rules/write-loss-length-truncation.html">Length Truncation</a> <code class="rule-key">silentscan/write-loss/length-truncation</code><span class="snippet">An INSERT/UPDATE, SET variable assignment, or proc-call argument assigns a VARCHAR/NVARCHAR/CHAR/NCHAR/BINARY/VARBINARY value to a target with a shorter declared length.</span></li>
+      <li><a class="id" href="rules/write-loss-numeric-scale-narrowing.html">Numeric Scale Narrowing</a> <code class="rule-key">silentscan/write-loss/numeric-scale-narrowing</code><span class="snippet">An INSERT/UPDATE, SET variable assignment, or proc-call argument assigns a numeric value (DECIMAL/NUMERIC or MONEY/SMALLMONEY) to a target with a smaller effective scale.</span></li>
+      <li><a class="id" href="rules/write-loss-temporal-offset-dropped.html">Temporal Offset Dropped</a> <code class="rule-key">silentscan/write-loss/temporal-offset-dropped</code><span class="snippet">An INSERT/UPDATE, SET variable assignment, or proc-call argument assigns a DATETIMEOFFSET value to a target type that cannot carry a UTC offset (DATETIME2/DATETIME/SMALLDATETIME/DATE/TIME).</span></li>
       <li><a class="id" href="rules/write-loss-temporal-precision-loss.html">Temporal Precision Loss</a> <code class="rule-key">silentscan/write-loss/temporal-precision-loss</code><span class="snippet">An INSERT/UPDATE or SET variable assignment assigns a DATETIME/DATETIME2/SMALLDATETIME/DATETIMEOFFSET value to a DATE target.</span></li>
+      <li><a class="id" href="rules/write-loss-temporal-scale-narrowing.html">Temporal Scale Narrowing</a> <code class="rule-key">silentscan/write-loss/temporal-scale-narrowing</code><span class="snippet">An INSERT/UPDATE, SET variable assignment, or proc-call argument assigns a TIME/DATETIME2/DATETIMEOFFSET value to a target with a smaller declared fractional-seconds scale.</span></li>
       <li><a class="id" href="rules/write-loss-unicode-to-non-unicode.html">Unicode To Non Unicode</a> <code class="rule-key">silentscan/write-loss/unicode-to-non-unicode</code><span class="snippet">An INSERT/UPDATE or SET variable assignment assigns a Unicode (NVARCHAR/NCHAR) value to a non-Unicode (VARCHAR/CHAR) target.</span></li>
     </ul>
   </section>

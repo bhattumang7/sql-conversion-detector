@@ -67,6 +67,32 @@ public sealed class ProcCallArgumentMismatchScannerTests
     }
 
     [Fact]
+    public void MoneySourceIntoNarrowerDecimalTarget_Fires()
+    {
+        var argument = new ProcCallArgument(
+            "@P", new SqlType(SqlTypeCategory.Decimal, Precision: 10, Scale: 2), FormalParameterIsOutput: false,
+            "@Local", IsLiteral: false, CallerArgumentType: new SqlType(SqlTypeCategory.Money));
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(GraphWith(argument));
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+    }
+
+    [Fact]
+    public void NarrowerVarcharTarget_Fires()
+    {
+        var argument = new ProcCallArgument(
+            "@P", new SqlType(SqlTypeCategory.VarChar, Length: 3), FormalParameterIsOutput: false,
+            "@Local", IsLiteral: false, CallerArgumentType: new SqlType(SqlTypeCategory.VarChar, Length: 10));
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(GraphWith(argument));
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.LengthTruncation, finding.Kind);
+    }
+
+    [Fact]
     public void UnresolvedCallerType_NeverGuesses()
     {
         var argument = new ProcCallArgument(
