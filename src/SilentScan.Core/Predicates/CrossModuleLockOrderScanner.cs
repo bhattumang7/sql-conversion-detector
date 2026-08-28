@@ -184,19 +184,12 @@ public static class CrossModuleLockOrderScanner
 
         private void RecordWrite(TableReference? target, int line, WithCtesAndXmlNamespaces? withCtes)
         {
-            if (_writes is null || _openTransactionDepth == 0 || target is not NamedTableReference named)
+            if (_writes is null || _openTransactionDepth == 0)
             {
                 return;
             }
 
-            if (named.SchemaObject.SchemaIdentifier is null && withCtes is { CommonTableExpressions: { } ctes }
-                && ctes.Any(cte => string.Equals(cte.ExpressionName.Value, named.SchemaObject.BaseIdentifier.Value, StringComparison.OrdinalIgnoreCase)))
-            {
-                return;
-            }
-
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            if (catalog.Find(qualifiedName) is not { Kind: CatalogTableKind.Table })
+            if (DmlWriteTargetResolver.TryResolve(target, withCtes, catalog) is not { } qualifiedName)
             {
                 return;
             }

@@ -167,18 +167,8 @@ public static class TriggerRecursionCycleScanner
 
         private void Record(TableReference? target, int line)
         {
-            if (target is not NamedTableReference named)
-            {
-                return;
-            }
-
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            if (string.Equals(qualifiedName, ownTargetQualifiedName, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            if (catalog.Find(qualifiedName) is not { Kind: CatalogTableKind.Table })
+            if (DmlWriteTargetResolver.TryResolve(target, withCtes: null, catalog) is not { } qualifiedName
+                || string.Equals(qualifiedName, ownTargetQualifiedName, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }

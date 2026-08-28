@@ -1,7 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
-using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
@@ -47,19 +46,7 @@ public static class DmlTargetTableScanner
 
         private void RecordWrite(TableReference? target, WithCtesAndXmlNamespaces? withCtes)
         {
-            if (target is not NamedTableReference named)
-            {
-                return;
-            }
-
-            if (named.SchemaObject.SchemaIdentifier is null && withCtes is { CommonTableExpressions: { } ctes }
-                && ctes.Any(cte => string.Equals(cte.ExpressionName.Value, named.SchemaObject.BaseIdentifier.Value, StringComparison.OrdinalIgnoreCase)))
-            {
-                return;
-            }
-
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            if (catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table })
+            if (DmlWriteTargetResolver.TryResolve(target, withCtes, catalog) is { } qualifiedName)
             {
                 targets.Add(qualifiedName);
             }
