@@ -367,6 +367,7 @@ public sealed class ReadableScanReportWriterTests
         FloatOrderDependentAggregateFindings: [],
         AlwaysEncryptedKeyColumnFindings: [],
         AlterColumnSafetyFindings: [],
+        SpExecuteSqlParameterMismatchFindings: [],
         SkippedConstructs: [],
         SkippedConstructSummary: SkippedConstructSummary.From([]),
         TypedPredicateSummary: TypedPredicateSummary.From([]),

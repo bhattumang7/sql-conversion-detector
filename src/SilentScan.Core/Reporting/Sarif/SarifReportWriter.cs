@@ -40,6 +40,7 @@ public static class SarifReportWriter
         results.AddRange(report.ColumnCollationDriftFindings.Select(ToResult));
         results.AddRange(report.CrossTableTypeDriftFindings.Select(ToResult));
         results.AddRange(report.ProcCallArgumentMismatchFindings.Select(ToResult));
+        results.AddRange(report.SpExecuteSqlParameterMismatchFindings.Select(ToResult));
         results.AddRange(report.TemporalBoundaryFindings.Select(ToResult));
         results.AddRange(report.MaxTypedColumnFindings.Select(ToResult));
         results.AddRange(report.ColumnstoreUnsupportedColumnTypeFindings.Select(ToResult));
@@ -314,6 +315,19 @@ public static class SarifReportWriter
         var message = finding.IsOutputWriteback
             ? $"EXEC '{finding.CalleeQualifiedName}': OUTPUT parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) writes its final value back into '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) in {callerLabel} - {DescribeWriteLossKind(finding.Kind)}."
             : $"EXEC '{finding.CalleeQualifiedName}': parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) receives '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) from {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(SpExecuteSqlParameterMismatchFinding finding)
+    {
+
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SpExecuteSqlParameterMismatchRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var callerLabel = finding.CallerScopeQualifiedName ?? "a top-level batch";
+        var message = finding.IsOutputWriteback
+            ? $"sp_executesql: declared OUTPUT parameter '{finding.ParameterName}' ({finding.DeclaredParameterTypeDisplay}) writes its final value back into '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) in {callerLabel} - {DescribeWriteLossKind(finding.Kind)}."
+            : $"sp_executesql: declared parameter '{finding.ParameterName}' ({finding.DeclaredParameterTypeDisplay}) receives '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) from {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

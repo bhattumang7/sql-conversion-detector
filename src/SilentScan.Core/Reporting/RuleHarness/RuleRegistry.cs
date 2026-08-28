@@ -57,6 +57,7 @@ public static class RuleRegistry
         new CrossTableTypeDriftRule(),
         new TriggerOrderRule(),
         new ProcCallArgumentMismatchRule(),
+        new SpExecuteSqlParameterMismatchRule(),
         new MaxTypedColumnRule(),
         new ColumnstoreUnsupportedColumnTypeRule(),
         new SelectiveXmlIndexValueColumnRule(),

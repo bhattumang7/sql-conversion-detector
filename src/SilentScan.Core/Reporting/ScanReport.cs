@@ -95,13 +95,14 @@ public sealed record ScanReport(
     IReadOnlyList<FloatOrderDependentAggregateFinding> FloatOrderDependentAggregateFindings,
     IReadOnlyList<AlwaysEncryptedKeyColumnFinding> AlwaysEncryptedKeyColumnFindings,
     IReadOnlyList<AlterColumnSafetyFinding> AlterColumnSafetyFindings,
+    IReadOnlyList<SpExecuteSqlParameterMismatchFinding> SpExecuteSqlParameterMismatchFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
     DynamicSqlSummary DynamicSqlSummary,
     int SchemaVersion = ScanReport.CurrentSchemaVersion)
 {
-    public const int CurrentSchemaVersion = 75;
+    public const int CurrentSchemaVersion = 76;
 
     public IReadOnlyList<RuleCatalogEntry> RuleCatalog { get; } = RuleCatalogEntries.All;
 }

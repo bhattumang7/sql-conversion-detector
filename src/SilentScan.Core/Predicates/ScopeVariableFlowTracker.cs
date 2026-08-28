@@ -4,9 +4,9 @@ namespace SilentScan.Core.Predicates;
 
 public static class ScopeVariableFlowTracker
 {
-    private readonly record struct WriteState(bool Written, bool LiteralKnown, ScalarExpression? Literal)
+    private readonly record struct WriteState(bool Written, bool LiteralKnown, ScalarExpression? Literal, bool Approximate)
     {
-        public static WriteState Unwritten { get; } = new(false, false, null);
+        public static WriteState Unwritten { get; } = new(false, false, null, false);
     }
 
     private enum BranchCombine
@@ -15,19 +15,19 @@ public static class ScopeVariableFlowTracker
         RequireAny,
     }
 
-    public static bool WasAssignedBeforeCall(IList<TSqlStatement>? scopeStatements, string variableName, TSqlFragment callSite)
+    public readonly record struct AssignmentFlow(bool Assigned, bool Approximate);
+
+    public static AssignmentFlow WasAssignedBeforeCall(IList<TSqlStatement>? scopeStatements, string variableName, TSqlFragment callSite)
     {
         if (scopeStatements is null)
         {
-            return true;
+            return new AssignmentFlow(Assigned: false, Approximate: false);
         }
 
         var everDeclared = DeclaresVariable(scopeStatements, variableName);
-        return WasWrittenBeforeTarget(scopeStatements, variableName, callSite) || !everDeclared;
+        var state = ResolveUpTo(scopeStatements, variableName, callSite, WriteState.Unwritten, BranchCombine.RequireAny);
+        return new AssignmentFlow(state.Written || !everDeclared, state.Approximate);
     }
-
-    private static bool WasWrittenBeforeTarget(IList<TSqlStatement> statements, string variableName, TSqlFragment target) =>
-        ResolveUpTo(statements, variableName, target, WriteState.Unwritten, BranchCombine.RequireAny).Written;
 
     public static ProcCallLiteralArgument? ResolvePropagatedLiteral(
         string? callerVariableName, IList<TSqlStatement>? currentScopeStatements, string sourcePath, TSqlFragment callSite)
@@ -83,10 +83,33 @@ public static class ScopeVariableFlowTracker
                 return ResolveIntoContainer(statement, variableName, target, state, combine);
             }
 
+            if (TryHandleFlowTerminator(statement, state, out var terminatedState))
+            {
+                return terminatedState;
+            }
+
             state = Advance(statement, variableName, state, combine);
         }
 
         return state;
+    }
+
+    private static bool TryHandleFlowTerminator(TSqlStatement statement, WriteState state, out WriteState result)
+    {
+        switch (statement)
+        {
+            case GoToStatement:
+                result = state with { Approximate = true };
+                return true;
+
+            case ReturnStatement or ThrowStatement:
+                result = state;
+                return true;
+
+            default:
+                result = state;
+                return false;
+        }
     }
 
     private static WriteState ResolveIntoContainer(TSqlStatement statement, string variableName, TSqlFragment target, WriteState state, BranchCombine combine) => statement switch
@@ -109,7 +132,7 @@ public static class ScopeVariableFlowTracker
         if (directWrite.Name is not null)
         {
             var literal = VariableWriteSites.DirectLiteralAssignment(statement, variableName);
-            return literal is not null ? new WriteState(true, true, literal) : new WriteState(true, false, null);
+            return literal is not null ? new WriteState(true, true, literal, Approximate: false) : new WriteState(true, false, null, Approximate: false);
         }
 
         return statement switch
@@ -117,16 +140,36 @@ public static class ScopeVariableFlowTracker
             BeginEndBlockStatement block => AnalyzeList(block.StatementList.Statements, variableName, state, combine),
             IfStatement ifStatement when TouchesVariable(AllBranches(ifStatement), variableName) => AnalyzeIf(ifStatement, variableName, state, combine),
             WhileStatement whileStatement when TouchesVariable(ToStatementList(whileStatement.Statement), variableName) =>
-                Combine(state, AnalyzeList(ToStatementList(whileStatement.Statement), variableName, state, combine), combine),
+                AnalyzeWhileToFixpoint(ToStatementList(whileStatement.Statement), variableName, state, combine),
             TryCatchStatement tryCatch when TouchesVariable(tryCatch.TryStatements.Statements, variableName)
                 || TouchesVariable(tryCatch.CatchStatements.Statements, variableName) =>
                 Combine(
                     AnalyzeList(tryCatch.TryStatements.Statements, variableName, state, combine),
                     AnalyzeList(tryCatch.CatchStatements.Statements, variableName, state, combine),
                     combine),
-            ReturnStatement or ThrowStatement or GoToStatement => state,
+            GoToStatement => state with { Approximate = true },
+            ReturnStatement or ThrowStatement => state,
             _ => state,
         };
+    }
+
+    private const int LoopFixpointIterationCap = 8;
+
+    private static WriteState AnalyzeWhileToFixpoint(IList<TSqlStatement> body, string variableName, WriteState entryState, BranchCombine combine)
+    {
+        var current = entryState;
+        for (var iteration = 0; iteration < LoopFixpointIterationCap; iteration++)
+        {
+            var next = Combine(entryState, AnalyzeList(body, variableName, current, combine), combine);
+            if (next == current)
+            {
+                return next;
+            }
+
+            current = next;
+        }
+
+        return current with { Approximate = true };
     }
 
     private static WriteState AnalyzeIf(IfStatement ifStatement, string variableName, WriteState entryState, BranchCombine combine)
@@ -142,9 +185,9 @@ public static class ScopeVariableFlowTracker
     {
         foreach (var statement in statements)
         {
-            if (statement is ReturnStatement or ThrowStatement or GoToStatement)
+            if (TryHandleFlowTerminator(statement, state, out var terminatedState))
             {
-                return state;
+                return terminatedState;
             }
 
             state = Advance(statement, variableName, state, combine);
@@ -158,27 +201,29 @@ public static class ScopeVariableFlowTracker
 
     private static WriteState Intersect(WriteState a, WriteState b)
     {
+        var approximate = a.Approximate || b.Approximate;
         var written = a.Written && b.Written;
         if (!written)
         {
-            return WriteState.Unwritten;
+            return WriteState.Unwritten with { Approximate = approximate };
         }
 
         return a is { LiteralKnown: true } && b is { LiteralKnown: true } && LiteralTextEquals(a.Literal, b.Literal)
-            ? new WriteState(true, true, a.Literal)
-            : new WriteState(true, false, null);
+            ? new WriteState(true, true, a.Literal, approximate)
+            : new WriteState(true, false, null, approximate);
     }
 
     private static WriteState Union(WriteState a, WriteState b)
     {
+        var approximate = a.Approximate || b.Approximate;
         if (!a.Written && !b.Written)
         {
-            return WriteState.Unwritten;
+            return WriteState.Unwritten with { Approximate = approximate };
         }
 
         return a is { Written: true, LiteralKnown: true } && b is { Written: true, LiteralKnown: true } && LiteralTextEquals(a.Literal, b.Literal)
-            ? new WriteState(true, true, a.Literal)
-            : new WriteState(true, false, null);
+            ? new WriteState(true, true, a.Literal, approximate)
+            : new WriteState(true, false, null, approximate);
     }
 
     private static bool LiteralTextEquals(ScalarExpression? a, ScalarExpression? b) => (a, b) switch

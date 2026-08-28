@@ -14,14 +14,16 @@ public static class ProcCallGraphBuilder
     public static ProcCallGraph Build(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog, SkipLedger ledger)
     {
         var edges = new List<ProcCallEdge>();
+        var spExecuteSqlCallSites = new List<SpExecuteSqlCallSite>();
         foreach (var result in parseResults)
         {
             var visitor = new Visitor(catalog, ledger, result.SourcePath);
             result.Fragment.Accept(visitor);
             edges.AddRange(visitor.Edges);
+            spExecuteSqlCallSites.AddRange(visitor.SpExecuteSqlCallSites);
         }
 
-        return new ProcCallGraph(edges);
+        return new ProcCallGraph(edges, spExecuteSqlCallSites);
     }
 
     private const string CallGraphConstructKind = "procedure call graph edge";
@@ -35,6 +37,8 @@ public static class ProcCallGraphBuilder
         private readonly Dictionary<string, SqlType?> _variableTypes = new(StringComparer.OrdinalIgnoreCase);
 
         public List<ProcCallEdge> Edges { get; } = [];
+
+        public List<SpExecuteSqlCallSite> SpExecuteSqlCallSites { get; } = [];
 
         public override void ExplicitVisit(DeclareVariableStatement node)
         {
@@ -94,8 +98,9 @@ public static class ProcCallGraphBuilder
                 {
                     ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: var spExecutesqlName,
                     Parameters: [{ ParameterValue: { } statementExpression }, ..],
-                } when string.Equals(spExecutesqlName, SpExecuteSqlName, StringComparison.OrdinalIgnoreCase):
+                } spExecuteSqlCall when string.Equals(spExecutesqlName, SpExecuteSqlName, StringComparison.OrdinalIgnoreCase):
                     TryFoldDynamicCall(node, [statementExpression]);
+                    TryRecordSpExecuteSqlParameterBindings(node, spExecuteSqlCall.Parameters);
                     break;
 
                 case ExecutableProcedureReference
@@ -183,6 +188,81 @@ public static class ProcCallGraphBuilder
             return true;
         }
 
+        private const string SpExecuteSqlParameterConstructKind = "sp_executesql inline parameter type";
+        private const string SpExecuteSqlSyntheticParameterListName = "dbo.__silentscan_sp_executesql_params";
+
+        private void TryRecordSpExecuteSqlParameterBindings(ExecuteStatement node, IList<ExecuteParameter> parameters)
+        {
+            if (parameters.Count < 2)
+            {
+                return;
+            }
+
+            if (parameters[1].ParameterValue is not StringLiteral definitionLiteral)
+            {
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, SpExecuteSqlParameterConstructKind,
+                    "sp_executesql's parameter-definition argument is not a literal string - inline parameter types not statically decidable");
+                return;
+            }
+
+            if (!TryParseParameterDefinitions(definitionLiteral.Value, out var declaredParameters))
+            {
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, SpExecuteSqlParameterConstructKind,
+                    "sp_executesql's parameter-definition string did not parse as a declared parameter list - inline parameter types not resolved");
+                return;
+            }
+
+            var byName = declaredParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+            var bindings = new List<SpExecuteSqlParameterBinding>();
+
+            for (var i = 2; i < parameters.Count; i++)
+            {
+                var actual = parameters[i];
+                if (actual.Variable is not { } namedFormal || !byName.TryGetValue(namedFormal.Name, out var declared))
+                {
+                    continue;
+                }
+
+                var callerVariableName = actual.ParameterValue is VariableReference variableRef ? variableRef.Name : null;
+                var callerArgumentType = ScalarExpressionResolver.ResolveScalarType(
+                    actual.ParameterValue, [], sourcePath,
+                    new ScalarExpressionResolver.ScalarTypeContext(null, catalog.TypeAliases, catalog, _variableTypes));
+                var assignmentFlow = callerVariableName is null
+                    ? new ScopeVariableFlowTracker.AssignmentFlow(Assigned: true, Approximate: false)
+                    : ScopeVariableFlowTracker.WasAssignedBeforeCall(_currentScopeStatements, callerVariableName, node);
+
+                bindings.Add(new SpExecuteSqlParameterBinding(
+                    declared.Name, declared.Type, declared.IsOutput, callerVariableName, callerArgumentType,
+                    actual.IsOutput, actual.ParameterValue, assignmentFlow.Assigned, assignmentFlow.Approximate));
+            }
+
+            if (bindings.Count > 0)
+            {
+                SpExecuteSqlCallSites.Add(new SpExecuteSqlCallSite(_currentScope, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), bindings));
+            }
+        }
+
+        private bool TryParseParameterDefinitions(string definitionText, out List<ProcedureParameterInfo> parameters)
+        {
+            parameters = [];
+            var syntheticText = $"CREATE PROCEDURE {SpExecuteSqlSyntheticParameterListName} ({definitionText}) AS SELECT 1;";
+            var parseResult = SqlScriptParser.ParseText(sourcePath, syntheticText);
+            if (parseResult.Errors.Count > 0 || parseResult.Fragment is not TSqlScript { Batches: [{ Statements: [CreateProcedureStatement createStatement] }] })
+            {
+                return false;
+            }
+
+            foreach (var parameter in createStatement.Parameters)
+            {
+                var resolvedType = SqlTypeReferenceResolver.Resolve(parameter.DataType, columnCollation: null, catalog.TypeAliases);
+                parameters.Add(new ProcedureParameterInfo(parameter.VariableName.Value, resolvedType, parameter.Modifier == ParameterModifier.Output));
+            }
+
+            return true;
+        }
+
         private List<ProcCallArgument> MatchFoldedArguments(
             IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, DynamicSqlSegmentMap segmentMap)
         {
@@ -222,7 +302,7 @@ public static class ProcCallGraphBuilder
                     actual.ParameterValue, [], sourcePath, new ScalarExpressionResolver.ScalarTypeContext(null, catalog.TypeAliases, catalog, _variableTypes));
                 matched.Add(new ProcCallArgument(
                     formal.Name, formal.Type, formal.IsOutput, CallerVariableName: null, actual.ParameterValue is Literal, literalArgument,
-                    callerArgumentType, actual.IsOutput, actual.ParameterValue, CallerVariableWasAssignedBeforeCall: true));
+                    callerArgumentType, actual.IsOutput, actual.ParameterValue, CallerVariableWasAssignedBeforeCall: true, CallerFlowApproximate: false));
             }
 
             return matched;
@@ -392,11 +472,12 @@ public static class ProcCallGraphBuilder
                 var callerArgumentType = ScalarExpressionResolver.ResolveScalarType(
                     actual.ParameterValue, [], context.SourcePath,
                     new ScalarExpressionResolver.ScalarTypeContext(null, context.Catalog.TypeAliases, context.Catalog, context.VariableTypes));
-                var wasAssignedBeforeCall = callerVariableName is null
-                    || ScopeVariableFlowTracker.WasAssignedBeforeCall(context.CurrentScopeStatements, callerVariableName, context.CallSite);
+                var assignmentFlow = callerVariableName is null
+                    ? new ScopeVariableFlowTracker.AssignmentFlow(Assigned: true, Approximate: false)
+                    : ScopeVariableFlowTracker.WasAssignedBeforeCall(context.CurrentScopeStatements, callerVariableName, context.CallSite);
                 matched.Add(new ProcCallArgument(
                     formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal, literalArgument,
-                    callerArgumentType, actual.IsOutput, actual.ParameterValue, wasAssignedBeforeCall));
+                    callerArgumentType, actual.IsOutput, actual.ParameterValue, assignmentFlow.Assigned, assignmentFlow.Approximate));
             }
 
             return matched;

@@ -150,6 +150,7 @@ public static class ScanReportBuilder
         var crossTableTypeDriftFindings = ruleResults.For<CrossTableTypeDriftFinding>("CrossTableTypeDriftScanner");
         var triggerOrderFindings = ruleResults.For<TriggerOrderFinding>("TriggerOrderScanner");
         var procCallArgumentMismatchFindings = ruleResults.For<ProcCallArgumentMismatchFinding>("ProcCallArgumentMismatchScanner");
+        var spExecuteSqlParameterMismatchFindings = ruleResults.For<SpExecuteSqlParameterMismatchFinding>("SpExecuteSqlParameterMismatchScanner");
         var maxTypedColumnFindings = ruleResults.For<MaxTypedColumnFinding>("MaxTypedColumnScanner");
         var columnstoreBatchModeDisqualifyingTypeFindings = ruleResults.For<ColumnstoreUnsupportedColumnTypeFinding>("ColumnstoreUnsupportedColumnTypeScanner");
         var selectiveXmlIndexValueColumnFindings = ruleResults.For<SelectiveXmlIndexValueColumnFinding>("SelectiveXmlIndexValueColumnScanner");
@@ -418,6 +419,7 @@ public static class ScanReportBuilder
             floatOrderDependentAggregateFindings,
             alwaysEncryptedKeyColumnFindings,
             alterColumnSafetyFindings,
+            spExecuteSqlParameterMismatchFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

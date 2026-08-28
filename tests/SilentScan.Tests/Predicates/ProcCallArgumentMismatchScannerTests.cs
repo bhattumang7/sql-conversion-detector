@@ -172,4 +172,32 @@ public sealed class ProcCallArgumentMismatchScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void InputNarrowing_ExactFlow_FiresAtHighConfidence()
+    {
+        var argument = new ProcCallArgument(
+            "@P", new SqlType(SqlTypeCategory.VarChar, Length: 3), FormalParameterIsOutput: false,
+            "@Local", IsLiteral: false, CallerArgumentType: new SqlType(SqlTypeCategory.VarChar, Length: 10),
+            CallerVariableWasAssignedBeforeCall: true, CallerFlowApproximate: false);
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(GraphWith(argument));
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void InputNarrowing_ApproximateFlow_FiresAtMediumConfidence()
+    {
+        var argument = new ProcCallArgument(
+            "@P", new SqlType(SqlTypeCategory.VarChar, Length: 3), FormalParameterIsOutput: false,
+            "@Local", IsLiteral: false, CallerArgumentType: new SqlType(SqlTypeCategory.VarChar, Length: 10),
+            CallerVariableWasAssignedBeforeCall: true, CallerFlowApproximate: true);
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(GraphWith(argument));
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
 }

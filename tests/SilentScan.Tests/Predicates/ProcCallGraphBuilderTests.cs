@@ -1170,4 +1170,82 @@ public sealed class ProcCallGraphBuilderTests
         var argument = edge.Arguments.Single();
         Assert.True(argument.CallerVariableWasAssignedBeforeCall);
     }
+
+    [Fact]
+    public void Build_CallerVariableWrittenOnlyInsideWhileLoopBody_FixpointResolvesExactly()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller @flag INT AS
+                DECLARE @v NVARCHAR(20);
+                WHILE @flag > 0
+                BEGIN
+                    SET @v = N'Archived';
+                    SET @flag = @flag - 1;
+                END
+                EXEC dbo.Callee @v OUTPUT;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.True(argument.CallerVariableWasAssignedBeforeCall);
+        Assert.False(argument.CallerFlowApproximate);
+    }
+
+    [Fact]
+    public void Build_CallerVariableWrittenBeforeCallOnStraightLine_IsNotFlowApproximate()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @v NVARCHAR(20);
+                SET @v = N'Archived';
+                EXEC dbo.Callee @v OUTPUT;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.True(argument.CallerVariableWasAssignedBeforeCall);
+        Assert.False(argument.CallerFlowApproximate);
+    }
+
+    [Fact]
+    public void Build_CallerVariableWrittenBeforeGotoOnTheWayToCall_IsFlowApproximate()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @v NVARCHAR(20);
+                SET @v = N'Archived';
+                GOTO Skip;
+                Skip:
+                EXEC dbo.Callee @v OUTPUT;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.True(argument.CallerVariableWasAssignedBeforeCall);
+        Assert.True(argument.CallerFlowApproximate);
+    }
+
+    [Fact]
+    public void Build_CallerVariableWrittenOnlyAfterUnconditionalReturn_WasNotAssignedBeforeCall()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20) OUTPUT) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @v NVARCHAR(20);
+                RETURN;
+                SET @v = N'Unreachable';
+                EXEC dbo.Callee @v OUTPUT;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = edge.Arguments.Single();
+        Assert.False(argument.CallerVariableWasAssignedBeforeCall);
+    }
 }

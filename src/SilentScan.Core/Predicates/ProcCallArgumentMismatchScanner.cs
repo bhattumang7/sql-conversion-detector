@@ -36,7 +36,8 @@ public static class ProcCallArgumentMismatchScanner
             findings.Add(new ProcCallArgumentMismatchFinding(
                 edge.CallerScopeQualifiedName, edge.CalleeQualifiedName, argument.FormalParameterName,
                 DisplayFor(argument), callerType.ToString(), formalType.ToString(), passedInKind, IsOutputWriteback: false,
-                edge.CallSite.SourcePath, edge.CallSite.Line, edge.CallSite.Column));
+                edge.CallSite.SourcePath, edge.CallSite.Line, edge.CallSite.Column,
+                ConfidenceFor(argument)));
         }
 
         if (argument.FormalParameterIsOutput && argument.CallSiteHasOutputKeyword
@@ -55,4 +56,7 @@ public static class ProcCallArgumentMismatchScanner
     private static string DisplayFor(ProcCallArgument argument) =>
         argument.CallerVariableName
         ?? (argument.CallerArgumentExpression is { } expression ? FragmentTextRenderer.Render(expression) : argument.FormalParameterName);
+
+    private static FindingConfidence ConfidenceFor(ProcCallArgument argument) =>
+        argument.CallerFlowApproximate ? FindingConfidence.Medium : FindingConfidence.High;
 }

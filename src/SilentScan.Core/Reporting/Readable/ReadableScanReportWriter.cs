@@ -68,6 +68,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(CrossTableTypeDrift(report, headingLevel, pathBase));
         blocks.AddRange(TriggerOrder(report, headingLevel, pathBase));
         blocks.AddRange(ProcCallArgumentMismatch(report, headingLevel, pathBase));
+        blocks.AddRange(SpExecuteSqlParameterMismatch(report, headingLevel, pathBase));
         blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
         blocks.AddRange(ColumnstoreUnsupportedColumnType(report, headingLevel, pathBase));
@@ -189,6 +190,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Foreign-key column pairs whose types/collations drift", report.CrossTableTypeDriftFindings.Count);
         AddCount(counts, "Tables with undefined AFTER trigger firing order", report.TriggerOrderFindings.Count);
         AddCount(counts, "EXEC call-site arguments risking silent data loss at the parameter boundary", report.ProcCallArgumentMismatchFindings.Count);
+        AddCount(counts, "sp_executesql call-site arguments risking silent data loss against their own declared parameter type", report.SpExecuteSqlParameterMismatchFindings.Count);
         AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.TemporalBoundaryFindings.Count);
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count(f => f.Kind == NonIndexableColumnFindingKind.MaxLength));
         AddCount(counts, "Legacy large-object columns (can never appear in any index)", report.MaxTypedColumnFindings.Count(f => f.Kind == NonIndexableColumnFindingKind.LegacyLargeObject));
@@ -685,6 +687,32 @@ public static class ReadableScanReportWriter
                 f.CallerExpressionDisplay,
                 f.CallerTypeDisplay,
                 f.FormalParameterTypeDisplay,
+                DescribeWriteLossKind(f.Kind),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> SpExecuteSqlParameterMismatch(ScanReport report, int level, string? pathBase)
+    {
+        if (report.SpExecuteSqlParameterMismatchFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"sp_executesql call-site parameter mismatches ({report.SpExecuteSqlParameterMismatchFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An EXEC sp_executesql call site declares its own parameter's type in the literal parameter-definition string (the second argument) and binds a caller-side variable to it - the same silent narrowing conversion as a static EXEC call's argument mismatch, but resolved from the parameter-definition string sp_executesql itself parses, not from a catalog-declared procedure signature. Two distinct directions can trigger it: an input parameter whose caller-side variable's declared type risks losing information on the way in, or an OUTPUT parameter whose final value risks losing information on the way back into a narrower caller-side variable after the call returns.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SpExecuteSqlParameterMismatchRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ParameterHeader, "Direction", "Caller-side expression", "Caller type", "Declared parameter type", "Risk"],
+            [.. report.SpExecuteSqlParameterMismatchFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ParameterName,
+                f.IsOutputWriteback ? "OUTPUT writeback (callee -> caller)" : "input (caller -> callee)",
+                f.CallerExpressionDisplay,
+                f.CallerTypeDisplay,
+                f.DeclaredParameterTypeDisplay,
                 DescribeWriteLossKind(f.Kind),
             })]);
     }

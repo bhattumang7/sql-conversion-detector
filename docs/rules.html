@@ -86,12 +86,13 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">278 rules. 192 carry fix guidance; 28 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">279 rules. 192 carry fix guidance; 28 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
     <ul class="rule-list">
       <li><a class="id" href="rules/call-graph-argument-type-mismatch.html">Argument Type Mismatch</a> <code class="rule-key">silentscan/call-graph/argument-type-mismatch</code><span class="snippet">A real EXEC call site passes a caller-side variable whose declared type risks silent data loss against the callee&#x27;s own declared parameter type.</span></li>
+      <li><a class="id" href="rules/call-graph-sp-executesql-parameter-type-mismatch.html">Sp Executesql Parameter Type Mismatch</a> <code class="rule-key">silentscan/call-graph/sp-executesql-parameter-type-mismatch</code><span class="snippet">An EXEC sp_executesql call site declares a parameter&#x27;s type in its own literal parameter-definition string and binds a caller-side variable to it whose declared type risks silent data loss against that declared type.</span></li>
     </ul>
   </section>
 

@@ -26,6 +26,12 @@ internal sealed class ProcCallArgumentMismatchRule : ICatalogRule
     public IReadOnlyList<IFinding> Scan(RuleContext context) => ProcCallArgumentMismatchScanner.Scan(context.ProcCallGraph);
 }
 
+internal sealed class SpExecuteSqlParameterMismatchRule : ICatalogRule
+{
+    public string Id => "SpExecuteSqlParameterMismatchScanner";
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => SpExecuteSqlParameterMismatchScanner.Scan(context.ProcCallGraph);
+}
+
 internal sealed class MaxTypedColumnRule : ICatalogRule
 {
     public string Id => "MaxTypedColumnScanner";
