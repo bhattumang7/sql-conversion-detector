@@ -7,7 +7,8 @@ namespace SilentScan.Core.Predicates;
 
 public static class DynamicSqlParameterDeclarations
 {
-    public static IReadOnlyDictionary<string, SqlType?>? TryParse(string declarationText, IReadOnlyDictionary<string, SqlType>? typeAliases = null)
+    public static IReadOnlyDictionary<string, SqlType?>? TryParse(
+        string declarationText, IReadOnlyDictionary<string, SqlType>? typeAliases = null, int? compatibilityLevel = null)
     {
         if (string.IsNullOrWhiteSpace(declarationText))
         {
@@ -15,7 +16,7 @@ public static class DynamicSqlParameterDeclarations
         }
 
         var wrapped = $"CREATE PROCEDURE dbo.__silentscan_dynamic_params ({declarationText}) AS SELECT 1;";
-        var result = SqlScriptParser.ParseText("dynamic-sql-params", wrapped);
+        var result = SqlScriptParser.ParseText("dynamic-sql-params", wrapped, initialQuotedIdentifiers: true, compatibilityLevel);
 
         if (result.HasErrors
             || result.Fragment is not TSqlScript { Batches: [{ Statements: [CreateProcedureStatement createProcedure] }] })

@@ -37,7 +37,7 @@ public static class IndexDesignScanner
             ScanClusteringKeyQuality(table, defaultTextByColumn, findings);
             ScanDuplicateAndSubsumedIndexes(table, findings);
             ScanDisabledAndHypotheticalIndexes(table, findings);
-            ScanFilteredIndexColumnCoverage(table, findings);
+            ScanFilteredIndexColumnCoverage(table, catalog.CompatibilityLevel, findings);
             ScanColumnTypeSignals(table, findings);
             ScanFloatOrRealIndexKeyColumns(table, findings);
             ScanNoRecomputeStatistics(table, findings);
@@ -310,7 +310,7 @@ public static class IndexDesignScanner
                 obj.ParentTableQualifiedName.ToUpperInvariant());
     }
 
-    private static void ScanFilteredIndexColumnCoverage(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanFilteredIndexColumnCoverage(CatalogTable table, int? compatibilityLevel, List<IndexDesignFinding> findings)
     {
         foreach (var index in table.Indexes)
         {
@@ -319,7 +319,7 @@ public static class IndexDesignScanner
                 continue;
             }
 
-            var filterColumns = TryExtractFilterColumnNames(filterDefinition);
+            var filterColumns = TryExtractFilterColumnNames(filterDefinition, compatibilityLevel);
             if (filterColumns is null || filterColumns.Count == 0)
             {
                 continue;
@@ -344,9 +344,9 @@ public static class IndexDesignScanner
         }
     }
 
-    private static List<string>? TryExtractFilterColumnNames(string filterDefinition)
+    private static List<string>? TryExtractFilterColumnNames(string filterDefinition, int? compatibilityLevel)
     {
-        var result = SqlScriptParser.ParseText("filter-definition.sql", $"SELECT 1 WHERE {filterDefinition};");
+        var result = SqlScriptParser.ParseText("filter-definition.sql", $"SELECT 1 WHERE {filterDefinition};", initialQuotedIdentifiers: true, compatibilityLevel);
         if (result.HasErrors
             || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { WhereClause.SearchCondition: { } searchCondition } } ] }] })
         {
@@ -358,9 +358,9 @@ public static class IndexDesignScanner
         return [.. collector.Names];
     }
 
-    public static (string ColumnName, string LiteralText)? TryExtractSimpleLiteralEqualityFilter(string filterDefinition)
+    public static (string ColumnName, string LiteralText)? TryExtractSimpleLiteralEqualityFilter(string filterDefinition, int? compatibilityLevel = null)
     {
-        var result = SqlScriptParser.ParseText("filter-definition.sql", $"SELECT 1 WHERE {filterDefinition};");
+        var result = SqlScriptParser.ParseText("filter-definition.sql", $"SELECT 1 WHERE {filterDefinition};", initialQuotedIdentifiers: true, compatibilityLevel);
         if (result.HasErrors
             || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { WhereClause.SearchCondition: { } searchCondition } }] }] })
         {

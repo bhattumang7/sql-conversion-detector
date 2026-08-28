@@ -14,7 +14,7 @@ public static class SchemaDependencyScanner
 
         foreach (var reference in catalog.SchemaExpressions)
         {
-            var fragment = TryParse(reference);
+            var fragment = TryParse(reference, catalog.CompatibilityLevel);
             if (fragment is null)
             {
                 continue;
@@ -56,13 +56,13 @@ public static class SchemaDependencyScanner
         return findings;
     }
 
-    private static TSqlFragment? TryParse(SchemaExpressionReference reference)
+    private static TSqlFragment? TryParse(SchemaExpressionReference reference, int? compatibilityLevel)
     {
         var wrapped = reference.Kind == SchemaDependencyKind.CheckConstraint
             ? $"SELECT 1 WHERE {reference.DefinitionText};"
             : $"SELECT {reference.DefinitionText};";
 
-        var result = SqlScriptParser.ParseText("schema-expression.sql", wrapped);
+        var result = SqlScriptParser.ParseText("schema-expression.sql", wrapped, initialQuotedIdentifiers: true, compatibilityLevel);
         return result.HasErrors ? null : result.Fragment;
     }
 

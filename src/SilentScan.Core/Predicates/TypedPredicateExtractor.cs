@@ -121,7 +121,7 @@ public static class TypedPredicateExtractor
                     foreach (var index in table.Indexes)
                     {
                         if (!index.IsFiltered || index.FilterDefinition is not { } filterDefinition
-                            || IndexDesignScanner.TryExtractSimpleLiteralEqualityFilter(filterDefinition) is not { } extracted)
+                            || IndexDesignScanner.TryExtractSimpleLiteralEqualityFilter(filterDefinition, catalog.CompatibilityLevel) is not { } extracted)
                         {
                             continue;
                         }

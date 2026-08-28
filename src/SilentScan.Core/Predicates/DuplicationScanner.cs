@@ -19,7 +19,7 @@ public static class DuplicationScanner
     {
         var findings = new List<DuplicationFinding>();
 
-        ScanComments(parseResult, findings);
+        ScanComments(parseResult, catalog.CompatibilityLevel, findings);
 
         var visitor = new Visitor(parseResult.SourcePath, catalog);
         parseResult.Fragment.Accept(visitor);
@@ -35,7 +35,7 @@ public static class DuplicationScanner
         ];
     }
 
-    private static void ScanComments(SqlParseResult parseResult, List<DuplicationFinding> findings)
+    private static void ScanComments(SqlParseResult parseResult, int? compatibilityLevel, List<DuplicationFinding> findings)
     {
         var fragment = parseResult.Fragment;
         if (fragment.ScriptTokenStream is null || fragment.LastTokenIndex < fragment.FirstTokenIndex)
@@ -54,7 +54,7 @@ public static class DuplicationScanner
             }
 
             var stripped = Strip(raw);
-            if (stripped.Length < MinCommentedCodeLength || !LooksLikeCode(stripped))
+            if (stripped.Length < MinCommentedCodeLength || !LooksLikeCode(stripped, compatibilityLevel))
             {
                 continue;
             }
@@ -94,7 +94,7 @@ public static class DuplicationScanner
         "EXEC", "EXECUTE", "CREATE", "ALTER", "DROP", "WITH", "GRANT", "REVOKE", "DENY", "USE",
     };
 
-    private static bool LooksLikeCode(string strippedText)
+    private static bool LooksLikeCode(string strippedText, int? compatibilityLevel)
     {
         var firstWord = strippedText.TrimStart().Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries) is [var word, ..]
             ? word
@@ -104,7 +104,7 @@ public static class DuplicationScanner
             return false;
         }
 
-        var result = SqlScriptParser.ParseText("commented-out-code-probe.sql", strippedText);
+        var result = SqlScriptParser.ParseText("commented-out-code-probe.sql", strippedText, initialQuotedIdentifiers: true, compatibilityLevel);
         return !result.HasErrors
             && result.Fragment is TSqlScript script
             && script.Batches.Any(b => b.Statements.Count > 0);

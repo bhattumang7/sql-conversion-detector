@@ -20,7 +20,7 @@ public static class TryCastComputedColumnPredicateScanner
                 continue;
             }
 
-            if (!DefinesTryCast(expression.DefinitionText))
+            if (!DefinesTryCast(expression.DefinitionText, catalog.CompatibilityLevel))
             {
                 continue;
             }
@@ -38,9 +38,9 @@ public static class TryCastComputedColumnPredicateScanner
         return candidates;
     }
 
-    private static bool DefinesTryCast(string definitionText)
+    private static bool DefinesTryCast(string definitionText, int? compatibilityLevel)
     {
-        var result = SqlScriptParser.ParseText("schema-expression.sql", $"SELECT {definitionText};");
+        var result = SqlScriptParser.ParseText("schema-expression.sql", $"SELECT {definitionText};", initialQuotedIdentifiers: true, compatibilityLevel);
         if (result.HasErrors || result.Fragment is not TSqlScript script)
         {
             return false;

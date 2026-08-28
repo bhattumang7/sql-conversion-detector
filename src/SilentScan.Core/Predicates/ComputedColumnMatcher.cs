@@ -25,7 +25,7 @@ internal static class ComputedColumnMatcher
                 continue;
             }
 
-            var definitionExpression = TryParseTopLevelExpression(expression.DefinitionText);
+            var definitionExpression = TryParseTopLevelExpression(expression.DefinitionText, catalog.CompatibilityLevel);
             if (definitionExpression is not null && StructurallyEqual(definitionExpression, predicateExpression))
             {
                 return true;
@@ -35,9 +35,9 @@ internal static class ComputedColumnMatcher
         return false;
     }
 
-    private static ScalarExpression? TryParseTopLevelExpression(string definitionText)
+    private static ScalarExpression? TryParseTopLevelExpression(string definitionText, int? compatibilityLevel)
     {
-        var result = SqlScriptParser.ParseText("schema-expression.sql", $"SELECT {definitionText};");
+        var result = SqlScriptParser.ParseText("schema-expression.sql", $"SELECT {definitionText};", initialQuotedIdentifiers: true, compatibilityLevel);
         if (result.HasErrors || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { SelectElements: [SelectScalarExpression selectScalar] } } ] }] })
         {
             return null;

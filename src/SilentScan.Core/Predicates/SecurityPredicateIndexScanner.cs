@@ -39,7 +39,7 @@ public static class SecurityPredicateIndexScanner
             return;
         }
 
-        var call = TryParseFunctionCall(predicate.PredicateDefinitionText);
+        var call = TryParseFunctionCall(predicate.PredicateDefinitionText, catalog.CompatibilityLevel);
         if (call is null)
         {
             return;
@@ -77,9 +77,9 @@ public static class SecurityPredicateIndexScanner
             table.SourceLine));
     }
 
-    private static FunctionCall? TryParseFunctionCall(string definitionText)
+    private static FunctionCall? TryParseFunctionCall(string definitionText, int? compatibilityLevel)
     {
-        var result = SqlScriptParser.ParseText("security-predicate.sql", $"SELECT {definitionText};");
+        var result = SqlScriptParser.ParseText("security-predicate.sql", $"SELECT {definitionText};", initialQuotedIdentifiers: true, compatibilityLevel);
         if (result.HasErrors
             || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { SelectElements: [SelectScalarExpression selectScalar] } }] }] })
         {

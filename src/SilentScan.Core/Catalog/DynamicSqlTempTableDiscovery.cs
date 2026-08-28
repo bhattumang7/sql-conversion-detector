@@ -8,7 +8,8 @@ public static class DynamicSqlTempTableDiscovery
 {
     private const string CreateTableMarker = "CREATE TABLE";
 
-    public static DatabaseCatalog Discover(IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null)
+    public static DatabaseCatalog Discover(
+        IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null, int? compatibilityLevel = null)
     {
         var wrapped = new List<SqlParseResult>();
         foreach (var result in parseResults)
@@ -26,7 +27,7 @@ public static class DynamicSqlTempTableDiscovery
                     continue;
                 }
 
-                if (TryWrapAsScopedProcedure(script.InnerText, scope, result.SourcePath) is { } wrappedResult)
+                if (TryWrapAsScopedProcedure(script.InnerText, scope, result.SourcePath, compatibilityLevel) is { } wrappedResult)
                 {
                     wrapped.Add(wrappedResult);
                 }
@@ -36,7 +37,7 @@ public static class DynamicSqlTempTableDiscovery
         return wrapped.Count == 0 ? new DatabaseCatalog() : CatalogBuilder.Build(wrapped, manifestDeclaredCollation, manifestTempdbCollation);
     }
 
-    private static SqlParseResult? TryWrapAsScopedProcedure(string innerText, string scope, string sourcePath)
+    private static SqlParseResult? TryWrapAsScopedProcedure(string innerText, string scope, string sourcePath, int? compatibilityLevel)
     {
         var dotIndex = scope.IndexOf('.', StringComparison.Ordinal);
         if (dotIndex <= 0 || dotIndex == scope.Length - 1)
@@ -47,7 +48,7 @@ public static class DynamicSqlTempTableDiscovery
         var schema = Bracket(scope[..dotIndex]);
         var name = Bracket(scope[(dotIndex + 1)..]);
         var wrapperSql = $"CREATE PROCEDURE [{schema}].[{name}] AS BEGIN {innerText} END";
-        var parsed = SqlScriptParser.ParseText(sourcePath, wrapperSql);
+        var parsed = SqlScriptParser.ParseText(sourcePath, wrapperSql, initialQuotedIdentifiers: true, compatibilityLevel);
         return parsed.HasErrors ? null : parsed;
     }
 

@@ -35,7 +35,7 @@ internal static class JsonComputedColumnMatcher
                 continue;
             }
 
-            var definitionCall = TryParseTopLevelFunctionCall(expression.DefinitionText);
+            var definitionCall = TryParseTopLevelFunctionCall(expression.DefinitionText, catalog.CompatibilityLevel);
             if (definitionCall is null
                 || !TryGetJsonPathLiteral(definitionCall, sourceColumnName, out var definitionPath))
             {
@@ -75,9 +75,9 @@ internal static class JsonComputedColumnMatcher
         return true;
     }
 
-    private static FunctionCall? TryParseTopLevelFunctionCall(string definitionText)
+    private static FunctionCall? TryParseTopLevelFunctionCall(string definitionText, int? compatibilityLevel)
     {
-        var result = SqlScriptParser.ParseText("schema-expression.sql", $"SELECT {definitionText};");
+        var result = SqlScriptParser.ParseText("schema-expression.sql", $"SELECT {definitionText};", initialQuotedIdentifiers: true, compatibilityLevel);
         if (result.HasErrors || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { SelectElements: [SelectScalarExpression selectScalar] } } ] }] })
         {
             return null;

@@ -171,7 +171,7 @@ public static class ProcCallGraphBuilder
         private bool TryResolveFoldedProcedureCall(string innerText, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ExecutableProcedureReference? procedureReference)
         {
             procedureReference = null;
-            var parseResult = SqlScriptParser.ParseText(sourcePath, innerText);
+            var parseResult = SqlScriptParser.ParseText(sourcePath, innerText, initialQuotedIdentifiers: true, catalog.CompatibilityLevel);
             if (parseResult.Errors.Count > 0
                 || parseResult.Fragment is not TSqlScript { Batches: [{ Statements: [ExecuteStatement innerExecute] }] }
                 || innerExecute.ExecuteSpecification.ExecutableEntity is not ExecutableProcedureReference
@@ -248,7 +248,7 @@ public static class ProcCallGraphBuilder
         {
             parameters = [];
             var syntheticText = $"CREATE PROCEDURE {SpExecuteSqlSyntheticParameterListName} ({definitionText}) AS SELECT 1;";
-            var parseResult = SqlScriptParser.ParseText(sourcePath, syntheticText);
+            var parseResult = SqlScriptParser.ParseText(sourcePath, syntheticText, initialQuotedIdentifiers: true, catalog.CompatibilityLevel);
             if (parseResult.Errors.Count > 0 || parseResult.Fragment is not TSqlScript { Batches: [{ Statements: [CreateProcedureStatement createStatement] }] })
             {
                 return false;

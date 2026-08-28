@@ -39,7 +39,7 @@ public static class CheckConstraintScanner
             return;
         }
 
-        var searchCondition = TryParse(check.DefinitionText);
+        var searchCondition = TryParse(check.DefinitionText, catalog.CompatibilityLevel);
         if (searchCondition is null)
         {
             return;
@@ -80,10 +80,10 @@ public static class CheckConstraintScanner
         }
     }
 
-    private static BooleanExpression? TryParse(string definitionText)
+    private static BooleanExpression? TryParse(string definitionText, int? compatibilityLevel)
     {
         var wrapped = $"SELECT 1 WHERE {definitionText};";
-        var result = SqlScriptParser.ParseText("check-constraint.sql", wrapped);
+        var result = SqlScriptParser.ParseText("check-constraint.sql", wrapped, initialQuotedIdentifiers: true, compatibilityLevel);
         if (result.HasErrors || result.Fragment is not TSqlScript script)
         {
             return null;
