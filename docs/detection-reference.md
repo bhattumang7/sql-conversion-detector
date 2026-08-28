@@ -551,19 +551,28 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
   `QUOTED_IDENTIFIER` mid-file, split on `GO` first with
   `GoBatchSplitter.Split` and guess the mode independently per batch rather
   than once for the whole file.
-* **`OutputParameterScanner` and `ParameterReassignmentPredicateScanner` share
-  one traversal (`ProcedureBodyFlowWalker`); `ScopeVariableFlowTracker` stays
-  separate.** All three had grown their own hand-rolled If/While/TryCatch/
-  GoTo/Return/Throw walker. The first two share the exact same shape — walk a
-  statement list to its end, dispatch per-construct, clone state into
+* **All three hand-rolled If/While/TryCatch/GoTo/Return/Throw walkers now go
+  through `ProcedureBodyFlowWalker`.** `OutputParameterScanner` and
+  `ParameterReassignmentPredicateScanner` shared the exact same shape — walk
+  a statement list to its end, dispatch per-construct, clone state into
   branches, merge with a policy-supplied combine rule — and now go through
   `ProcedureBodyFlowWalker`'s `IStatementFlowPolicy<TState>` (each scanner
   supplies its own state type, per-statement effect, and branch-merge
-  policy). `ScopeVariableFlowTracker` was deliberately left out: it isn't a
+  policy). `ScopeVariableFlowTracker` is structurally different — it isn't a
   whole-list walk to a final state, it's a walk *up to a specific target
-  fragment*, and its `WhileStatement` handling runs a real fixed-point loop
-  (cap 8) rather than the other two's single pass — forcing it into the same
-  shape would either lose that fixpoint or bolt a target-stop condition onto
-  every dispatch arm of the shared walker for no shared benefit. Do not
-  re-propose folding it in without an actual value case for one visitor
-  needing both a fixpoint loop and a target-stop.
+  fragment* (`ResolveUpTo`/`ResolveIntoContainer`), so that targeted-descent
+  part stays bespoke; but the sub-walk it runs once it reaches the target's
+  sibling statements (the old `Advance`/`AnalyzeList`/`AnalyzeIf`/
+  `AnalyzeWhileToFixpoint`/`Combine`) *is* the same whole-list-to-completion
+  shape, so it now also goes through `ProcedureBodyFlowWalker` via its own
+  `Policy`. That required extending the walker with an opt-in fixed-point
+  mode for `While` (`WhileFixpointCap`/`StatesEqual`/
+  `MarkApproximateOnCapExceeded`, all defaulted so the other two policies are
+  unaffected — single pass, cap 1). One accepted behavior change: the old
+  `TouchesVariable`/`AllBranches` short-circuit (skip recursing into a
+  branch that provably never writes the tracked variable) was dropped rather
+  than turned into a fourth walker hook — it was a pure performance
+  optimization, not a correctness requirement (recursing into an
+  unaffected branch is a no-op on the resulting `WriteState`), and adding a
+  hook solely for it would have outweighed the benefit. Watch for it if this
+  scanner shows up in a profile on a large procedure body.

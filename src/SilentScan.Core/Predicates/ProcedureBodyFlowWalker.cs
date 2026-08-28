@@ -19,6 +19,12 @@ internal interface IStatementFlowPolicy<TState>
     TState CloneForBranch(TState state);
 
     TState Merge(TState a, TState b);
+
+    int WhileFixpointCap => 1;
+
+    bool StatesEqual(TState a, TState b) => true;
+
+    TState MarkApproximateOnCapExceeded(TState state) => state;
 }
 
 internal static class ProcedureBodyFlowWalker
@@ -96,8 +102,20 @@ internal static class ProcedureBodyFlowWalker
             return enteringState;
         }
 
-        var bodyResult = Walk(ToStatementList(whileStatement.Statement), policy.CloneForBranch(enteringState), policy);
-        return policy.Merge(enteringState, bodyResult);
+        var current = enteringState;
+        for (var iteration = 0; iteration < policy.WhileFixpointCap; iteration++)
+        {
+            var bodyResult = Walk(ToStatementList(whileStatement.Statement), policy.CloneForBranch(current), policy);
+            var next = policy.Merge(enteringState, bodyResult);
+            if (policy.StatesEqual(next, current))
+            {
+                return next;
+            }
+
+            current = next;
+        }
+
+        return policy.MarkApproximateOnCapExceeded(current);
     }
 
     private static TState WalkTryCatch<TState>(TryCatchStatement tryCatch, TState enteringState, IStatementFlowPolicy<TState> policy)

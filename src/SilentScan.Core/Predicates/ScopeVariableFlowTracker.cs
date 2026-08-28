@@ -25,7 +25,8 @@ public static class ScopeVariableFlowTracker
         }
 
         var everDeclared = DeclaresVariable(scopeStatements, variableName);
-        var state = ResolveUpTo(scopeStatements, variableName, callSite, WriteState.Unwritten, BranchCombine.RequireAny);
+        var policy = new Policy(variableName, BranchCombine.RequireAny);
+        var state = ResolveUpTo(scopeStatements, variableName, callSite, WriteState.Unwritten, policy);
         return new AssignmentFlow(state.Written || !everDeclared, state.Approximate);
     }
 
@@ -37,7 +38,8 @@ public static class ScopeVariableFlowTracker
             return null;
         }
 
-        var state = ResolveUpTo(currentScopeStatements, callerVariableName, callSite, WriteState.Unwritten, BranchCombine.RequireAll);
+        var policy = new Policy(callerVariableName, BranchCombine.RequireAll);
+        var state = ResolveUpTo(currentScopeStatements, callerVariableName, callSite, WriteState.Unwritten, policy);
         return state is { Written: true, LiteralKnown: true, Literal: { } literal }
             ? TryGetDirectLiteralArgument(literal, sourcePath)
             : null;
@@ -69,7 +71,7 @@ public static class ScopeVariableFlowTracker
         return false;
     }
 
-    private static WriteState ResolveUpTo(IList<TSqlStatement> statements, string variableName, TSqlFragment target, WriteState state, BranchCombine combine)
+    private static WriteState ResolveUpTo(IList<TSqlStatement> statements, string variableName, TSqlFragment target, WriteState state, Policy policy)
     {
         foreach (var statement in statements)
         {
@@ -80,7 +82,7 @@ public static class ScopeVariableFlowTracker
 
             if (Contains(statement, target))
             {
-                return ResolveIntoContainer(statement, variableName, target, state, combine);
+                return ResolveIntoContainer(statement, variableName, target, state, policy);
             }
 
             if (TryHandleFlowTerminator(statement, state, out var terminatedState))
@@ -88,7 +90,7 @@ public static class ScopeVariableFlowTracker
                 return terminatedState;
             }
 
-            state = Advance(statement, variableName, state, combine);
+            state = ProcedureBodyFlowWalker.Walk([statement], state, policy);
         }
 
         return state;
@@ -112,88 +114,55 @@ public static class ScopeVariableFlowTracker
         }
     }
 
-    private static WriteState ResolveIntoContainer(TSqlStatement statement, string variableName, TSqlFragment target, WriteState state, BranchCombine combine) => statement switch
+    private static WriteState ResolveIntoContainer(TSqlStatement statement, string variableName, TSqlFragment target, WriteState state, Policy policy) => statement switch
     {
-        BeginEndBlockStatement block => ResolveUpTo(block.StatementList.Statements, variableName, target, state, combine),
+        BeginEndBlockStatement block => ResolveUpTo(block.StatementList.Statements, variableName, target, state, policy),
         IfStatement ifStatement when Contains(ifStatement.ThenStatement, target) =>
-            ResolveUpTo(ToStatementList(ifStatement.ThenStatement), variableName, target, state, combine),
+            ResolveUpTo(ToStatementList(ifStatement.ThenStatement), variableName, target, state, policy),
         IfStatement { ElseStatement: { } elseStatement } when Contains(elseStatement, target) =>
-            ResolveUpTo(ToStatementList(elseStatement), variableName, target, state, combine),
-        WhileStatement whileStatement => ResolveUpTo(ToStatementList(whileStatement.Statement), variableName, target, state, combine),
+            ResolveUpTo(ToStatementList(elseStatement), variableName, target, state, policy),
+        WhileStatement whileStatement => ResolveUpTo(ToStatementList(whileStatement.Statement), variableName, target, state, policy),
         TryCatchStatement tryCatch when Contains(tryCatch.TryStatements, target) =>
-            ResolveUpTo(tryCatch.TryStatements.Statements, variableName, target, state, combine),
-        TryCatchStatement tryCatch => ResolveUpTo(tryCatch.CatchStatements.Statements, variableName, target, state, combine),
+            ResolveUpTo(tryCatch.TryStatements.Statements, variableName, target, state, policy),
+        TryCatchStatement tryCatch => ResolveUpTo(tryCatch.CatchStatements.Statements, variableName, target, state, policy),
         _ => state,
     };
 
-    private static WriteState Advance(TSqlStatement statement, string variableName, WriteState state, BranchCombine combine)
+    private const int LoopFixpointIterationCap = 8;
+
+    private sealed class Policy(string variableName, BranchCombine combine) : IStatementFlowPolicy<WriteState>
     {
-        var directWrite = VariableWriteSites.InStatement(statement).FirstOrDefault(w => NameEquals(w.Name, variableName));
-        if (directWrite.Name is not null)
+        public bool IsDeclined(WriteState state) => false;
+
+        public bool IsDone(WriteState state) => false;
+
+        public WriteState PerStatement(TSqlStatement statement, WriteState state)
         {
+            var directWrite = VariableWriteSites.InStatement(statement).FirstOrDefault(w => NameEquals(w.Name, variableName));
+            if (directWrite.Name is null)
+            {
+                return state;
+            }
+
             var literal = VariableWriteSites.DirectLiteralAssignment(statement, variableName);
             return literal is not null ? new WriteState(true, true, literal, Approximate: false) : new WriteState(true, false, null, Approximate: false);
         }
 
-        return statement switch
-        {
-            BeginEndBlockStatement block => AnalyzeList(block.StatementList.Statements, variableName, state, combine),
-            IfStatement ifStatement when TouchesVariable(AllBranches(ifStatement), variableName) => AnalyzeIf(ifStatement, variableName, state, combine),
-            WhileStatement whileStatement when TouchesVariable(ToStatementList(whileStatement.Statement), variableName) =>
-                AnalyzeWhileToFixpoint(ToStatementList(whileStatement.Statement), variableName, state, combine),
-            TryCatchStatement tryCatch when TouchesVariable(tryCatch.TryStatements.Statements, variableName)
-                || TouchesVariable(tryCatch.CatchStatements.Statements, variableName) =>
-                Combine(
-                    AnalyzeList(tryCatch.TryStatements.Statements, variableName, state, combine),
-                    AnalyzeList(tryCatch.CatchStatements.Statements, variableName, state, combine),
-                    combine),
-            GoToStatement => state with { Approximate = true },
-            ReturnStatement or ThrowStatement => state,
-            _ => state,
-        };
-    }
+        public WriteState OnReturn(WriteState state, TSqlStatement statement) => state;
 
-    private const int LoopFixpointIterationCap = 8;
+        public WriteState OnThrow(WriteState state) => state;
 
-    private static WriteState AnalyzeWhileToFixpoint(IList<TSqlStatement> body, string variableName, WriteState entryState, BranchCombine combine)
-    {
-        var current = entryState;
-        for (var iteration = 0; iteration < LoopFixpointIterationCap; iteration++)
-        {
-            var next = Combine(entryState, AnalyzeList(body, variableName, current, combine), combine);
-            if (next == current)
-            {
-                return next;
-            }
+        public WriteState OnGoTo(WriteState state) => state with { Approximate = true };
 
-            current = next;
-        }
+        public WriteState CloneForBranch(WriteState state) => state;
 
-        return current with { Approximate = true };
-    }
+        public WriteState Merge(WriteState a, WriteState b) => Combine(a, b, combine);
 
-    private static WriteState AnalyzeIf(IfStatement ifStatement, string variableName, WriteState entryState, BranchCombine combine)
-    {
-        var thenState = AnalyzeList(ToStatementList(ifStatement.ThenStatement), variableName, entryState, combine);
-        var elseState = ifStatement.ElseStatement is not null
-            ? AnalyzeList(ToStatementList(ifStatement.ElseStatement), variableName, entryState, combine)
-            : entryState;
-        return Combine(thenState, elseState, combine);
-    }
+        public int WhileFixpointCap => LoopFixpointIterationCap;
 
-    private static WriteState AnalyzeList(IList<TSqlStatement> statements, string variableName, WriteState state, BranchCombine combine)
-    {
-        foreach (var statement in statements)
-        {
-            if (TryHandleFlowTerminator(statement, state, out var terminatedState))
-            {
-                return terminatedState;
-            }
+        public bool StatesEqual(WriteState a, WriteState b) => a == b;
 
-            state = Advance(statement, variableName, state, combine);
-        }
-
-        return state;
+        public WriteState MarkApproximateOnCapExceeded(WriteState state) => state with { Approximate = true };
     }
 
     private static WriteState Combine(WriteState a, WriteState b, BranchCombine combine) =>
@@ -233,24 +202,6 @@ public static class ScopeVariableFlowTracker
         _ => false,
     };
 
-    private static bool TouchesVariable(IEnumerable<TSqlStatement> statements, string variableName)
-    {
-        foreach (var statement in statements)
-        {
-            if (VariableWriteSites.InStatement(statement).Any(w => NameEquals(w.Name, variableName)))
-            {
-                return true;
-            }
-
-            if (NestedLists(statement).Any(nested => TouchesVariable(nested, variableName)))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private static IEnumerable<IList<TSqlStatement>> NestedLists(TSqlStatement statement)
     {
         switch (statement)
@@ -276,15 +227,6 @@ public static class ScopeVariableFlowTracker
                 yield return tryCatch.TryStatements.Statements;
                 yield return tryCatch.CatchStatements.Statements;
                 break;
-        }
-    }
-
-    private static IEnumerable<TSqlStatement> AllBranches(IfStatement ifStatement)
-    {
-        yield return ifStatement.ThenStatement;
-        if (ifStatement.ElseStatement is not null)
-        {
-            yield return ifStatement.ElseStatement;
         }
     }
 
