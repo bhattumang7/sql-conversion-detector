@@ -124,6 +124,55 @@ public sealed class DeprecatedSyntaxScannerTests
     }
 
     [Fact]
+    public void EqualsNull_AdHocScriptAfterSetAnsiNullsOff_Suppressed()
+    {
+        var findings = Scan("SET ANSI_NULLS OFF; SELECT * FROM dbo.T WHERE Col = NULL;");
+
+        Assert.DoesNotContain(findings, f => f.Kind is DeprecatedSyntaxFindingKind.EqualsNullComparison or DeprecatedSyntaxFindingKind.NotEqualsNullComparison);
+    }
+
+    [Fact]
+    public void EqualsNull_AdHocScriptBeforeSetAnsiNullsOff_StillFires()
+    {
+        var findings = Scan("SELECT * FROM dbo.T WHERE Col = NULL; SET ANSI_NULLS OFF;");
+
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+    }
+
+    [Fact]
+    public void EqualsNull_AdHocScriptAfterSetAnsiNullsBackOn_StillFires()
+    {
+        var findings = Scan("SET ANSI_NULLS OFF; SET ANSI_NULLS ON; SELECT * FROM dbo.T WHERE Col = NULL;");
+
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+    }
+
+    [Fact]
+    public void EqualsNull_SetAnsiNullsOffInsideConditionalBlock_StillFires()
+    {
+        var findings = Scan("IF 1 = 1 BEGIN SET ANSI_NULLS OFF; END SELECT * FROM dbo.T WHERE Col = NULL;");
+
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+    }
+
+    [Fact]
+    public void ExclamationNotEqualNull_AdHocScriptAfterSetAnsiNullsOff_FiresNonAnsiOnly()
+    {
+        var findings = Scan("SET ANSI_NULLS OFF; SELECT * FROM dbo.T WHERE Col != NULL;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == DeprecatedSyntaxFindingKind.NotEqualsNullComparison);
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.NonAnsiComparisonOperator);
+    }
+
+    [Fact]
+    public void BracketsNotEqualNull_AdHocScriptAfterSetAnsiNullsOff_FiresNeither()
+    {
+        var findings = Scan("SET ANSI_NULLS OFF; SELECT * FROM dbo.T WHERE Col <> NULL;");
+
+        Assert.DoesNotContain(findings, f => f.Kind is DeprecatedSyntaxFindingKind.NotEqualsNullComparison or DeprecatedSyntaxFindingKind.NonAnsiComparisonOperator);
+    }
+
+    [Fact]
     public void NotEqualToBracketsNull_Fires()
     {
         var findings = Scan("SELECT * FROM dbo.T WHERE Col <> NULL;");
