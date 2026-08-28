@@ -227,7 +227,7 @@ public static class DuplicationScanner
             {
                 var columnText = FragmentTextRenderer.Render(column);
                 var valueText = FragmentTextRenderer.Render(node.NewValue);
-                if (string.Equals(columnText, valueText, StringComparison.OrdinalIgnoreCase))
+                if (catalog.IdentifierComparer.Equals(columnText, valueText))
                 {
                     Add(DuplicationFindingKind.SelfAssignment, columnText, node, FindingConfidence.High);
                 }
@@ -424,7 +424,7 @@ public static class DuplicationScanner
 
         private CatalogColumn? CatalogColumnOf(ScopeEntry entry, string columnName) =>
             !entry.IsViewLayer && entry.Relation.QualifiedName is { } qualifiedName
-                ? catalog.Find(qualifiedName)?.FindColumn(columnName)
+                ? catalog.Find(qualifiedName)?.FindColumn(columnName, catalog.IdentifierComparer)
                 : null;
 
         private static bool AlwaysExitsLoop(IList<TSqlStatement> statements) =>

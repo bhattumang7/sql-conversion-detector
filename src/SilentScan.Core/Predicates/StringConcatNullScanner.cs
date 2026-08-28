@@ -154,14 +154,14 @@ public static class StringConcatNullScanner
                     return new Leaf(LeafKind.String, IsNullableColumn: false, TableQualifiedName: null, ColumnName: null);
 
                 case ColumnReferenceExpression columnRef:
-                    var resolved = BaseColumnResolver.ResolveBaseColumn(columnRef, sourcePath, scopeChain);
+                    var resolved = BaseColumnResolver.ResolveBaseColumn(columnRef, sourcePath, scopeChain, catalog);
                     if (resolved is not { } r || r.Type is not { } columnType || !StringCategories.Contains(columnType.Category))
                     {
 
                         return new Leaf(LeafKind.Unknown, false, null, null);
                     }
 
-                    var isNullable = catalog.Find(r.TableQualifiedName)?.FindColumn(r.ColumnName)?.IsNullable ?? false;
+                    var isNullable = catalog.Find(r.TableQualifiedName)?.FindColumn(r.ColumnName, catalog.IdentifierComparer)?.IsNullable ?? false;
                     return new Leaf(LeafKind.String, isNullable, r.TableQualifiedName, r.ColumnName);
 
                 case FunctionCall { FunctionName.Value: var name } call

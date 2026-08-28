@@ -223,7 +223,7 @@ public static class ParameterReassignmentPredicateScanner
                 return;
             }
 
-            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null);
+            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null, catalog);
             if (provenance is not ColumnProvenance.BaseColumn { Depth: 0 } baseColumn)
             {
                 return;
@@ -235,7 +235,7 @@ public static class ParameterReassignmentPredicateScanner
                 return;
             }
 
-            var indexed = catalog.Find(baseColumn.TableQualifiedName)?.IsIndexedColumn(baseColumn.ColumnName) ?? false;
+            var indexed = catalog.Find(baseColumn.TableQualifiedName)?.IsIndexedColumn(baseColumn.ColumnName, catalog.IdentifierComparer) ?? false;
             var site = state.ReassignmentSites![variableRef.Name];
 
             Findings.Add(new ParameterReassignmentPredicateFinding(

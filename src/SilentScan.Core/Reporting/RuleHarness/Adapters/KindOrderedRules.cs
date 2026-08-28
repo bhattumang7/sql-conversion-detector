@@ -70,7 +70,7 @@ internal sealed class FormattingRule : IPerFileRule
 internal sealed class NamingRule : IPerFileRule
 {
     public string Id => "NamingScanner";
-    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => NamingScanner.Scan(parseResult);
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => NamingScanner.Scan(parseResult, context.Catalog);
     public IComparer<IFinding>? Comparer => new KindThenLocationComparer<NamingFinding>(f => f.Kind);
 }
 

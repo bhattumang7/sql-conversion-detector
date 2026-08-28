@@ -80,7 +80,7 @@ public static class FloatOrderDependentAggregateScanner
         {
             foreach (var parameter in call.Parameters)
             {
-                if (BaseColumnResolver.ResolveBaseColumn(parameter, sourcePath, scopeChain) is not { } resolved
+                if (BaseColumnResolver.ResolveBaseColumn(parameter, sourcePath, scopeChain, catalog) is not { } resolved
                     || resolved.Type?.Category is not (SqlTypeCategory.Real or SqlTypeCategory.Float))
                 {
                     continue;

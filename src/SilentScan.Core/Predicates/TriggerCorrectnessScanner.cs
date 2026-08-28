@@ -312,7 +312,7 @@ public static class TriggerCorrectnessScanner
                 foreach (var updateCall in updateCalls.Calls)
                 {
                     var columnName = updateCall.Identifier.Value;
-                    if (HasSameColumnValueComparison(predicate, columnName))
+                    if (HasSameColumnValueComparison(predicate, columnName, catalog.IdentifierComparer))
                     {
                         continue;
                     }
@@ -326,9 +326,9 @@ public static class TriggerCorrectnessScanner
             }
         }
 
-        private static bool HasSameColumnValueComparison(BooleanExpression predicate, string columnName)
+        private static bool HasSameColumnValueComparison(BooleanExpression predicate, string columnName, StringComparer identifierComparer)
         {
-            var collector = new SameColumnComparisonCollector(columnName);
+            var collector = new SameColumnComparisonCollector(columnName, identifierComparer);
             predicate.Accept(collector);
             return collector.Found;
         }
@@ -351,7 +351,7 @@ public static class TriggerCorrectnessScanner
             public override void ExplicitVisit(UpdateCall node) => Calls.Add(node);
         }
 
-        private sealed class SameColumnComparisonCollector(string columnName) : TSqlFragmentVisitor
+        private sealed class SameColumnComparisonCollector(string columnName, StringComparer identifierComparer) : TSqlFragmentVisitor
         {
             public bool Found { get; private set; }
 
@@ -365,9 +365,9 @@ public static class TriggerCorrectnessScanner
                 base.ExplicitVisit(node);
             }
 
-            private static bool IsColumnNamed(ScalarExpression expression, string columnName) =>
+            private bool IsColumnNamed(ScalarExpression expression, string columnName) =>
                 expression is ColumnReferenceExpression { MultiPartIdentifier.Identifiers: [.., { } last] }
-                && string.Equals(last.Value, columnName, StringComparison.OrdinalIgnoreCase);
+                && identifierComparer.Equals(last.Value, columnName);
         }
 
         private void InspectLogonTriggerHostNameGate(string triggerQualifiedName, StatementList statementList)
@@ -474,7 +474,7 @@ public static class TriggerCorrectnessScanner
             {
                 if (FoundAt is null
                     && target is NamedTableReference named
-                    && string.Equals(catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject)), targetQualifiedName, StringComparison.OrdinalIgnoreCase))
+                    && catalog.IdentifierComparer.Equals(catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject)), targetQualifiedName))
                 {
                     FoundAt = line;
                 }

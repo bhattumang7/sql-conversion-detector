@@ -8,7 +8,7 @@ public static class DmlTargetTableScanner
 {
     public static IReadOnlySet<string> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog)
     {
-        var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var targets = new HashSet<string>(catalog.IdentifierComparer);
         foreach (var parseResult in parseResults)
         {
             var visitor = new Visitor(catalog, targets);

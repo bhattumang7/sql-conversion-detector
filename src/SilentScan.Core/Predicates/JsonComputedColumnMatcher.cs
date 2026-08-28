@@ -14,7 +14,7 @@ internal static class JsonComputedColumnMatcher
     public static bool HasIndexedMatchingComputedColumn(
         DatabaseCatalog catalog, string tableQualifiedName, string sourceColumnName, FunctionCall predicateCall)
     {
-        if (!TryGetJsonPathLiteral(predicateCall, sourceColumnName, out var predicatePath))
+        if (!TryGetJsonPathLiteral(predicateCall, sourceColumnName, catalog.IdentifierComparer, out var predicatePath))
         {
             return false;
         }
@@ -29,15 +29,15 @@ internal static class JsonComputedColumnMatcher
         {
             if (expression.Kind != SchemaDependencyKind.ComputedColumn
                 || expression.ColumnName is not { } computedColumnName
-                || !string.Equals(expression.TableQualifiedName, tableQualifiedName, StringComparison.OrdinalIgnoreCase)
-                || !table.IsIndexedColumn(computedColumnName))
+                || !catalog.IdentifierComparer.Equals(expression.TableQualifiedName, tableQualifiedName)
+                || !table.IsIndexedColumn(computedColumnName, catalog.IdentifierComparer))
             {
                 continue;
             }
 
             var definitionCall = TryParseTopLevelFunctionCall(expression.DefinitionText, catalog.CompatibilityLevel);
             if (definitionCall is null
-                || !TryGetJsonPathLiteral(definitionCall, sourceColumnName, out var definitionPath))
+                || !TryGetJsonPathLiteral(definitionCall, sourceColumnName, catalog.IdentifierComparer, out var definitionPath))
             {
                 continue;
             }
@@ -53,7 +53,7 @@ internal static class JsonComputedColumnMatcher
         return false;
     }
 
-    private static bool TryGetJsonPathLiteral(FunctionCall call, string sourceColumnName, out string path)
+    private static bool TryGetJsonPathLiteral(FunctionCall call, string sourceColumnName, StringComparer identifierComparer, out string path)
     {
         path = string.Empty;
 
@@ -66,7 +66,7 @@ internal static class JsonComputedColumnMatcher
             ? identifiers[^1].Value
             : null;
 
-        if (!string.Equals(columnName, sourceColumnName, StringComparison.OrdinalIgnoreCase))
+        if (columnName is null || !identifierComparer.Equals(columnName, sourceColumnName))
         {
             return false;
         }

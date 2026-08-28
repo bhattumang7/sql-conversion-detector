@@ -14,7 +14,7 @@ internal static class DmlWriteTargetResolver
         }
 
         if (named.SchemaObject.SchemaIdentifier is null && withCtes is { CommonTableExpressions: { } ctes }
-            && ctes.Any(cte => string.Equals(cte.ExpressionName.Value, named.SchemaObject.BaseIdentifier.Value, StringComparison.OrdinalIgnoreCase)))
+            && ctes.Any(cte => catalog.IdentifierComparer.Equals(cte.ExpressionName.Value, named.SchemaObject.BaseIdentifier.Value)))
         {
             return null;
         }

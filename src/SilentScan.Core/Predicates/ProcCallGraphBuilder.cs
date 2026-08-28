@@ -23,7 +23,7 @@ public static class ProcCallGraphBuilder
             spExecuteSqlCallSites.AddRange(visitor.SpExecuteSqlCallSites);
         }
 
-        return new ProcCallGraph(edges, spExecuteSqlCallSites);
+        return new ProcCallGraph(edges, spExecuteSqlCallSites, catalog.IdentifierComparer);
     }
 
     private const string CallGraphConstructKind = "procedure call graph edge";
@@ -214,7 +214,7 @@ public static class ProcCallGraphBuilder
                 return;
             }
 
-            var byName = declaredParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+            var byName = declaredParameters.ToDictionary(p => p.Name, catalog.IdentifierComparer);
             var bindings = new List<SpExecuteSqlParameterBinding>();
 
             for (var i = 2; i < parameters.Count; i++)
@@ -266,7 +266,7 @@ public static class ProcCallGraphBuilder
         private List<ProcCallArgument> MatchFoldedArguments(
             IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, DynamicSqlSegmentMap segmentMap)
         {
-            var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+            var byName = formalParameters.ToDictionary(p => p.Name, catalog.IdentifierComparer);
             var positionalCursor = 0;
             var matched = new List<ProcCallArgument>(actualParameters.Count);
 
@@ -440,7 +440,7 @@ public static class ProcCallGraphBuilder
         private static List<ProcCallArgument> MatchArguments(
             IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, MatchArgumentsContext context)
         {
-            var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+            var byName = formalParameters.ToDictionary(p => p.Name, context.Catalog.IdentifierComparer);
             var positionalCursor = 0;
             var matched = new List<ProcCallArgument>(actualParameters.Count);
 

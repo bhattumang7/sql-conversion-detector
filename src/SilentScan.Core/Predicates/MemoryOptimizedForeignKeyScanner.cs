@@ -8,7 +8,7 @@ public static class MemoryOptimizedForeignKeyScanner
     {
         var findings = new List<MemoryOptimizedForeignKeyFinding>();
 
-        foreach (var fk in catalog.ForeignKeys.DistinctBy(fk => fk.ConstraintName, StringComparer.OrdinalIgnoreCase))
+        foreach (var fk in catalog.ForeignKeys.DistinctBy(fk => fk.ConstraintName, catalog.IdentifierComparer))
         {
             var parentTable = catalog.Find(fk.ParentTableQualifiedName);
             var referencedTable = catalog.Find(fk.ReferencedTableQualifiedName);

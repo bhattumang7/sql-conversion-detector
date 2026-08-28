@@ -45,11 +45,11 @@ public static class CheckConstraintScanner
             return;
         }
 
-        var referencedColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var referencedColumnNames = new HashSet<string>(catalog.IdentifierComparer);
         var columnRefVisitor = new ColumnNameCollector(referencedColumnNames);
         searchCondition.Accept(columnRefVisitor);
 
-        var nullGuardedColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var nullGuardedColumnNames = new HashSet<string>(catalog.IdentifierComparer);
         var nullGuardVisitor = new NullGuardCollector(nullGuardedColumnNames);
         searchCondition.Accept(nullGuardVisitor);
 
@@ -58,7 +58,7 @@ public static class CheckConstraintScanner
 
         foreach (var columnName in referencedColumnNames)
         {
-            var catalogColumn = table.FindColumn(columnName);
+            var catalogColumn = table.FindColumn(columnName, catalog.IdentifierComparer);
             if (catalogColumn is null)
             {
                 continue;

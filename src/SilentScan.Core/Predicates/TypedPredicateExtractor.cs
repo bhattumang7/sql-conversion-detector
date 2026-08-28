@@ -115,7 +115,7 @@ public static class TypedPredicateExtractor
                     return _literalEqualityFilteredIndexesByColumn;
                 }
 
-                var map = new Dictionary<(string, string), List<(string?, string)>>(TableColumnKeyComparer.Instance);
+                var map = new Dictionary<(string, string), List<(string?, string)>>(TableColumnKeyComparer.For(catalog));
                 foreach (var table in catalog.Tables)
                 {
                     foreach (var index in table.Indexes)
@@ -473,7 +473,7 @@ public static class TypedPredicateExtractor
             foreach (var columnRef in spec.Columns)
             {
                 var name = columnRef.MultiPartIdentifier.Identifiers[^1].Value;
-                var column = table.FindColumn(name);
+                var column = table.FindColumn(name, catalog.IdentifierComparer);
                 if (column is null)
                 {
                     ledger.Record(
@@ -952,7 +952,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var catalogColumn = catalog.Find(column.TableQualifiedName, CurrentProcScope)?.FindColumn(column.ColumnName);
+            var catalogColumn = catalog.Find(column.TableQualifiedName, CurrentProcScope)?.FindColumn(column.ColumnName, catalog.IdentifierComparer);
             if (catalogColumn is not { IsAnsiPadded: false })
             {
                 return;
@@ -1161,17 +1161,17 @@ public static class TypedPredicateExtractor
             ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
 
-            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger);
+            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger, catalog);
             var columnName = columnRef.MultiPartIdentifier.Identifiers[^1].Value;
 
             if (provenance is ColumnProvenance.BaseColumn baseColumn)
             {
 
                 var tableEntry = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope);
-                var matchedIndex = tableEntry?.FindIndexedColumn(baseColumn.ColumnName);
+                var matchedIndex = tableEntry?.FindIndexedColumn(baseColumn.ColumnName, catalog.IdentifierComparer);
 
                 bool? indexed = tableEntry is null ? null : matchedIndex is not null;
-                var immediateRelation = ScalarExpressionResolver.TryResolveImmediateRelation(columnRef, scopeChain);
+                var immediateRelation = ScalarExpressionResolver.TryResolveImmediateRelation(columnRef, scopeChain, catalog);
                 return new PredicateOperand.Column(
                     baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, indexed, baseColumn.Depth, baseColumn,
                     immediateRelation?.RelationQualifiedName, immediateRelation?.ExposedColumnName, matchedIndex?.Name);
@@ -1209,7 +1209,7 @@ public static class TypedPredicateExtractor
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             var underlyingBaseColumns = ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(provenance)
-                .Select(bc => new UnderlyingBaseColumn(bc.TableQualifiedName, bc.ColumnName, catalog.Find(bc.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(bc.ColumnName) ?? false))
+                .Select(bc => new UnderlyingBaseColumn(bc.TableQualifiedName, bc.ColumnName, catalog.Find(bc.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(bc.ColumnName, catalog.IdentifierComparer) ?? false))
                 .ToList();
 
             if (underlyingBaseColumns.Count == 0)
@@ -1223,7 +1223,7 @@ public static class TypedPredicateExtractor
 
             var transformationChain = ColumnProvenanceAnalysis.DescribeTransformationChain(provenance);
 
-            var immediateRelation = ScalarExpressionResolver.TryResolveImmediateRelation(columnRef, scopeChain);
+            var immediateRelation = ScalarExpressionResolver.TryResolveImmediateRelation(columnRef, scopeChain, catalog);
             var identifiers = columnRef.MultiPartIdentifier.Identifiers;
             var alias = identifiers.Count >= 2 ? identifiers[^2].Value : null;
 

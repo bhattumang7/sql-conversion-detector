@@ -24,14 +24,17 @@ public sealed record SpExecuteSqlParameterBinding(
 public sealed record SpExecuteSqlCallSite(
     string? CallerScopeQualifiedName, SourceSpan CallSite, IReadOnlyList<SpExecuteSqlParameterBinding> Bindings);
 
-public sealed class ProcCallGraph(IReadOnlyList<ProcCallEdge> edges, IReadOnlyList<SpExecuteSqlCallSite>? spExecuteSqlCallSites = null)
+public sealed class ProcCallGraph(
+    IReadOnlyList<ProcCallEdge> edges, IReadOnlyList<SpExecuteSqlCallSite>? spExecuteSqlCallSites = null, StringComparer? identifierComparer = null)
 {
+    private readonly StringComparer _identifierComparer = identifierComparer ?? StringComparer.OrdinalIgnoreCase;
+
     public IReadOnlyList<ProcCallEdge> Edges { get; } = edges;
 
     public IReadOnlyList<SpExecuteSqlCallSite> SpExecuteSqlCallSites { get; } = spExecuteSqlCallSites ?? [];
 
     public IEnumerable<ProcCallEdge> EdgesCalling(string calleeQualifiedName) =>
-        Edges.Where(e => string.Equals(e.CalleeQualifiedName, calleeQualifiedName, StringComparison.OrdinalIgnoreCase));
+        Edges.Where(e => _identifierComparer.Equals(e.CalleeQualifiedName, calleeQualifiedName));
 
     public ProcCallEdge? EdgeAt(SourceSpan callSite) =>
         Edges.FirstOrDefault(e => e.CallSite == callSite);

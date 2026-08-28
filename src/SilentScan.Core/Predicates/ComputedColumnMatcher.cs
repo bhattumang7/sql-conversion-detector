@@ -19,14 +19,14 @@ internal static class ComputedColumnMatcher
         {
             if (expression.Kind != SchemaDependencyKind.ComputedColumn
                 || expression.ColumnName is not { } computedColumnName
-                || !string.Equals(expression.TableQualifiedName, tableQualifiedName, StringComparison.OrdinalIgnoreCase)
-                || !table.IsIndexedColumn(computedColumnName))
+                || !catalog.IdentifierComparer.Equals(expression.TableQualifiedName, tableQualifiedName)
+                || !table.IsIndexedColumn(computedColumnName, catalog.IdentifierComparer))
             {
                 continue;
             }
 
             var definitionExpression = TryParseTopLevelExpression(expression.DefinitionText, catalog.CompatibilityLevel);
-            if (definitionExpression is not null && StructurallyEqual(definitionExpression, predicateExpression))
+            if (definitionExpression is not null && StructurallyEqual(definitionExpression, predicateExpression, catalog.IdentifierComparer))
             {
                 return true;
             }
@@ -56,7 +56,7 @@ internal static class ComputedColumnMatcher
         return expression;
     }
 
-    private static bool StructurallyEqual(ScalarExpression? a, ScalarExpression? b)
+    private static bool StructurallyEqual(ScalarExpression? a, ScalarExpression? b, StringComparer identifierComparer)
     {
         a = a is null ? null : Unwrap(a);
         b = b is null ? null : Unwrap(b);
@@ -74,17 +74,17 @@ internal static class ComputedColumnMatcher
         return (a, b) switch
         {
             (null, null) => true,
-            (ColumnReferenceExpression ca, ColumnReferenceExpression cb) => string.Equals(LastIdentifier(ca), LastIdentifier(cb), StringComparison.OrdinalIgnoreCase),
+            (ColumnReferenceExpression ca, ColumnReferenceExpression cb) => identifierComparer.Equals(LastIdentifier(ca), LastIdentifier(cb)),
             (FunctionCall fa, FunctionCall fb) => string.Equals(fa.FunctionName.Value, fb.FunctionName.Value, StringComparison.OrdinalIgnoreCase)
                 && fa.Parameters.Count == fb.Parameters.Count
-                && fa.Parameters.Zip(fb.Parameters, StructurallyEqual).All(equal => equal),
+                && fa.Parameters.Zip(fb.Parameters, (x, y) => StructurallyEqual(x, y, identifierComparer)).All(equal => equal),
 
             (LeftFunctionCall la, LeftFunctionCall lb) => la.Parameters.Count == lb.Parameters.Count
-                && la.Parameters.Zip(lb.Parameters, StructurallyEqual).All(equal => equal),
-            (CastCall casta, CastCall castb) => TypeEqual(casta.DataType, castb.DataType) && StructurallyEqual(casta.Parameter, castb.Parameter),
+                && la.Parameters.Zip(lb.Parameters, (x, y) => StructurallyEqual(x, y, identifierComparer)).All(equal => equal),
+            (CastCall casta, CastCall castb) => TypeEqual(casta.DataType, castb.DataType) && StructurallyEqual(casta.Parameter, castb.Parameter, identifierComparer),
             (ConvertCall converta, ConvertCall convertb) => TypeEqual(converta.DataType, convertb.DataType)
-                && StructurallyEqual(converta.Parameter, convertb.Parameter)
-                && StructurallyEqual(converta.Style, convertb.Style),
+                && StructurallyEqual(converta.Parameter, convertb.Parameter, identifierComparer)
+                && StructurallyEqual(converta.Style, convertb.Style, identifierComparer),
             (StringLiteral sa, StringLiteral sb) => string.Equals(sa.Value, sb.Value, StringComparison.Ordinal),
             (IntegerLiteral ia, IntegerLiteral ib) => string.Equals(ia.Value, ib.Value, StringComparison.Ordinal),
             (IdentifierLiteral da, IdentifierLiteral db) => string.Equals(da.Value, db.Value, StringComparison.OrdinalIgnoreCase),

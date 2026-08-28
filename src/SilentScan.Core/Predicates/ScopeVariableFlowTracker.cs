@@ -156,51 +156,48 @@ public static class ScopeVariableFlowTracker
 
         public WriteState CloneForBranch(WriteState state) => state;
 
-        public WriteState Merge(WriteState a, WriteState b) => Combine(a, b, combine);
+        public WriteState Merge(WriteState a, WriteState b) => combine == BranchCombine.RequireAll ? Intersect(a, b) : Union(a, b);
 
         public int WhileFixpointCap => LoopFixpointIterationCap;
 
         public bool StatesEqual(WriteState a, WriteState b) => a == b;
 
         public WriteState MarkApproximateOnCapExceeded(WriteState state) => state with { Approximate = true };
-    }
 
-    private static WriteState Combine(WriteState a, WriteState b, BranchCombine combine) =>
-        combine == BranchCombine.RequireAll ? Intersect(a, b) : Union(a, b);
-
-    private static WriteState Intersect(WriteState a, WriteState b)
-    {
-        var approximate = a.Approximate || b.Approximate;
-        var written = a.Written && b.Written;
-        if (!written)
+        private static WriteState Intersect(WriteState a, WriteState b)
         {
-            return WriteState.Unwritten with { Approximate = approximate };
+            var approximate = a.Approximate || b.Approximate;
+            var written = a.Written && b.Written;
+            if (!written)
+            {
+                return WriteState.Unwritten with { Approximate = approximate };
+            }
+
+            return a is { LiteralKnown: true } && b is { LiteralKnown: true } && LiteralTextEquals(a.Literal, b.Literal)
+                ? new WriteState(true, true, a.Literal, approximate)
+                : new WriteState(true, false, null, approximate);
         }
 
-        return a is { LiteralKnown: true } && b is { LiteralKnown: true } && LiteralTextEquals(a.Literal, b.Literal)
-            ? new WriteState(true, true, a.Literal, approximate)
-            : new WriteState(true, false, null, approximate);
-    }
-
-    private static WriteState Union(WriteState a, WriteState b)
-    {
-        var approximate = a.Approximate || b.Approximate;
-        if (!a.Written && !b.Written)
+        private static WriteState Union(WriteState a, WriteState b)
         {
-            return WriteState.Unwritten with { Approximate = approximate };
+            var approximate = a.Approximate || b.Approximate;
+            if (!a.Written && !b.Written)
+            {
+                return WriteState.Unwritten with { Approximate = approximate };
+            }
+
+            return a is { Written: true, LiteralKnown: true } && b is { Written: true, LiteralKnown: true } && LiteralTextEquals(a.Literal, b.Literal)
+                ? new WriteState(true, true, a.Literal, approximate)
+                : new WriteState(true, false, null, approximate);
         }
 
-        return a is { Written: true, LiteralKnown: true } && b is { Written: true, LiteralKnown: true } && LiteralTextEquals(a.Literal, b.Literal)
-            ? new WriteState(true, true, a.Literal, approximate)
-            : new WriteState(true, false, null, approximate);
+        private static bool LiteralTextEquals(ScalarExpression? a, ScalarExpression? b) => (a, b) switch
+        {
+            (StringLiteral left, StringLiteral right) => string.Equals(left.Value, right.Value, StringComparison.Ordinal),
+            (IntegerLiteral left, IntegerLiteral right) => string.Equals(left.Value, right.Value, StringComparison.Ordinal),
+            _ => false,
+        };
     }
-
-    private static bool LiteralTextEquals(ScalarExpression? a, ScalarExpression? b) => (a, b) switch
-    {
-        (StringLiteral left, StringLiteral right) => string.Equals(left.Value, right.Value, StringComparison.Ordinal),
-        (IntegerLiteral left, IntegerLiteral right) => string.Equals(left.Value, right.Value, StringComparison.Ordinal),
-        _ => false,
-    };
 
     private static IEnumerable<IList<TSqlStatement>> NestedLists(TSqlStatement statement)
     {

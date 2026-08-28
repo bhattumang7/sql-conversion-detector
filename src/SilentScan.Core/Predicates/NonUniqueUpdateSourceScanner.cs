@@ -85,13 +85,13 @@ public static class NonUniqueUpdateSourceScanner
             var secondAlias = AliasOf(join.SecondTableReference);
 
             string sourceAlias, sourceQualifiedName;
-            if (string.Equals(firstAlias, targetAlias, StringComparison.OrdinalIgnoreCase)
+            if (catalog.IdentifierComparer.Equals(firstAlias, targetAlias)
                 && secondAlias is not null && byAlias.TryGetValue(secondAlias, out var secondEntry)
                 && !secondEntry.IsViewLayer && secondEntry.Relation.QualifiedName is { } secondQualifiedName)
             {
                 (sourceAlias, sourceQualifiedName) = (secondAlias, secondQualifiedName);
             }
-            else if (string.Equals(secondAlias, targetAlias, StringComparison.OrdinalIgnoreCase)
+            else if (catalog.IdentifierComparer.Equals(secondAlias, targetAlias)
                 && firstAlias is not null && byAlias.TryGetValue(firstAlias, out var firstEntry)
                 && !firstEntry.IsViewLayer && firstEntry.Relation.QualifiedName is { } firstQualifiedName)
             {
@@ -108,14 +108,14 @@ public static class NonUniqueUpdateSourceScanner
                 return;
             }
 
-            var joinColumns = JoinKeyUniqueness.EqualityColumnsQualifiedBy(join.SearchCondition, sourceAlias);
+            var joinColumns = JoinKeyUniqueness.EqualityColumnsQualifiedBy(join.SearchCondition, sourceAlias, catalog.IdentifierComparer);
             if (joinColumns.Count == 0)
             {
 
                 return;
             }
 
-            if (JoinKeyUniqueness.IsProvenUniqueOver(sourceTable, joinColumns))
+            if (JoinKeyUniqueness.IsProvenUniqueOver(sourceTable, joinColumns, catalog.IdentifierComparer))
             {
                 return;
             }
@@ -124,7 +124,7 @@ public static class NonUniqueUpdateSourceScanner
                 .OfType<AssignmentSetClause>()
                 .Where(sc => ReferencesAlias(sc.NewValue, sourceAlias))
                 .Select(sc => sc.Column.MultiPartIdentifier.Identifiers[^1].Value)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(catalog.IdentifierComparer)
                 .ToList();
 
             if (setColumnNames.Count == 0)
@@ -138,11 +138,11 @@ public static class NonUniqueUpdateSourceScanner
                 sourcePath, join.StartLine, join.StartColumn));
         }
 
-        private static bool ReferencesAlias(ScalarExpression expression, string alias)
+        private bool ReferencesAlias(ScalarExpression expression, string alias)
         {
             var collector = new ColumnAliasHelpers.RawColumnReferenceCollector();
             expression.Accept(collector);
-            return collector.References.Any(columnRef => ColumnAliasHelpers.ColumnNameIfQualifiedByAlias(columnRef, alias) is not null);
+            return collector.References.Any(columnRef => ColumnAliasHelpers.ColumnNameIfQualifiedByAlias(columnRef, alias, catalog.IdentifierComparer) is not null);
         }
     }
 }

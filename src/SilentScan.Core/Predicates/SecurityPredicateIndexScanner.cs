@@ -50,7 +50,7 @@ public static class SecurityPredicateIndexScanner
             .Select(c => c.MultiPartIdentifier?.Identifiers is { Count: > 0 } ids ? ids[^1].Value : null)
             .Where(name => name is not null)
             .Select(name => name!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(catalog.IdentifierComparer)
             .ToList();
 
         if (boundColumns.Count == 0)
@@ -61,7 +61,7 @@ public static class SecurityPredicateIndexScanner
 
         var hasSupportingIndex = table.Indexes.Any(i =>
             !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0
-            && boundColumns.Contains(i.KeyColumns[0], StringComparer.OrdinalIgnoreCase));
+            && boundColumns.Contains(i.KeyColumns[0], catalog.IdentifierComparer));
 
         if (hasSupportingIndex)
         {

@@ -51,7 +51,7 @@ public static class ScanReportBuilder
             tvfFenceMap = Lineage.TvfFenceMap.Build(viewDefinitions, catalog);
             scalarUdfMap = Lineage.ScalarUdfMap.Build(viewDefinitions, catalog);
             viewExpansionMap = Lineage.ViewExpansionMap.Build(viewDefinitions, catalog);
-            selectStarViewCandidates = SelectStarViewScanner.BuildCandidates(viewDefinitions, viewExpansionMap, lineage);
+            selectStarViewCandidates = SelectStarViewScanner.BuildCandidates(viewDefinitions, viewExpansionMap, lineage, catalog.IdentifierComparer);
             fenceMapStage.Complete($"{tvfFenceMap.Count:N0} view/TVF layers inherit a fence, {scalarUdfMap.Count:N0} inherit a scalar UDF");
         }
 
@@ -453,7 +453,7 @@ public static class ScanReportBuilder
     {
         const int maxOutputSummaryRounds = 5;
 
-        var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>(TableColumnKeyComparer.Instance);
+        var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>(TableColumnKeyComparer.For(catalog));
         List<DynamicSqlExtractionResult> dynamicSqlExtractions = [];
         using (var dynamicStage = progress.Begin("scanning dynamic SQL", usableCount * maxOutputSummaryRounds))
         {

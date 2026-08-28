@@ -8,7 +8,7 @@ public static class NonPersistedComputedColumnScanner
     {
         var definitions = catalog.SchemaExpressions
             .Where(e => e.Kind == SchemaDependencyKind.ComputedColumn)
-            .ToLookup(e => (e.TableQualifiedName, ColumnName: e.ColumnName ?? string.Empty), TupleComparer.Instance);
+            .ToLookup(e => (e.TableQualifiedName, ColumnName: e.ColumnName ?? string.Empty), new TupleComparer(catalog.IdentifierComparer));
 
         var findings = new List<NonPersistedComputedColumnFinding>();
 
@@ -40,17 +40,15 @@ public static class NonPersistedComputedColumnScanner
         ];
     }
 
-    private sealed class TupleComparer : IEqualityComparer<(string TableQualifiedName, string ColumnName)>
+    private sealed class TupleComparer(StringComparer identifierComparer) : IEqualityComparer<(string TableQualifiedName, string ColumnName)>
     {
-        public static readonly TupleComparer Instance = new();
-
         public bool Equals((string TableQualifiedName, string ColumnName) x, (string TableQualifiedName, string ColumnName) y) =>
-            string.Equals(x.TableQualifiedName, y.TableQualifiedName, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(x.ColumnName, y.ColumnName, StringComparison.OrdinalIgnoreCase);
+            identifierComparer.Equals(x.TableQualifiedName, y.TableQualifiedName) &&
+            identifierComparer.Equals(x.ColumnName, y.ColumnName);
 
         public int GetHashCode((string TableQualifiedName, string ColumnName) obj) =>
             HashCode.Combine(
-                obj.TableQualifiedName.ToUpperInvariant(),
-                obj.ColumnName.ToUpperInvariant());
+                identifierComparer.GetHashCode(obj.TableQualifiedName),
+                identifierComparer.GetHashCode(obj.ColumnName));
     }
 }

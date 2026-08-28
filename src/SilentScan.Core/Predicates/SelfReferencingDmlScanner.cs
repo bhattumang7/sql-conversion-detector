@@ -108,9 +108,9 @@ public static class SelfReferencingDmlScanner
             return expression is IntegerLiteral { Value: "1" };
         }
 
-        private static HashSet<string> CteNamesOf(WithCtesAndXmlNamespaces? withClause) =>
+        private HashSet<string> CteNamesOf(WithCtesAndXmlNamespaces? withClause) =>
             withClause is { CommonTableExpressions: { } ctes }
-                ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), StringComparer.OrdinalIgnoreCase)
+                ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), catalog.IdentifierComparer)
                 : [];
 
         private void Report(SelfReferencingDmlFinding? match, string statementKind, string targetQualifiedName, TSqlFragment locationNode)
@@ -166,7 +166,7 @@ public static class SelfReferencingDmlScanner
             foreach (var reference in collector.References)
             {
                 var alias = reference.Alias?.Value ?? reference.SchemaObject.BaseIdentifier.Value;
-                if (!skippedTargetEntry && string.Equals(alias, targetAlias, StringComparison.OrdinalIgnoreCase))
+                if (!skippedTargetEntry && catalog.IdentifierComparer.Equals(alias, targetAlias))
                 {
                     skippedTargetEntry = true;
                     continue;
@@ -205,7 +205,7 @@ public static class SelfReferencingDmlScanner
 
             var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(reference.SchemaObject));
 
-            if (string.Equals(qualifiedName, targetQualifiedName, StringComparison.OrdinalIgnoreCase))
+            if (catalog.IdentifierComparer.Equals(qualifiedName, targetQualifiedName))
             {
                 return new SelfReferencingDmlFinding(
                     SelfReferencingDmlFindingKind.DirectTableReference, StatementKind: "", targetQualifiedName, qualifiedName,

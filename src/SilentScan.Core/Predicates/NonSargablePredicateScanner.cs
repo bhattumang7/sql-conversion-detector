@@ -429,7 +429,7 @@ public static class NonSargablePredicateScanner
                 return false;
             }
 
-            var column = catalog.Find(table, CurrentProcScope)?.FindColumn(columnName);
+            var column = catalog.Find(table, CurrentProcScope)?.FindColumn(columnName, catalog.IdentifierComparer);
             return column is { IsNullable: false };
         }
 
@@ -548,14 +548,14 @@ public static class NonSargablePredicateScanner
             }
 
             var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
-            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger);
+            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger, catalog);
 
             return provenance switch
             {
 
                 ColumnProvenance.BaseColumn baseColumn => (
                     baseColumn.TableQualifiedName,
-                    catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(baseColumn.ColumnName),
+                    catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(baseColumn.ColumnName, catalog.IdentifierComparer),
                     baseColumn.Type),
 
                 ColumnProvenance.Declared declared => (declared.TableQualifiedName, false, declared.Type),

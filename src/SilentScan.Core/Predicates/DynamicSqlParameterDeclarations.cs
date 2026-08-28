@@ -8,7 +8,8 @@ namespace SilentScan.Core.Predicates;
 public static class DynamicSqlParameterDeclarations
 {
     public static IReadOnlyDictionary<string, SqlType?>? TryParse(
-        string declarationText, IReadOnlyDictionary<string, SqlType>? typeAliases = null, int? compatibilityLevel = null)
+        string declarationText, IReadOnlyDictionary<string, SqlType>? typeAliases = null, int? compatibilityLevel = null,
+        StringComparer? identifierComparer = null)
     {
         if (string.IsNullOrWhiteSpace(declarationText))
         {
@@ -24,7 +25,7 @@ public static class DynamicSqlParameterDeclarations
             return null;
         }
 
-        var declared = new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase);
+        var declared = new Dictionary<string, SqlType?>(identifierComparer ?? StringComparer.OrdinalIgnoreCase);
         foreach (var parameter in createProcedure.Parameters)
         {
             declared[parameter.VariableName.Value] = SqlTypeReferenceResolver.Resolve(parameter.DataType, columnCollation: null, typeAliases);

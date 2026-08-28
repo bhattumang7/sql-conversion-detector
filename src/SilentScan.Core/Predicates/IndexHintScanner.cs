@@ -82,8 +82,8 @@ public static class IndexHintScanner
 
             var joinNodes = fromClause is null ? [] : fromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes).ToList();
 
-            var anyReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.Instance);
-            var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(sourcePath, scopeChain, anyReferencedColumns);
+            var anyReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.For(catalog));
+            var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(sourcePath, scopeChain, anyReferencedColumns, catalog);
             whereCondition?.Accept(referenceVisitor);
             foreach (var join in joinNodes)
             {
@@ -137,7 +137,7 @@ public static class IndexHintScanner
                     continue;
                 }
 
-                var matchedIndex = table.Indexes.FirstOrDefault(i => string.Equals(i.Name, hintedName, StringComparison.OrdinalIgnoreCase));
+                var matchedIndex = table.Indexes.FirstOrDefault(i => catalog.IdentifierComparer.Equals(i.Name, hintedName));
                 if (matchedIndex is null)
                 {
                     Findings.Add(new IndexHintFinding(

@@ -29,8 +29,8 @@ public static class CompositeIndexLeadingColumnScanner
         protected override void InspectStatement(ConstrainedStatement statement)
         {
 
-            var anyReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.Instance);
-            var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, anyReferencedColumns);
+            var anyReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.For(Catalog));
+            var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, anyReferencedColumns, Catalog);
             statement.WhereCondition?.Accept(referenceVisitor);
             foreach (var join in statement.JoinNodes)
             {
@@ -70,7 +70,7 @@ public static class CompositeIndexLeadingColumnScanner
 
                     var hasAlternativeSeekPath = usableIndexes.Any(other =>
                         !ReferenceEquals(other, index)
-                        && string.Equals(other.KeyColumns[0], violatingColumn, StringComparison.OrdinalIgnoreCase));
+                        && Catalog.IdentifierComparer.Equals(other.KeyColumns[0], violatingColumn));
                     if (hasAlternativeSeekPath)
                     {
                         continue;

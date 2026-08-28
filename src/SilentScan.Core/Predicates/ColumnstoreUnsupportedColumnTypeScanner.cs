@@ -28,7 +28,7 @@ public static class ColumnstoreUnsupportedColumnTypeScanner
 
                 var hasExplicitColumnList = index.KeyColumns.Count > 0;
                 var offendingColumns = hasExplicitColumnList
-                    ? sqlVariantColumns.Where(c => index.KeyColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
+                    ? sqlVariantColumns.Where(c => index.KeyColumns.Contains(c.Name, catalog.IdentifierComparer))
                     : sqlVariantColumns;
 
                 foreach (var column in offendingColumns)

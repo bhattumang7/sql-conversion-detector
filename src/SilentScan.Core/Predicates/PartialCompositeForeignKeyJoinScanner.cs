@@ -19,7 +19,7 @@ public static class PartialCompositeForeignKeyJoinScanner
 
     public static IReadOnlyList<CompositeForeignKey> BuildCompositeForeignKeys(DatabaseCatalog catalog) =>
         [.. catalog.ForeignKeys
-            .GroupBy(fk => fk.ConstraintName, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(fk => fk.ConstraintName, catalog.IdentifierComparer)
             .Where(g => g.Count() >= 2)
             .Select(g => new CompositeForeignKey(
                 g.Key,
@@ -116,7 +116,7 @@ public static class PartialCompositeForeignKeyJoinScanner
                 .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                 .ToList();
 
-            var directlyJoinedTablePairs = new HashSet<(string, string)>(TableColumnKeyComparer.Instance);
+            var directlyJoinedTablePairs = new HashSet<(string, string)>(TableColumnKeyComparer.For(catalog));
             foreach (var join in joinNodes)
             {
                 InspectJoin(join, byAlias, scopeChain, statementWideEqualities, directlyJoinedTablePairs);
@@ -165,7 +165,7 @@ public static class PartialCompositeForeignKeyJoinScanner
                 .Select(e => e.Relation.QualifiedName)
                 .Where(name => name is not null && catalog.Find(name)?.Kind == CatalogTableKind.Table)
                 .Select(name => name!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(catalog.IdentifierComparer)
                 .ToList();
 
             for (var i = 0; i < baseTables.Count; i++)
@@ -227,7 +227,7 @@ public static class PartialCompositeForeignKeyJoinScanner
                 return false;
             }
 
-            var usedReferencedColumns = new HashSet<string>(coveredLocally.Select(p => p.ReferencedColumnName), StringComparer.OrdinalIgnoreCase);
+            var usedReferencedColumns = new HashSet<string>(coveredLocally.Select(p => p.ReferencedColumnName), catalog.IdentifierComparer);
             return referencedTable.Indexes.Any(i => i.IsUnique && i.KeyColumns.Count > 0 && i.KeyColumns.All(usedReferencedColumns.Contains));
         }
 
@@ -236,8 +236,8 @@ public static class PartialCompositeForeignKeyJoinScanner
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
             CompositeForeignKey fk, ForeignKeyColumnPair pair)
         {
-            var left = BaseColumnResolver.ResolveBaseColumn(predicate.FirstExpression, sourcePath, scopeChain);
-            var right = BaseColumnResolver.ResolveBaseColumn(predicate.SecondExpression, sourcePath, scopeChain);
+            var left = BaseColumnResolver.ResolveBaseColumn(predicate.FirstExpression, sourcePath, scopeChain, catalog);
+            var right = BaseColumnResolver.ResolveBaseColumn(predicate.SecondExpression, sourcePath, scopeChain, catalog);
             if (left is null || right is null)
             {
                 return false;
@@ -247,10 +247,10 @@ public static class PartialCompositeForeignKeyJoinScanner
                 || (Matches(left, fk.ReferencedTableQualifiedName, pair.ReferencedColumnName) && Matches(right, fk.ParentTableQualifiedName, pair.ParentColumnName));
         }
 
-        private static bool Matches(ColumnProvenance.BaseColumn? resolved, string table, string column) =>
+        private bool Matches(ColumnProvenance.BaseColumn? resolved, string table, string column) =>
             resolved is { } r
-            && string.Equals(r.TableQualifiedName, table, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(r.ColumnName, column, StringComparison.OrdinalIgnoreCase);
+            && catalog.IdentifierComparer.Equals(r.TableQualifiedName, table)
+            && catalog.IdentifierComparer.Equals(r.ColumnName, column);
 
         private string? ResolveDirectBaseTable(TableReference tableReference, IReadOnlyDictionary<string, ScopeEntry> byAlias)
         {
@@ -273,10 +273,10 @@ public static class PartialCompositeForeignKeyJoinScanner
                 (Eq(fk.ParentTableQualifiedName, tableA) && Eq(fk.ReferencedTableQualifiedName, tableB))
                 || (Eq(fk.ParentTableQualifiedName, tableB) && Eq(fk.ReferencedTableQualifiedName, tableA)));
 
-        private static bool Eq(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        private bool Eq(string a, string b) => catalog.IdentifierComparer.Equals(a, b);
 
-        private static (string, string) NormalizedPair(string a, string b) =>
-            string.Compare(a, b, StringComparison.OrdinalIgnoreCase) <= 0 ? (a, b) : (b, a);
+        private (string, string) NormalizedPair(string a, string b) =>
+            catalog.IdentifierComparer.Compare(a, b) <= 0 ? (a, b) : (b, a);
 
     }
 }

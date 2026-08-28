@@ -4,7 +4,7 @@ namespace SilentScan.Core.Predicates;
 
 internal static class ColumnAliasHelpers
 {
-    public static string? ColumnNameIfQualifiedByAlias(ScalarExpression expression, string alias)
+    public static string? ColumnNameIfQualifiedByAlias(ScalarExpression expression, string alias, StringComparer? identifierComparer = null)
     {
         if (expression is not ColumnReferenceExpression columnRef)
         {
@@ -12,7 +12,7 @@ internal static class ColumnAliasHelpers
         }
 
         var identifiers = columnRef.MultiPartIdentifier.Identifiers;
-        return identifiers.Count >= 2 && string.Equals(identifiers[^2].Value, alias, StringComparison.OrdinalIgnoreCase)
+        return identifiers.Count >= 2 && (identifierComparer ?? StringComparer.OrdinalIgnoreCase).Equals(identifiers[^2].Value, alias)
             ? identifiers[^1].Value
             : null;
     }

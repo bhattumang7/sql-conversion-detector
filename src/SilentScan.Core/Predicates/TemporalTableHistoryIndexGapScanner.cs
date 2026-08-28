@@ -20,7 +20,7 @@ public static class TemporalTableHistoryIndexGapScanner
 
             foreach (var index in current.Indexes.Where(IsComparableIndex))
             {
-                var hasMatch = history.Indexes.Any(h => IsComparableIndex(h) && SameKeyColumns(index, h));
+                var hasMatch = history.Indexes.Any(h => IsComparableIndex(h) && SameKeyColumns(index, h, catalog.IdentifierComparer));
                 if (hasMatch)
                 {
                     continue;
@@ -44,6 +44,6 @@ public static class TemporalTableHistoryIndexGapScanner
         index.Kind == CatalogIndexKind.Index && !index.IsFiltered && !index.IsColumnstore && !index.IsDisabled
         && index.KeyColumns.Count > 0;
 
-    private static bool SameKeyColumns(CatalogIndex current, CatalogIndex candidate) =>
-        current.KeyColumns.SequenceEqual(candidate.KeyColumns, StringComparer.OrdinalIgnoreCase);
+    private static bool SameKeyColumns(CatalogIndex current, CatalogIndex candidate, StringComparer identifierComparer) =>
+        current.KeyColumns.SequenceEqual(candidate.KeyColumns, identifierComparer);
 }

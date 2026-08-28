@@ -1,13 +1,14 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
 public static class MultiReferencedCteScanner
 {
-    public static IReadOnlyList<MultiReferencedCteFinding> Scan(SqlParseResult parseResult)
+    public static IReadOnlyList<MultiReferencedCteFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
+        var visitor = new Visitor(parseResult.SourcePath, catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase);
         parseResult.Fragment.Accept(visitor);
         return
         [
@@ -17,7 +18,7 @@ public static class MultiReferencedCteScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, StringComparer identifierComparer) : TSqlFragmentVisitor
     {
         public List<MultiReferencedCteFinding> Findings { get; } = [];
 
@@ -55,20 +56,20 @@ public static class MultiReferencedCteScanner
             }
         }
 
-        private static List<int> CollectReferences(TSqlFragment fragment, string cteName)
+        private List<int> CollectReferences(TSqlFragment fragment, string cteName)
         {
-            var collector = new ReferenceCollector(cteName);
+            var collector = new ReferenceCollector(cteName, identifierComparer);
             fragment.Accept(collector);
             return collector.Lines;
         }
 
-        private sealed class ReferenceCollector(string cteName) : TSqlFragmentVisitor
+        private sealed class ReferenceCollector(string cteName, StringComparer identifierComparer) : TSqlFragmentVisitor
         {
             public List<int> Lines { get; } = [];
 
             public override void ExplicitVisit(NamedTableReference node)
             {
-                if (node.SchemaObject.SchemaIdentifier is null && string.Equals(node.SchemaObject.BaseIdentifier.Value, cteName, StringComparison.OrdinalIgnoreCase))
+                if (node.SchemaObject.SchemaIdentifier is null && identifierComparer.Equals(node.SchemaObject.BaseIdentifier.Value, cteName))
                 {
                     Lines.Add(node.StartLine);
                 }

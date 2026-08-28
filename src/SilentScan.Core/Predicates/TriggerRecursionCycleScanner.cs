@@ -26,20 +26,20 @@ public static class TriggerRecursionCycleScanner
         }
 
         var byFromTable = edges
-            .GroupBy(e => e.FromTableQualifiedName, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(e => e.FromTableQualifiedName, catalog.IdentifierComparer)
             .ToDictionary(
                 g => g.Key,
                 g => (IReadOnlyList<TriggerRecursionCycleHop>)
                     [.. g.OrderBy(e => e.ToTableQualifiedName, StringComparer.Ordinal).ThenBy(e => e.SourcePath, StringComparer.Ordinal).ThenBy(e => e.TriggerLine)],
-                StringComparer.OrdinalIgnoreCase);
+                catalog.IdentifierComparer);
 
         var seenCanonicalKeys = new HashSet<string>(StringComparer.Ordinal);
         var findings = new List<TriggerRecursionCycleFinding>();
 
         foreach (var startTable in byFromTable.Keys.OrderBy(k => k, StringComparer.Ordinal))
         {
-            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { startTable };
-            var context = new CycleSearchContext(startTable, byFromTable, seenCanonicalKeys, findings);
+            var visited = new HashSet<string>(catalog.IdentifierComparer) { startTable };
+            var context = new CycleSearchContext(startTable, byFromTable, seenCanonicalKeys, findings, catalog.IdentifierComparer);
             FindCycles(context, startTable, [], visited, depth: 0);
         }
 
@@ -50,7 +50,8 @@ public static class TriggerRecursionCycleScanner
         string StartTable,
         IReadOnlyDictionary<string, IReadOnlyList<TriggerRecursionCycleHop>> Graph,
         HashSet<string> SeenCanonicalKeys,
-        List<TriggerRecursionCycleFinding> Findings);
+        List<TriggerRecursionCycleFinding> Findings,
+        StringComparer IdentifierComparer);
 
     private static void FindCycles(
         CycleSearchContext context, string currentTable, List<TriggerRecursionCycleHop> path, HashSet<string> visited, int depth)
@@ -62,13 +63,13 @@ public static class TriggerRecursionCycleScanner
 
         foreach (var edge in outEdges)
         {
-            if (path.Count == 0 && string.Equals(edge.ToTableQualifiedName, context.StartTable, StringComparison.OrdinalIgnoreCase))
+            if (path.Count == 0 && context.IdentifierComparer.Equals(edge.ToTableQualifiedName, context.StartTable))
             {
 
                 continue;
             }
 
-            if (string.Equals(edge.ToTableQualifiedName, context.StartTable, StringComparison.OrdinalIgnoreCase))
+            if (context.IdentifierComparer.Equals(edge.ToTableQualifiedName, context.StartTable))
             {
                 RecordCycle([.. path, edge], context.SeenCanonicalKeys, context.Findings);
                 continue;
@@ -153,7 +154,7 @@ public static class TriggerRecursionCycleScanner
 
     private sealed class WriteTargetCollector(DatabaseCatalog catalog, string ownTargetQualifiedName) : TSqlFragmentVisitor
     {
-        private readonly HashSet<string> _seen = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _seen = new(catalog.IdentifierComparer);
 
         public List<(string ToTableQualifiedName, int Line)> Writes { get; } = [];
 
@@ -168,7 +169,7 @@ public static class TriggerRecursionCycleScanner
         private void Record(TableReference? target, int line)
         {
             if (DmlWriteTargetResolver.TryResolve(target, withCtes: null, catalog) is not { } qualifiedName
-                || string.Equals(qualifiedName, ownTargetQualifiedName, StringComparison.OrdinalIgnoreCase))
+                || catalog.IdentifierComparer.Equals(qualifiedName, ownTargetQualifiedName))
             {
                 return;
             }

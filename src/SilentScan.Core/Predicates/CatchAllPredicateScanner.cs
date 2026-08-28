@@ -271,13 +271,13 @@ public static class CatchAllPredicateScanner
                 return;
             }
 
-            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null);
+            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null, catalog);
             if (provenance is not ColumnProvenance.BaseColumn { Depth: 0 } baseColumn)
             {
                 return;
             }
 
-            var indexed = catalog.Find(baseColumn.TableQualifiedName)?.IsIndexedColumn(baseColumn.ColumnName) ?? false;
+            var indexed = catalog.Find(baseColumn.TableQualifiedName)?.IsIndexedColumn(baseColumn.ColumnName, catalog.IdentifierComparer) ?? false;
 
             Findings.Add(new CatchAllPredicateFinding(
                 baseColumn.TableQualifiedName, baseColumn.ColumnName, indexed, variableRef.Name,

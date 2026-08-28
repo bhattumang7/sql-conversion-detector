@@ -114,7 +114,8 @@ public static class DynamicSqlTransfer
         foreach (var formal in formalParameters)
         {
             var paramName = formal.VariableName.Value;
-            var argument = edge.Arguments.FirstOrDefault(a => string.Equals(a.FormalParameterName, paramName, StringComparison.OrdinalIgnoreCase));
+            var identifierComparer = context.Catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase;
+            var argument = edge.Arguments.FirstOrDefault(a => identifierComparer.Equals(a.FormalParameterName, paramName));
             if (argument is null)
             {
 
@@ -160,9 +161,10 @@ public static class DynamicSqlTransfer
         var first = true;
         var guardId = SqlTextValue.NewGuardId();
 
+        var identifierComparer = context.Catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase;
         foreach (var edge in edges)
         {
-            var argument = edge.Arguments.FirstOrDefault(a => string.Equals(a.FormalParameterName, paramName, StringComparison.OrdinalIgnoreCase));
+            var argument = edge.Arguments.FirstOrDefault(a => identifierComparer.Equals(a.FormalParameterName, paramName));
             if (argument is null || argument.FormalParameterIsOutput || argument.LiteralArgument is not { } literalArgument)
             {
                 return SeedSymbolicOrTaint(formal, "parameter-not-seeded:non-literal-caller", context);
@@ -473,12 +475,12 @@ public static class DynamicSqlTransfer
     {
         if (context.RowValueFetcher is not { } fetcher
             || expression is not ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: > 0 } selectedIdentifiers } selectedColumnRef
-            || table.FindColumn(selectedIdentifiers[^1].Value) is not { } selectedColumn)
+            || table.FindColumn(selectedIdentifiers[^1].Value, context.Catalog?.IdentifierComparer) is not { } selectedColumn)
         {
             return null;
         }
 
-        var equalityKeys = TryExtractLiteralEqualityKeys(whereClause, table);
+        var equalityKeys = TryExtractLiteralEqualityKeys(whereClause, table, context.Catalog?.IdentifierComparer);
         var fetchedValues = fetcher.TryFetchDistinctValues(table.QualifiedName, selectedColumn.Name, equalityKeys, context.Cap);
         if (fetchedValues is not { Count: > 0 })
         {
@@ -497,34 +499,35 @@ public static class DynamicSqlTransfer
         return combined as SqlTextValue.Template;
     }
 
-    private static List<(string Column, string LiteralValue)> TryExtractLiteralEqualityKeys(WhereClause? whereClause, CatalogTable table)
+    private static List<(string Column, string LiteralValue)> TryExtractLiteralEqualityKeys(WhereClause? whereClause, CatalogTable table, StringComparer? identifierComparer)
     {
         var keys = new List<(string, string)>();
         if (whereClause?.SearchCondition is { } condition)
         {
-            CollectEqualityKeys(condition, table, keys);
+            CollectEqualityKeys(condition, table, identifierComparer, keys);
         }
 
         return keys;
     }
 
-    private static void CollectEqualityKeys(BooleanExpression expression, CatalogTable table, List<(string Column, string LiteralValue)> keys)
+    private static void CollectEqualityKeys(
+        BooleanExpression expression, CatalogTable table, StringComparer? identifierComparer, List<(string Column, string LiteralValue)> keys)
     {
         switch (expression)
         {
             case BooleanParenthesisExpression paren:
-                CollectEqualityKeys(paren.Expression, table, keys);
+                CollectEqualityKeys(paren.Expression, table, identifierComparer, keys);
                 break;
 
             case BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } and:
-                CollectEqualityKeys(and.FirstExpression, table, keys);
-                CollectEqualityKeys(and.SecondExpression, table, keys);
+                CollectEqualityKeys(and.FirstExpression, table, identifierComparer, keys);
+                CollectEqualityKeys(and.SecondExpression, table, identifierComparer, keys);
                 break;
 
             case BooleanComparisonExpression { ComparisonType: BooleanComparisonType.Equals } cmp:
-                if (!TryAddEqualityKey(cmp.FirstExpression, cmp.SecondExpression, table, keys))
+                if (!TryAddEqualityKey(cmp.FirstExpression, cmp.SecondExpression, table, identifierComparer, keys))
                 {
-                    TryAddEqualityKey(cmp.SecondExpression, cmp.FirstExpression, table, keys);
+                    TryAddEqualityKey(cmp.SecondExpression, cmp.FirstExpression, table, identifierComparer, keys);
                 }
 
                 break;
@@ -535,10 +538,12 @@ public static class DynamicSqlTransfer
         }
     }
 
-    private static bool TryAddEqualityKey(ScalarExpression columnSide, ScalarExpression literalSide, CatalogTable table, List<(string Column, string LiteralValue)> keys)
+    private static bool TryAddEqualityKey(
+        ScalarExpression columnSide, ScalarExpression literalSide, CatalogTable table, StringComparer? identifierComparer,
+        List<(string Column, string LiteralValue)> keys)
     {
         if (columnSide is not ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: > 0 } identifiers } colRef
-            || table.FindColumn(identifiers[^1].Value) is null)
+            || table.FindColumn(identifiers[^1].Value, identifierComparer) is null)
         {
             return false;
         }
@@ -565,7 +570,7 @@ public static class DynamicSqlTransfer
         ParenthesisExpression paren => TryFoldWithColumnSplice(paren.Expression, table, state, context),
         VariableReference variableRef => state.GetValueOrDefault(variableRef.Name),
         ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: > 0 } identifiers } colRef
-            when table.FindColumn(identifiers[^1].Value) is { Type: { } columnType }
+            when table.FindColumn(identifiers[^1].Value, context.Catalog?.IdentifierComparer) is { Type: { } columnType }
             => new SqlTextValue.Template([new TemplatePiece.Hole(columnType, context.Span(colRef), HoleKind.RowDependentColumn)]),
         BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } binary
             when TryFoldWithColumnSplice(binary.FirstExpression, table, state, context) is { } left

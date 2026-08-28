@@ -59,8 +59,8 @@ public static class AlwaysEncryptedOrderByScanner
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             if (element.Expression is not ColumnReferenceExpression columnRef
-                || BaseColumnResolver.ResolveBaseColumn(columnRef, sourcePath, scopeChain) is not { } resolved
-                || catalog.Find(resolved.TableQualifiedName)?.FindColumn(resolved.ColumnName) is not { } catalogColumn
+                || BaseColumnResolver.ResolveBaseColumn(columnRef, sourcePath, scopeChain, catalog) is not { } resolved
+                || catalog.Find(resolved.TableQualifiedName)?.FindColumn(resolved.ColumnName, catalog.IdentifierComparer) is not { } catalogColumn
                 || catalogColumn.EncryptionType is not (Catalog.ColumnEncryptionType.Deterministic or Catalog.ColumnEncryptionType.Randomized))
             {
                 return;

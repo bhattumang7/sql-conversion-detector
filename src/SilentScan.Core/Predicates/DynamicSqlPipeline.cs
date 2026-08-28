@@ -438,10 +438,10 @@ public static partial class DynamicSqlPipeline
         FoldFenceAndScalarUdfFindings(innerParseResult, context, script, map, accumulator);
 
         var ownDeclaredParameters = script.ParameterDeclarationText is { } declarationText
-            ? DynamicSqlParameterDeclarations.TryParse(declarationText, context.Catalog.TypeAliases, context.Catalog.CompatibilityLevel) ?? NoDeclaredParameters
+            ? DynamicSqlParameterDeclarations.TryParse(declarationText, context.Catalog.TypeAliases, context.Catalog.CompatibilityLevel, context.Catalog.IdentifierComparer) ?? NoDeclaredParameters
             : NoDeclaredParameters;
         var declaredParameters = seeds is not null && seeds.TryGetValue(script, out var seed)
-            ? MergeSeededParameters(ownDeclaredParameters, seed)
+            ? MergeSeededParameters(ownDeclaredParameters, seed, context.Catalog.IdentifierComparer)
             : ownDeclaredParameters;
         var extraction = TypedPredicateExtractor.Extract(innerParseResult, context.Catalog, context.Lineage, declaredParameters, script.Scope, context.CallerScopeByCalleeScope);
         foreach (var typedFinding in extraction.TypedFindings)
@@ -552,7 +552,7 @@ public static partial class DynamicSqlPipeline
             return new DynamicSqlPipelineResult(findings, [], [], [], [], [], [], [], [], []);
         }
 
-        var seeds = BuildArgumentBindingSeeds(nestedExtraction.AnalyzableScripts, outerDeclaredParameters);
+        var seeds = BuildArgumentBindingSeeds(nestedExtraction.AnalyzableScripts, outerDeclaredParameters, context.Catalog.IdentifierComparer);
         var nestedResult = Analyze(nestedExtraction.AnalyzableScripts, context, depth + 1, seeds);
         findings.AddRange(nestedResult.Findings.Select(f => RemapFinding(f, script)));
 
@@ -592,7 +592,7 @@ public static partial class DynamicSqlPipeline
     }
 
     private static Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? BuildArgumentBindingSeeds(
-        IReadOnlyList<DynamicSqlScript> nestedScripts, IReadOnlyDictionary<string, SqlType?> outerDeclaredParameters)
+        IReadOnlyList<DynamicSqlScript> nestedScripts, IReadOnlyDictionary<string, SqlType?> outerDeclaredParameters, StringComparer identifierComparer)
     {
         Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds = null;
         foreach (var nestedScript in nestedScripts)
@@ -607,7 +607,7 @@ public static partial class DynamicSqlPipeline
             {
                 if (outerDeclaredParameters.TryGetValue(boundVariableName, out var outerType))
                 {
-                    seed ??= new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase);
+                    seed ??= new Dictionary<string, SqlType?>(identifierComparer);
                     seed[formalName] = outerType;
                 }
             }
@@ -623,9 +623,9 @@ public static partial class DynamicSqlPipeline
     }
 
     private static Dictionary<string, SqlType?> MergeSeededParameters(
-        IReadOnlyDictionary<string, SqlType?> ownDeclaredParameters, IReadOnlyDictionary<string, SqlType?> seed)
+        IReadOnlyDictionary<string, SqlType?> ownDeclaredParameters, IReadOnlyDictionary<string, SqlType?> seed, StringComparer identifierComparer)
     {
-        var merged = new Dictionary<string, SqlType?>(ownDeclaredParameters, StringComparer.OrdinalIgnoreCase);
+        var merged = new Dictionary<string, SqlType?>(ownDeclaredParameters, identifierComparer);
         foreach (var (name, type) in seed)
         {
             if (!merged.TryGetValue(name, out var existing) || existing is null)

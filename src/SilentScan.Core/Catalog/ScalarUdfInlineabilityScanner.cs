@@ -105,7 +105,7 @@ public static class ScalarUdfInlineabilityScanner
         {
             TableReferenceCount++;
 
-            if (string.Equals(node.SchemaObject.SchemaIdentifier?.Value, "sys", StringComparison.OrdinalIgnoreCase))
+            if (catalog.IdentifierComparer.Equals(node.SchemaObject.SchemaIdentifier?.Value, "sys"))
             {
                 Report("system catalog access (sys." + node.SchemaObject.BaseIdentifier.Value + ")");
             }
@@ -151,7 +151,7 @@ public static class ScalarUdfInlineabilityScanner
             if (node.CallTarget is MultiPartIdentifierCallTarget)
             {
                 var qualifiedName = SchemaObjectNameHelper.QualifyFunctionCall(node);
-                if (string.Equals(qualifiedName, ownQualifiedName, StringComparison.OrdinalIgnoreCase))
+                if (catalog.IdentifierComparer.Equals(qualifiedName, ownQualifiedName))
                 {
                     Report("recursive self-reference");
                 }

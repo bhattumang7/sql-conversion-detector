@@ -59,7 +59,7 @@ public static class PostExpansionJoinWidthScanner
             }
 
             var written = ordered.Count;
-            var expandedBaseTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var expandedBaseTables = new HashSet<string>(catalog.IdentifierComparer);
             var inflatingSources = new List<string>();
             var partiallyUnexpanded = false;
 

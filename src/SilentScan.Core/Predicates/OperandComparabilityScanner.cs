@@ -224,7 +224,7 @@ public static class OperandComparabilityScanner
             ScalarExpression expression,
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
-            if (BaseColumnResolver.ResolveBaseColumn(expression, sourcePath, scopeChain) is not { } resolved)
+            if (BaseColumnResolver.ResolveBaseColumn(expression, sourcePath, scopeChain, catalog) is not { } resolved)
             {
                 return null;
             }

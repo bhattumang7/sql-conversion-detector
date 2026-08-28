@@ -113,7 +113,7 @@ public static class FloatEqualityPredicateScanner
             foreach (var side in new[] { comparison.FirstExpression, comparison.SecondExpression })
             {
                 if (side is not ColumnReferenceExpression columnRef
-                    || BaseColumnResolver.ResolveBaseColumn(columnRef, sourcePath, scopeChain) is not { } resolved
+                    || BaseColumnResolver.ResolveBaseColumn(columnRef, sourcePath, scopeChain, catalog) is not { } resolved
                     || resolved.Type?.Category is not (SqlTypeCategory.Real or SqlTypeCategory.Float))
                 {
                     continue;

@@ -25,13 +25,13 @@ public static class CrossModuleLockOrderScanner
         {
             for (var j = i + 1; j < procedures.Count; j++)
             {
-                if (string.Equals(procedures[i].ProcedureQualifiedName, procedures[j].ProcedureQualifiedName, StringComparison.OrdinalIgnoreCase))
+                if (catalog.IdentifierComparer.Equals(procedures[i].ProcedureQualifiedName, procedures[j].ProcedureQualifiedName))
                 {
 
                     continue;
                 }
 
-                findings.AddRange(FindInconsistentPairs(procedures[i], procedures[j]));
+                findings.AddRange(FindInconsistentPairs(procedures[i], procedures[j], catalog.IdentifierComparer));
             }
         }
 
@@ -45,7 +45,7 @@ public static class CrossModuleLockOrderScanner
         ];
     }
 
-    private static IEnumerable<CrossModuleLockOrderFinding> FindInconsistentPairs(ProcedureWriteOrder a, ProcedureWriteOrder b)
+    private static IEnumerable<CrossModuleLockOrderFinding> FindInconsistentPairs(ProcedureWriteOrder a, ProcedureWriteOrder b, StringComparer identifierComparer)
     {
         for (var x = 0; x < a.Writes.Count; x++)
         {
@@ -54,8 +54,8 @@ public static class CrossModuleLockOrderScanner
                 var tableX = a.Writes[x];
                 var tableY = a.Writes[y];
 
-                var bXIndex = IndexOfTable(b.Writes, tableX.TableQualifiedName);
-                var bYIndex = IndexOfTable(b.Writes, tableY.TableQualifiedName);
+                var bXIndex = IndexOfTable(b.Writes, tableX.TableQualifiedName, identifierComparer);
+                var bYIndex = IndexOfTable(b.Writes, tableY.TableQualifiedName, identifierComparer);
                 if (bXIndex < 0 || bYIndex < 0 || bXIndex < bYIndex)
                 {
 
@@ -80,11 +80,11 @@ public static class CrossModuleLockOrderScanner
         }
     }
 
-    private static int IndexOfTable(IReadOnlyList<(string TableQualifiedName, int Line)> writes, string tableQualifiedName)
+    private static int IndexOfTable(IReadOnlyList<(string TableQualifiedName, int Line)> writes, string tableQualifiedName, StringComparer identifierComparer)
     {
         for (var i = 0; i < writes.Count; i++)
         {
-            if (string.Equals(writes[i].TableQualifiedName, tableQualifiedName, StringComparison.OrdinalIgnoreCase))
+            if (identifierComparer.Equals(writes[i].TableQualifiedName, tableQualifiedName))
             {
                 return i;
             }
@@ -194,7 +194,7 @@ public static class CrossModuleLockOrderScanner
                 return;
             }
 
-            if (IndexOfTable(_writes, qualifiedName) < 0)
+            if (IndexOfTable(_writes, qualifiedName, catalog.IdentifierComparer) < 0)
             {
                 _writes.Add((qualifiedName, line));
             }

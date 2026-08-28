@@ -30,7 +30,7 @@ internal sealed class SessionDateSettingRule : IPerFileRule
 internal sealed class CartesianJoinRule : IPerFileRule
 {
     public string Id => "CartesianJoinScanner";
-    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => CartesianJoinScanner.Scan(parseResult);
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => CartesianJoinScanner.Scan(parseResult, context.Catalog);
 }
 
 internal sealed class TruncateSwallowedRule : IPerFileRule

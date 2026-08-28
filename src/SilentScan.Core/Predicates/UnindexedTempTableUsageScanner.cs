@@ -12,13 +12,14 @@ public static class UnindexedTempTableUsageScanner
         var visitor = new Visitor(catalog);
         parseResult.Fragment.Accept(visitor);
 
+        var tempIdentifierComparer = TypeInference.Collation.IdentifierComparer(catalog.EffectiveTempdbCollation);
         var findings = new List<UnindexedTempTableUsageFinding>();
 
         foreach (var declaration in visitor.Declarations)
         {
             var usage = visitor.Usages.FirstOrDefault(u =>
                 u.Scope == declaration.Scope
-                && string.Equals(u.TempTableName, declaration.TempTableName, StringComparison.OrdinalIgnoreCase));
+                && tempIdentifierComparer.Equals(u.TempTableName, declaration.TempTableName));
 
             if (usage is null)
             {

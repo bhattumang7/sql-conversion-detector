@@ -35,9 +35,9 @@ public static class MissingStatisticsScanner
             foreach (var table in statement.BaseTables)
             {
                 var constrainedColumns = statement.AndConstrainedColumns
-                    .Where(c => string.Equals(c.TableQualifiedName, table.QualifiedName, StringComparison.OrdinalIgnoreCase))
+                    .Where(c => Catalog.IdentifierComparer.Equals(c.TableQualifiedName, table.QualifiedName))
                     .Select(c => c.ColumnName)
-                    .Distinct(StringComparer.OrdinalIgnoreCase);
+                    .Distinct(Catalog.IdentifierComparer);
 
                 foreach (var columnName in constrainedColumns)
                 {
@@ -52,8 +52,8 @@ public static class MissingStatisticsScanner
             }
         }
 
-        private static bool HasApplicableStatistic(CatalogTable table, string columnName) =>
+        private bool HasApplicableStatistic(CatalogTable table, string columnName) =>
             table.EffectiveStatistics.Any(s =>
-                s.KeyColumns.Count > 0 && string.Equals(s.KeyColumns[0], columnName, StringComparison.OrdinalIgnoreCase));
+                s.KeyColumns.Count > 0 && Catalog.IdentifierComparer.Equals(s.KeyColumns[0], columnName));
     }
 }

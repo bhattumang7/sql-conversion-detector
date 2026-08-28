@@ -49,12 +49,12 @@ internal abstract class ScopedSqlVisitorBase(
     protected PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
         ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
     {
-        if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
+        if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null, catalog) is not ColumnProvenance.BaseColumn baseColumn)
         {
             return default;
         }
 
-        var catalogColumn = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.FindColumn(baseColumn.ColumnName);
+        var catalogColumn = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.FindColumn(baseColumn.ColumnName, catalog.IdentifierComparer);
         return new PredicateSurvivalAnalyzer.ColumnFacts(
             catalogColumn is null ? null : !catalogColumn.IsNullable,
             baseColumn.Type?.Collation?.IsCaseSensitive);

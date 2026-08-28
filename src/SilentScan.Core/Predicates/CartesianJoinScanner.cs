@@ -7,9 +7,9 @@ namespace SilentScan.Core.Predicates;
 
 public static class CartesianJoinScanner
 {
-    public static IReadOnlyList<CartesianJoinFinding> Scan(SqlParseResult parseResult)
+    public static IReadOnlyList<CartesianJoinFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
+        var visitor = new Visitor(parseResult.SourcePath, catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase);
         parseResult.Fragment.Accept(visitor);
         return
         [
@@ -20,7 +20,7 @@ public static class CartesianJoinScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, StringComparer identifierComparer) : TSqlFragmentVisitor
     {
         public List<CartesianJoinFinding> Findings { get; } = [];
 
@@ -59,7 +59,7 @@ public static class CartesianJoinScanner
                 return;
             }
 
-            var unionFind = BuildConnectivity(allNamed, allPredicates);
+            var unionFind = BuildConnectivity(allNamed, allPredicates, identifierComparer);
 
             ReportExplicitCrossJoinGaps(topLevel, unionFind, sourcePath);
 
@@ -67,9 +67,9 @@ public static class CartesianJoinScanner
         }
 
         private static AliasUnionFind BuildConnectivity(
-            List<NamedTableReference> allNamed, List<BooleanExpression> allPredicates)
+            List<NamedTableReference> allNamed, List<BooleanExpression> allPredicates, StringComparer identifierComparer)
         {
-            var unionFind = new AliasUnionFind(allNamed.Select(AliasKey));
+            var unionFind = new AliasUnionFind(allNamed.Select(AliasKey), identifierComparer);
             foreach (var leaf in allPredicates.SelectMany(FlattenLeaves))
             {
                 var qualifiers = CollectQualifiers(leaf).Where(unionFind.Contains).ToList();
@@ -269,10 +269,14 @@ public static class CartesianJoinScanner
 
         private sealed class AliasUnionFind
         {
-            private readonly Dictionary<string, string> _parent = new(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<string, string> _parent;
 
-            public AliasUnionFind(IEnumerable<string> aliases)
+            private readonly StringComparer _identifierComparer;
+
+            public AliasUnionFind(IEnumerable<string> aliases, StringComparer identifierComparer)
             {
+                _identifierComparer = identifierComparer;
+                _parent = new Dictionary<string, string>(identifierComparer);
                 foreach (var alias in aliases)
                 {
                     _parent.TryAdd(alias, alias);
@@ -285,18 +289,18 @@ public static class CartesianJoinScanner
             {
                 var rootA = Find(a);
                 var rootB = Find(b);
-                if (!string.Equals(rootA, rootB, StringComparison.OrdinalIgnoreCase))
+                if (!_identifierComparer.Equals(rootA, rootB))
                 {
                     _parent[rootA] = rootB;
                 }
             }
 
             public bool SameComponent(string a, string b) =>
-                string.Equals(Find(a), Find(b), StringComparison.OrdinalIgnoreCase);
+                _identifierComparer.Equals(Find(a), Find(b));
 
             private string Find(string alias)
             {
-                while (!string.Equals(_parent[alias], alias, StringComparison.OrdinalIgnoreCase))
+                while (!_identifierComparer.Equals(_parent[alias], alias))
                 {
                     _parent[alias] = _parent[_parent[alias]];
                     alias = _parent[alias];

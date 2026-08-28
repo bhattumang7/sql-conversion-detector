@@ -98,13 +98,13 @@ public static class NotInNullableSubqueryScanner
             }
 
             var (innerByAlias, innerOrdered) = FromScopeResolver.Resolve(subquerySpec.FromClause, CurrentResolutionContext());
-            var innerProvenance = ScalarExpressionResolver.ResolveColumnReference(innerColumnRef, [(innerByAlias, innerOrdered)], sourcePath, ledger: null);
+            var innerProvenance = ScalarExpressionResolver.ResolveColumnReference(innerColumnRef, [(innerByAlias, innerOrdered)], sourcePath, ledger: null, catalog);
             if (innerProvenance is not ColumnProvenance.BaseColumn { Depth: 0 } innerColumn)
             {
                 return;
             }
 
-            var catalogColumn = catalog.Find(innerColumn.TableQualifiedName)?.FindColumn(innerColumn.ColumnName);
+            var catalogColumn = catalog.Find(innerColumn.TableQualifiedName)?.FindColumn(innerColumn.ColumnName, catalog.IdentifierComparer);
             if (catalogColumn is null || !catalogColumn.IsNullable)
             {
                 return;
@@ -119,7 +119,7 @@ public static class NotInNullableSubqueryScanner
                 ? outerColumnRef.MultiPartIdentifier.Identifiers[^1].Value
                 : null;
 
-            var indexed = catalog.Find(innerColumn.TableQualifiedName)?.IsIndexedColumn(innerColumn.ColumnName) ?? false;
+            var indexed = catalog.Find(innerColumn.TableQualifiedName)?.IsIndexedColumn(innerColumn.ColumnName, catalog.IdentifierComparer) ?? false;
 
             Findings.Add(new NotInNullableSubqueryFinding(
                 outerColumnName, innerColumn.TableQualifiedName, innerColumn.ColumnName, indexed,
@@ -137,10 +137,10 @@ public static class NotInNullableSubqueryScanner
                     continue;
                 }
 
-                var provenance = ScalarExpressionResolver.ResolveColumnReference(filterColumnRef, [(innerByAlias, innerOrdered)], sourcePath, ledger: null);
+                var provenance = ScalarExpressionResolver.ResolveColumnReference(filterColumnRef, [(innerByAlias, innerOrdered)], sourcePath, ledger: null, catalog);
                 if (provenance is ColumnProvenance.BaseColumn { Depth: 0 } filterColumn
-                    && string.Equals(filterColumn.TableQualifiedName, tableQualifiedName, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(filterColumn.ColumnName, columnName, StringComparison.OrdinalIgnoreCase))
+                    && catalog.IdentifierComparer.Equals(filterColumn.TableQualifiedName, tableQualifiedName)
+                    && catalog.IdentifierComparer.Equals(filterColumn.ColumnName, columnName))
                 {
                     return true;
                 }

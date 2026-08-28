@@ -18,7 +18,7 @@ public static class StaleSelectStarViewScanner
                 continue;
             }
 
-            var cteNames = CteNamesOf(view.SelectStatement.WithCtesAndXmlNamespaces);
+            var cteNames = CteNamesOf(view.SelectStatement.WithCtesAndXmlNamespaces, catalog.IdentifierComparer);
             if (FindSingleBaseTable(view.SelectStatement.QueryExpression, cteNames) is not { } baseTableQualifiedName)
             {
                 continue;
@@ -37,7 +37,7 @@ public static class StaleSelectStarViewScanner
 
             var baseTableColumns = baseTable.Columns.Select(c => c.Name).ToList();
 
-            if (viewColumns.SequenceEqual(baseTableColumns, StringComparer.OrdinalIgnoreCase))
+            if (viewColumns.SequenceEqual(baseTableColumns, catalog.IdentifierComparer))
             {
                 continue;
             }
@@ -72,8 +72,8 @@ public static class StaleSelectStarViewScanner
             _ => null,
         };
 
-    private static HashSet<string> CteNamesOf(WithCtesAndXmlNamespaces? withClause) =>
+    private static HashSet<string> CteNamesOf(WithCtesAndXmlNamespaces? withClause, StringComparer identifierComparer) =>
         withClause is { CommonTableExpressions: { } ctes }
-            ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), StringComparer.OrdinalIgnoreCase)
+            ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), identifierComparer)
             : [];
 }

@@ -19,7 +19,6 @@ public static class CatalogBuilder
         catalog.TempdbCollation = manifestTempdbCollation is { Length: > 0 }
             ? new Collation(manifestTempdbCollation, CollationSource.DatabaseDefaultFromManifest)
             : null;
-        WarnIfCaseSensitive(catalog);
 
         foreach (var result in results)
         {
@@ -49,22 +48,6 @@ public static class CatalogBuilder
         foreach (var batch in script.Batches)
         {
             batch.Accept(visitor);
-        }
-    }
-
-    private static void WarnIfCaseSensitive(DatabaseCatalog catalog)
-    {
-        var caseSensitive = new[] { catalog.DefaultCollation, catalog.TempdbCollation }
-            .Where(c => c is { IsCaseSensitive: true })
-            .Select(c => c!.Name)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (caseSensitive.Count > 0)
-        {
-            catalog.Skipped.Record(
-                AnalysisPass.Catalog, sourcePath: string.Empty, line: 0, column: 0, "case-sensitive collation",
-                $"database collation(s) {string.Join(", ", caseSensitive)} are case-sensitive, but this scan's catalog/name lookups are unconditionally case-insensitive - two objects differing only by case would be wrongly treated as the same one; results for this repo should be treated as unreliable");
         }
     }
 
@@ -960,7 +943,7 @@ public static class CatalogBuilder
             }
 
             var columnName = alterColumn.ColumnIdentifier.Value;
-            var existingColumn = existing.FindColumn(columnName);
+            var existingColumn = existing.FindColumn(columnName, catalog.IdentifierComparer);
             if (existingColumn is null)
             {
 
@@ -1277,7 +1260,8 @@ public static class CatalogBuilder
     private static List<CatalogColumn> ResolveComputedColumnTypes(
         List<CatalogColumn> columns, Dictionary<string, ScalarExpression> computedExpressions, Dictionary<string, (int Line, int Column)> computedColumnLines, ColumnBuildContext context)
     {
-        columns = ComputedColumnTypeResolver.ResolveAll(columns, computedExpressions, context.TypeAliases);
+        columns = ComputedColumnTypeResolver.ResolveAll(
+            columns, computedExpressions, context.TypeAliases, Collation.IdentifierComparer(context.DefaultCollation));
         columns = [.. columns.Select(c => c.Type is { IsStringFamily: true, Collation: null } && context.DefaultCollation is not null
             ? c with { Type = c.Type with { Collation = context.DefaultCollation } }
             : c)];

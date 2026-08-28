@@ -14,7 +14,7 @@ public static class ModuleReachableObjectWalker
         var collector = new TableReferenceCollector();
         moduleBody.Accept(collector);
 
-        var visitedViews = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visitedViews = new HashSet<string>(catalog.IdentifierComparer);
         foreach (var rawName in collector.QualifiedNames)
         {
             if (TryInspectQualifiedName(catalog.ResolveSynonymName(rawName), catalog, lineage, visitedViews, out touch))

@@ -92,7 +92,7 @@ public static class TvfFenceScanner
             var argumentColumns = isApplySecondSide
                 ? function.Parameters.SelectMany(CollectColumnReferences)
                     .Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Distinct(catalog.IdentifierComparer)
                     .ToList()
                 : [];
 

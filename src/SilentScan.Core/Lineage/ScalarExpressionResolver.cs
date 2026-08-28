@@ -48,7 +48,7 @@ public static class ScalarExpressionResolver
 
     private static ColumnProvenance Resolve(ScalarExpression expression, ExpressionContext context) => expression switch
     {
-        ColumnReferenceExpression columnRef => ResolveColumnReference(columnRef, context.ScopeChain, context.SourcePath, context.Ledger),
+        ColumnReferenceExpression columnRef => ResolveColumnReference(columnRef, context.ScopeChain, context.SourcePath, context.Ledger, context.Catalog),
         VariableReference variableRef => ResolveVariableReference(variableRef, context),
         GlobalVariableExpression globalVariable => ResolveGlobalVariableExpression(globalVariable, context),
         ScalarSubquery scalarSubquery => ResolveScalarSubquery(scalarSubquery, context),
@@ -151,7 +151,7 @@ public static class ScalarExpressionResolver
     {
         var collector = new ColumnReferenceCollector();
         expression.Accept(collector);
-        return collector.References.Select(columnRef => ResolveColumnReference(columnRef, context.ScopeChain, context.SourcePath, context.Ledger)).ToList();
+        return collector.References.Select(columnRef => ResolveColumnReference(columnRef, context.ScopeChain, context.SourcePath, context.Ledger, context.Catalog)).ToList();
     }
 
     private sealed class ColumnReferenceCollector : TSqlFragmentVisitor
@@ -173,17 +173,20 @@ public static class ScalarExpressionResolver
     }
 
     internal static ColumnProvenance ResolveColumnReference(
-        ColumnReferenceExpression columnRef, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, SkipLedger? ledger) =>
-        ResolveColumnReference(columnRef, [(scope, orderedRelations)], sourcePath, ledger);
+        ColumnReferenceExpression columnRef, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath,
+        SkipLedger? ledger, DatabaseCatalog? catalog = null) =>
+        ResolveColumnReference(columnRef, [(scope, orderedRelations)], sourcePath, ledger, catalog);
 
     internal static ColumnProvenance ResolveColumnReference(
         ColumnReferenceExpression columnRef,
         IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
         string sourcePath,
-        SkipLedger? ledger)
+        SkipLedger? ledger,
+        DatabaseCatalog? catalog = null)
     {
         var identifiers = columnRef.MultiPartIdentifier.Identifiers;
         var columnName = identifiers[^1].Value;
+        var identifierComparer = catalog?.IdentifierComparer;
 
         ColumnProvenance.Unknown Unresolved(string reason)
         {
@@ -201,7 +204,7 @@ public static class ScalarExpressionResolver
                     continue;
                 }
 
-                var column = entry.Relation.FindColumn(columnName);
+                var column = entry.Relation.FindColumn(columnName, identifierComparer);
                 return column is null
                     ? Unresolved($"column '{columnName}' not found on '{qualifier}'")
                     : ApplyExplicitCollate(columnRef, BumpDepthIfViewLayer(column.Provenance, entry.IsViewLayer), sourcePath);
@@ -213,7 +216,7 @@ public static class ScalarExpressionResolver
         foreach (var (_, ordered) in scopeChain)
         {
             var matches = ordered
-                .Select(entry => (Entry: entry, Column: entry.Relation.FindColumn(columnName)))
+                .Select(entry => (Entry: entry, Column: entry.Relation.FindColumn(columnName, identifierComparer)))
                 .Where(m => m.Column is not null)
                 .ToList();
 
@@ -233,10 +236,12 @@ public static class ScalarExpressionResolver
 
     internal static (string RelationQualifiedName, string ExposedColumnName)? TryResolveImmediateRelation(
         ColumnReferenceExpression columnRef,
-        IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+        DatabaseCatalog? catalog = null)
     {
         var identifiers = columnRef.MultiPartIdentifier.Identifiers;
         var columnName = identifiers[^1].Value;
+        var identifierComparer = catalog?.IdentifierComparer;
 
         if (identifiers.Count >= 2)
         {
@@ -248,7 +253,7 @@ public static class ScalarExpressionResolver
                     continue;
                 }
 
-                var column = entry.Relation.FindColumn(columnName);
+                var column = entry.Relation.FindColumn(columnName, identifierComparer);
                 return column is not null && entry.IsViewLayer && entry.Relation.QualifiedName is { } qualifiedName
                     ? (qualifiedName, column.Name)
                     : null;
@@ -260,7 +265,7 @@ public static class ScalarExpressionResolver
         foreach (var (_, ordered) in scopeChain)
         {
             var matches = ordered
-                .Select(entry => (Entry: entry, Column: entry.Relation.FindColumn(columnName)))
+                .Select(entry => (Entry: entry, Column: entry.Relation.FindColumn(columnName, identifierComparer)))
                 .Where(m => m.Column is not null)
                 .ToList();
 

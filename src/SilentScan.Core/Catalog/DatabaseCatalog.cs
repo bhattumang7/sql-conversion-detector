@@ -372,9 +372,8 @@ public sealed class DatabaseCatalog
         }
 
         var prefix = currentDatabaseName + ".";
-        return qualifiedName.StartsWith(prefix, _identifierComparer == StringComparer.Ordinal ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase)
-            ? qualifiedName[prefix.Length..]
-            : null;
+        var comparison = _identifierComparer == StringComparer.Ordinal ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        return qualifiedName.StartsWith(prefix, comparison) ? qualifiedName[prefix.Length..] : null;
     }
 
     public void Remove(string qualifiedName, string? scope)

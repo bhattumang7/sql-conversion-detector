@@ -29,8 +29,8 @@ public static class IndexCoverageScanner
         protected override void InspectStatement(ConstrainedStatement statement)
         {
 
-            var allReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.Instance);
-            var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, allReferencedColumns);
+            var allReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.For(Catalog));
+            var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, allReferencedColumns, Catalog);
             statement.Node.Accept(referenceVisitor);
 
             foreach (var table in statement.BaseTables)
@@ -46,9 +46,9 @@ public static class IndexCoverageScanner
             TSqlFragment node)
         {
             var constrainedColumnsOnTable = andConstrainedColumns
-                .Where(c => string.Equals(c.TableQualifiedName, table.QualifiedName, StringComparison.OrdinalIgnoreCase))
+                .Where(c => Catalog.IdentifierComparer.Equals(c.TableQualifiedName, table.QualifiedName))
                 .Select(c => c.ColumnName)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                .ToHashSet(Catalog.IdentifierComparer);
 
             if (constrainedColumnsOnTable.Count == 0)
             {
@@ -78,14 +78,14 @@ public static class IndexCoverageScanner
             var indexColumns = index.KeyColumns
                 .Concat(index.IncludedColumns)
                 .Concat(clusteringKeyColumns)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                .ToHashSet(Catalog.IdentifierComparer);
 
             var uncoveredColumns = allReferencedColumns
-                .Where(c => string.Equals(c.Table, table.QualifiedName, StringComparison.OrdinalIgnoreCase))
+                .Where(c => Catalog.IdentifierComparer.Equals(c.Table, table.QualifiedName))
                 .Select(c => c.Column)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(Catalog.IdentifierComparer)
                 .Where(c => !indexColumns.Contains(c))
-                .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(c => c, Catalog.IdentifierComparer)
                 .ToList();
 
             if (uncoveredColumns.Count == 0)

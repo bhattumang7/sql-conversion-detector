@@ -11,7 +11,7 @@ public static class TryCastComputedColumnPredicateScanner
 
     public static IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> BuildCandidates(DatabaseCatalog catalog)
     {
-        var candidates = new Dictionary<(string, string), Candidate>();
+        var candidates = new Dictionary<(string, string), Candidate>(TableColumnKeyComparer.For(catalog));
 
         foreach (var expression in catalog.SchemaExpressions)
         {
@@ -25,7 +25,7 @@ public static class TryCastComputedColumnPredicateScanner
                 continue;
             }
 
-            var column = catalog.Find(expression.TableQualifiedName)?.FindColumn(columnName);
+            var column = catalog.Find(expression.TableQualifiedName)?.FindColumn(columnName, catalog.IdentifierComparer);
             if (column is not { IsComputed: true, IsPersisted: false })
             {
                 continue;
@@ -172,7 +172,7 @@ public static class TryCastComputedColumnPredicateScanner
 
             foreach (var columnRef in collector.References)
             {
-                var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null);
+                var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null, catalog);
                 if (provenance is not ColumnProvenance.BaseColumn { Depth: 0 } baseColumn)
                 {
                     continue;

@@ -47,7 +47,7 @@ public static class AggregateDivisionColumnstoreScanner
             var tables = ordered
                 .Where(e => !e.IsViewLayer && e.Relation.QualifiedName is not null)
                 .Select(e => e.Relation.QualifiedName!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(catalog.IdentifierComparer)
                 .Select(name => catalog.Find(name))
                 .Where(t => t is not null && t.Kind == CatalogTableKind.Table)
                 .Select(t => t!)

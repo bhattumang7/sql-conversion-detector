@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 
 namespace SilentScan.Core.Predicates;
@@ -7,9 +8,9 @@ public static class NestedViewDepthScanner
     public const int DepthThreshold = 2;
 
     public static IReadOnlyList<NestedViewDepthFinding> Scan(
-        IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap, IReadOnlyList<ViewDefinition> views)
+        IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap, IReadOnlyList<ViewDefinition> views, DatabaseCatalog? catalog = null)
     {
-        var byName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
+        var byName = new Dictionary<string, ViewDefinition>(catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase);
         foreach (var view in views)
         {
             byName[view.QualifiedName] = view;

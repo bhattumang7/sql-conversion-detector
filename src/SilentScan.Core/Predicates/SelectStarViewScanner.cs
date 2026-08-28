@@ -10,9 +10,10 @@ public readonly record struct SelectStarViewCandidate(string ViewSourcePath, int
 public static class SelectStarViewScanner
 {
     public static IReadOnlyDictionary<string, SelectStarViewCandidate> BuildCandidates(
-        IReadOnlyList<ViewDefinition> views, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap, LineageCatalog lineage)
+        IReadOnlyList<ViewDefinition> views, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap, LineageCatalog lineage,
+        StringComparer? identifierComparer = null)
     {
-        var candidates = new Dictionary<string, SelectStarViewCandidate>(StringComparer.OrdinalIgnoreCase);
+        var candidates = new Dictionary<string, SelectStarViewCandidate>(identifierComparer ?? StringComparer.OrdinalIgnoreCase);
 
         foreach (var view in views)
         {
@@ -106,13 +107,13 @@ public static class SelectStarViewScanner
                     continue;
                 }
 
-                if (wholeQueryStar is not null || AliasHasOwnStar(node, alias))
+                if (wholeQueryStar is not null || AliasHasOwnStar(node, alias, catalog.IdentifierComparer))
                 {
 
                     continue;
                 }
 
-                var selected = CollectExplicitSelectedColumns(node, alias, byAlias.Count == 1, candidate.FullColumns);
+                var selected = CollectExplicitSelectedColumns(node, alias, byAlias.Count == 1, candidate.FullColumns, catalog.IdentifierComparer);
                 if (selected.Count == 0 || selected.Count >= candidate.FullColumns.Count)
                 {
                     continue;
@@ -124,11 +125,12 @@ public static class SelectStarViewScanner
             }
         }
 
-        private static bool AliasHasOwnStar(QuerySpecification node, string alias) =>
+        private static bool AliasHasOwnStar(QuerySpecification node, string alias, StringComparer identifierComparer) =>
             node.SelectElements.OfType<SelectStarExpression>()
-                .Any(s => s.Qualifier is { Count: > 0 } q && string.Equals(q[^1].Value, alias, StringComparison.OrdinalIgnoreCase));
+                .Any(s => s.Qualifier is { Count: > 0 } q && identifierComparer.Equals(q[^1].Value, alias));
 
-        private static List<string> CollectExplicitSelectedColumns(QuerySpecification node, string alias, bool isOnlySource, IReadOnlyList<string> fullColumns)
+        private static List<string> CollectExplicitSelectedColumns(
+            QuerySpecification node, string alias, bool isOnlySource, IReadOnlyList<string> fullColumns, StringComparer identifierComparer)
         {
             var selected = new List<string>();
 
@@ -142,12 +144,12 @@ public static class SelectStarViewScanner
                 var identifiers = columnRef.MultiPartIdentifier.Identifiers;
                 string? columnName = identifiers.Count switch
                 {
-                    >= 2 when string.Equals(identifiers[^2].Value, alias, StringComparison.OrdinalIgnoreCase) => identifiers[^1].Value,
+                    >= 2 when identifierComparer.Equals(identifiers[^2].Value, alias) => identifiers[^1].Value,
                     1 when isOnlySource => identifiers[0].Value,
                     _ => null,
                 };
 
-                if (columnName is not null && fullColumns.Contains(columnName, StringComparer.OrdinalIgnoreCase) && !selected.Contains(columnName, StringComparer.OrdinalIgnoreCase))
+                if (columnName is not null && fullColumns.Contains(columnName, identifierComparer) && !selected.Contains(columnName, identifierComparer))
                 {
                     selected.Add(columnName);
                 }

@@ -9,7 +9,7 @@ public static class UntrustedConstraintScanner
         var findings = new List<UntrustedConstraintFinding>();
 
         foreach (var fk in catalog.ForeignKeys.Where(fk => fk.IsNotTrusted && !fk.IsDisabled)
-            .DistinctBy(fk => fk.ConstraintName, StringComparer.OrdinalIgnoreCase))
+            .DistinctBy(fk => fk.ConstraintName, catalog.IdentifierComparer))
         {
             var table = catalog.Find(fk.ParentTableQualifiedName);
             findings.Add(new UntrustedConstraintFinding(

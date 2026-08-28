@@ -32,7 +32,7 @@ internal static class SelectIntoColumnResolver
 
                 case SelectScalarExpression { Expression: ColumnReferenceExpression columnRef } scalar:
                     var columnName = scalar.ColumnName?.Value ?? columnRef.MultiPartIdentifier.Identifiers[^1].Value;
-                    columns.Add(new CatalogColumn(columnName, ResolveColumnType(columnRef, fromScope), IsNullable: true, IsIdentity: false, IsComputed: false, IsPersisted: false));
+                    columns.Add(new CatalogColumn(columnName, ResolveColumnType(columnRef, fromScope, catalog.IdentifierComparer), IsNullable: true, IsIdentity: false, IsComputed: false, IsPersisted: false));
                     break;
 
                 case SelectScalarExpression { ColumnName.Value: { } aliasedName }:
@@ -127,7 +127,8 @@ internal static class SelectIntoColumnResolver
         }
     }
 
-    private static SqlType? ResolveColumnType(ColumnReferenceExpression columnRef, (Dictionary<string, CatalogTable?> ByAlias, List<CatalogTable?> Ordered) fromScope)
+    private static SqlType? ResolveColumnType(
+        ColumnReferenceExpression columnRef, (Dictionary<string, CatalogTable?> ByAlias, List<CatalogTable?> Ordered) fromScope, StringComparer identifierComparer)
     {
         var identifiers = columnRef.MultiPartIdentifier.Identifiers;
         var columnName = identifiers[^1].Value;
@@ -135,11 +136,11 @@ internal static class SelectIntoColumnResolver
         if (identifiers.Count >= 2)
         {
             var qualifier = identifiers[^2].Value;
-            return fromScope.ByAlias.TryGetValue(qualifier, out var table) ? table?.FindColumn(columnName)?.Type : null;
+            return fromScope.ByAlias.TryGetValue(qualifier, out var table) ? table?.FindColumn(columnName, identifierComparer)?.Type : null;
         }
 
-        var matches = fromScope.Ordered.Where(t => t?.FindColumn(columnName) is not null).ToList();
-        return matches.Count == 1 ? matches[0]!.FindColumn(columnName)!.Type : null;
+        var matches = fromScope.Ordered.Where(t => t?.FindColumn(columnName, identifierComparer) is not null).ToList();
+        return matches.Count == 1 ? matches[0]!.FindColumn(columnName, identifierComparer)!.Type : null;
     }
 
     private static IEnumerable<CatalogColumn> ResolveStar(

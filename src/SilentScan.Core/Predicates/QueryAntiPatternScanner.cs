@@ -24,7 +24,7 @@ public static class QueryAntiPatternScanner
     public static IReadOnlyList<QueryAntiPatternFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
 
-        var cteNameCollector = new Visitor.CteNameCollector();
+        var cteNameCollector = new Visitor.CteNameCollector(catalog.IdentifierComparer);
         parseResult.Fragment.Accept(cteNameCollector);
 
         var visitor = new Visitor(parseResult.SourcePath, catalog, cteNameCollector.Names);
@@ -280,9 +280,9 @@ public static class QueryAntiPatternScanner
             }
         }
 
-        internal sealed class CteNameCollector : TSqlFragmentVisitor
+        internal sealed class CteNameCollector(StringComparer identifierComparer) : TSqlFragmentVisitor
         {
-            public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+            public HashSet<string> Names { get; } = new(identifierComparer);
 
             public override void ExplicitVisit(CommonTableExpression node)
             {
@@ -415,7 +415,7 @@ public static class QueryAntiPatternScanner
                 var sourceColumn = source.Columns[i];
                 var targetColumn = target.Columns[i];
 
-                if (!string.Equals(sourceColumn.Name, targetColumn.Name, StringComparison.OrdinalIgnoreCase))
+                if (!catalog.IdentifierComparer.Equals(sourceColumn.Name, targetColumn.Name))
                 {
                     Findings.Add(new QueryAntiPatternFinding(
                         QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch, sourcePath,
@@ -506,10 +506,10 @@ public static class QueryAntiPatternScanner
         private static bool IsComparableSwitchIndex(CatalogIndex index) =>
             !index.IsFiltered && !index.IsColumnstore && !index.IsDisabled && !index.IsHypothetical;
 
-        private static bool HasSameIndexShape(CatalogIndex sourceIndex, CatalogIndex targetIndex)
+        private bool HasSameIndexShape(CatalogIndex sourceIndex, CatalogIndex targetIndex)
         {
             if (sourceIndex.IsUnique != targetIndex.IsUnique
-                || !sourceIndex.KeyColumns.SequenceEqual(targetIndex.KeyColumns, StringComparer.OrdinalIgnoreCase))
+                || !sourceIndex.KeyColumns.SequenceEqual(targetIndex.KeyColumns, catalog.IdentifierComparer))
             {
                 return false;
             }
@@ -520,8 +520,8 @@ public static class QueryAntiPatternScanner
                 return false;
             }
 
-            var sourceIncluded = new HashSet<string>(sourceIndex.IncludedColumns, StringComparer.OrdinalIgnoreCase);
-            var targetIncluded = new HashSet<string>(targetIndex.IncludedColumns, StringComparer.OrdinalIgnoreCase);
+            var sourceIncluded = new HashSet<string>(sourceIndex.IncludedColumns, catalog.IdentifierComparer);
+            var targetIncluded = new HashSet<string>(targetIndex.IncludedColumns, catalog.IdentifierComparer);
             return sourceIncluded.SetEquals(targetIncluded);
         }
 
@@ -536,8 +536,8 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
-            var sourceChecks = catalog.CheckConstraints.Where(c => string.Equals(c.TableQualifiedName, sourceQualifiedName, StringComparison.OrdinalIgnoreCase)).ToList();
-            var targetChecks = catalog.CheckConstraints.Where(c => string.Equals(c.TableQualifiedName, targetQualifiedName, StringComparison.OrdinalIgnoreCase)).ToList();
+            var sourceChecks = catalog.CheckConstraints.Where(c => catalog.IdentifierComparer.Equals(c.TableQualifiedName, sourceQualifiedName)).ToList();
+            var targetChecks = catalog.CheckConstraints.Where(c => catalog.IdentifierComparer.Equals(c.TableQualifiedName, targetQualifiedName)).ToList();
 
             foreach (var targetCheck in targetChecks)
             {
@@ -563,8 +563,8 @@ public static class QueryAntiPatternScanner
                 }
             }
 
-            var sourceForeignKeys = GroupForeignKeys(catalog.ForeignKeys, sourceQualifiedName);
-            var targetForeignKeys = GroupForeignKeys(catalog.ForeignKeys, targetQualifiedName);
+            var sourceForeignKeys = GroupForeignKeys(catalog.ForeignKeys, sourceQualifiedName, catalog.IdentifierComparer);
+            var targetForeignKeys = GroupForeignKeys(catalog.ForeignKeys, targetQualifiedName, catalog.IdentifierComparer);
 
             foreach (var targetFk in targetForeignKeys)
             {
@@ -605,20 +605,30 @@ public static class QueryAntiPatternScanner
             string ConstraintName, string ReferencedTableQualifiedName,
             IReadOnlySet<(string Parent, string Referenced)> ColumnPairs, bool IsDisabled, bool IsNotTrusted);
 
-        private static List<GroupedForeignKey> GroupForeignKeys(IReadOnlyList<ForeignKeyRelationship> foreignKeys, string tableQualifiedName) =>
+        private static List<GroupedForeignKey> GroupForeignKeys(
+            IReadOnlyList<ForeignKeyRelationship> foreignKeys, string tableQualifiedName, StringComparer identifierComparer) =>
             foreignKeys
-                .Where(fk => string.Equals(fk.ParentTableQualifiedName, tableQualifiedName, StringComparison.OrdinalIgnoreCase))
-                .GroupBy(fk => fk.ConstraintName, StringComparer.OrdinalIgnoreCase)
+                .Where(fk => identifierComparer.Equals(fk.ParentTableQualifiedName, tableQualifiedName))
+                .GroupBy(fk => fk.ConstraintName, identifierComparer)
                 .Select(g => new GroupedForeignKey(
                     g.Key,
                     g.First().ReferencedTableQualifiedName,
-                    g.Select(fk => (fk.ParentColumnName.ToUpperInvariant(), fk.ReferencedColumnName.ToUpperInvariant())).ToHashSet(),
+                    g.Select(fk => (fk.ParentColumnName, fk.ReferencedColumnName)).ToHashSet(new ColumnPairComparer(identifierComparer)),
                     g.First().IsDisabled,
                     g.First().IsNotTrusted))
                 .ToList();
 
-        private static bool HasSameForeignKeyShape(GroupedForeignKey a, GroupedForeignKey b) =>
-            string.Equals(a.ReferencedTableQualifiedName, b.ReferencedTableQualifiedName, StringComparison.OrdinalIgnoreCase)
+        private sealed class ColumnPairComparer(StringComparer identifierComparer) : IEqualityComparer<(string Parent, string Referenced)>
+        {
+            public bool Equals((string Parent, string Referenced) x, (string Parent, string Referenced) y) =>
+                identifierComparer.Equals(x.Parent, y.Parent) && identifierComparer.Equals(x.Referenced, y.Referenced);
+
+            public int GetHashCode((string Parent, string Referenced) obj) =>
+                HashCode.Combine(identifierComparer.GetHashCode(obj.Parent), identifierComparer.GetHashCode(obj.Referenced));
+        }
+
+        private bool HasSameForeignKeyShape(GroupedForeignKey a, GroupedForeignKey b) =>
+            catalog.IdentifierComparer.Equals(a.ReferencedTableQualifiedName, b.ReferencedTableQualifiedName)
             && a.ColumnPairs.SetEquals(b.ColumnPairs);
 
         private void InspectAlterTableSwitchTargetOnlyIndexRestriction(AlterTableSwitchStatement node)
@@ -681,7 +691,7 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
-            if (!string.Equals(source.FilegroupName, target.FilegroupName, StringComparison.OrdinalIgnoreCase))
+            if (!catalog.IdentifierComparer.Equals(source.FilegroupName, target.FilegroupName))
             {
                 Findings.Add(new QueryAntiPatternFinding(
                     QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch, sourcePath,
@@ -776,7 +786,7 @@ public static class QueryAntiPatternScanner
             var sourceFilegroup = ResolveSwitchSideFilegroup(source, node.SourcePartitionNumber);
             var targetFilegroup = ResolveSwitchSideFilegroup(target, node.TargetPartitionNumber);
             if (sourceFilegroup is null || targetFilegroup is null
-                || string.Equals(sourceFilegroup, targetFilegroup, StringComparison.OrdinalIgnoreCase))
+                || catalog.IdentifierComparer.Equals(sourceFilegroup, targetFilegroup))
             {
                 return;
             }
@@ -816,8 +826,8 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
-            var sourceIsTemporal = catalog.TemporalTablePairs.Any(p => string.Equals(p.CurrentTableQualifiedName, sourceQualifiedName, StringComparison.OrdinalIgnoreCase));
-            var targetIsTemporal = catalog.TemporalTablePairs.Any(p => string.Equals(p.CurrentTableQualifiedName, targetQualifiedName, StringComparison.OrdinalIgnoreCase));
+            var sourceIsTemporal = catalog.TemporalTablePairs.Any(p => catalog.IdentifierComparer.Equals(p.CurrentTableQualifiedName, sourceQualifiedName));
+            var targetIsTemporal = catalog.TemporalTablePairs.Any(p => catalog.IdentifierComparer.Equals(p.CurrentTableQualifiedName, targetQualifiedName));
             if (sourceIsTemporal == targetIsTemporal)
             {
                 return;
@@ -959,13 +969,13 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
-            var joinColumns = JoinKeyUniqueness.EqualityColumnsQualifiedBy(spec.SearchCondition, sourceAlias);
+            var joinColumns = JoinKeyUniqueness.EqualityColumnsQualifiedBy(spec.SearchCondition, sourceAlias, catalog.IdentifierComparer);
             if (joinColumns.Count == 0)
             {
                 return;
             }
 
-            if (JoinKeyUniqueness.IsProvenUniqueOver(sourceTable, joinColumns))
+            if (JoinKeyUniqueness.IsProvenUniqueOver(sourceTable, joinColumns, catalog.IdentifierComparer))
             {
                 return;
             }
@@ -1480,7 +1490,7 @@ public static class QueryAntiPatternScanner
                 .Select(g => g.Expression)
                 .OfType<ColumnReferenceExpression>()
                 .Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                .ToHashSet(catalog.IdentifierComparer);
 
             var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(having, columnRef => ResolveColumnFacts(columnRef, scopeChain));
 
@@ -1568,10 +1578,10 @@ public static class QueryAntiPatternScanner
                     .OfType<BooleanComparisonExpression>()
                     .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                     .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
-                    .Select(e => ColumnAliasHelpers.ColumnNameIfQualifiedByAlias(e, joinedAlias))
+                    .Select(e => ColumnAliasHelpers.ColumnNameIfQualifiedByAlias(e, joinedAlias, catalog.IdentifierComparer))
                     .Where(c => c is not null)
                     .Select(c => c!)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Distinct(catalog.IdentifierComparer)
                     .ToList();
 
                 if (joinColumns.Count == 0)
@@ -1582,7 +1592,7 @@ public static class QueryAntiPatternScanner
                 var isProvablyUnique = joinedTable.Indexes.Any(ix =>
                     ix.IsUnique && !ix.IsFiltered && !ix.IsDisabled
                     && ix.KeyColumns.Count > 0
-                    && ix.KeyColumns.All(kc => joinColumns.Contains(kc, StringComparer.OrdinalIgnoreCase)));
+                    && ix.KeyColumns.All(kc => joinColumns.Contains(kc, catalog.IdentifierComparer)));
                 if (isProvablyUnique)
                 {
                     continue;
@@ -1699,7 +1709,7 @@ public static class QueryAntiPatternScanner
                 return null;
             }
 
-            var columnAlias = ColumnAliasHelpers.ColumnNameIfQualifiedByAlias(columnExpr, alias);
+            var columnAlias = ColumnAliasHelpers.ColumnNameIfQualifiedByAlias(columnExpr, alias, catalog.IdentifierComparer);
             var columnName = columnAlias ?? (columnExpr.MultiPartIdentifier.Identifiers.Count == 1 ? columnExpr.MultiPartIdentifier.Identifiers[0].Value : null);
             return columnName is null ? null : (qualifiedName, columnName, literalExpr);
         }

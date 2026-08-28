@@ -12,12 +12,12 @@ public static class AlwaysEncryptedKeyColumnScanner
         {
             foreach (var index in table.Indexes)
             {
-                findings.AddRange(ScanKeyColumns(table, index.Name ?? "(unnamed)", KindOf(index.Kind), index.KeyColumns));
+                findings.AddRange(ScanKeyColumns(table, index.Name ?? "(unnamed)", KindOf(index.Kind), index.KeyColumns, catalog.IdentifierComparer));
             }
 
             foreach (var statistics in table.EffectiveStatistics)
             {
-                findings.AddRange(ScanKeyColumns(table, statistics.Name, AlwaysEncryptedKeyColumnKind.Statistics, statistics.KeyColumns));
+                findings.AddRange(ScanKeyColumns(table, statistics.Name, AlwaysEncryptedKeyColumnKind.Statistics, statistics.KeyColumns, catalog.IdentifierComparer));
             }
         }
 
@@ -38,11 +38,11 @@ public static class AlwaysEncryptedKeyColumnScanner
     };
 
     private static IEnumerable<AlwaysEncryptedKeyColumnFinding> ScanKeyColumns(
-        CatalogTable table, string objectName, AlwaysEncryptedKeyColumnKind kind, IReadOnlyList<string> keyColumns)
+        CatalogTable table, string objectName, AlwaysEncryptedKeyColumnKind kind, IReadOnlyList<string> keyColumns, StringComparer identifierComparer)
     {
         foreach (var columnName in keyColumns)
         {
-            if (table.FindColumn(columnName) is not { EncryptionType: ColumnEncryptionType.Randomized, EnclaveSupport: ColumnEncryptionEnclaveSupport.Disabled })
+            if (table.FindColumn(columnName, identifierComparer) is not { EncryptionType: ColumnEncryptionType.Randomized, EnclaveSupport: ColumnEncryptionEnclaveSupport.Disabled })
             {
                 continue;
             }

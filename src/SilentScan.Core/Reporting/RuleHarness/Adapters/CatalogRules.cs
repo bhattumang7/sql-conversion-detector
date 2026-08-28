@@ -130,5 +130,5 @@ internal sealed class TemporalTableHistoryIndexGapRule : ICatalogRule
 internal sealed class NestedViewDepthRule : ICatalogRule
 {
     public string Id => "NestedViewDepthScanner";
-    public IReadOnlyList<IFinding> Scan(RuleContext context) => NestedViewDepthScanner.Scan(context.ViewExpansionMap, context.ViewDefinitions);
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => NestedViewDepthScanner.Scan(context.ViewExpansionMap, context.ViewDefinitions, context.Catalog);
 }

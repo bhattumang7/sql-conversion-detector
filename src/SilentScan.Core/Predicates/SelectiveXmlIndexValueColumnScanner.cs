@@ -8,7 +8,7 @@ public static class SelectiveXmlIndexValueColumnScanner
 
     public static IReadOnlyList<SelectiveXmlIndexValueColumnFinding> Scan(DatabaseCatalog catalog)
     {
-        var promotedPathTypes = new Dictionary<string, TypeInference.SqlType?>(StringComparer.OrdinalIgnoreCase);
+        var promotedPathTypes = new Dictionary<string, TypeInference.SqlType?>(catalog.IdentifierComparer);
         foreach (var path in catalog.SelectiveXmlIndexPromotedPaths)
         {
             promotedPathTypes[Key(path.TableQualifiedName, path.IndexName, path.PathName)] = path.Type;

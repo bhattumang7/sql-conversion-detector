@@ -426,28 +426,6 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
-    public void Build_CaseSensitiveDeclaredCollation_LedgersAnHonestWarning()
-    {
-        var catalog = CatalogBuilder.Build(
-            [Parse("CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);")],
-            manifestDeclaredCollation: "Latin1_General_CS_AS");
-
-        Assert.Contains(
-            catalog.Skipped.Entries,
-            e => e.ConstructKind == "case-sensitive collation" && e.Reason.Contains("Latin1_General_CS_AS", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void Build_CaseInsensitiveDeclaredCollation_NoCaseSensitivityWarning()
-    {
-        var catalog = CatalogBuilder.Build(
-            [Parse("CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);")],
-            manifestDeclaredCollation: "Latin1_General_CI_AS");
-
-        Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "case-sensitive collation");
-    }
-
-    [Fact]
     public void Build_NoDatabaseCollationAnySource_ColumnCollationStaysNull()
     {
         var catalog = CatalogBuilder.Build([Parse("CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);")]);
@@ -1776,32 +1754,6 @@ public sealed class CatalogBuilderTests
 
         Assert.DoesNotContain(table.Indexes, i => i.Name == "UQ_T_Id");
         Assert.False(table.IsIndexedColumn("Id"));
-    }
-
-    [Fact]
-    public void Build_CaseSensitiveTempdbCollationOnly_LedgersWarningNamingIt()
-    {
-        var catalog = CatalogBuilder.Build(
-            [Parse("CREATE TABLE #Staging (Col VARCHAR(20) NOT NULL);")],
-            manifestDeclaredCollation: "Latin1_General_CI_AS",
-            manifestTempdbCollation: "Latin1_General_CS_AS");
-
-        Assert.Contains(
-            catalog.Skipped.Entries,
-            e => e.ConstructKind == "case-sensitive collation" && e.Reason.Contains("Latin1_General_CS_AS", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void Build_BothDatabaseAndTempdbCollationsCaseSensitiveWithDifferentNames_WarningNamesBoth()
-    {
-        var catalog = CatalogBuilder.Build(
-            [Parse("CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);")],
-            manifestDeclaredCollation: "Latin1_General_CS_AS",
-            manifestTempdbCollation: "Latin1_General_BIN2");
-
-        var entry = Assert.Single(catalog.Skipped.Entries, e => e.ConstructKind == "case-sensitive collation");
-        Assert.Contains("Latin1_General_CS_AS", entry.Reason, StringComparison.Ordinal);
-        Assert.Contains("Latin1_General_BIN2", entry.Reason, StringComparison.Ordinal);
     }
 
 }

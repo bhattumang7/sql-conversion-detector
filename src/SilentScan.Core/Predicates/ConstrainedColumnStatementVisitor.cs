@@ -77,7 +77,7 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
         var baseTables = ordered
             .Where(e => !e.IsViewLayer && e.Relation.QualifiedName is not null)
             .Select(e => e.Relation.QualifiedName!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(Catalog.IdentifierComparer)
             .Select(name => Catalog.Find(name))
             .Where(t => t is not null && t.Kind == CatalogTableKind.Table)
             .Select(t => t!)
@@ -95,8 +95,8 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
             .SelectMany(j => PredicateTreeWalker.FlattenAnd(j.SearchCondition))
             .Concat(PredicateTreeWalker.FlattenAnd(whereCondition))
             .OfType<BooleanComparisonExpression>()
-            .SelectMany(c => BaseColumnResolver.ResolveBothSides(c, SourcePath, scopeChain))
-            .ToHashSet(TableColumnKeyComparer.Instance);
+            .SelectMany(c => BaseColumnResolver.ResolveBothSides(c, SourcePath, scopeChain, Catalog))
+            .ToHashSet(TableColumnKeyComparer.For(Catalog));
 
         InspectStatement(new ConstrainedStatement(
             baseTables, andConstrainedColumns, scopeChain, joinNodes, whereCondition, node));

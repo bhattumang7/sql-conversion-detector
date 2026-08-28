@@ -35,9 +35,9 @@ public static class NamingScanner
         "VARYING", "VIEW", "WAITFOR", "WHEN", "WHERE", "WHILE", "WITH", "WITHIN GROUP", "WRITETEXT",
     };
 
-    public static IReadOnlyList<NamingFinding> Scan(SqlParseResult parseResult)
+    public static IReadOnlyList<NamingFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
+        var visitor = new Visitor(parseResult.SourcePath, catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase);
         parseResult.Fragment.Accept(visitor);
 
         return
@@ -54,9 +54,12 @@ public static class NamingScanner
     {
         private readonly string sourcePath;
 
-        public Visitor(string sourcePath)
+        private readonly StringComparer identifierComparer;
+
+        public Visitor(string sourcePath, StringComparer identifierComparer)
         {
             this.sourcePath = sourcePath;
+            this.identifierComparer = identifierComparer;
             _currentModule = sourcePath;
         }
 
@@ -218,7 +221,7 @@ public static class NamingScanner
                 return;
             }
 
-            if (!string.Equals(schema.Value, SchemaObjectNameHelper.DefaultSchema, StringComparison.OrdinalIgnoreCase))
+            if (!identifierComparer.Equals(schema.Value, SchemaObjectNameHelper.DefaultSchema))
             {
                 return;
             }

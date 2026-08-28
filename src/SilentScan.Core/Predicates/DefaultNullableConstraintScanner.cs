@@ -15,7 +15,7 @@ public static class DefaultNullableConstraintScanner
                 continue;
             }
 
-            var column = catalog.Find(expression.TableQualifiedName)?.FindColumn(columnName);
+            var column = catalog.Find(expression.TableQualifiedName)?.FindColumn(columnName, catalog.IdentifierComparer);
             if (column is not { IsNullable: true })
             {
                 continue;

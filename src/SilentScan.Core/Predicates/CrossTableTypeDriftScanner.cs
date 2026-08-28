@@ -12,8 +12,8 @@ public static class CrossTableTypeDriftScanner
         foreach (var fk in catalog.ForeignKeys)
         {
             var parentTable = catalog.Find(fk.ParentTableQualifiedName);
-            var parentType = parentTable?.FindColumn(fk.ParentColumnName)?.Type;
-            var referencedType = catalog.Find(fk.ReferencedTableQualifiedName)?.FindColumn(fk.ReferencedColumnName)?.Type;
+            var parentType = parentTable?.FindColumn(fk.ParentColumnName, catalog.IdentifierComparer)?.Type;
+            var referencedType = catalog.Find(fk.ReferencedTableQualifiedName)?.FindColumn(fk.ReferencedColumnName, catalog.IdentifierComparer)?.Type;
             if (parentTable is null || parentType is null || referencedType is null)
             {
                 continue;

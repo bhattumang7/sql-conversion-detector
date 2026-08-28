@@ -67,7 +67,7 @@ internal sealed class MultiReferencedCteRule : IPerFileRule
 {
     public string Id => "MultiReferencedCteScanner";
 
-    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => MultiReferencedCteScanner.Scan(parseResult);
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => MultiReferencedCteScanner.Scan(parseResult, context.Catalog);
 
     public IComparer<IFinding>? Comparer => Comparer<IFinding>.Create((x, y) =>
     {

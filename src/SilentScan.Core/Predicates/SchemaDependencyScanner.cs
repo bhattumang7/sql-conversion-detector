@@ -23,7 +23,7 @@ public static class SchemaDependencyScanner
             var visitor = new FunctionCallCollector();
             fragment.Accept(visitor);
 
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seen = new HashSet<string>(catalog.IdentifierComparer);
             foreach (var call in visitor.Calls)
             {
                 var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.QualifyFunctionCall(call));
