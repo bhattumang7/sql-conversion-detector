@@ -8,7 +8,7 @@ public static class TvfFenceMap
 {
     public static IReadOnlyDictionary<string, TvfFenceOrigin> Build(IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
     {
-        var viewsByName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
+        var viewsByName = new Dictionary<string, ViewDefinition>(catalog.IdentifierComparer);
         foreach (var view in views)
         {
 
@@ -16,7 +16,7 @@ public static class TvfFenceMap
         }
 
         var context = new ResolutionContext(
-            viewsByName, catalog, new Dictionary<string, TvfFenceOrigin?>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            viewsByName, catalog, new Dictionary<string, TvfFenceOrigin?>(catalog.IdentifierComparer), new HashSet<string>(catalog.IdentifierComparer));
 
         foreach (var view in viewsByName.Values)
         {
@@ -25,7 +25,7 @@ public static class TvfFenceMap
 
         return context.Resolved
             .Where(kv => kv.Value is not null)
-            .ToDictionary(kv => kv.Key, kv => kv.Value!, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(kv => kv.Key, kv => kv.Value!, catalog.IdentifierComparer);
     }
 
     private readonly record struct ResolutionContext(
@@ -46,7 +46,7 @@ public static class TvfFenceMap
             return null;
         }
 
-        var (functionRefs, namedRefs) = TvfReferenceWalker.CollectFromClauses(view.SelectStatement);
+        var (functionRefs, namedRefs) = TvfReferenceWalker.CollectFromClauses(view.SelectStatement, context.Catalog.IdentifierComparer);
         var found = functionRefs.Select(f => TryResolveFunctionReference(view, f, context)).FirstOrDefault(o => o is not null)
             ?? namedRefs.Select(n => TryResolveNamedReference(n, context)).FirstOrDefault(o => o is not null);
 

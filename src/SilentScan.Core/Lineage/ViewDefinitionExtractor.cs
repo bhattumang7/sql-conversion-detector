@@ -15,8 +15,9 @@ public static class ViewDefinitionExtractor
         IEnumerable<SqlParseResult> parseResults, Collation? defaultCollation = null, IReadOnlyDictionary<string, SqlType>? typeAliases = null, SkipLedger? ledger = null)
     {
 
-        var viewsByName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
-        var tvfsByName = new Dictionary<string, MultiStatementTvfDefinition>(StringComparer.OrdinalIgnoreCase);
+        var identifierComparer = Collation.IdentifierComparer(defaultCollation);
+        var viewsByName = new Dictionary<string, ViewDefinition>(identifierComparer);
+        var tvfsByName = new Dictionary<string, MultiStatementTvfDefinition>(identifierComparer);
         var tvfContext = new TvfContext(defaultCollation, typeAliases, ledger);
 
         foreach (var result in parseResults)

@@ -4,6 +4,9 @@ public sealed record ResolvedRelation(string? QualifiedName, IReadOnlyList<Resol
 {
     public static readonly ResolvedRelation Empty = new(QualifiedName: null, Columns: []);
 
-    public ResolvedColumn? FindColumn(string columnName) =>
-        Columns.FirstOrDefault(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));
+    public ResolvedColumn? FindColumn(string columnName, StringComparer? identifierComparer = null)
+    {
+        var comparer = identifierComparer ?? StringComparer.OrdinalIgnoreCase;
+        return Columns.FirstOrDefault(c => comparer.Equals(c.Name, columnName));
+    }
 }

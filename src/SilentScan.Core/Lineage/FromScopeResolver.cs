@@ -31,7 +31,7 @@ public static class FromScopeResolver
 
     internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(FromClause? fromClause, ResolutionContext context)
     {
-        var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
+        var byAlias = new Dictionary<string, ScopeEntry>(context.Catalog.IdentifierComparer);
         var ordered = new List<ScopeEntry>();
 
         if (fromClause is null)
@@ -55,7 +55,7 @@ public static class FromScopeResolver
             return Resolve(extraFromClause, context);
         }
 
-        var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
+        var byAlias = new Dictionary<string, ScopeEntry>(context.Catalog.IdentifierComparer);
         var ordered = new List<ScopeEntry>();
         AddResolved(target, context, aliasOverride: null, byAlias, ordered);
         return (byAlias, ordered);
@@ -64,7 +64,7 @@ public static class FromScopeResolver
     internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) ResolveForMerge(
         TableReference target, Identifier? targetAlias, TableReference source, ResolutionContext context)
     {
-        var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
+        var byAlias = new Dictionary<string, ScopeEntry>(context.Catalog.IdentifierComparer);
         var ordered = new List<ScopeEntry>();
 
         AddResolved(target, context, targetAlias?.Value, byAlias, ordered);
@@ -300,7 +300,7 @@ public static class FromScopeResolver
 
     private static (string? Alias, ScopeEntry Entry) ResolvePivotedTableReference(PivotedTableReference pivot, ResolutionContext context)
     {
-        var (_, _, sourcePath, ledger, _, _, _) = context;
+        var (catalog, _, sourcePath, ledger, _, _, _) = context;
         var innerColumns = ResolveFlattenedSourceColumns(pivot.TableReference, context);
 
         if (pivot.ValueColumns.Count != 1)
@@ -315,7 +315,7 @@ public static class FromScopeResolver
         var pivotColumnName = pivot.PivotColumn.MultiPartIdentifier.Identifiers[^1].Value;
         var aggregateFunctionName = pivot.AggregateFunctionIdentifier.Identifiers[^1].Value;
 
-        var valueColumn = innerColumns.FirstOrDefault(c => string.Equals(c.Name, valueColumnName, StringComparison.OrdinalIgnoreCase));
+        var valueColumn = innerColumns.FirstOrDefault(c => catalog.IdentifierComparer.Equals(c.Name, valueColumnName));
         var aggregateResultType = valueColumn is not null
             ? ResolveAggregateResultType(aggregateFunctionName, ColumnProvenanceAnalysis.TryGetScalarType(valueColumn.Provenance))
             : null;
@@ -323,8 +323,8 @@ public static class FromScopeResolver
         var pivotedColumns = new List<ResolvedColumn>();
         foreach (var column in innerColumns)
         {
-            if (string.Equals(column.Name, valueColumnName, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(column.Name, pivotColumnName, StringComparison.OrdinalIgnoreCase))
+            if (catalog.IdentifierComparer.Equals(column.Name, valueColumnName)
+                || catalog.IdentifierComparer.Equals(column.Name, pivotColumnName))
             {
                 continue;
             }
@@ -345,14 +345,14 @@ public static class FromScopeResolver
 
     private static (string? Alias, ScopeEntry Entry) ResolveUnpivotedTableReference(UnpivotedTableReference unpivot, ResolutionContext context)
     {
-        var (_, _, sourcePath, ledger, _, _, _) = context;
+        var (catalog, _, sourcePath, ledger, _, _, _) = context;
         var innerColumns = ResolveFlattenedSourceColumns(unpivot.TableReference, context);
 
         var inColumnNames = unpivot.InColumns
             .Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)
             .ToList();
         var inColumnTypes = inColumnNames
-            .Select(name => innerColumns.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)))
+            .Select(name => innerColumns.FirstOrDefault(c => catalog.IdentifierComparer.Equals(c.Name, name)))
             .Select(c => c is not null ? ColumnProvenanceAnalysis.TryGetScalarType(c.Provenance) : null)
             .ToList();
 
@@ -369,11 +369,11 @@ public static class FromScopeResolver
         }
 
         var passthroughColumns = innerColumns
-            .Where(c => !inColumnNames.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
+            .Where(c => !inColumnNames.Contains(c.Name, catalog.IdentifierComparer))
             .ToList();
 
         var valueInputs = inColumnTypes.Any(t => t is not null)
-            ? innerColumns.Where(c => inColumnNames.Contains(c.Name, StringComparer.OrdinalIgnoreCase)).Select(c => c.Provenance).ToArray()
+            ? innerColumns.Where(c => inColumnNames.Contains(c.Name, catalog.IdentifierComparer)).Select(c => c.Provenance).ToArray()
             : [];
 
         var unpivotedColumns = new List<ResolvedColumn>(passthroughColumns)

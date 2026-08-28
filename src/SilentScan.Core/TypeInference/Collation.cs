@@ -20,4 +20,7 @@ public sealed record Collation(string Name, CollationSource Source = CollationSo
         || Name.EndsWith("_BIN", StringComparison.OrdinalIgnoreCase)
         || Name.Contains("_BIN_", StringComparison.OrdinalIgnoreCase)
         || Name.Contains("_BIN2", StringComparison.OrdinalIgnoreCase);
+
+    public static StringComparer IdentifierComparer(Collation? collation) =>
+        collation is { IsCaseSensitive: true } ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
 }

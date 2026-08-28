@@ -13,7 +13,7 @@ public static class LineageResolver
         var (views, tvfs) = ViewDefinitionExtractor.Extract(parseResults, catalog.DefaultCollation, catalog.TypeAliases, ledger);
         var (order, cyclicViews) = ViewDependencyGraph.TopologicalSort(views, catalog);
 
-        var resolved = new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase);
+        var resolved = new Dictionary<string, ResolvedRelation>(catalog.IdentifierComparer);
 
         foreach (var tvf in tvfs)
         {

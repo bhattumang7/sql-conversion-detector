@@ -91,7 +91,7 @@ public static class SelectIntoLineagePass
                 return;
             }
 
-            var resolvedByName = new Dictionary<string, ResolvedColumn>(StringComparer.OrdinalIgnoreCase);
+            var resolvedByName = new Dictionary<string, ResolvedColumn>(catalog.IdentifierComparer);
             foreach (var r in resolved)
             {
                 resolvedByName.TryAdd(r.Name, r);
@@ -110,7 +110,7 @@ public static class SelectIntoLineagePass
         {
             var currentCtes = CurrentCteRelations();
             var ctes = CteResolver.Resolve(withClause, catalog, resolvedViews, sourcePath, catalog.Skipped, _currentScope);
-            _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes));
+            _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes, catalog.IdentifierComparer));
         }
 
         private IReadOnlyDictionary<string, ResolvedRelation> CurrentCteRelations() =>
@@ -119,9 +119,9 @@ public static class SelectIntoLineagePass
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedRelations = new Dictionary<string, ResolvedRelation>();
 
         private static Dictionary<string, ResolvedRelation> MergeCtes(
-            IReadOnlyDictionary<string, ResolvedRelation> outer, IReadOnlyDictionary<string, ResolvedRelation> inner)
+            IReadOnlyDictionary<string, ResolvedRelation> outer, IReadOnlyDictionary<string, ResolvedRelation> inner, StringComparer identifierComparer)
         {
-            var merged = new Dictionary<string, ResolvedRelation>(outer, StringComparer.OrdinalIgnoreCase);
+            var merged = new Dictionary<string, ResolvedRelation>(outer, identifierComparer);
             foreach (var (name, relation) in inner)
             {
                 merged[name] = relation;

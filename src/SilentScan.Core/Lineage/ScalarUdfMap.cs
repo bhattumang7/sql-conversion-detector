@@ -8,14 +8,14 @@ public static class ScalarUdfMap
 {
     public static IReadOnlyDictionary<string, ScalarUdfOrigin> Build(IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
     {
-        var viewsByName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
+        var viewsByName = new Dictionary<string, ViewDefinition>(catalog.IdentifierComparer);
         foreach (var view in views)
         {
             viewsByName[view.QualifiedName] = view;
         }
 
         var context = new ResolutionContext(
-            viewsByName, catalog, new Dictionary<string, ScalarUdfOrigin?>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            viewsByName, catalog, new Dictionary<string, ScalarUdfOrigin?>(catalog.IdentifierComparer), new HashSet<string>(catalog.IdentifierComparer));
 
         foreach (var view in viewsByName.Values)
         {
@@ -24,7 +24,7 @@ public static class ScalarUdfMap
 
         return context.Resolved
             .Where(kv => kv.Value is not null)
-            .ToDictionary(kv => kv.Key, kv => kv.Value!, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(kv => kv.Key, kv => kv.Value!, catalog.IdentifierComparer);
     }
 
     private readonly record struct ResolutionContext(
@@ -47,7 +47,7 @@ public static class ScalarUdfMap
 
         var direct = FindWorstDirectCall(view, context.Catalog);
 
-        var (functionRefs, namedRefs) = TvfReferenceWalker.CollectFromClauses(view.SelectStatement);
+        var (functionRefs, namedRefs) = TvfReferenceWalker.CollectFromClauses(view.SelectStatement, context.Catalog.IdentifierComparer);
         ScalarUdfOrigin? inherited = null;
         foreach (var origin in namedRefs.Select(named => TryResolveNamedReference(named, context))
             .Concat(functionRefs.Select(function => TryResolveFunctionReference(function, context)))

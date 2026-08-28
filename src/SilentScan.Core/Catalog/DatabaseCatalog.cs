@@ -8,20 +8,17 @@ public sealed record ProcedureParameterInfo(string Name, SqlType? Type, bool IsO
 
 public sealed class DatabaseCatalog
 {
-    private readonly Dictionary<string, CatalogTable> _tablesByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private StringComparer _identifierComparer = StringComparer.OrdinalIgnoreCase;
 
-    private readonly Dictionary<string, SqlType> _typeAliasesByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, CatalogTable> _tablesByQualifiedName;
 
-    private readonly Dictionary<string, SqlType?> _scalarFunctionReturnTypesByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, SqlType> _typeAliasesByQualifiedName;
 
-    private readonly Dictionary<string, TableValuedFunctionKind> _tableValuedFunctionKindsByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, SqlType?> _scalarFunctionReturnTypesByQualifiedName;
 
-    private readonly Dictionary<string, ScalarUdfInfo> _scalarUdfInfoByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, TableValuedFunctionKind> _tableValuedFunctionKindsByQualifiedName;
+
+    private Dictionary<string, ScalarUdfInfo> _scalarUdfInfoByQualifiedName;
 
     private readonly List<SchemaExpressionReference> _schemaExpressions = [];
 
@@ -41,40 +38,51 @@ public sealed class DatabaseCatalog
 
     private readonly Dictionary<(string SchemeName, int PartitionNumber), string> _partitionFilegroupsBySchemeAndNumber = [];
 
-    private readonly Dictionary<string, IReadOnlyList<CatalogIndex>> _indexedViewIndexesByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, IReadOnlyList<CatalogIndex>> _indexedViewIndexesByQualifiedName;
 
-    private readonly Dictionary<string, IReadOnlyList<string>> _viewCompiledColumnsByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, IReadOnlyList<string>> _viewCompiledColumnsByQualifiedName;
 
-    private readonly Dictionary<string, bool> _moduleUsesQuotedIdentifierByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, bool> _moduleUsesQuotedIdentifierByQualifiedName;
 
-    private readonly Dictionary<string, bool> _moduleUsesAnsiNullsByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, bool> _moduleUsesAnsiNullsByQualifiedName;
 
-    private readonly Dictionary<string, bool> _moduleIsRecompiledByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, bool> _moduleIsRecompiledByQualifiedName;
 
-    private readonly Dictionary<string, bool> _moduleUsesDatabaseCollationByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, bool> _moduleUsesDatabaseCollationByQualifiedName;
 
-    private readonly Dictionary<string, bool> _moduleIsSchemaBoundByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, bool> _moduleIsSchemaBoundByQualifiedName;
 
-    private readonly Dictionary<string, string> _synonymTargetsByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, string> _synonymTargetsByQualifiedName;
 
-    private readonly Dictionary<string, IReadOnlyList<ProcedureParameterInfo>> _procedureParametersByQualifiedName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, IReadOnlyList<ProcedureParameterInfo>> _procedureParametersByQualifiedName;
 
-    private readonly Dictionary<string, bool> _columnMasterKeyEnclaveSupportByName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, bool> _columnMasterKeyEnclaveSupportByName;
 
-    private readonly Dictionary<string, IReadOnlyList<string>> _columnEncryptionKeyMasterKeysByName =
-        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, IReadOnlyList<string>> _columnEncryptionKeyMasterKeysByName;
 
     private const int MaxSynonymHops = 8;
+
+    public DatabaseCatalog()
+    {
+        _tablesByQualifiedName = new(_identifierComparer);
+        _typeAliasesByQualifiedName = new(_identifierComparer);
+        _scalarFunctionReturnTypesByQualifiedName = new(_identifierComparer);
+        _tableValuedFunctionKindsByQualifiedName = new(_identifierComparer);
+        _scalarUdfInfoByQualifiedName = new(_identifierComparer);
+        _indexedViewIndexesByQualifiedName = new(_identifierComparer);
+        _viewCompiledColumnsByQualifiedName = new(_identifierComparer);
+        _moduleUsesQuotedIdentifierByQualifiedName = new(_identifierComparer);
+        _moduleUsesAnsiNullsByQualifiedName = new(_identifierComparer);
+        _moduleIsRecompiledByQualifiedName = new(_identifierComparer);
+        _moduleUsesDatabaseCollationByQualifiedName = new(_identifierComparer);
+        _moduleIsSchemaBoundByQualifiedName = new(_identifierComparer);
+        _synonymTargetsByQualifiedName = new(_identifierComparer);
+        _procedureParametersByQualifiedName = new(_identifierComparer);
+        _columnMasterKeyEnclaveSupportByName = new(_identifierComparer);
+        _columnEncryptionKeyMasterKeysByName = new(_identifierComparer);
+    }
+
+    public StringComparer IdentifierComparer => _identifierComparer;
 
     public IReadOnlyCollection<CatalogTable> Tables => _tablesByQualifiedName.Values;
 
@@ -248,7 +256,7 @@ public sealed class DatabaseCatalog
 
     public string ResolveSynonymName(string qualifiedName)
     {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(_identifierComparer);
         var current = qualifiedName;
 
         while (_synonymTargetsByQualifiedName.TryGetValue(current, out var next))
@@ -266,7 +274,39 @@ public sealed class DatabaseCatalog
 
     public string? CurrentDatabaseName { get; set; }
 
-    public Collation? DefaultCollation { get; set; }
+    private Collation? _defaultCollation;
+
+    public Collation? DefaultCollation
+    {
+        get => _defaultCollation;
+        set
+        {
+            _defaultCollation = value;
+            var comparer = Collation.IdentifierComparer(value);
+            if (ReferenceEquals(comparer, _identifierComparer))
+            {
+                return;
+            }
+
+            _identifierComparer = comparer;
+            _tablesByQualifiedName = new(_tablesByQualifiedName, comparer);
+            _typeAliasesByQualifiedName = new(_typeAliasesByQualifiedName, comparer);
+            _scalarFunctionReturnTypesByQualifiedName = new(_scalarFunctionReturnTypesByQualifiedName, comparer);
+            _tableValuedFunctionKindsByQualifiedName = new(_tableValuedFunctionKindsByQualifiedName, comparer);
+            _scalarUdfInfoByQualifiedName = new(_scalarUdfInfoByQualifiedName, comparer);
+            _indexedViewIndexesByQualifiedName = new(_indexedViewIndexesByQualifiedName, comparer);
+            _viewCompiledColumnsByQualifiedName = new(_viewCompiledColumnsByQualifiedName, comparer);
+            _moduleUsesQuotedIdentifierByQualifiedName = new(_moduleUsesQuotedIdentifierByQualifiedName, comparer);
+            _moduleUsesAnsiNullsByQualifiedName = new(_moduleUsesAnsiNullsByQualifiedName, comparer);
+            _moduleIsRecompiledByQualifiedName = new(_moduleIsRecompiledByQualifiedName, comparer);
+            _moduleUsesDatabaseCollationByQualifiedName = new(_moduleUsesDatabaseCollationByQualifiedName, comparer);
+            _moduleIsSchemaBoundByQualifiedName = new(_moduleIsSchemaBoundByQualifiedName, comparer);
+            _synonymTargetsByQualifiedName = new(_synonymTargetsByQualifiedName, comparer);
+            _procedureParametersByQualifiedName = new(_procedureParametersByQualifiedName, comparer);
+            _columnMasterKeyEnclaveSupportByName = new(_columnMasterKeyEnclaveSupportByName, comparer);
+            _columnEncryptionKeyMasterKeysByName = new(_columnEncryptionKeyMasterKeysByName, comparer);
+        }
+    }
 
     public Collation? TempdbCollation { get; set; }
 
@@ -332,7 +372,9 @@ public sealed class DatabaseCatalog
         }
 
         var prefix = currentDatabaseName + ".";
-        return qualifiedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? qualifiedName[prefix.Length..] : null;
+        return qualifiedName.StartsWith(prefix, _identifierComparer == StringComparer.Ordinal ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase)
+            ? qualifiedName[prefix.Length..]
+            : null;
     }
 
     public void Remove(string qualifiedName, string? scope)

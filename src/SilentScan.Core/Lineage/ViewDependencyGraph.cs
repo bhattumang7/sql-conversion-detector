@@ -10,7 +10,7 @@ public static class ViewDependencyGraph
         IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
     {
 
-        var byName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
+        var byName = new Dictionary<string, ViewDefinition>(catalog.IdentifierComparer);
         foreach (var view in views)
         {
             byName[view.QualifiedName] = view;
@@ -20,9 +20,9 @@ public static class ViewDependencyGraph
         var edges = dedupedViews.ToDictionary(
             v => v.QualifiedName,
             v => FindReferencedViewNames(v.SelectStatement, byName.Keys, catalog),
-            StringComparer.OrdinalIgnoreCase);
+            catalog.IdentifierComparer);
 
-        var state = new TraversalState(byName, edges);
+        var state = new TraversalState(byName, edges, catalog.IdentifierComparer);
 
         foreach (var view in dedupedViews)
         {
@@ -68,10 +68,10 @@ public static class ViewDependencyGraph
 
     private static HashSet<string> FindReferencedViewNames(SelectStatement selectStatement, IEnumerable<string> knownViewNames, DatabaseCatalog catalog)
     {
-        var collector = new TableReferenceCollector(CteNameCollector.Collect(selectStatement));
+        var collector = new TableReferenceCollector(CteNameCollector.Collect(selectStatement, catalog.IdentifierComparer));
         selectStatement.Accept(collector);
 
-        var known = new HashSet<string>(knownViewNames, StringComparer.OrdinalIgnoreCase);
+        var known = new HashSet<string>(knownViewNames, catalog.IdentifierComparer);
         return [.. collector.QualifiedNames.Select(catalog.ResolveSynonymName).Where(known.Contains)];
     }
 
@@ -94,7 +94,7 @@ public static class ViewDependencyGraph
             QualifiedNames.Add(SchemaObjectNameHelper.Qualify(node.SchemaObject));
     }
 
-    private sealed class TraversalState(Dictionary<string, ViewDefinition> byName, Dictionary<string, HashSet<string>> edges)
+    private sealed class TraversalState(Dictionary<string, ViewDefinition> byName, Dictionary<string, HashSet<string>> edges, StringComparer identifierComparer)
     {
         public Dictionary<string, ViewDefinition> ByName { get; } = byName;
 
@@ -102,12 +102,12 @@ public static class ViewDependencyGraph
 
         public List<ViewDefinition> Order { get; } = [];
 
-        public HashSet<string> Visited { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> Visited { get; } = new(identifierComparer);
 
         public List<string> Path { get; } = [];
 
-        public HashSet<string> PathSet { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> PathSet { get; } = new(identifierComparer);
 
-        public HashSet<string> Cyclic { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> Cyclic { get; } = new(identifierComparer);
     }
 }

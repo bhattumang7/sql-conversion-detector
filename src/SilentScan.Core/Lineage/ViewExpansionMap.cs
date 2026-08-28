@@ -13,7 +13,7 @@ public static class ViewExpansionMap
 {
     public static IReadOnlyDictionary<string, ViewExpansionOrigin> Build(IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
     {
-        var viewsByName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
+        var viewsByName = new Dictionary<string, ViewDefinition>(catalog.IdentifierComparer);
         foreach (var view in views)
         {
 
@@ -21,7 +21,7 @@ public static class ViewExpansionMap
         }
 
         var context = new ResolutionContext(
-            viewsByName, catalog, new Dictionary<string, ViewExpansionOrigin?>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            viewsByName, catalog, new Dictionary<string, ViewExpansionOrigin?>(catalog.IdentifierComparer), new HashSet<string>(catalog.IdentifierComparer));
 
         foreach (var view in viewsByName.Values)
         {
@@ -30,7 +30,7 @@ public static class ViewExpansionMap
 
         return context.Resolved
             .Where(kv => kv.Value is not null)
-            .ToDictionary(kv => kv.Key, kv => kv.Value!, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(kv => kv.Key, kv => kv.Value!, catalog.IdentifierComparer);
     }
 
     private readonly record struct ResolutionContext(
@@ -51,12 +51,12 @@ public static class ViewExpansionMap
             return null;
         }
 
-        var (functionRefs, namedRefs) = TvfReferenceWalker.CollectFromClauses(view.SelectStatement);
+        var (functionRefs, namedRefs) = TvfReferenceWalker.CollectFromClauses(view.SelectStatement, context.Catalog.IdentifierComparer);
         var referencedNames = functionRefs.Select(f => context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(f.Reference.SchemaObject)))
             .Concat(namedRefs.Select(n => context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(n.SchemaObject))))
-            .Distinct(StringComparer.OrdinalIgnoreCase);
+            .Distinct(context.Catalog.IdentifierComparer);
 
-        var baseTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var baseTables = new HashSet<string>(context.Catalog.IdentifierComparer);
         var partiallyUnexpanded = false;
         var deepestChildDepth = -1;
         string? deepestChildName = null;
@@ -102,7 +102,7 @@ public static class ViewExpansionMap
 
         if (context.Catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table or CatalogTableKind.ClrTableValuedFunction })
         {
-            return (new HashSet<string>(StringComparer.OrdinalIgnoreCase) { qualifiedName }, false, null);
+            return (new HashSet<string>(context.Catalog.IdentifierComparer) { qualifiedName }, false, null);
         }
 
         return (NoBaseTables, true, null);
