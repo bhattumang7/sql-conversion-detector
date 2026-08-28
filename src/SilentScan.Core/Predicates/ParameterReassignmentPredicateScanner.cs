@@ -27,7 +27,7 @@ public static class ParameterReassignmentPredicateScanner
         public static FlowState Declined_() => new(null, null, true);
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor, IStatementFlowPolicy<FlowState>
     {
         public List<ParameterReassignmentPredicateFinding> Findings { get; } = [];
 
@@ -65,59 +65,37 @@ public static class ParameterReassignmentPredicateScanner
                 : statementList.Statements;
 
             var entryState = new FlowState([], new Dictionary<string, TSqlFragment>(StringComparer.OrdinalIgnoreCase), false);
-            AnalyzeSequential(statements, entryState);
+            ProcedureBodyFlowWalker.Walk(statements, entryState, this);
         }
 
-        private FlowState AnalyzeSequential(IList<TSqlStatement> statements, FlowState state)
+        public bool IsDeclined(FlowState state) => state.Declined;
+
+        public bool IsDone(FlowState state) => false;
+
+        public FlowState PerStatement(TSqlStatement statement, FlowState state)
         {
-            foreach (var statement in statements)
+            if (!_procedureHasWithRecompile)
             {
-                if (state.Declined)
-                {
-                    return state;
-                }
+                InspectStatementForFindings(statement, state);
+            }
 
-                if (!_procedureHasWithRecompile)
-                {
-                    InspectStatementForFindings(statement, state);
-                }
-
-                foreach (var (name, site) in VariableWriteSites.InStatement(statement))
-                {
-                    Reassign(state, name, site);
-                }
-
-                switch (statement)
-                {
-                    case ReturnStatement or ThrowStatement:
-                        return state with { Reassigned = [] };
-
-                    case GoToStatement:
-                        return FlowState.Declined_();
-
-                    case BeginEndBlockStatement block:
-                        state = AnalyzeSequential(block.StatementList.Statements, state);
-                        break;
-
-                    case IfStatement ifStatement:
-                        state = AnalyzeIf(ifStatement, state);
-                        break;
-
-                    case WhileStatement whileStatement:
-                        state = AnalyzeWhile(whileStatement, state);
-                        break;
-
-                    case TryCatchStatement tryCatch:
-                        state = AnalyzeTryCatch(tryCatch, state);
-                        break;
-
-                    default:
-                        break;
-                }
+            foreach (var (name, site) in VariableWriteSites.InStatement(statement))
+            {
+                Reassign(state, name, site);
             }
 
             return state;
         }
+
+        public FlowState OnReturn(FlowState state, TSqlStatement statement) => state with { Reassigned = [] };
+
+        public FlowState OnThrow(FlowState state) => state with { Reassigned = [] };
+
+        public FlowState OnGoTo(FlowState state) => FlowState.Declined_();
+
+        public FlowState CloneForBranch(FlowState state) => CloneState(state);
+
+        public FlowState Merge(FlowState a, FlowState b) => IntersectBranches(a, b);
 
         private void Reassign(FlowState state, string variableName, TSqlFragment site)
         {
@@ -278,46 +256,6 @@ public static class ParameterReassignmentPredicateScanner
             _ => null,
         };
 
-        private FlowState AnalyzeIf(IfStatement ifStatement, FlowState enteringState)
-        {
-            if (enteringState.Declined)
-            {
-                return enteringState;
-            }
-
-            var thenResult = AnalyzeSequential(ToStatementList(ifStatement.ThenStatement), CloneState(enteringState));
-            var elseResult = ifStatement.ElseStatement is not null
-                ? AnalyzeSequential(ToStatementList(ifStatement.ElseStatement), CloneState(enteringState))
-                : enteringState;
-
-            return IntersectBranches(thenResult, elseResult);
-        }
-
-        private FlowState AnalyzeWhile(WhileStatement whileStatement, FlowState enteringState)
-        {
-            if (enteringState.Declined)
-            {
-                return enteringState;
-            }
-
-            var bodyResult = AnalyzeSequential(ToStatementList(whileStatement.Statement), CloneState(enteringState));
-            return IntersectBranches(enteringState, bodyResult);
-        }
-
-        private FlowState AnalyzeTryCatch(TryCatchStatement tryCatch, FlowState enteringState)
-        {
-            if (enteringState.Declined)
-            {
-                return enteringState;
-            }
-
-            var tryResult = AnalyzeSequential(tryCatch.TryStatements.Statements, CloneState(enteringState));
-
-            var catchResult = AnalyzeSequential(tryCatch.CatchStatements.Statements, CloneState(enteringState));
-
-            return IntersectBranches(tryResult, catchResult);
-        }
-
         private static FlowState CloneState(FlowState state) => state.Declined
             ? state
             : new FlowState([.. state.Reassigned!], new Dictionary<string, TSqlFragment>(state.ReassignmentSites!, StringComparer.OrdinalIgnoreCase), false);
@@ -341,8 +279,5 @@ public static class ParameterReassignmentPredicateScanner
 
             return new FlowState(merged, sites, false);
         }
-
-        private static IList<TSqlStatement> ToStatementList(TSqlStatement statement) =>
-            statement is BeginEndBlockStatement block ? block.StatementList.Statements : [statement];
     }
 }

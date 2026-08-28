@@ -23,7 +23,7 @@ public static class OutputParameterScanner
         public static FlowState Declined_() => new(null, true);
     }
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor, IStatementFlowPolicy<FlowState>
     {
         private int _procedureLine;
         private int _procedureColumn;
@@ -61,7 +61,7 @@ public static class OutputParameterScanner
             _procedureColumn = procedureName.BaseIdentifier.StartColumn;
 
             var entryState = new FlowState(new HashSet<string>(outputNames, StringComparer.OrdinalIgnoreCase), false);
-            var finalState = AnalyzeSequential(statements, entryState);
+            var finalState = ProcedureBodyFlowWalker.Walk(statements, entryState, this);
 
             if (finalState is { Declined: false, Unassigned.Count: > 0 })
             {
@@ -80,69 +80,34 @@ public static class OutputParameterScanner
             }
         }
 
-        private FlowState AnalyzeSequential(IList<TSqlStatement> statements, FlowState state)
-        {
-            foreach (var statement in statements)
-            {
+        public bool IsDeclined(FlowState state) => state.Declined;
 
-                if (state.Declined)
-                {
-                    return state;
-                }
+        public bool IsDone(FlowState state) => state.Unassigned!.Count == 0;
 
-                if (state.Unassigned!.Count == 0)
-                {
-                    continue;
-                }
-
-                var (nextState, terminal) = AnalyzeStatement(statement, state);
-                state = nextState;
-                if (terminal)
-                {
-
-                    return state;
-                }
-            }
-
-            return state;
-        }
-
-        private (FlowState State, bool Terminal) AnalyzeStatement(TSqlStatement statement, FlowState state)
+        public FlowState PerStatement(TSqlStatement statement, FlowState state)
         {
             foreach (var (name, _) in VariableWriteSites.InStatement(statement))
             {
                 state.Unassigned!.Remove(name);
             }
 
-            switch (statement)
-            {
-                case ReturnStatement:
-                    EmitUnassignedFindings(state.Unassigned!, statement);
-                    return (state with { Unassigned = [] }, true);
-
-                case ThrowStatement:
-
-                    return (state with { Unassigned = [] }, true);
-
-                case GoToStatement:
-                    return (FlowState.Declined_(), true);
-
-                case BeginEndBlockStatement block:
-                    return (AnalyzeSequential(block.StatementList.Statements, state), false);
-
-                case IfStatement ifStatement:
-                    return (AnalyzeIf(ifStatement, state), false);
-
-                case WhileStatement whileStatement:
-                    return (AnalyzeWhile(whileStatement, state), false);
-
-                case TryCatchStatement tryCatch:
-                    return (AnalyzeTryCatch(tryCatch, state), false);
-
-                default:
-                    return (state, false);
-            }
+            return state;
         }
+
+        public FlowState OnReturn(FlowState state, TSqlStatement statement)
+        {
+            EmitUnassignedFindings(state.Unassigned!, statement);
+            return state with { Unassigned = [] };
+        }
+
+        public FlowState OnThrow(FlowState state) => state with { Unassigned = [] };
+
+        public FlowState OnGoTo(FlowState state) => FlowState.Declined_();
+
+        public FlowState CloneForBranch(FlowState state) =>
+            state.Declined ? state : new FlowState([.. state.Unassigned!], false);
+
+        public FlowState Merge(FlowState a, FlowState b) => MergeBranches(a, b);
 
         private void EmitUnassignedFindings(HashSet<string> unassigned, TSqlStatement statement)
         {
@@ -159,51 +124,6 @@ public static class OutputParameterScanner
             }
         }
 
-        private FlowState AnalyzeIf(IfStatement ifStatement, FlowState enteringState)
-        {
-            if (enteringState.Declined)
-            {
-                return enteringState;
-            }
-
-            var thenResult = AnalyzeSequential(
-                ToStatementList(ifStatement.ThenStatement), CloneState(enteringState));
-            var elseResult = ifStatement.ElseStatement is not null
-                ? AnalyzeSequential(ToStatementList(ifStatement.ElseStatement), CloneState(enteringState))
-                : enteringState;
-
-            return MergeBranches(thenResult, elseResult);
-        }
-
-        private FlowState AnalyzeWhile(WhileStatement whileStatement, FlowState enteringState)
-        {
-            if (enteringState.Declined)
-            {
-                return enteringState;
-            }
-
-            var bodyResult = AnalyzeSequential(
-                ToStatementList(whileStatement.Statement), CloneState(enteringState));
-            return MergeBranches(enteringState, bodyResult);
-        }
-
-        private FlowState AnalyzeTryCatch(TryCatchStatement tryCatch, FlowState enteringState)
-        {
-            if (enteringState.Declined)
-            {
-                return enteringState;
-            }
-
-            var tryResult = AnalyzeSequential(tryCatch.TryStatements.Statements, CloneState(enteringState));
-
-            var catchResult = AnalyzeSequential(tryCatch.CatchStatements.Statements, CloneState(enteringState));
-
-            return MergeBranches(tryResult, catchResult);
-        }
-
-        private static FlowState CloneState(FlowState state) =>
-            state.Declined ? state : new FlowState([.. state.Unassigned!], false);
-
         private static FlowState MergeBranches(FlowState a, FlowState b)
         {
             if (a.Declined || b.Declined)
@@ -215,8 +135,5 @@ public static class OutputParameterScanner
             merged.UnionWith(b.Unassigned!);
             return new FlowState(merged, false);
         }
-
-        private static IList<TSqlStatement> ToStatementList(TSqlStatement statement) =>
-            statement is BeginEndBlockStatement block ? block.StatementList.Statements : [statement];
     }
 }
