@@ -146,22 +146,59 @@ public static class DeprecatedSyntaxScanner
 
         foreach (var batch in script.Batches)
         {
-            foreach (var statement in batch.Statements)
-            {
-                if (statement is PredicateSetStatement { Options: var options, IsOn: var isOn }
-                    && (options & SetOptions.AnsiNulls) != 0)
-                {
-                    ansiNullsIsOff = !isOn;
-                    continue;
-                }
-
-                var walker = new NullComparisonVisitor(sourcePath, ansiNullsIsOff);
-                statement.Accept(walker);
-                findings.AddRange(walker.Findings);
-            }
+            ansiNullsIsOff = WalkAnsiNullsStatements(batch.Statements, ansiNullsIsOff, sourcePath, findings);
         }
 
         return findings;
+    }
+
+    private static bool WalkAnsiNullsStatements(IList<TSqlStatement> statements, bool ansiNullsIsOff, string sourcePath, List<DeprecatedSyntaxFinding> findings)
+    {
+        foreach (var statement in statements)
+        {
+            ansiNullsIsOff = WalkAnsiNullsStatement(statement, ansiNullsIsOff, sourcePath, findings);
+        }
+
+        return ansiNullsIsOff;
+    }
+
+    private static bool WalkAnsiNullsStatement(TSqlStatement statement, bool ansiNullsIsOff, string sourcePath, List<DeprecatedSyntaxFinding> findings)
+    {
+        if (statement is PredicateSetStatement { Options: var options, IsOn: var isOn }
+            && (options & SetOptions.AnsiNulls) != 0)
+        {
+            return !isOn;
+        }
+
+        switch (statement)
+        {
+            case BeginEndBlockStatement block:
+                return WalkAnsiNullsStatements(block.StatementList.Statements, ansiNullsIsOff, sourcePath, findings);
+
+            case IfStatement ifStatement:
+                WalkAnsiNullsStatement(ifStatement.ThenStatement, ansiNullsIsOff, sourcePath, findings);
+                if (ifStatement.ElseStatement is not null)
+                {
+                    WalkAnsiNullsStatement(ifStatement.ElseStatement, ansiNullsIsOff, sourcePath, findings);
+                }
+
+                return ansiNullsIsOff;
+
+            case WhileStatement whileStatement:
+                WalkAnsiNullsStatement(whileStatement.Statement, ansiNullsIsOff, sourcePath, findings);
+                return ansiNullsIsOff;
+
+            case TryCatchStatement tryCatch:
+                WalkAnsiNullsStatements(tryCatch.TryStatements.Statements, ansiNullsIsOff, sourcePath, findings);
+                WalkAnsiNullsStatements(tryCatch.CatchStatements.Statements, ansiNullsIsOff, sourcePath, findings);
+                return ansiNullsIsOff;
+
+            default:
+                var walker = new NullComparisonVisitor(sourcePath, ansiNullsIsOff);
+                statement.Accept(walker);
+                findings.AddRange(walker.Findings);
+                return ansiNullsIsOff;
+        }
     }
 
     private sealed class Visitor : TSqlFragmentVisitor

@@ -148,9 +148,52 @@ public sealed class DeprecatedSyntaxScannerTests
     }
 
     [Fact]
-    public void EqualsNull_SetAnsiNullsOffInsideConditionalBlock_StillFires()
+    public void EqualsNull_SetAnsiNullsOffInsideConditionalBlock_DoesNotPropagatePastBlock()
     {
         var findings = Scan("IF 1 = 1 BEGIN SET ANSI_NULLS OFF; END SELECT * FROM dbo.T WHERE Col = NULL;");
+
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+    }
+
+    [Fact]
+    public void EqualsNull_SetAnsiNullsOffInsideUnconditionalBeginEndBlock_PropagatesPastBlock()
+    {
+        var findings = Scan("BEGIN SET ANSI_NULLS OFF; END SELECT * FROM dbo.T WHERE Col = NULL;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+    }
+
+    [Fact]
+    public void EqualsNull_SetAnsiNullsOffEarlierInSameConditionalBranch_Suppressed()
+    {
+        var findings = Scan("IF 1 = 1 BEGIN SET ANSI_NULLS OFF; SELECT * FROM dbo.T WHERE Col = NULL; END");
+
+        Assert.DoesNotContain(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+    }
+
+    [Fact]
+    public void EqualsNull_SetAnsiNullsOffInElseBranch_DoesNotAffectThenBranch()
+    {
+        var findings = Scan(
+            "IF 1 = 1 BEGIN SELECT * FROM dbo.T WHERE Col = NULL; END ELSE BEGIN SET ANSI_NULLS OFF; END");
+
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+    }
+
+    [Fact]
+    public void EqualsNull_SetAnsiNullsOffInsideWhileBody_SuppressedWithinBodyButNotAfterLoop()
+    {
+        var findings = Scan(
+            "WHILE 1 = 0 BEGIN SET ANSI_NULLS OFF; SELECT * FROM dbo.T WHERE Col = NULL; END SELECT * FROM dbo.T WHERE Col2 = NULL;");
+
+        Assert.Single(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+    }
+
+    [Fact]
+    public void EqualsNull_SetAnsiNullsOffInsideTryBlock_DoesNotAffectCatchBlock()
+    {
+        var findings = Scan(
+            "BEGIN TRY SET ANSI_NULLS OFF; END TRY BEGIN CATCH SELECT * FROM dbo.T WHERE Col = NULL; END CATCH");
 
         Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
     }
