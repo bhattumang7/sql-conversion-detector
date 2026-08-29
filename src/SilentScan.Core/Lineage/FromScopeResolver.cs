@@ -76,9 +76,14 @@ public static class FromScopeResolver
     private static void AddResolved(
         TableReference tableReference, ResolutionContext context, string? aliasOverride, Dictionary<string, ScopeEntry> byAlias, List<ScopeEntry> ordered)
     {
-        foreach (var leaf in FlattenJoins(tableReference))
+        foreach (var (leaf, isNullableSide) in FlattenJoins(tableReference))
         {
             var (alias, entry) = ResolveTableReference(leaf, context, aliasOverride);
+            if (isNullableSide)
+            {
+                entry = entry with { IsNullableSide = true };
+            }
+
             if (alias is not null)
             {
                 if (byAlias.ContainsKey(alias))
@@ -100,19 +105,42 @@ public static class FromScopeResolver
     }
 
     private static IReadOnlyList<ResolvedColumn> ResolveFlattenedSourceColumns(TableReference source, ResolutionContext context) =>
-        [.. FlattenJoins(source).SelectMany(leaf => ResolveTableReference(leaf, context, aliasOverride: null).Entry.Relation.Columns)];
+        [.. FlattenJoins(source).SelectMany(leaf => ResolveTableReference(leaf.Reference, context, aliasOverride: null).Entry.Relation.Columns)];
 
-    private static IEnumerable<TableReference> FlattenJoins(TableReference tableReference)
+    private static IEnumerable<(TableReference Reference, bool IsNullableSide)> FlattenJoins(TableReference tableReference, bool ambientNullable = false)
     {
         switch (tableReference)
         {
-            case JoinTableReference join:
-                foreach (var t in FlattenJoins(join.FirstTableReference))
+            case QualifiedJoin qualifiedJoin:
+                var (firstNullable, secondNullable) = qualifiedJoin.QualifiedJoinType switch
+                {
+                    QualifiedJoinType.LeftOuter => (ambientNullable, true),
+                    QualifiedJoinType.RightOuter => (true, ambientNullable),
+                    QualifiedJoinType.FullOuter => (true, true),
+                    _ => (ambientNullable, ambientNullable),
+                };
+
+                foreach (var t in FlattenJoins(qualifiedJoin.FirstTableReference, firstNullable))
                 {
                     yield return t;
                 }
 
-                foreach (var t in FlattenJoins(join.SecondTableReference))
+                foreach (var t in FlattenJoins(qualifiedJoin.SecondTableReference, secondNullable))
+                {
+                    yield return t;
+                }
+
+                break;
+
+            case UnqualifiedJoin unqualifiedJoin:
+                var secondNullableUnqualified = ambientNullable || unqualifiedJoin.UnqualifiedJoinType == UnqualifiedJoinType.OuterApply;
+
+                foreach (var t in FlattenJoins(unqualifiedJoin.FirstTableReference, ambientNullable))
+                {
+                    yield return t;
+                }
+
+                foreach (var t in FlattenJoins(unqualifiedJoin.SecondTableReference, secondNullableUnqualified))
                 {
                     yield return t;
                 }
@@ -120,7 +148,7 @@ public static class FromScopeResolver
                 break;
 
             case JoinParenthesisTableReference parenthesis:
-                foreach (var t in FlattenJoins(parenthesis.Join))
+                foreach (var t in FlattenJoins(parenthesis.Join, ambientNullable))
                 {
                     yield return t;
                 }
@@ -128,7 +156,7 @@ public static class FromScopeResolver
                 break;
 
             default:
-                yield return tableReference;
+                yield return (tableReference, ambientNullable);
                 break;
         }
     }

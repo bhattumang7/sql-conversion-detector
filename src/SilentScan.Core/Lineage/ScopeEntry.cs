@@ -1,3 +1,3 @@
 namespace SilentScan.Core.Lineage;
 
-public readonly record struct ScopeEntry(ResolvedRelation Relation, bool IsViewLayer);
+public readonly record struct ScopeEntry(ResolvedRelation Relation, bool IsViewLayer, bool IsNullableSide = false);

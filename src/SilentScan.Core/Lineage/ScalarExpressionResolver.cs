@@ -234,6 +234,48 @@ public static class ScalarExpressionResolver
         return Unresolved($"column '{columnName}' not found in FROM scope");
     }
 
+    internal static ScopeEntry? TryResolveScopeEntry(
+        ColumnReferenceExpression columnRef,
+        IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+        DatabaseCatalog? catalog = null)
+    {
+        var identifiers = columnRef.MultiPartIdentifier.Identifiers;
+        var columnName = identifiers[^1].Value;
+        var identifierComparer = catalog?.IdentifierComparer;
+
+        if (identifiers.Count >= 2)
+        {
+            var qualifier = identifiers[^2].Value;
+            foreach (var (byAlias, _) in scopeChain)
+            {
+                if (!byAlias.TryGetValue(qualifier, out var entry))
+                {
+                    continue;
+                }
+
+                return entry.Relation.FindColumn(columnName, identifierComparer) is not null ? entry : null;
+            }
+
+            return null;
+        }
+
+        foreach (var (_, ordered) in scopeChain)
+        {
+            var matches = ordered.Where(entry => entry.Relation.FindColumn(columnName, identifierComparer) is not null).ToList();
+            if (matches.Count == 1)
+            {
+                return matches[0];
+            }
+
+            if (matches.Count > 1)
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
     internal static (string RelationQualifiedName, string ExposedColumnName)? TryResolveImmediateRelation(
         ColumnReferenceExpression columnRef,
         IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,

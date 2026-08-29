@@ -251,6 +251,30 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_NumericRangeTautologyOnNotNullColumn_EliminatedAsNormalizationDead()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL);",
+            "CREATE TABLE dbo.Lines (OrderId INT NOT NULL, Qty INT NOT NULL);",
+            "SELECT 1 FROM dbo.Orders o JOIN dbo.Lines l ON o.Id = l.OrderId WHERE l.Qty < 5 OR l.Qty >= 5;");
+
+        Assert.DoesNotContain(result.TypedFindings, f => f.Column.ColumnName == "Qty");
+        Assert.Equal(2, result.SkippedConstructs.Count(s => s.ConstructKind == "predicate eliminated by normalization"));
+    }
+
+    [Fact]
+    public void Extract_NumericRangeTautologyOnNullableSideOfLeftOuterJoin_NeverEliminated()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL);",
+            "CREATE TABLE dbo.Lines (OrderId INT NOT NULL, Qty INT NOT NULL);",
+            "SELECT 1 FROM dbo.Orders o LEFT JOIN dbo.Lines l ON o.Id = l.OrderId WHERE l.Qty < 5 OR l.Qty >= 5;");
+
+        Assert.Equal(2, result.TypedFindings.Count(f => f.Column.ColumnName == "Qty"));
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "predicate eliminated by normalization");
+    }
+
+    [Fact]
     public void Extract_NestedSubqueryHasOwnScope_DoesNotLeakOuterAlias()
     {
         var findings = Extract(
