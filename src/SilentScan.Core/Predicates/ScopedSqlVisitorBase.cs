@@ -55,9 +55,8 @@ internal abstract class ScopedSqlVisitorBase(
         }
 
         var catalogColumn = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.FindColumn(baseColumn.ColumnName, catalog.IdentifierComparer);
-        var isNullableSide = ScalarExpressionResolver.TryResolveScopeEntry(columnRef, scopeChain, catalog)?.IsNullableSide == true;
         return new PredicateSurvivalAnalyzer.ColumnFacts(
-            catalogColumn is null || isNullableSide ? null : !catalogColumn.IsNullable,
+            catalogColumn is null || baseColumn.IsNullableSide ? null : !catalogColumn.IsNullable,
             baseColumn.Type?.Collation?.GuaranteesDistinctLiteralsAreUnequal);
     }
 

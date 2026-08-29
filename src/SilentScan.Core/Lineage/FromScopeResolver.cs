@@ -81,7 +81,7 @@ public static class FromScopeResolver
             var (alias, entry) = ResolveTableReference(leaf, context, aliasOverride);
             if (isNullableSide)
             {
-                entry = entry with { IsNullableSide = true };
+                entry = entry with { Relation = WithNullableSideColumns(entry.Relation) };
             }
 
             if (alias is not null)
@@ -103,6 +103,14 @@ public static class FromScopeResolver
             ordered.Add(entry);
         }
     }
+
+    private static ResolvedRelation WithNullableSideColumns(ResolvedRelation relation) =>
+        relation with
+        {
+            Columns = [.. relation.Columns.Select(c => c.Provenance is ColumnProvenance.BaseColumn baseColumn
+                ? c with { Provenance = baseColumn with { IsNullableSide = true } }
+                : c)],
+        };
 
     private static IReadOnlyList<ResolvedColumn> ResolveFlattenedSourceColumns(TableReference source, ResolutionContext context) =>
         [.. FlattenJoins(source).SelectMany(leaf => ResolveTableReference(leaf.Reference, context, aliasOverride: null).Entry.Relation.Columns)];

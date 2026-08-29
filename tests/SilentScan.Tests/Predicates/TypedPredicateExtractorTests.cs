@@ -275,6 +275,22 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_NumericRangeTautologyThroughDerivedTableWrappingLeftOuterJoin_NeverEliminated()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL);",
+            "CREATE TABLE dbo.Lines (OrderId INT NOT NULL, Qty INT NOT NULL);",
+            """
+            SELECT 1
+            FROM (SELECT o.Id, l.Qty FROM dbo.Orders o LEFT JOIN dbo.Lines l ON o.Id = l.OrderId) d
+            WHERE d.Qty < 5 OR d.Qty >= 5;
+            """);
+
+        Assert.Equal(2, result.TypedFindings.Count(f => f.Column.ColumnName == "Qty"));
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "predicate eliminated by normalization");
+    }
+
+    [Fact]
     public void Extract_NestedSubqueryHasOwnScope_DoesNotLeakOuterAlias()
     {
         var findings = Extract(

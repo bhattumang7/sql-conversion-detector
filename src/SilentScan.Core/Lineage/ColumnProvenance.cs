@@ -17,7 +17,7 @@ public abstract record ColumnProvenance
     {
     }
 
-    public sealed record BaseColumn(string TableQualifiedName, string ColumnName, SqlType? Type, int Depth = 0) : ColumnProvenance;
+    public sealed record BaseColumn(string TableQualifiedName, string ColumnName, SqlType? Type, int Depth = 0, bool IsNullableSide = false) : ColumnProvenance;
 
     public sealed record Declared(SqlType Type, string? TableQualifiedName = null, int Depth = 0) : ColumnProvenance;
 
