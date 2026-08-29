@@ -64,7 +64,7 @@ public static class LiveScanRunner
         using (var dynamicExtrasStage = progress.Begin("discovering dynamic-SQL temp tables"))
         {
             var discovered = DynamicSqlTempTableDiscovery.Discover(
-                parseResultSource(), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name, catalog.CompatibilityLevel);
+                parseResultSource(), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name, catalog.CompatibilityLevel, catalog);
             catalog.MergeFileModeExtras(discovered);
             dynamicExtrasStage.Complete($"{catalog.Tables.Count:N0} tables");
         }

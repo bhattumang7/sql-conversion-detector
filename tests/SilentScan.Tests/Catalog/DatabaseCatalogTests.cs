@@ -70,4 +70,34 @@ public sealed class DatabaseCatalogTests
 
         Assert.Null(catalog.Find("AnyDatabase.dbo.tblCoordinatingAgencies"));
     }
+
+    [Fact]
+    public void Find_TempTableUnderCaseSensitiveTempdbButCaseInsensitiveDatabase_KeepsDifferentlyCasedTempNamesDistinct()
+    {
+        var catalog = new DatabaseCatalog
+        {
+            DefaultCollation = new Collation("SQL_Latin1_General_CP1_CI_AS"),
+            TempdbCollation = new Collation("SQL_Latin1_General_CP1_CS_AS"),
+        };
+        var upper = new CatalogTable(null, "#Foo", CatalogTableKind.TemporaryTable, [], [], "test.sql", 1);
+        var lower = new CatalogTable(null, "#foo", CatalogTableKind.TemporaryTable, [], [], "test.sql", 2);
+        catalog.AddOrReplace(upper, scope: "dbo.MyProc");
+        catalog.AddOrReplace(lower, scope: "dbo.MyProc");
+
+        Assert.Same(upper, catalog.Find("#Foo", scope: "dbo.MyProc"));
+        Assert.Same(lower, catalog.Find("#foo", scope: "dbo.MyProc"));
+    }
+
+    [Fact]
+    public void Find_RegularTableUnderCaseSensitiveTempdbButCaseInsensitiveDatabase_StillFoldsCase()
+    {
+        var catalog = new DatabaseCatalog
+        {
+            DefaultCollation = new Collation("SQL_Latin1_General_CP1_CI_AS"),
+            TempdbCollation = new Collation("SQL_Latin1_General_CP1_CS_AS"),
+        };
+        catalog.AddOrReplace(new CatalogTable("dbo", "Customers", CatalogTableKind.Table, [], [], "test.sql", 1));
+
+        Assert.NotNull(catalog.Find("dbo.customers"));
+    }
 }

@@ -174,8 +174,10 @@ public static partial class DynamicSqlPipeline
             new(Findings, Tier1, Typed, ExpressionDerived, CollationConflicts, WriteLoss, TvfFence, ScalarUdf, Unparameterized, Skipped);
     }
 
+    private readonly record struct DynamicSqlParseOptions(bool InitialQuotedIdentifiers, int? CompatibilityLevel);
+
     private static bool TryParseAndClassify(
-        DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence>? placeholders, int? compatibilityLevel, ResultAccumulator accumulator,
+        DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence>? placeholders, DynamicSqlParseOptions parseOptions, ResultAccumulator accumulator,
         [NotNullWhen(true)] out SqlParseResult? innerParseResult,
         out Func<int, int, SourceSpan>? elisionMap)
     {
@@ -192,14 +194,14 @@ public static partial class DynamicSqlPipeline
         }
 
         var virtualPath = $"{script.CallSite.SourcePath}::dynamic-sql@{script.CallSite.Line}";
-        var parseResult = SqlScriptParser.ParseText(virtualPath, script.InnerText, initialQuotedIdentifiers: true, compatibilityLevel);
+        var parseResult = SqlScriptParser.ParseText(virtualPath, script.InnerText, parseOptions.InitialQuotedIdentifiers, parseOptions.CompatibilityLevel);
 
         if (parseResult.HasErrors)
         {
             if (placeholders is { Count: > 0 })
             {
 
-                if (TryReparseWithTargetedElision(script, placeholders, parseResult.Errors, compatibilityLevel, out var elidedParseResult, out var map))
+                if (TryReparseWithTargetedElision(script, placeholders, parseResult.Errors, parseOptions, out var elidedParseResult, out var map))
                 {
                     innerParseResult = elidedParseResult;
                     elisionMap = map;
@@ -240,13 +242,13 @@ public static partial class DynamicSqlPipeline
     private static readonly string[] ElisionFillerCandidates = [" ", "1=1", "NULL", "(SELECT 1)"];
 
     private static bool TryReparseWithTargetedElision(
-        DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence> placeholders, IReadOnlyList<ParseError> originalErrors, int? compatibilityLevel,
+        DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence> placeholders, IReadOnlyList<ParseError> originalErrors, DynamicSqlParseOptions parseOptions,
         [NotNullWhen(true)] out SqlParseResult? elidedParseResult,
         [NotNullWhen(true)] out Func<int, int, SourceSpan>? map)
     {
         foreach (var filler in ElisionFillerCandidates)
         {
-            if (TryReparseWithTargetedElision(script, placeholders, originalErrors, filler, compatibilityLevel, out elidedParseResult, out map))
+            if (TryReparseWithTargetedElision(script, placeholders, originalErrors, filler, parseOptions, out elidedParseResult, out map))
             {
                 return true;
             }
@@ -258,7 +260,7 @@ public static partial class DynamicSqlPipeline
     }
 
     private static bool TryReparseWithTargetedElision(
-        DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence> placeholders, IReadOnlyList<ParseError> originalErrors, string filler, int? compatibilityLevel,
+        DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence> placeholders, IReadOnlyList<ParseError> originalErrors, string filler, DynamicSqlParseOptions parseOptions,
         [NotNullWhen(true)] out SqlParseResult? elidedParseResult,
         [NotNullWhen(true)] out Func<int, int, SourceSpan>? map)
     {
@@ -282,7 +284,7 @@ public static partial class DynamicSqlPipeline
 
             var toElideNow = placeholders.Where(p => toElide.Contains(PlaceholderToken(p))).ToList();
             var variant = NeutralElisionVariant.Build(script.InnerText, toElideNow, filler);
-            var parseResult = SqlScriptParser.ParseText(virtualPath, variant.Text, initialQuotedIdentifiers: true, compatibilityLevel);
+            var parseResult = SqlScriptParser.ParseText(virtualPath, variant.Text, parseOptions.InitialQuotedIdentifiers, parseOptions.CompatibilityLevel);
             if (!parseResult.HasErrors)
             {
                 elidedParseResult = parseResult;
@@ -411,7 +413,9 @@ public static partial class DynamicSqlPipeline
         ResultAccumulator accumulator)
     {
         var placeholders = script.PlaceholderOccurrences;
-        if (!TryParseAndClassify(script, placeholders, context.Catalog.CompatibilityLevel, accumulator, out var innerParseResult, out var elisionMap))
+        var parseOptions = new DynamicSqlParseOptions(
+            context.Catalog.ResolveDynamicSqlQuotedIdentifier(script.Scope.ProcScope), context.Catalog.CompatibilityLevel);
+        if (!TryParseAndClassify(script, placeholders, parseOptions, accumulator, out var innerParseResult, out var elisionMap))
         {
             return;
         }

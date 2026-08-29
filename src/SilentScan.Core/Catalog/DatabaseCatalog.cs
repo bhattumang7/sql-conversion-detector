@@ -177,6 +177,16 @@ public sealed class DatabaseCatalog
     public bool TryGetModuleUsesQuotedIdentifier(string qualifiedName, out bool usesQuotedIdentifier) =>
         _moduleUsesQuotedIdentifierByQualifiedName.TryGetValue(qualifiedName, out usesQuotedIdentifier);
 
+    public bool ResolveDynamicSqlQuotedIdentifier(string? enclosingModuleQualifiedName)
+    {
+        if (enclosingModuleQualifiedName is not null && TryGetModuleUsesQuotedIdentifier(enclosingModuleQualifiedName, out var usesQuotedIdentifier))
+        {
+            return usesQuotedIdentifier;
+        }
+
+        return true;
+    }
+
     public void AddModuleUsesAnsiNulls(string qualifiedName, bool usesAnsiNulls) =>
         _moduleUsesAnsiNullsByQualifiedName[qualifiedName] = usesAnsiNulls;
 
@@ -282,35 +292,82 @@ public sealed class DatabaseCatalog
         set
         {
             _defaultCollation = value;
-            var comparer = Collation.IdentifierComparer(value);
-            if (ReferenceEquals(comparer, _identifierComparer))
-            {
-                return;
-            }
-
-            _identifierComparer = comparer;
-            _tablesByQualifiedName = new(_tablesByQualifiedName, comparer);
-            _typeAliasesByQualifiedName = new(_typeAliasesByQualifiedName, comparer);
-            _scalarFunctionReturnTypesByQualifiedName = new(_scalarFunctionReturnTypesByQualifiedName, comparer);
-            _tableValuedFunctionKindsByQualifiedName = new(_tableValuedFunctionKindsByQualifiedName, comparer);
-            _scalarUdfInfoByQualifiedName = new(_scalarUdfInfoByQualifiedName, comparer);
-            _indexedViewIndexesByQualifiedName = new(_indexedViewIndexesByQualifiedName, comparer);
-            _viewCompiledColumnsByQualifiedName = new(_viewCompiledColumnsByQualifiedName, comparer);
-            _moduleUsesQuotedIdentifierByQualifiedName = new(_moduleUsesQuotedIdentifierByQualifiedName, comparer);
-            _moduleUsesAnsiNullsByQualifiedName = new(_moduleUsesAnsiNullsByQualifiedName, comparer);
-            _moduleIsRecompiledByQualifiedName = new(_moduleIsRecompiledByQualifiedName, comparer);
-            _moduleUsesDatabaseCollationByQualifiedName = new(_moduleUsesDatabaseCollationByQualifiedName, comparer);
-            _moduleIsSchemaBoundByQualifiedName = new(_moduleIsSchemaBoundByQualifiedName, comparer);
-            _synonymTargetsByQualifiedName = new(_synonymTargetsByQualifiedName, comparer);
-            _procedureParametersByQualifiedName = new(_procedureParametersByQualifiedName, comparer);
-            _columnMasterKeyEnclaveSupportByName = new(_columnMasterKeyEnclaveSupportByName, comparer);
-            _columnEncryptionKeyMasterKeysByName = new(_columnEncryptionKeyMasterKeysByName, comparer);
+            SyncIdentifierComparer();
         }
     }
 
-    public Collation? TempdbCollation { get; set; }
+    private Collation? _tempdbCollation;
+
+    public Collation? TempdbCollation
+    {
+        get => _tempdbCollation;
+        set
+        {
+            _tempdbCollation = value;
+            SyncIdentifierComparer();
+        }
+    }
 
     public Collation? EffectiveTempdbCollation => TempdbCollation ?? DefaultCollation;
+
+    private StringComparer? _activeDefaultComparer;
+    private StringComparer? _activeTempComparer;
+
+    private void SyncIdentifierComparer()
+    {
+        var defaultComparer = Collation.IdentifierComparer(_defaultCollation);
+        var tempComparer = Collation.IdentifierComparer(EffectiveTempdbCollation);
+        if (ReferenceEquals(defaultComparer, _activeDefaultComparer) && ReferenceEquals(tempComparer, _activeTempComparer))
+        {
+            return;
+        }
+
+        _activeDefaultComparer = defaultComparer;
+        _activeTempComparer = tempComparer;
+
+        var comparer = ReferenceEquals(defaultComparer, tempComparer)
+            ? defaultComparer
+            : new TempScopedIdentifierComparer(defaultComparer, tempComparer);
+
+        _identifierComparer = comparer;
+        _tablesByQualifiedName = new(_tablesByQualifiedName, comparer);
+        _typeAliasesByQualifiedName = new(_typeAliasesByQualifiedName, comparer);
+        _scalarFunctionReturnTypesByQualifiedName = new(_scalarFunctionReturnTypesByQualifiedName, comparer);
+        _tableValuedFunctionKindsByQualifiedName = new(_tableValuedFunctionKindsByQualifiedName, comparer);
+        _scalarUdfInfoByQualifiedName = new(_scalarUdfInfoByQualifiedName, comparer);
+        _indexedViewIndexesByQualifiedName = new(_indexedViewIndexesByQualifiedName, comparer);
+        _viewCompiledColumnsByQualifiedName = new(_viewCompiledColumnsByQualifiedName, comparer);
+        _moduleUsesQuotedIdentifierByQualifiedName = new(_moduleUsesQuotedIdentifierByQualifiedName, comparer);
+        _moduleUsesAnsiNullsByQualifiedName = new(_moduleUsesAnsiNullsByQualifiedName, comparer);
+        _moduleIsRecompiledByQualifiedName = new(_moduleIsRecompiledByQualifiedName, comparer);
+        _moduleUsesDatabaseCollationByQualifiedName = new(_moduleUsesDatabaseCollationByQualifiedName, comparer);
+        _moduleIsSchemaBoundByQualifiedName = new(_moduleIsSchemaBoundByQualifiedName, comparer);
+        _synonymTargetsByQualifiedName = new(_synonymTargetsByQualifiedName, comparer);
+        _procedureParametersByQualifiedName = new(_procedureParametersByQualifiedName, comparer);
+        _columnMasterKeyEnclaveSupportByName = new(_columnMasterKeyEnclaveSupportByName, comparer);
+        _columnEncryptionKeyMasterKeysByName = new(_columnEncryptionKeyMasterKeysByName, comparer);
+    }
+
+    private sealed class TempScopedIdentifierComparer(StringComparer defaultComparer, StringComparer tempComparer) : StringComparer
+    {
+        private StringComparer ComparerFor(string? value)
+        {
+            if (value is null)
+            {
+                return defaultComparer;
+            }
+
+            var scopeSeparator = value.LastIndexOf("::", StringComparison.Ordinal);
+            var name = scopeSeparator < 0 ? value : value[(scopeSeparator + 2)..];
+            return name is { Length: > 0 } && name[0] == '#' ? tempComparer : defaultComparer;
+        }
+
+        public override int Compare(string? x, string? y) => ComparerFor(x).Compare(x, y);
+
+        public override bool Equals(string? x, string? y) => ComparerFor(x).Equals(x, y);
+
+        public override int GetHashCode(string obj) => ComparerFor(obj).GetHashCode(obj);
+    }
 
     public int? CompatibilityLevel { get; set; }
 
