@@ -21,6 +21,12 @@ public sealed record Collation(string Name, CollationSource Source = CollationSo
         || Name.Contains("_BIN_", StringComparison.OrdinalIgnoreCase)
         || Name.Contains("_BIN2", StringComparison.OrdinalIgnoreCase);
 
+    public bool IsAccentInsensitive =>
+        Name.EndsWith("_AI", StringComparison.OrdinalIgnoreCase)
+        || Name.Contains("_AI_", StringComparison.OrdinalIgnoreCase);
+
+    public bool GuaranteesDistinctLiteralsAreUnequal => IsCaseSensitive && !IsAccentInsensitive;
+
     public static StringComparer IdentifierComparer(Collation? collation) =>
         collation is { IsCaseSensitive: true } ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
 }

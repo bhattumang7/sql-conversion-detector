@@ -6,7 +6,7 @@ namespace SilentScan.Core.Predicates.Normalization;
 
 public static class PredicateSurvivalAnalyzer
 {
-    public readonly record struct ColumnFacts(bool? IsNotNull, bool? IsCaseSensitiveCollation);
+    public readonly record struct ColumnFacts(bool? IsNotNull, bool? CollationGuaranteesDistinctLiterals);
 
     public static IReadOnlySet<TSqlFragment> FindDeadComparisons(
         BooleanExpression? searchCondition, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
@@ -397,7 +397,7 @@ public static class PredicateSurvivalAnalyzer
 
         var (required, excluded) = PartitionStringConstraints(literalConstraints);
         if (required.Overlaps(excluded)
-            || (required.Count >= 2 && IsColumnCaseSensitive(leaves, resolveColumnFacts) == true))
+            || (required.Count >= 2 && ColumnGuaranteesDistinctLiterals(leaves, resolveColumnFacts) == true))
         {
             return (true, confirmedNotNull);
         }
@@ -537,7 +537,7 @@ public static class PredicateSurvivalAnalyzer
         IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>
         leaves.Count > 0 ? resolveColumnFacts(leaves[0].ColumnRef).IsNotNull : null;
 
-    private static bool? IsColumnCaseSensitive(
+    private static bool? ColumnGuaranteesDistinctLiterals(
         IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>
-        leaves.Count > 0 ? resolveColumnFacts(leaves[0].ColumnRef).IsCaseSensitiveCollation : null;
+        leaves.Count > 0 ? resolveColumnFacts(leaves[0].ColumnRef).CollationGuaranteesDistinctLiterals : null;
 }

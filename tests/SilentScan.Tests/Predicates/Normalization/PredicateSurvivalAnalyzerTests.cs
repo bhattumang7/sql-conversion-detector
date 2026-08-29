@@ -15,14 +15,15 @@ public sealed class PredicateSurvivalAnalyzerTests
             "NullableCol" => false,
             _ => null,
         };
-        bool? isCaseSensitive = name switch
+        bool? guaranteesDistinctLiterals = name switch
         {
             "CsCol" => true,
             "CiCol" => false,
+            "CsAiCol" => false,
             _ => null,
         };
 
-        return new PredicateSurvivalAnalyzer.ColumnFacts(isNotNull, isCaseSensitive);
+        return new PredicateSurvivalAnalyzer.ColumnFacts(isNotNull, guaranteesDistinctLiterals);
     }
 
     private sealed class LeafCollector : TSqlFragmentVisitor
@@ -198,6 +199,12 @@ public sealed class PredicateSurvivalAnalyzerTests
 
         Assert.Empty(Analyze("CiCol = 'Foo' AND CiCol = 'foo'").Dead);
         Assert.Empty(Analyze("UnknownCollationCol = 'Foo' AND UnknownCollationCol = 'foo'").Dead);
+    }
+
+    [Fact]
+    public void DifferentLiteralsRequiredEquals_CaseSensitiveButAccentInsensitiveCollation_NeverConcluded()
+    {
+        Assert.Empty(Analyze("CsAiCol = 'cafe' AND CsAiCol = 'café'").Dead);
     }
 
     [Fact]

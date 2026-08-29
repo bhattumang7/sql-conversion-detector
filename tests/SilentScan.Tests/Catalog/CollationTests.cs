@@ -44,4 +44,39 @@ public sealed class CollationTests
     {
         Assert.False(new Collation(name).IsCaseSensitive);
     }
+
+    [Theory]
+    [InlineData("Latin1_General_100_CS_AI")]
+    [InlineData("Latin1_General_CI_AI")]
+    public void IsAccentInsensitive_AiCollation_ReturnsTrue(string name)
+    {
+        Assert.True(new Collation(name).IsAccentInsensitive);
+    }
+
+    [Theory]
+    [InlineData("Latin1_General_CS_AS")]
+    [InlineData("SQL_Latin1_General_CP1_CS_AS")]
+    [InlineData("Latin1_General_100_BIN2")]
+    public void IsAccentInsensitive_AsOrBinaryCollation_ReturnsFalse(string name)
+    {
+        Assert.False(new Collation(name).IsAccentInsensitive);
+    }
+
+    [Theory]
+    [InlineData("Latin1_General_CS_AS")]
+    [InlineData("SQL_Latin1_General_CP1_CS_AS")]
+    [InlineData("Latin1_General_100_BIN2")]
+    public void GuaranteesDistinctLiteralsAreUnequal_CaseSensitiveAndAccentSensitive_ReturnsTrue(string name)
+    {
+        Assert.True(new Collation(name).GuaranteesDistinctLiteralsAreUnequal);
+    }
+
+    [Theory]
+    [InlineData("Latin1_General_100_CS_AI")]
+    [InlineData("Latin1_General_CI_AS")]
+    [InlineData("SQL_Latin1_General_CP1_CI_AS")]
+    public void GuaranteesDistinctLiteralsAreUnequal_CaseInsensitiveOrAccentInsensitive_ReturnsFalse(string name)
+    {
+        Assert.False(new Collation(name).GuaranteesDistinctLiteralsAreUnequal);
+    }
 }
