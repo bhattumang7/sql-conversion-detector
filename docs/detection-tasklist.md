@@ -19,6 +19,141 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
+- [ ] **`VECTOR` is entirely unmodeled in the type system.** Oracle-confirmed
+      on SQL Server 2025: `VECTOR(n)` is a real, working scalar type
+      (`VECTOR_DISTANCE`, comparisons, casts all function normally), but
+      `SqlTypeCategory`/`SqlType` has no case for it at all. Every rule built
+      on type inference (sargability, write-loss, call-graph argument
+      matching) silently has no opinion on a `VECTOR` column - scope the
+      minimum needed (does it need its own category, or fold into an opaque
+      "unknown, never guess" bucket for now) before touching the type table.
+
+- [ ] **`CatalogBuilder`'s column-nullability fallback ignores
+      `ANSI_NULL_DFLT_OFF`/`ON`.** Oracle-confirmed: a `CREATE TABLE` column
+      with no explicit `NULL`/`NOT NULL` is created `NOT NULL` under `SET
+      ANSI_NULL_DFLT_OFF ON` (or the database-level `ANSI_NULL_DEFAULT`
+      option, common in legacy/migrated databases) - but
+      `CatalogBuilder.cs`'s fallback hardcodes `isNullable = true`
+      unconditionally when no explicit constraint is present. Highest
+      fan-out item on this list: every rule that reads column nullability
+      from the catalog (null-comparison predicates, write-loss, join
+      semantics) inherits the wrong fact for any script scanned under this
+      setting.
+
+- [ ] **`TransactionHygieneScanner`'s transaction-state model has three
+      distinct blind spots**, all confirmed live, best fixed as one
+      redesign rather than three patches: (1) `SAVE TRANSACTION` /
+      `ROLLBACK TRANSACTION <savepoint>` is treated identically to a full
+      `ROLLBACK TRANSACTION` (`case CommitTransactionStatement or
+      RollbackTransactionStatement`) - a savepoint rollback does not
+      decrement `@@TRANCOUNT`, so a `SAVE TRANSACTION sp1; ... ROLLBACK
+      TRANSACTION sp1; RETURN;` branch is misclassified as "properly
+      closed" when the transaction is actually left open on return; (2) the
+      scanner only starts tracking on an explicit `BeginTransactionStatement`
+      - under `SET IMPLICIT_TRANSACTIONS ON`, ordinary DML/DDL silently
+      opens a transaction (`@@TRANCOUNT` becomes 1 after a plain `CREATE
+      TABLE` with no `BEGIN TRAN` at all) and the scanner never begins
+      tracking it; (3) zero references to `XACT_ABORT`/`XACT_STATE()`
+      anywhere in Core - under `XACT_ABORT ON`, a `CATCH` block still runs
+      but the transaction is silently marked doomed rather than rolled
+      back, reported only at end-of-batch (`Msg 3998`), a state the scanner
+      has no way to distinguish from a correctly-handled `CATCH`.
+
+- [ ] **`WriteLossNumericScaleNarrowingRuleId`'s "silent, no error" claim is
+      false under `NUMERIC_ROUNDABORT ON`.** Oracle-confirmed:
+      `DECLARE @d DECIMAL(5,2) = 123.456` silently rounds to `123.46` when
+      `NUMERIC_ROUNDABORT` is `OFF` (the default), but raises `Msg 8115,
+      Arithmetic overflow error` when it's `ON`. Scoped narrowly to
+      same-family numeric/decimal scale narrowing - confirmed *not* to
+      affect `INT` truncation, `VARCHAR` length truncation, or
+      `FLOAT`-to-`DECIMAL` narrowing under the same setting.
+
+- [ ] **`READ_COMMITTED_SNAPSHOT` × `READCOMMITTEDLOCK` table hint.**
+      `ControlFlowRiskScanner.cs` matches `TableHintKind.NoLock`/
+      `ReadUncommitted` for dirty-read risk but not `ReadCommittedLock`. On
+      a database with RCSI on (`sys.databases.is_read_committed_snapshot_on`,
+      catalog-decidable), `READCOMMITTEDLOCK` silently reverts that one
+      query from row-versioned to blocking/locking reads - a real
+      concurrency/consistency change invisible from the rest of the batch.
+
+- [ ] **`DURABILITY = SCHEMA_ONLY` memory-optimized tables: zero
+      coverage.** Pure DDL-time fact, no live-database dependency. A table
+      declared `WITH (DURABILITY = SCHEMA_ONLY)` loses all data on
+      restart/failover - about as squarely "silent data loss" as this
+      tool's mission gets, and nothing currently checks for it despite the
+      rest of the memory-optimized-table rule family already existing.
+
+- [ ] **`RemovedSecurityStoredProcedureNames` is missing two engine-tracked
+      names.** Diffed the full list against `sys.dm_os_performance_counters`
+      `'Deprecated Features'` (255 entries, authoritative for the exact
+      running engine version): `sp_change_users_login` and
+      `sp_changedbowner` are tracked deprecated security/user-mapping
+      procedures, same flavor as `sp_addlogin`/`sp_grantdbaccess` already
+      in the set, but absent from it. (The same diff also found three of
+      our entries - `sp_dropalias`, `sp_helprotect`, `sp_helpuser` - not in
+      the engine's current tracked list; not necessarily wrong to keep,
+      just not corroborated by this source.)
+
+- [ ] **Legacy LOB statements (`READTEXT`/`WRITETEXT`/`UPDATETEXT`/
+      `TEXTPTR`/`TEXTVALID`) have zero coverage anywhere.** Confirmed by two
+      independent methods: none of the five appear as a referenced AST node
+      type anywhere in `src/`, and all five are official
+      engine-tracked deprecated features (same `sys.dm_os_performance_counters`
+      diff as above).
+
+- [ ] **Dynamic Data Masking has zero coverage as a feature area** - not one
+      missing case, no references anywhere in Core at all (no check for
+      masked-column arithmetic/comparison exposure, no check for
+      `default()`'s per-type sentinel values e.g. `1900-01-01` for
+      `DATETIME`, oracle-confirmed). Scope, not a single bug: needs its own
+      pass to decide what's decidable and worth the precision bar, not a
+      quick patch. Separately, oracle-confirmed the engine recognizes an
+      undocumented fifth masking function name, `datetime()` (parses,
+      arity-checked, distinct from the four publicly documented functions
+      `default`/`email`/`random`/`partial`) - noted here so it isn't
+      rediscovered from scratch if this area gets scoped later.
+
+- [ ] **`ALLOW_ROW_LOCKS`/`ALLOW_PAGE_LOCKS = OFF` is a hidden concurrency
+      hazard, zero coverage.** Both are plain DDL-declared/catalog-visible
+      facts (`sys.indexes.allow_row_locks`/`allow_page_locks`), fully
+      decidable, currently referenced nowhere except as a column name in
+      `SystemCatalogViewRegistry`. An index built with either `OFF` forces
+      page- or table-level locking for any DML touching it - a plain
+      `UPDATE`/`DELETE` statement gives no hint of this, so two statements a
+      developer assumes can run concurrently against unrelated rows can
+      block or deadlock instead. Same shape as the `READCOMMITTEDLOCK`/RCSI
+      gap already on this list - a table-hint/index-option silently
+      reverting locking granularity in a way invisible from the DML site.
+
+- [ ] **`STATISTICS_NORECOMPUTE` index option is a distinct staleness gap
+      from `MissingStatisticsScanner`.** The shipped rule catches "no
+      statistic exists and auto-create is off." An index built `WITH
+      (STATISTICS_NORECOMPUTE = ON)` has a statistic that exists but is
+      pinned - it is never auto-refreshed regardless of the database's
+      `AUTO_UPDATE_STATISTICS` setting. Same downstream symptom (stale
+      cardinality estimate), different DDL surface, currently zero coverage.
+
+- [ ] **`CURSOR_CLOSE_ON_COMMIT` - zero coverage, narrow blast radius.**
+      When `ON`, any open cursor is silently closed by the next
+      `COMMIT`/`ROLLBACK` - a script that opens a cursor, commits mid-flow,
+      then keeps fetching from it errors at runtime with no hint from the
+      cursor-open site itself. Real and decidable (session setting × cursor
+      lifetime across a commit), but only reachable by scripts that mix
+      cursors with a mid-flow commit - low priority relative to the rest of
+      this list, recorded so it isn't rediscovered from scratch.
+
+- [ ] **Compound assignment (`+=`, `-=`, etc.) is invisible to write-loss
+      detection.** `VariableWriteSites.ResolveAssignedExpression` (and every
+      write-loss/narrowing rule built on it) only resolves a variable's
+      assigned value when `AssignmentKind` is `Equals` - all nine compound
+      forms (`+=`/`-=`/`*=`/`/=`/`%=`/`&=`/`|=`/`^=`/`+=` on strings) return
+      `null`, so `SET @decimal_var += @wider_value` gets no narrowing check
+      at all. `DynamicSqlTransfer.cs` already special-cases `AddEquals`
+      elsewhere in the codebase, so the pattern for handling it exists -
+      it's just not threaded through the shared write-resolution helper.
+      False-negative shaped (matches this project's precision bias), but on
+      an extremely common T-SQL idiom.
+
 - [ ] **`STRING_SPLIT` separator must be exactly one character.** A literal
       (or constant-folded) separator argument of any length other than 1 is
       a compile-error fact, pure source-level analysis, no catalog needed.
@@ -444,3 +579,15 @@ their own findings.
 Thresholds are calibrated against the real measured distribution, never copied
 from convention. Record the calibration in `detection-reference.md`
 Appendix 10.
+
+Before writing (or re-auditing) a rule whose rationale depends on a session
+setting, a keyword list, a data-type set, or a fixed option enum: find the
+engine's own closed enumeration for it - a ScriptDom enum, a live catalog/DMV
+(`sys.dm_os_performance_counters`, `sys.configurations`,
+`sys.database_scoped_configurations`), or an internal engine table via
+`vendor/sql2025` (target the function that *consumes* a fixed-size table,
+not a decompiled enum's member names - those rarely survive compilation) -
+and diff every member against the rule's actual coverage. Free-text sources
+(`sys.messages`) don't work for this: there's no reliable way to rank them by
+relevance, so don't try. Oracle-verify every surviving candidate before
+trusting it - a structurally-missing case is not yet a confirmed gap.
