@@ -216,6 +216,22 @@ public sealed class DeprecatedSyntaxScannerTests
     }
 
     [Fact]
+    public void NotLessThanNull_AdHocScript_StillFiresNonAnsi()
+    {
+        var findings = Scan("SELECT * FROM dbo.T WHERE Col !< NULL;");
+
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.NonAnsiComparisonOperator);
+    }
+
+    [Fact]
+    public void NotGreaterThanNull_AdHocScript_StillFiresNonAnsi()
+    {
+        var findings = Scan("SELECT * FROM dbo.T WHERE Col !> NULL;");
+
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.NonAnsiComparisonOperator);
+    }
+
+    [Fact]
     public void NotEqualToBracketsNull_Fires()
     {
         var findings = Scan("SELECT * FROM dbo.T WHERE Col <> NULL;");

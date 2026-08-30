@@ -43,7 +43,7 @@ public static class DeprecatedSyntaxScanner
 
         var isAdHocScript = moduleQualifiedName is null && HasNoModuleDefinition(parseResult.Fragment);
 
-        var visitor = new Visitor(parseResult.SourcePath, ansiNullsIsOff, skipNullComparisonFindings: isAdHocScript);
+        var visitor = new Visitor(parseResult.SourcePath, ansiNullsIsOff, skipComparisonFindings: isAdHocScript);
         parseResult.Fragment.Accept(visitor);
         findings.AddRange(visitor.Findings);
 
@@ -141,63 +141,114 @@ public static class DeprecatedSyntaxScanner
 
     private static List<DeprecatedSyntaxFinding> ScanAdHocAnsiNullComparisons(TSqlScript script, string sourcePath)
     {
-        var findings = new List<DeprecatedSyntaxFinding>();
-        var ansiNullsIsOff = false;
+        var policy = new AnsiNullsFlowPolicy(sourcePath);
+        var state = default(AnsiNullsFlowState);
 
         foreach (var batch in script.Batches)
         {
-            ansiNullsIsOff = WalkAnsiNullsStatements(batch.Statements, ansiNullsIsOff, sourcePath, findings);
+            state = ProcedureBodyFlowWalker.Walk(batch.Statements, state with { Depth = 0 }, policy);
         }
 
-        return findings;
+        return policy.Findings;
     }
 
-    private static bool WalkAnsiNullsStatements(IList<TSqlStatement> statements, bool ansiNullsIsOff, string sourcePath, List<DeprecatedSyntaxFinding> findings)
+    private readonly record struct AnsiNullsFlowState(bool IsOff, bool RestoreIsOff, int Depth);
+
+    private sealed class AnsiNullsFlowPolicy(string sourcePath) : IStatementFlowPolicy<AnsiNullsFlowState>
     {
-        foreach (var statement in statements)
+        public List<DeprecatedSyntaxFinding> Findings { get; } = [];
+
+        public bool IsDeclined(AnsiNullsFlowState state) => false;
+
+        public bool IsDone(AnsiNullsFlowState state) => false;
+
+        public AnsiNullsFlowState PerStatement(TSqlStatement statement, AnsiNullsFlowState state)
         {
-            ansiNullsIsOff = WalkAnsiNullsStatement(statement, ansiNullsIsOff, sourcePath, findings);
+            if (statement is PredicateSetStatement { Options: var options, IsOn: var isOn } && (options & SetOptions.AnsiNulls) != 0)
+            {
+                return state with { IsOff = !isOn };
+            }
+
+            if (statement is BeginEndBlockStatement or IfStatement or WhileStatement or TryCatchStatement)
+            {
+                return state;
+            }
+
+            var walker = new ComparisonFindingVisitor(sourcePath, state.IsOff);
+            statement.Accept(walker);
+            Findings.AddRange(walker.Findings);
+            return state;
         }
 
-        return ansiNullsIsOff;
+        public AnsiNullsFlowState OnReturn(AnsiNullsFlowState state, TSqlStatement statement) => state;
+
+        public AnsiNullsFlowState OnThrow(AnsiNullsFlowState state) => state;
+
+        public AnsiNullsFlowState OnGoTo(AnsiNullsFlowState state) => state;
+
+        public AnsiNullsFlowState CloneForBranch(AnsiNullsFlowState state) =>
+            state with { RestoreIsOff = state.IsOff, Depth = state.Depth + 1 };
+
+        public AnsiNullsFlowState Merge(AnsiNullsFlowState a, AnsiNullsFlowState b)
+        {
+            var winner = a.Depth >= b.Depth ? a : b;
+            return new AnsiNullsFlowState(winner.RestoreIsOff, winner.RestoreIsOff, winner.Depth - 1);
+        }
     }
 
-    private static bool WalkAnsiNullsStatement(TSqlStatement statement, bool ansiNullsIsOff, string sourcePath, List<DeprecatedSyntaxFinding> findings)
+    private static bool IsNullLiteral(ScalarExpression expression) =>
+        expression is NullLiteral;
+
+    private static string OperatorText(BooleanComparisonType type) => type switch
     {
-        if (statement is PredicateSetStatement { Options: var options, IsOn: var isOn }
-            && (options & SetOptions.AnsiNulls) != 0)
+        BooleanComparisonType.NotLessThan => "!<",
+        BooleanComparisonType.NotGreaterThan => "!>",
+        BooleanComparisonType.NotEqualToExclamation => "!=",
+        _ => type.ToString(),
+    };
+
+    private static (DeprecatedSyntaxFindingKind Kind, string Detail)? ClassifyComparison(
+        BooleanComparisonType comparisonType, bool comparesToNull, bool ansiNullsIsOff)
+    {
+        switch (comparisonType)
         {
-            return !isOn;
-        }
+            case BooleanComparisonType.Equals when comparesToNull && !ansiNullsIsOff:
+                return (DeprecatedSyntaxFindingKind.EqualsNullComparison,
+                    "\"= NULL\" never matches any row under the default ANSI_NULLS ON session setting, including a genuinely NULL value - use \"IS NULL\".");
 
-        switch (statement)
-        {
-            case BeginEndBlockStatement block:
-                return WalkAnsiNullsStatements(block.StatementList.Statements, ansiNullsIsOff, sourcePath, findings);
+            case BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation
+                when comparesToNull && !ansiNullsIsOff:
+                return (DeprecatedSyntaxFindingKind.NotEqualsNullComparison,
+                    "\"<> NULL\"/\"!= NULL\" never matches any row under the default ANSI_NULLS ON session setting - use \"IS NOT NULL\".");
 
-            case IfStatement ifStatement:
-                WalkAnsiNullsStatement(ifStatement.ThenStatement, ansiNullsIsOff, sourcePath, findings);
-                if (ifStatement.ElseStatement is not null)
-                {
-                    WalkAnsiNullsStatement(ifStatement.ElseStatement, ansiNullsIsOff, sourcePath, findings);
-                }
-
-                return ansiNullsIsOff;
-
-            case WhileStatement whileStatement:
-                WalkAnsiNullsStatement(whileStatement.Statement, ansiNullsIsOff, sourcePath, findings);
-                return ansiNullsIsOff;
-
-            case TryCatchStatement tryCatch:
-                WalkAnsiNullsStatements(tryCatch.TryStatements.Statements, ansiNullsIsOff, sourcePath, findings);
-                WalkAnsiNullsStatements(tryCatch.CatchStatements.Statements, ansiNullsIsOff, sourcePath, findings);
-                return ansiNullsIsOff;
+            case BooleanComparisonType.NotEqualToExclamation or BooleanComparisonType.NotLessThan or BooleanComparisonType.NotGreaterThan:
+                return (DeprecatedSyntaxFindingKind.NonAnsiComparisonOperator,
+                    $"Non-ANSI comparison operator \"{OperatorText(comparisonType)}\" used - write the ANSI-standard form instead.");
 
             default:
-                var walker = new NullComparisonVisitor(sourcePath, ansiNullsIsOff);
-                statement.Accept(walker);
-                findings.AddRange(walker.Findings);
-                return ansiNullsIsOff;
+                return null;
+        }
+    }
+
+    private static DeprecatedSyntaxFinding BuildComparisonFinding(DeprecatedSyntaxFindingKind kind, TSqlFragment node, string detail, string sourcePath) =>
+        new(kind, sourcePath, sourcePath, node.StartLine, node.StartColumn, detail,
+            kind is DeprecatedSyntaxFindingKind.EqualsNullComparison or DeprecatedSyntaxFindingKind.NotEqualsNullComparison
+                ? FindingConfidence.High
+                : FindingConfidence.Medium);
+
+    private sealed class ComparisonFindingVisitor(string sourcePath, bool ansiNullsIsOff) : TSqlFragmentVisitor
+    {
+        public List<DeprecatedSyntaxFinding> Findings { get; } = [];
+
+        public override void ExplicitVisit(BooleanComparisonExpression node)
+        {
+            var comparesToNull = IsNullLiteral(node.SecondExpression) || IsNullLiteral(node.FirstExpression);
+            if (ClassifyComparison(node.ComparisonType, comparesToNull, ansiNullsIsOff) is { } result)
+            {
+                Findings.Add(BuildComparisonFinding(result.Kind, node, result.Detail, sourcePath));
+            }
+
+            base.ExplicitVisit(node);
         }
     }
 
@@ -205,13 +256,13 @@ public static class DeprecatedSyntaxScanner
     {
         private readonly string sourcePath;
         private readonly bool ansiNullsIsOff;
-        private readonly bool skipNullComparisonFindings;
+        private readonly bool skipComparisonFindings;
 
-        public Visitor(string sourcePath, bool ansiNullsIsOff, bool skipNullComparisonFindings = false)
+        public Visitor(string sourcePath, bool ansiNullsIsOff, bool skipComparisonFindings = false)
         {
             this.sourcePath = sourcePath;
             this.ansiNullsIsOff = ansiNullsIsOff;
-            this.skipNullComparisonFindings = skipNullComparisonFindings;
+            this.skipComparisonFindings = skipComparisonFindings;
         }
 
         public List<DeprecatedSyntaxFinding> Findings { get; } = [];
@@ -219,27 +270,9 @@ public static class DeprecatedSyntaxScanner
         public override void ExplicitVisit(BooleanComparisonExpression node)
         {
             var comparesToNull = IsNullLiteral(node.SecondExpression) || IsNullLiteral(node.FirstExpression);
-
-            switch (node.ComparisonType)
+            if (!skipComparisonFindings && ClassifyComparison(node.ComparisonType, comparesToNull, ansiNullsIsOff) is { } result)
             {
-                case BooleanComparisonType.Equals when comparesToNull && !ansiNullsIsOff && !skipNullComparisonFindings:
-                    Add(DeprecatedSyntaxFindingKind.EqualsNullComparison, node,
-                        "\"= NULL\" never matches any row under the default ANSI_NULLS ON session setting, including a genuinely NULL value - use \"IS NULL\".");
-                    break;
-
-                case BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation
-                    when comparesToNull && !ansiNullsIsOff && !skipNullComparisonFindings:
-                    Add(DeprecatedSyntaxFindingKind.NotEqualsNullComparison, node,
-                        "\"<> NULL\"/\"!= NULL\" never matches any row under the default ANSI_NULLS ON session setting - use \"IS NOT NULL\".");
-                    break;
-
-                case BooleanComparisonType.NotEqualToExclamation
-                    or BooleanComparisonType.NotLessThan
-                    or BooleanComparisonType.NotGreaterThan
-                    when !(comparesToNull && skipNullComparisonFindings):
-                    Add(DeprecatedSyntaxFindingKind.NonAnsiComparisonOperator, node,
-                        $"Non-ANSI comparison operator \"{OperatorText(node.ComparisonType)}\" used - write the ANSI-standard form instead.");
-                    break;
+                Add(result.Kind, node, result.Detail);
             }
 
             base.ExplicitVisit(node);
@@ -328,9 +361,6 @@ public static class DeprecatedSyntaxScanner
             base.ExplicitVisit(node);
         }
 
-        private static bool IsNullLiteral(ScalarExpression expression) =>
-            expression is NullLiteral;
-
         private static bool HasPrecedingWithKeyword(IList<TSqlParserToken> tokens, int hintFirstTokenIndex)
         {
             var index = SkipBackWhitespace(tokens, hintFirstTokenIndex - 1);
@@ -353,73 +383,7 @@ public static class DeprecatedSyntaxScanner
             return index;
         }
 
-        private static string OperatorText(BooleanComparisonType type) => type switch
-        {
-            BooleanComparisonType.NotLessThan => "!<",
-            BooleanComparisonType.NotGreaterThan => "!>",
-            BooleanComparisonType.NotEqualToExclamation => "!=",
-            _ => type.ToString(),
-        };
-
         private void Add(DeprecatedSyntaxFindingKind kind, TSqlFragment node, string detail) =>
-            Findings.Add(new DeprecatedSyntaxFinding(
-                kind, sourcePath, sourcePath, node.StartLine, node.StartColumn, detail,
-                kind is DeprecatedSyntaxFindingKind.EqualsNullComparison
-                    or DeprecatedSyntaxFindingKind.NotEqualsNullComparison
-                    ? FindingConfidence.High
-                    : FindingConfidence.Medium));
-    }
-
-    private sealed class NullComparisonVisitor : TSqlFragmentVisitor
-    {
-        private readonly string sourcePath;
-        private readonly bool ansiNullsIsOff;
-
-        public NullComparisonVisitor(string sourcePath, bool ansiNullsIsOff)
-        {
-            this.sourcePath = sourcePath;
-            this.ansiNullsIsOff = ansiNullsIsOff;
-        }
-
-        public List<DeprecatedSyntaxFinding> Findings { get; } = [];
-
-        public override void ExplicitVisit(BooleanComparisonExpression node)
-        {
-            var comparesToNull = node.SecondExpression is NullLiteral || node.FirstExpression is NullLiteral;
-            if (!comparesToNull)
-            {
-                base.ExplicitVisit(node);
-                return;
-            }
-
-            switch (node.ComparisonType)
-            {
-                case BooleanComparisonType.Equals when !ansiNullsIsOff:
-                    Add(DeprecatedSyntaxFindingKind.EqualsNullComparison, node,
-                        "\"= NULL\" never matches any row under the default ANSI_NULLS ON session setting, including a genuinely NULL value - use \"IS NULL\".");
-                    break;
-
-                case BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation
-                    when !ansiNullsIsOff:
-                    Add(DeprecatedSyntaxFindingKind.NotEqualsNullComparison, node,
-                        "\"<> NULL\"/\"!= NULL\" never matches any row under the default ANSI_NULLS ON session setting - use \"IS NOT NULL\".");
-                    break;
-
-                case BooleanComparisonType.NotEqualToExclamation:
-                    Add(DeprecatedSyntaxFindingKind.NonAnsiComparisonOperator, node,
-                        "Non-ANSI comparison operator \"!=\" used - write the ANSI-standard form instead.");
-                    break;
-            }
-
-            base.ExplicitVisit(node);
-        }
-
-        private void Add(DeprecatedSyntaxFindingKind kind, TSqlFragment node, string detail) =>
-            Findings.Add(new DeprecatedSyntaxFinding(
-                kind, sourcePath, sourcePath, node.StartLine, node.StartColumn, detail,
-                kind is DeprecatedSyntaxFindingKind.EqualsNullComparison
-                    or DeprecatedSyntaxFindingKind.NotEqualsNullComparison
-                    ? FindingConfidence.High
-                    : FindingConfidence.Medium));
+            Findings.Add(BuildComparisonFinding(kind, node, detail, sourcePath));
     }
 }

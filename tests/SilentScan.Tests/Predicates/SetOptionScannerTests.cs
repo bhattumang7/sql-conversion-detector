@@ -199,6 +199,66 @@ public sealed class SetOptionScannerTests
     }
 
     [Fact]
+    public void AnsiNullsOff_InlineSetInAdHocScript_TouchesFilteredIndexTable_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var result = SqlScriptParser.ParseText("test.sql", "SET ANSI_NULLS OFF; SELECT Id FROM dbo.Orders;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        var findings = SetOptionScanner.Scan(result, catalog, lineage);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SetOptionFindingKind.AnsiNullsOffBlocksIndexedFeature, finding.Kind);
+    }
+
+    [Fact]
+    public void QuotedIdentifierOff_InlineSetInAdHocScript_TouchesFilteredIndexTable_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var result = SqlScriptParser.ParseText("test.sql", "SET QUOTED_IDENTIFIER OFF; SELECT Id FROM dbo.Orders;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        var findings = SetOptionScanner.Scan(result, catalog, lineage);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature, finding.Kind);
+    }
+
+    [Fact]
+    public void AnsiNullsOff_InlineSetInAdHocScript_TurnedBackOnBeforeTouch_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var result = SqlScriptParser.ParseText(
+            "test.sql", "SET ANSI_NULLS OFF; SET ANSI_NULLS ON; SELECT Id FROM dbo.Orders;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        var findings = SetOptionScanner.Scan(result, catalog, lineage);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void AnsiNullsOff_InsideConditionalBlockInAdHocScript_DoesNotPropagatePastBlock()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var result = SqlScriptParser.ParseText(
+            "test.sql", "IF 1 = 1 BEGIN SET ANSI_NULLS OFF; END SELECT Id FROM dbo.Orders;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        var findings = SetOptionScanner.Scan(result, catalog, lineage);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void AnsiNullsOn_NeverFires()
     {
         var catalog = new DatabaseCatalog();

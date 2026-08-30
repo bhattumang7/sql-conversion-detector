@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Common;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
@@ -23,8 +24,15 @@ public static class SetOptionScanner
         var visitor = new SetStatementVisitor();
         parseResult.Fragment.Accept(visitor);
 
-        var quotedIdentifierOff = catalog.TryGetModuleUsesQuotedIdentifier(moduleQualifiedName, out var usesQuotedIdentifier) && !usesQuotedIdentifier;
-        var ansiNullsOff = catalog.TryGetModuleUsesAnsiNulls(moduleQualifiedName, out var usesAnsiNulls) && !usesAnsiNulls;
+        var isAdHocScript = IsAdHocScript(parseResult.Fragment);
+
+        var quotedIdentifierOff = isAdHocScript
+            ? SetOptionFlowTracker.ComputeFinalOffState(parseResult.Fragment, SetOptions.QuotedIdentifier)
+            : catalog.TryGetModuleUsesQuotedIdentifier(moduleQualifiedName, out var usesQuotedIdentifier) && !usesQuotedIdentifier;
+
+        var ansiNullsOff = isAdHocScript
+            ? SetOptionFlowTracker.ComputeFinalOffState(parseResult.Fragment, SetOptions.AnsiNulls)
+            : catalog.TryGetModuleUsesAnsiNulls(moduleQualifiedName, out var usesAnsiNulls) && !usesAnsiNulls;
 
         if (!quotedIdentifierOff && !ansiNullsOff && visitor.MatchedStatements.Count == 0)
         {
@@ -62,6 +70,13 @@ public static class SetOptionScanner
         }
 
         return findings;
+    }
+
+    private static bool IsAdHocScript(TSqlFragment fragment)
+    {
+        var collector = new ModuleNameCollector();
+        fragment.Accept(collector);
+        return collector.Names.Count == 0;
     }
 
     private sealed class SetStatementVisitor : TSqlFragmentVisitor
