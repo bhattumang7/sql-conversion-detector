@@ -1066,6 +1066,15 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_ComputedColumnWithNoExplicitNullability_IgnoresAnsiNullDfltAndDefaultsToNullable()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("SET ANSI_NULL_DFLT_OFF ON; CREATE TABLE dbo.T (A INT NOT NULL, Col AS (A + 1));")]);
+
+        Assert.True(catalog.Find("dbo.T")!.FindColumn("Col")!.IsNullable);
+    }
+
+    [Fact]
     public void Build_SpatialColumn_TypeIsNullAndLedgered()
     {
 

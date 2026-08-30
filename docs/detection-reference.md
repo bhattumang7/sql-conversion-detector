@@ -453,9 +453,21 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 * **`CatalogBuilder`'s column-nullability fallback: shipped, branch-aware.**
   Oracle-confirmed (Docker, SQL Server 2025): a `CREATE TABLE` column with no
   explicit `NULL`/`NOT NULL` is created `NOT NULL` under `SET
-  ANSI_NULL_DFLT_OFF ON`, `NULL` under `SET ANSI_NULL_DFLT_ON ON`, and
-  otherwise inherits the database's own `sys.databases.is_ansi_null_default_on`
-  (`DatabaseCatalog.IsAnsiNullDefaultOn`). Tracking goes through the shared
+  ANSI_NULL_DFLT_OFF ON`, `NULL` under `SET ANSI_NULL_DFLT_ON ON`, `NOT NULL`
+  under `SET ANSI_NULL_DFLT_ON OFF` (this also flips it), and otherwise
+  inherits the database's own `sys.databases.is_ansi_null_default_on`
+  (`DatabaseCatalog.IsAnsiNullDefaultOn`). `SET ANSI_NULL_DFLT_OFF OFF` is a
+  no-op on the real engine - it does not revert to `NULL`, it leaves whatever
+  was already in effect untouched - and `AnsiNullDfltFlowResolver` mirrors
+  that asymmetry (oracle-confirmed); `SET ANSI_NULL_DFLT_ON, ANSI_NULL_DFLT_OFF`
+  combined in one statement is not legal T-SQL at all (confirmed - a syntax
+  error), so no combined-flag ambiguity to model. A computed column with no
+  explicit `NULL`/`NOT NULL` is excluded from this fallback entirely and
+  always defaults to `NULL` regardless of `ANSI_NULL_DFLT` or the source
+  expression's own nullability (oracle-confirmed against `PERSISTED` and
+  non-`PERSISTED` computed columns alike); an explicit `NULL`/`NOT NULL` on a
+  `PERSISTED` computed column is still honored normally. Tracking goes through
+  the shared
   `AnsiNullDfltFlowResolver` (`Common/AnsiNullDfltFlowResolver.cs`), built
   on the same `ProcedureBodyFlowWalker`/`IStatementFlowPolicy` branch-merge
   walker already used for `SET ANSI_NULLS`/`SET QUOTED_IDENTIFIER` tracking -

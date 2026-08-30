@@ -56,9 +56,9 @@ internal static class AnsiNullDfltFlowResolver
                 return state with { Override = isOn };
             }
 
-            if ((options & SetOptions.AnsiNullDfltOff) != 0)
+            if ((options & SetOptions.AnsiNullDfltOff) != 0 && isOn)
             {
-                return state with { Override = !isOn };
+                return state with { Override = false };
             }
 
             return state;

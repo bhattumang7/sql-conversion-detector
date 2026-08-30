@@ -50,6 +50,61 @@ public sealed class CatalogBuilderAnsiNullDfltBranchOracleTests
     }
 
     [Fact]
+    public async Task Build_AnsiNullDfltOffTurnedOff_IsANoOpThatDoesNotRevertToNullable()
+    {
+        const string procedureSql = """
+            CREATE PROCEDURE dbo.usp_OffThenOffOff AS
+            BEGIN
+                SET ANSI_NULL_DFLT_OFF ON;
+                SET ANSI_NULL_DFLT_OFF OFF;
+                CREATE TABLE #t (Col INT);
+                SELECT is_nullable FROM tempdb.sys.columns WHERE object_id = OBJECT_ID('tempdb..#t') AND name = 'Col';
+            END
+            """;
+
+        await AssertModuleBodyStaticAnalysisMatchesRealEngineAsync(procedureSql, "dbo.usp_OffThenOffOff");
+    }
+
+    [Fact]
+    public async Task Build_ComputedColumnUnderAnsiNullDfltOff_MatchesRealEngineIgnoringTheOverride()
+    {
+        const string deploymentSql = """
+            SET ANSI_NULL_DFLT_OFF ON;
+            CREATE TABLE dbo.T (A INT NOT NULL, Col AS (A + 1));
+            """;
+
+        var databaseName = $"SilentScanTest_{Guid.NewGuid():N}";
+        var provisioner = new DatabaseProvisioner(Options);
+        await provisioner.CreateFreshAsync(databaseName);
+        try
+        {
+            await new ScriptDeployer(Options).DeployAsync(deploymentSql, databaseName);
+            var connectionString = Options.BuildConnectionString(databaseName);
+
+            bool realIsNullable;
+            await using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT is_nullable FROM sys.columns WHERE object_id = OBJECT_ID('dbo.T') AND name = 'Col';";
+                realIsNullable = (bool)(await command.ExecuteScalarAsync())!;
+            }
+
+            var deploymentScriptResult = SqlScriptParser.ParseText("deploy.sql", deploymentSql);
+            Assert.False(deploymentScriptResult.HasErrors);
+
+            var catalog = CatalogBuilder.Build([deploymentScriptResult]);
+            var staticIsNullable = catalog.Find("dbo.T")!.FindColumn("Col")!.IsNullable;
+
+            Assert.Equal(realIsNullable, staticIsNullable);
+        }
+        finally
+        {
+            await provisioner.DropIfExistsAsync(databaseName);
+        }
+    }
+
+    [Fact]
     public async Task Build_AmbientAnsiNullDfltBeforeCreateProcedure_DoesNotLeakIntoProcedureBodyOnLaterExecution()
     {
         const string deploymentSql = """

@@ -1300,7 +1300,7 @@ public static class CatalogBuilder
 
     private static bool BuildColumnConstraints(ColumnDefinition columnDefinition, string columnName, List<CatalogIndex> inlineIndexes, bool defaultNullable)
     {
-        var isNullable = defaultNullable;
+        var isNullable = columnDefinition.ComputedColumnExpression is not null ? true : defaultNullable;
 
         foreach (var constraint in columnDefinition.Constraints)
         {
