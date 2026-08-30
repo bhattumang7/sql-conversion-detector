@@ -84,6 +84,68 @@ against this instance's real plan XML before it ships.
 * `src/SilentScan.Bench` — benchmark harness.
 * `tests/SilentScan.Tests` — xUnit tests and fixtures.
 
+## Architecture
+
+`scan-db` is the only entry point that matters at runtime: connect, read,
+scan, report. Nothing is ever written back to the target database.
+
+```mermaid
+flowchart TD
+    subgraph Input["Target database"]
+        DB[(SQL Server<br/>catalog + modules)]
+    end
+
+    DB -->|read-only| LCR["SilentScan.Live<br/>LiveCatalogReader"]
+
+    subgraph Core["SilentScan.Core"]
+        direction TB
+        LCR --> CAT["Catalog<br/>DatabaseCatalog / CatalogBuilder"]
+        CAT --> PARSE["Parsing<br/>ScriptDom parse of every module"]
+        PARSE --> LIN["Lineage<br/>LineageResolver, TVF fences,<br/>scalar-UDF map, view expansion"]
+        LIN --> TYPE["TypeInference<br/>ExpressionTypeInferencer"]
+        TYPE --> PRED["Predicates<br/>206 TSqlFragmentVisitor scanners<br/>(one Finding+Scanner pair per rule family)"]
+        PRED --> RULES["Rules<br/>Verdict / TypePairMatrix classifiers"]
+        RULES --> SRB["Reporting<br/>ScanReportBuilder → ScanReport"]
+    end
+
+    LIVEEXTRA["SilentScan.Live<br/>plan-cache reader, dangling-ref checker,<br/>temp-table exec shape (optional, live-only)"] -.-> SRB
+
+    SRB --> WRITERS{"Report writers"}
+    WRITERS --> TXT["Readable text / markdown"]
+    WRITERS --> JSON["Versioned JSON findings"]
+    WRITERS --> SARIF["SARIF (CI gating,<br/>helpUri → rule docs)"]
+
+    RULECAT["RuleCatalog<br/>(id, rationale, fix guidance)"] --> WRITERS
+    RULECAT --> RULEDOCS["rules-doc verb →<br/>docs/rules.html + docs/rules/*.html"]
+
+    subgraph Verify["SilentScan.Verify (offline, Docker)"]
+        ORACLE["Oracle: real SQL Server<br/>plan XML per verdict-bearing rule"]
+    end
+    ORACLE -.->|backs test suite,<br/>not the scan path| PRED
+
+    classDef opt stroke-dasharray: 4 3;
+    class LIVEEXTRA,Verify opt;
+```
+
+**Pipeline, in order:** `LiveCatalogReader` reads catalog metadata and module
+text straight from engine catalog views (`sys.*`), never executing app DDL/DML.
+`CatalogBuilder` folds in anything only visible by parsing (e.g. `SELECT
+INTO` shapes). Every module is parsed once via ScriptDom
+(`SqlScriptParser`); `LineageResolver` resolves column provenance across
+CTEs, views, and multi-statement TVFs; `ExpressionTypeInferencer` assigns a
+`SqlType` to every scalar expression. The 206 predicate scanners in
+`Core/Predicates` each walk the AST (many now sharing the same proc/trigger
+scope walker) and emit typed findings, classified against oracle-verified
+truth tables in `Core/Rules` (implicit-conversion matrix, write-loss,
+sargability, temporal-boundary, TVF-fence, scalar-UDF). `ScanReportBuilder`
+assembles everything into one `ScanReport`, which the `Reporting` writers
+render as text, JSON, or SARIF — all keyed against the single
+`RuleCatalog` source of truth that also generates the published rule docs.
+
+`SilentScan.Verify` never runs during a scan — it's the offline oracle
+(Dockerized SQL Server) that every verdict-bearing rule's truth table is
+checked against before it ships, and it backs the test suite.
+
 ## More detail
 
 * [Rule catalog](https://umangbhatt.in/mssql-silentscan/rules.html) — every
