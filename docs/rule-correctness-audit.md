@@ -157,6 +157,42 @@ worse than not reporting it at all.
       same way as `SELECT` was not directly tested — Msg 524's own wording
       says "resultset" specifically, so this is noted but not asserted.)
 
+- [ ] **`CrossModuleLockOrderScanner` records a procedure's write order
+      across its whole body instead of per explicit transaction, so two
+      writes that were never lock-held concurrently can be reported as a
+      lock-order disagreement.**
+      (`src/SilentScan.Core/Predicates/CrossModuleLockOrderScanner.cs:169-203`
+      — `_writes` is reset only in `EnterProcedure`, never at `BEGIN
+      TRANSACTION`, so `RecordWrite`'s dedup-by-first-occurrence spans
+      transactions that already committed and released their locks before a
+      later, separate transaction re-touches the same table.) Oracle-confirmed
+      (SQL Server 2025, via `sys.dm_tran_locks`): a lock on a table is
+      released at `COMMIT` and not re-acquired until that table is next
+      touched. For a procedure shaped `BEGIN TRAN; UPDATE T1; COMMIT; BEGIN
+      TRAN; UPDATE T2; UPDATE T1; COMMIT;`, the scanner records the
+      procedure's order as `[T1, T2]` (from T1's first, already-committed
+      appearance) even though the only transaction that ever holds both
+      locks simultaneously acquires them `T2` then `T1` — the opposite of
+      what the scanner reports, and identical to a sibling procedure that
+      does `BEGIN TRAN; UPDATE T2; UPDATE T1; COMMIT;`. The scanner flags
+      these two procedures as disagreeing on lock order (deadlock risk) when
+      no deadlock cycle can actually form between them. False positive.
+
+- [ ] **`DeprecatedSyntaxScanner`'s legacy-compatibility-view name list
+      includes `syslocks`, which is not and never was a real SQL Server
+      compatibility view.**
+      (`src/SilentScan.Core/Predicates/DeprecatedSyntaxScanner.cs:12-20`,
+      `LegacyCompatibilityViewNames`.) Oracle-confirmed (SQL Server 2025):
+      `SELECT OBJECT_ID('sys.syslocks')` returns `NULL` and `SELECT * FROM
+      sys.syslocks` raises `Msg 208, Invalid object name 'sys.syslocks'` —
+      the real backward-compatibility view for lock info is `syslockinfo`,
+      already separately and correctly present in the same list. Every one
+      of the other 34 names in the list was cross-checked against
+      `sys.all_objects` and does exist as a real `is_ms_shipped` compatibility
+      view; `syslocks` is the only one that doesn't. If a scanned codebase
+      has an ordinary object literally named `syslocks`, the scanner falsely
+      claims it "is a pre-SQL-Server-2005 system compatibility view."
+
 ---
 
 ## Audited, no bug found
@@ -205,14 +241,35 @@ worse than not reporting it at all.
   with an explicit `WITH (INDEX(...))` hint forcing the index; verified no
   newer "index skip scan" feature invalidates it (still a full `Index
   Scan`, never a seek, when only the non-leading column is bound).
+- `CrossTableTypeDriftScanner` — the differing-category-or-collation gate
+  matches SQL Server's documented data-type precedence table exactly; any
+  two differing in-model categories genuinely sit at different precedence,
+  so a join always converts the lower-precedence side, matching the rule's
+  "one side always loses seek" claim.
+- `DeadCodeScanner` — the `ReachabilityWalker` control-flow model correctly
+  treats RETURN/THROW as terminal, requires every IF/TRY-CATCH branch to be
+  terminal (a `THROW` inside `TRY` alone doesn't make the block terminal —
+  it's ANDed with `CATCH`'s own terminality), and never treats `WHILE` as
+  terminal; unused-variable/parameter logic correctly separates reads from
+  writes. Pure static-AST rule, no real-engine fact to diverge from beyond
+  the definitional "RETURN/THROW end the routine."
+- `DefaultNullableConstraintScanner` — only fires when a `DEFAULT`-bearing
+  column is still nullable, matching the uncontested fact that a `DEFAULT`
+  only applies when a column is omitted from an INSERT's column list, and
+  an explicit `NULL` always overrides it.
+- `DmlTargetTable` (helper feeding `IndexDesignScanner`'s
+  `ColumnstoreIndexOnDmlTargetTable` rule, no own finding/rule id) — wired
+  correctly, not dead code; `DmlWriteTargetResolver` correctly excludes CTE
+  self-references and only resolves catalog-confirmed real tables
+  (synonyms resolved through), matching its "direct DML target" framing —
+  writes through an updatable view are intentionally out of scope, same as
+  sibling rules.
 
 ---
 
 ## Not yet audited
 
-CatchAllPredicate, CodeMetric, CrossModuleLockOrder,
-CrossTableTypeDrift, DeadCode, DefaultNullableConstraint, DeprecatedSyntax,
-DmlTargetTable, Duplication, FloatEqualityPredicate,
+CatchAllPredicate, CodeMetric, Duplication, FloatEqualityPredicate,
 FloatOrderDependentAggregate, ForcedParameterization, ForcedSerial,
 Formatting, IdentityRange, IndexCoverage, IndexHint, MaxTypedColumn,
 MemoryOptimizedForeignKey, MemoryOptimizedUnsupportedColumnType,
