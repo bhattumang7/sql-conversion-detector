@@ -27,7 +27,10 @@ public static class ParameterReassignmentPredicateScanner
         public static FlowState Declined_() => new(null, null, true);
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor, IStatementFlowPolicy<FlowState>
+#pragma warning disable CS9107
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
+        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null), IStatementFlowPolicy<FlowState>
+#pragma warning restore CS9107
     {
         public List<ParameterReassignmentPredicateFinding> Findings { get; } = [];
 
@@ -35,20 +38,18 @@ public static class ParameterReassignmentPredicateScanner
 
         private HashSet<string> _formalParameterNames = new(StringComparer.OrdinalIgnoreCase);
 
-        public override void ExplicitVisit(CreateProcedureStatement node) =>
-            AnalyzeProcedure(node.Parameters, node.StatementList, node.Options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile));
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        {
+            var hasWithRecompile = node switch
+            {
+                CreateProcedureStatement p => p.Options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile),
+                AlterProcedureStatement p => p.Options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile),
+                CreateOrAlterProcedureStatement p => p.Options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile),
+                _ => false,
+            };
 
-        public override void ExplicitVisit(AlterProcedureStatement node) =>
-            AnalyzeProcedure(node.Parameters, node.StatementList, node.Options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile));
-
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) =>
-            AnalyzeProcedure(node.Parameters, node.StatementList, node.Options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile));
-
-        public override void ExplicitVisit(CreateFunctionStatement node) => AnalyzeProcedure(node.Parameters, node.StatementList, hasWithRecompile: false);
-
-        public override void ExplicitVisit(AlterFunctionStatement node) => AnalyzeProcedure(node.Parameters, node.StatementList, hasWithRecompile: false);
-
-        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => AnalyzeProcedure(node.Parameters, node.StatementList, hasWithRecompile: false);
+            AnalyzeProcedure(node.Parameters, node.StatementList, hasWithRecompile);
+        }
 
         private void AnalyzeProcedure(IList<ProcedureParameter> parameters, StatementList? statementList, bool hasWithRecompile)
         {
@@ -119,15 +120,18 @@ public static class ParameterReassignmentPredicateScanner
             switch (statement)
             {
                 case SelectStatement { QueryExpression: QuerySpecification spec } select when !HasOptionRecompile(select.OptimizerHints):
-                    InspectSearchCondition(spec.WhereClause?.SearchCondition, spec.FromClause, select.WithCtesAndXmlNamespaces, state);
+                    InspectAllPredicateLocations(
+                        spec, BuildScopeChain(spec.FromClause, select.WithCtesAndXmlNamespaces), (condition, chain) => InspectSearchConditionCore(condition, chain, state));
                     break;
 
                 case UpdateStatement { UpdateSpecification: { } upd } update when !HasOptionRecompile(update.OptimizerHints):
-                    InspectSearchCondition(upd.WhereClause?.SearchCondition, upd.Target, upd.FromClause, update.WithCtesAndXmlNamespaces, state);
+                    InspectAllPredicateLocations(
+                        update, BuildDataModificationScopeChain(upd.Target, upd.FromClause, update.WithCtesAndXmlNamespaces), (condition, chain) => InspectSearchConditionCore(condition, chain, state));
                     break;
 
                 case DeleteStatement { DeleteSpecification: { } del } delete when !HasOptionRecompile(delete.OptimizerHints):
-                    InspectSearchCondition(del.WhereClause?.SearchCondition, del.Target, del.FromClause, delete.WithCtesAndXmlNamespaces, state);
+                    InspectAllPredicateLocations(
+                        delete, BuildDataModificationScopeChain(del.Target, del.FromClause, delete.WithCtesAndXmlNamespaces), (condition, chain) => InspectSearchConditionCore(condition, chain, state));
                     break;
 
                 default:
@@ -138,38 +142,23 @@ public static class ParameterReassignmentPredicateScanner
         private static bool HasOptionRecompile(IList<OptimizerHint> hints) =>
             hints.Any(h => h.HintKind == OptimizerHintKind.Recompile);
 
-        private void InspectSearchCondition(BooleanExpression? condition, FromClause? fromClause, WithCtesAndXmlNamespaces? withClause, FlowState state)
+        private ScopeChain BuildScopeChain(FromClause? fromClause, WithCtesAndXmlNamespaces? withClause)
         {
-            if (condition is null || fromClause is null)
-            {
-                return;
-            }
-
-            var cteRelations = CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, procScope: null);
-            InspectSearchConditionCore(condition, byAlias, ordered, state);
+            var cteRelations = CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, CurrentProcScope);
+            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, CurrentProcScope);
+            return [((IReadOnlyDictionary<string, ScopeEntry>)byAlias, (IReadOnlyList<ScopeEntry>)ordered)];
         }
 
-        private void InspectSearchCondition(BooleanExpression? condition, TableReference target, FromClause? extraFromClause, WithCtesAndXmlNamespaces? withClause, FlowState state)
+        private ScopeChain BuildDataModificationScopeChain(TableReference target, FromClause? extraFromClause, WithCtesAndXmlNamespaces? withClause)
         {
-            if (condition is null)
-            {
-                return;
-            }
-
-            var cteRelations = CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            var context = new FromScopeResolver.ResolutionContext(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
+            var cteRelations = CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, CurrentProcScope);
+            var context = new FromScopeResolver.ResolutionContext(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, CurrentProcScope);
             var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(target, extraFromClause, context);
-            InspectSearchConditionCore(condition, byAlias, ordered, state);
+            return [((IReadOnlyDictionary<string, ScopeEntry>)byAlias, (IReadOnlyList<ScopeEntry>)ordered)];
         }
 
-        private void InspectSearchConditionCore(
-            BooleanExpression condition,
-            IReadOnlyDictionary<string, ScopeEntry> byAlias,
-            IReadOnlyList<ScopeEntry> ordered,
-            FlowState state)
+        private void InspectSearchConditionCore(BooleanExpression condition, ScopeChain scopeChain, FlowState state)
         {
-            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
             foreach (var comparison in FindComparisons(condition))
             {
                 TryMatch(comparison.FirstExpression, comparison.SecondExpression, comparison, scopeChain, state);
@@ -213,7 +202,7 @@ public static class ParameterReassignmentPredicateScanner
 
         private void TryMatch(
             ScalarExpression columnSide, ScalarExpression variableSide, BooleanComparisonExpression comparison,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+            ScopeChain scopeChain,
             FlowState state)
         {
             if (columnSide is not ColumnReferenceExpression columnRef

@@ -8,6 +8,8 @@ namespace SilentScan.Core.Predicates;
 
 public static class SelfReferencingDmlScanner
 {
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     public static IReadOnlyList<SelfReferencingDmlFinding> Scan(
         SqlParseResult parseResult, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap)
     {
@@ -22,11 +24,14 @@ public static class SelfReferencingDmlScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap) : TSqlFragmentVisitor
+#pragma warning disable CS9107
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap)
+        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
     {
         public List<SelfReferencingDmlFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(InsertStatement node)
+        protected override void OnInsertStatementScope(InsertStatement node, Action continueDescent)
         {
             var spec = node.InsertSpecification;
             if (spec.Target is NamedTableReference targetRef && !HasLiteralTopOne(spec.TopRowFilter))
@@ -38,14 +43,15 @@ public static class SelfReferencingDmlScanner
                 Report(match, "INSERT", targetQualifiedName, node);
             }
 
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
-        public override void ExplicitVisit(UpdateStatement node)
+        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             var spec = node.UpdateSpecification;
+            var updateTargetAlias = (spec.Target as NamedTableReference)?.Alias?.Value ?? (spec.Target as NamedTableReference)?.SchemaObject.BaseIdentifier.Value;
             if (!HasLiteralTopOne(spec.TopRowFilter)
-                && ResolveDataModificationTarget(spec.Target, spec.FromClause, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
+                && ResolveTargetQualifiedName(spec.Target, updateTargetAlias, scopeChain) is { } targetQualifiedName)
             {
                 var cteNames = CteNamesOf(node.WithCtesAndXmlNamespaces);
                 var match = FindMatchInFromClauseExtras(spec.FromClause, spec.Target, targetQualifiedName, cteNames)
@@ -56,14 +62,15 @@ public static class SelfReferencingDmlScanner
                 Report(match, "UPDATE", targetQualifiedName, node);
             }
 
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
-        public override void ExplicitVisit(DeleteStatement node)
+        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             var spec = node.DeleteSpecification;
+            var deleteTargetAlias = (spec.Target as NamedTableReference)?.Alias?.Value ?? (spec.Target as NamedTableReference)?.SchemaObject.BaseIdentifier.Value;
             if (!HasLiteralTopOne(spec.TopRowFilter)
-                && ResolveDataModificationTarget(spec.Target, spec.FromClause, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
+                && ResolveTargetQualifiedName(spec.Target, deleteTargetAlias, scopeChain) is { } targetQualifiedName)
             {
                 var cteNames = CteNamesOf(node.WithCtesAndXmlNamespaces);
                 var match = FindMatchInFromClauseExtras(spec.FromClause, spec.Target, targetQualifiedName, cteNames)
@@ -71,14 +78,15 @@ public static class SelfReferencingDmlScanner
                 Report(match, "DELETE", targetQualifiedName, node);
             }
 
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
-        public override void ExplicitVisit(MergeStatement node)
+        protected override void OnMergeStatementScope(MergeStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             var spec = node.MergeSpecification;
+            var mergeTargetAlias = spec.TableAlias?.Value ?? (spec.Target as NamedTableReference)?.SchemaObject.BaseIdentifier.Value;
             if (!HasLiteralTopOne(spec.TopRowFilter)
-                && ResolveMergeTarget(spec, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
+                && ResolveTargetQualifiedName(spec.Target, mergeTargetAlias, scopeChain) is { } targetQualifiedName)
             {
                 var cteNames = CteNamesOf(node.WithCtesAndXmlNamespaces);
                 var match = FindMatchInFragment(spec.TableReference, targetQualifiedName, cteNames)
@@ -89,7 +97,7 @@ public static class SelfReferencingDmlScanner
                 Report(match, "MERGE", targetQualifiedName, node);
             }
 
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
         private static bool HasLiteralTopOne(TopRowFilter? topRowFilter)
@@ -119,34 +127,15 @@ public static class SelfReferencingDmlScanner
             }
         }
 
-        private string? ResolveDataModificationTarget(TableReference target, FromClause? fromClause, WithCtesAndXmlNamespaces? withClause)
+        private static string? ResolveTargetQualifiedName(TableReference target, string? alias, ScopeChain scopeChain)
         {
-            if (target is not NamedTableReference named)
+            if (target is not NamedTableReference || alias is null || scopeChain.Count == 0)
             {
                 return null;
             }
 
-            var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
-            var (byAlias, _) = FromScopeResolver.ResolveForDataModification(target, fromClause, ResolutionContext(withClause));
-            return byAlias.TryGetValue(alias, out var entry) ? entry.Relation.QualifiedName : null;
+            return scopeChain[0].ByAlias.TryGetValue(alias, out var entry) ? entry.Relation.QualifiedName : null;
         }
-
-        private string? ResolveMergeTarget(MergeSpecification spec, WithCtesAndXmlNamespaces? withClause)
-        {
-            if (spec.Target is not NamedTableReference named)
-            {
-                return null;
-            }
-
-            var alias = spec.TableAlias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
-            var (byAlias, _) = FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, ResolutionContext(withClause));
-            return byAlias.TryGetValue(alias, out var entry) ? entry.Relation.QualifiedName : null;
-        }
-
-        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
-
-        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
         private SelfReferencingDmlFinding? FindMatchInFromClauseExtras(FromClause? fromClause, TableReference target, string targetQualifiedName, HashSet<string> cteNames)
         {

@@ -623,6 +623,58 @@ public sealed class ParameterReassignmentPredicateScannerTests
     }
 
     [Fact]
+    public void ReassignedParameter_InHavingClause_Fires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                SELECT Code, COUNT(*) FROM dbo.Customers GROUP BY Code HAVING Code = @p;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ReassignedParameter_InJoinOnClause_Fires()
+    {
+        var findings = Scan(
+            """
+            CREATE TABLE dbo.Orders (CustomerCode VARCHAR(20) NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                SELECT 1 FROM dbo.Customers c JOIN dbo.Orders o ON c.Code = @p;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ReassignedParameter_InUpdateFromJoinOnClause_Fires()
+    {
+        var findings = Scan(
+            """
+            CREATE TABLE dbo.Orders (CustomerCode VARCHAR(20) NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                UPDATE c SET Region = 'X' FROM dbo.Customers c JOIN dbo.Orders o ON c.Code = @p;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.ColumnName);
+    }
+
+    [Fact]
     public void ComputedColumnInDerivedTable_NeverFires()
     {
         var findings = Scan(

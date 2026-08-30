@@ -38,6 +38,18 @@ public sealed class PredicateLocationCoverageTests
         ("ExplicitVisit", typeof(QualifiedJoin)),
     ];
 
+    private static readonly (string TypeName, string MethodName) FlowDrivenPredicateLocationSites =
+        ("SilentScan.Core.Predicates.ParameterReassignmentPredicateScanner+Visitor", "InspectStatementForFindings");
+
+    private static readonly (string TypeName, string MethodName)[] DmlTargetScopeHookSites =
+    [
+        ("SilentScan.Core.Predicates.SelfReferencingDmlScanner+Visitor", "OnUpdateStatementScope"),
+        ("SilentScan.Core.Predicates.SelfReferencingDmlScanner+Visitor", "OnDeleteStatementScope"),
+        ("SilentScan.Core.Predicates.SelfReferencingDmlScanner+Visitor", "OnMergeStatementScope"),
+    ];
+
+    private static readonly string[] HandRolledScopeResolutionCalleeNames = ["Resolve", "ResolveForDataModification", "ResolveForMerge"];
+
     [Fact]
     public void SharedWalkerScanners_RouteEveryOverriddenScopeHookThroughInspectAllPredicateLocations()
     {
@@ -80,6 +92,42 @@ public sealed class PredicateLocationCoverageTests
                 if (method is null)
                 {
                     gaps.Add($"{typeName} no longer overrides {methodName}({parameterType.Name})");
+                }
+            }
+        }
+
+        Assert.True(gaps.Count == 0, string.Join("\n", gaps));
+    }
+
+    [Fact]
+    public void FlowDrivenScanner_RoutesStatementInspectionThroughInspectAllPredicateLocations()
+    {
+        var (typeName, methodName) = FlowDrivenPredicateLocationSites;
+        var visitorType = ResolveRegisteredType(typeName);
+        var method = visitorType.GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+            ?? throw new InvalidOperationException($"{typeName}.{methodName} no longer exists - update this test");
+
+        Assert.True(
+            IlCallGraph.Calls(method, "InspectAllPredicateLocations"),
+            $"{typeName}.{methodName} no longer calls InspectAllPredicateLocations");
+    }
+
+    [Fact]
+    public void DmlTargetScopeScanner_ConsumesSharedWalkerScopeInsteadOfHandRolledResolution()
+    {
+        var gaps = new List<string>();
+
+        foreach (var (typeName, methodName) in DmlTargetScopeHookSites)
+        {
+            var visitorType = ResolveRegisteredType(typeName);
+            var method = visitorType.GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                ?? throw new InvalidOperationException($"{typeName}.{methodName} no longer exists - update this test");
+
+            foreach (var calleeName in HandRolledScopeResolutionCalleeNames)
+            {
+                if (IlCallGraph.Calls(method, calleeName))
+                {
+                    gaps.Add($"{typeName}.{methodName} calls '{calleeName}' directly again instead of consuming the base class's scope chain");
                 }
             }
         }
