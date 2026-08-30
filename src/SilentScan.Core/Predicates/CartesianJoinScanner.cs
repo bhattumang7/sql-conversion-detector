@@ -44,7 +44,7 @@ public static class CartesianJoinScanner
             }
 
             var allJoinOnConditions = topLevel
-                .SelectMany(FlattenJoinNodes)
+                .SelectMany(PredicateTreeWalker.FlattenJoinNodes)
                 .Select(j => j.SearchCondition)
                 .ToList();
 
@@ -194,34 +194,6 @@ public static class CartesianJoinScanner
 
                 default:
                     yield return expression;
-                    break;
-            }
-        }
-
-        private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
-        {
-            switch (tableReference)
-            {
-                case QualifiedJoin join:
-                    foreach (var t in FlattenJoinNodes(join.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenJoinNodes(join.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    yield return join;
-                    break;
-
-                case JoinParenthesisTableReference parenthesis:
-                    foreach (var t in FlattenJoinNodes(parenthesis.Join))
-                    {
-                        yield return t;
-                    }
-
                     break;
             }
         }

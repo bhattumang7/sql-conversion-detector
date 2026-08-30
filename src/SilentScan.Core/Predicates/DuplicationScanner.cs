@@ -119,79 +119,21 @@ public static class DuplicationScanner
         {
             this.sourcePath = sourcePath;
             this.catalog = catalog;
-            _currentModule = sourcePath;
         }
 
         public List<DuplicationFinding> Findings { get; } = [];
 
-        private string _currentModule;
+        private string CurrentModule => CurrentProcScope ?? sourcePath;
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
         private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqualityComparer.Instance);
 
-        public override void ExplicitVisit(CreateProcedureStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
             CheckStringLiterals(node.StatementList);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(AlterProcedureStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
+        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
             CheckStringLiterals(node.StatementList);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
-            CheckStringLiterals(node.StatementList);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateFunctionStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckStringLiterals(node.StatementList);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterFunctionStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckStringLiterals(node.StatementList);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateOrAlterFunctionStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckStringLiterals(node.StatementList);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateTriggerStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckStringLiterals(node.StatementList);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterTriggerStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckStringLiterals(node.StatementList);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateOrAlterTriggerStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckStringLiterals(node.StatementList);
-            base.ExplicitVisit(node);
-        }
 
         public override void ExplicitVisit(SetVariableStatement node)
         {
@@ -866,7 +808,7 @@ public static class DuplicationScanner
             var collector = new StringLiteralCollector();
             statementList.Accept(collector);
 
-            var moduleName = _currentModule;
+            var moduleName = CurrentModule;
             foreach (var group in collector.Literals
                          .Where(l => l.Value.Length >= MinDuplicatedLiteralLength)
                          .GroupBy(l => (l.Value, l.IsNational), StringLiteralKeyComparer.Instance))
@@ -907,6 +849,6 @@ public static class DuplicationScanner
 
         private void Add(DuplicationFindingKind kind, string? detail, TSqlFragment fragment, FindingConfidence confidence) =>
             Findings.Add(new DuplicationFinding(
-                kind, _currentModule, sourcePath, fragment.StartLine, fragment.StartColumn, detail, confidence));
+                kind, CurrentModule, sourcePath, fragment.StartLine, fragment.StartColumn, detail, confidence));
     }
 }

@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
 
@@ -9,7 +10,7 @@ public static class UnindexedTempTableUsageScanner
 {
     public static IReadOnlyList<UnindexedTempTableUsageFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(catalog);
+        var visitor = new Visitor(parseResult.SourcePath, catalog);
         parseResult.Fragment.Accept(visitor);
 
         var tempIdentifierComparer = TypeInference.Collation.IdentifierComparer(catalog.EffectiveTempdbCollation);
@@ -53,33 +54,24 @@ public static class UnindexedTempTableUsageScanner
 
     private sealed record Usage(string TempTableName, string? Scope, UnindexedTempTableUsageKind Kind, int Line, int Column);
 
-    private sealed class Visitor(DatabaseCatalog catalog) : TSqlFragmentVisitor
-    {
-        private string? _currentScope;
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
+#pragma warning disable CS9107
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
+        : ScopedRelationWalker(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
+    {
         public List<Declaration> Declarations { get; } = [];
 
         public List<Usage> Usages { get; } = [];
-
-        public override void ExplicitVisit(CreateProcedureStatement node) => VisitScopedBody(node.ProcedureReference.Name, node);
-
-        public override void ExplicitVisit(AlterProcedureStatement node) => VisitScopedBody(node.ProcedureReference.Name, node);
-
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => VisitScopedBody(node.ProcedureReference.Name, node);
-
-        public override void ExplicitVisit(CreateTriggerStatement node) => VisitScopedBody(node.Name, node);
-
-        public override void ExplicitVisit(AlterTriggerStatement node) => VisitScopedBody(node.Name, node);
-
-        public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitScopedBody(node.Name, node);
 
         public override void ExplicitVisit(SelectStatement node)
         {
             if (node.Into is { BaseIdentifier.Value: var tempName } into && tempName.StartsWith('#'))
             {
-                var qualified = catalog.Find(SchemaObjectNameHelper.Qualify(into), _currentScope)?.QualifiedName
+                var qualified = catalog.Find(SchemaObjectNameHelper.Qualify(into), CurrentProcScope)?.QualifiedName
                     ?? SchemaObjectNameHelper.Qualify(into);
-                Declarations.Add(new Declaration(tempName, qualified, _currentScope, node.StartLine));
+                Declarations.Add(new Declaration(tempName, qualified, CurrentProcScope, node.StartLine));
             }
 
             base.ExplicitVisit(node);
@@ -98,25 +90,17 @@ public static class UnindexedTempTableUsageScanner
                 && node.FromClause?.TableReferences is [NamedTableReference { SchemaObject.BaseIdentifier.Value: var name }]
                 && name.StartsWith('#'))
             {
-                Usages.Add(new Usage(name, _currentScope, UnindexedTempTableUsageKind.FilteredInWhere, where.StartLine, where.StartColumn));
+                Usages.Add(new Usage(name, CurrentProcScope, UnindexedTempTableUsageKind.FilteredInWhere, where.StartLine, where.StartColumn));
             }
 
             base.ExplicitVisit(node);
-        }
-
-        private void VisitScopedBody(SchemaObjectName name, TSqlFragment node)
-        {
-            var previousScope = _currentScope;
-            _currentScope = SchemaObjectNameHelper.Qualify(name);
-            node.AcceptChildren(this);
-            _currentScope = previousScope;
         }
 
         private void TryRecordJoinOperand(TableReference side, TSqlFragment joinNode)
         {
             if (side is NamedTableReference { SchemaObject.BaseIdentifier.Value: var name } && name.StartsWith('#'))
             {
-                Usages.Add(new Usage(name, _currentScope, UnindexedTempTableUsageKind.JoinOperand, joinNode.StartLine, joinNode.StartColumn));
+                Usages.Add(new Usage(name, CurrentProcScope, UnindexedTempTableUsageKind.JoinOperand, joinNode.StartLine, joinNode.StartColumn));
             }
         }
     }

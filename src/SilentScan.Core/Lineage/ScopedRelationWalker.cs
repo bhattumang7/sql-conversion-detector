@@ -77,9 +77,9 @@ internal abstract class ScopedRelationWalker(
 
     private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)
     {
-        OnEnterProcedureOrFunctionBody(node);
         var previousScope = CurrentProcScope;
         CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
+        OnEnterProcedureOrFunctionBody(node);
         node.AcceptChildren(this);
         CurrentProcScope = previousScope;
         OnLeaveProcedureOrFunctionBody(node);
@@ -94,9 +94,9 @@ internal abstract class ScopedRelationWalker(
 
     private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject)
     {
-        OnEnterTriggerBody(node);
         var previousScope = CurrentProcScope;
         CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
+        OnEnterTriggerBody(node);
 
         if (triggerObject.Name is not { } targetTableName)
         {

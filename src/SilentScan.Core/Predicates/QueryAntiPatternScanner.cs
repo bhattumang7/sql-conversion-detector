@@ -63,41 +63,8 @@ public static class QueryAntiPatternScanner
 
         private readonly HashSet<BinaryQueryExpression> _consumedUnionChainNodes = [];
 
-        public override void ExplicitVisit(CreateProcedureStatement node)
-        {
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
             InspectTableValuedParameters(node.Parameters);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterProcedureStatement node)
-        {
-            InspectTableValuedParameters(node.Parameters);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node)
-        {
-            InspectTableValuedParameters(node.Parameters);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateFunctionStatement node)
-        {
-            InspectTableValuedParameters(node.Parameters);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterFunctionStatement node)
-        {
-            InspectTableValuedParameters(node.Parameters);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateOrAlterFunctionStatement node)
-        {
-            InspectTableValuedParameters(node.Parameters);
-            base.ExplicitVisit(node);
-        }
 
         public override void ExplicitVisit(DeclareTableVariableStatement node)
         {
