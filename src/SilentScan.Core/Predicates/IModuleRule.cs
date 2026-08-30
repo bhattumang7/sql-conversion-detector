@@ -67,4 +67,96 @@ internal interface IModuleRule
     void OnLeaveInsertStatementScope(InsertStatement node, ModuleWalker walker)
     {
     }
+
+    void OnEnterAssignmentSetClause(AssignmentSetClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterSetVariableStatement(SetVariableStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterTSqlBatch(TSqlBatch node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterBooleanNotExpression(BooleanNotExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveBooleanNotExpression(BooleanNotExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterOperandPosition(TSqlFragment node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveOperandPosition(TSqlFragment node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterWhereClause(WhereClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveWhereClause(WhereClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterHavingClause(HavingClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveHavingClause(HavingClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterJoinSearchCondition(QualifiedJoin node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveJoinSearchCondition(QualifiedJoin node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterMergeSearchCondition(MergeSpecification node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveMergeSearchCondition(MergeSpecification node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterMergeActionSearchCondition(MergeActionClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveMergeActionSearchCondition(MergeActionClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnBooleanComparisonExpression(BooleanComparisonExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnBooleanTernaryExpression(BooleanTernaryExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnLikePredicate(LikePredicate node, ModuleWalker walker)
+    {
+    }
+
+    void OnInPredicate(InPredicate node, ModuleWalker walker)
+    {
+    }
+
+    void OnSubqueryComparisonPredicate(SubqueryComparisonPredicate node, ModuleWalker walker)
+    {
+    }
 }

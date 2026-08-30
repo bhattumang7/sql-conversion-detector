@@ -11,30 +11,35 @@ namespace SilentScan.Core.Predicates;
 
 public static class TypedPredicateExtractor
 {
-
     public static PredicateExtractionResult Extract(
         SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SqlType?>? externalVariables = null,
         DynamicSqlScope? enclosingScope = null, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
     {
         var resolvedViews = lineage.AllRelations;
         var ledger = new SkipLedger();
-        var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, enclosingScope, callerScopeByCalleeScope);
-        visitor.SeedEnclosingScope(parseResult.Fragment);
-        parseResult.Fragment.Accept(visitor);
-        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries, visitor.OversizedParameterFindings, visitor.UnderLengthParameterFindings, visitor.AnsiPaddingMismatchFindings, visitor.LocalVariablePredicateFindings, visitor.FilteredIndexParameterMismatchFindings);
+        var rule = new Rule(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, callerScopeByCalleeScope);
+        var walker = new ModuleWalker(
+            parseResult.SourcePath, catalog, resolvedViews, ledger, enclosingScope?.ProcScope, callerScopeByCalleeScope, rules: [rule]);
+
+        if (enclosingScope?.TriggerTarget is { } target)
+        {
+            walker.PushCteRelations(walker.BuildTriggerPseudoTableRelations(target, parseResult.Fragment));
+        }
+
+        parseResult.Fragment.Accept(walker);
+        return new PredicateExtractionResult(
+            rule.Findings, rule.ExpressionDerivedFindings, rule.CollationConflictFindings, rule.WriteLossFindings, ledger.Entries,
+            rule.OversizedParameterFindings, rule.UnderLengthParameterFindings, rule.AnsiPaddingMismatchFindings,
+            rule.LocalVariablePredicateFindings, rule.FilteredIndexParameterMismatchFindings);
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(
+    private sealed class Rule(
         string sourcePath,
         DatabaseCatalog catalog,
         IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
         IReadOnlyDictionary<string, SqlType?>? externalVariables,
         SkipLedger ledger,
-        DynamicSqlScope? enclosingScope = null,
-        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
-        : ScopedSqlVisitorBase(sourcePath, catalog, resolvedViews, ledger, enclosingScope?.ProcScope, callerScopeByCalleeScope)
-#pragma warning restore CS9107
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope) : IModuleRule
     {
         private const string PredicateOperandConstructKind = "predicate operand";
 
@@ -54,14 +59,6 @@ public static class TypedPredicateExtractor
 
         private const string FoldableLiteralComparisonConstructKind = "foldable literal comparison";
 
-        public void SeedEnclosingScope(TSqlFragment rootFragment)
-        {
-            if (enclosingScope?.TriggerTarget is { } target)
-            {
-                PushCteRelations(BuildTriggerPseudoTableRelations(target, rootFragment));
-            }
-        }
-
         private enum PredicatePosition
         {
             NotSeekable,
@@ -73,7 +70,11 @@ public static class TypedPredicateExtractor
 
         private PredicatePosition _position;
 
+        private readonly Stack<PredicatePosition> _positionStack = new();
+
         private bool _negated;
+
+        private readonly Stack<bool> _negatedStack = new();
 
         private TSqlFragment? _currentPredicateFragment;
 
@@ -145,166 +146,155 @@ public static class TypedPredicateExtractor
 
         private bool _statementHasOptionRecompile;
 
+        private readonly Stack<bool> _statementRecompileStack = new();
+
         private bool HasActiveRecompileGuard => _procedureHasWithRecompile || _statementHasOptionRecompile;
 
         private IReadOnlyList<CatalogColumn?>? _pendingInsertTargetColumns;
 
         private string? _pendingInsertTargetTable;
 
-        protected override void OnSelectStatementScope(SelectStatement node, Action continueDescent)
+        private bool _previousProcedureHasWithRecompile;
+
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
         {
-            var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
-            continueDescent();
-            _statementHasOptionRecompile = previousStatementHasOptionRecompile;
+            _variables.Clear();
+            _formalParameterNames.Clear();
+            RecordParameters(node.Parameters);
+
+            _previousProcedureHasWithRecompile = _procedureHasWithRecompile;
+            _procedureHasWithRecompile = node is ProcedureStatementBody { Options: { } options }
+                && options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile);
         }
 
-        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
+        public void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker) =>
+            _procedureHasWithRecompile = _previousProcedureHasWithRecompile;
+
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker)
+        {
+            _variables.Clear();
+            _formalParameterNames.Clear();
+        }
+
+        public void OnEnterSelectStatementScope(SelectStatement node, ModuleWalker walker) =>
+            _statementRecompileStack.Push(BeginStatementOptimizerHints(node.OptimizerHints));
+
+        public void OnLeaveSelectStatementScope(SelectStatement node, ModuleWalker walker) =>
+            _statementHasOptionRecompile = _statementRecompileStack.Pop();
+
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker)
         {
             if (_pendingInsertTargetColumns is { } pendingColumns)
             {
                 _pendingInsertTargetColumns = null;
                 var pendingTable = _pendingInsertTargetTable!;
                 _pendingInsertTargetTable = null;
-                AnalyzeSelectListWriteLoss(node.SelectElements, pendingColumns, pendingTable);
+                AnalyzeSelectListWriteLoss(node.SelectElements, pendingColumns, pendingTable, scopeChain, walker);
             }
 
-            var previousPosition = _position;
+            _positionStack.Push(_position);
             _position = PredicatePosition.NotSeekable;
 
-            var previousNegated = _negated;
+            _negatedStack.Push(_negated);
             _negated = false;
+        }
 
-            node.FromClause?.Accept(this);
-            foreach (var element in node.SelectElements)
+        public void OnLeaveQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker)
+        {
+            _negated = _negatedStack.Pop();
+            _position = _positionStack.Pop();
+        }
+
+        public void OnEnterWhereClause(WhereClause node, ModuleWalker walker)
+        {
+            _positionStack.Push(_position);
+            _position = PredicatePosition.Seekable;
+        }
+
+        public void OnLeaveWhereClause(WhereClause node, ModuleWalker walker) => _position = _positionStack.Pop();
+
+        public void OnEnterHavingClause(HavingClause node, ModuleWalker walker)
+        {
+            _positionStack.Push(_position);
+            _position = PredicatePosition.Seekable;
+        }
+
+        public void OnLeaveHavingClause(HavingClause node, ModuleWalker walker) => _position = _positionStack.Pop();
+
+        public void OnEnterJoinSearchCondition(QualifiedJoin node, ModuleWalker walker)
+        {
+            _positionStack.Push(_position);
+            _position = PredicatePosition.Seekable;
+        }
+
+        public void OnLeaveJoinSearchCondition(QualifiedJoin node, ModuleWalker walker) => _position = _positionStack.Pop();
+
+        public void OnEnterMergeSearchCondition(MergeSpecification node, ModuleWalker walker)
+        {
+            _positionStack.Push(_position);
+            _position = PredicatePosition.Seekable;
+        }
+
+        public void OnLeaveMergeSearchCondition(MergeSpecification node, ModuleWalker walker) => _position = _positionStack.Pop();
+
+        public void OnEnterMergeActionSearchCondition(MergeActionClause node, ModuleWalker walker)
+        {
+            _positionStack.Push(_position);
+            _position = PredicatePosition.Seekable;
+        }
+
+        public void OnLeaveMergeActionSearchCondition(MergeActionClause node, ModuleWalker walker) => _position = _positionStack.Pop();
+
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            _statementRecompileStack.Push(BeginStatementOptimizerHints(node.OptimizerHints));
+
+        public void OnLeaveUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            _statementHasOptionRecompile = _statementRecompileStack.Pop();
+
+        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker) =>
+            AnalyzeInsertWriteLoss(node.InsertSpecification, walker);
+
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            _statementRecompileStack.Push(BeginStatementOptimizerHints(node.OptimizerHints));
+
+        public void OnLeaveDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            _statementHasOptionRecompile = _statementRecompileStack.Pop();
+
+        public void OnEnterMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            _statementRecompileStack.Push(BeginStatementOptimizerHints(node.OptimizerHints));
+
+        public void OnLeaveMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            _statementHasOptionRecompile = _statementRecompileStack.Pop();
+
+        public void OnEnterAssignmentSetClause(AssignmentSetClause node, ModuleWalker walker)
+        {
+            if (node.Column is not { } columnRef)
             {
-                element.Accept(this);
+                return;
             }
 
-            node.WhereClause?.Accept(this);
-            node.GroupByClause?.Accept(this);
-            node.HavingClause?.Accept(this);
-            node.OrderByClause?.Accept(this);
-            node.WindowClause?.Accept(this);
-
-            _negated = previousNegated;
-            _position = previousPosition;
-        }
-
-        public override void ExplicitVisit(WhereClause node)
-        {
-            var previous = _position;
-            _position = PredicatePosition.Seekable;
-            WithPredicateLocation(node.SearchCondition, () => node.AcceptChildren(this));
-            _position = previous;
-        }
-
-        public override void ExplicitVisit(HavingClause node)
-        {
-            var previous = _position;
-            _position = PredicatePosition.Seekable;
-            WithPredicateLocation(node.SearchCondition, () => node.AcceptChildren(this));
-            _position = previous;
-        }
-
-        public override void ExplicitVisit(QualifiedJoin node)
-        {
-            node.FirstTableReference?.Accept(this);
-            node.SecondTableReference?.Accept(this);
-
-            var previous = _position;
-            _position = PredicatePosition.Seekable;
-            WithPredicateLocation(node.SearchCondition, () => node.SearchCondition?.Accept(this));
-            _position = previous;
-        }
-
-        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
-        {
-            var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
-            continueDescent();
-            _statementHasOptionRecompile = previousStatementHasOptionRecompile;
-        }
-
-        protected override void OnInsertStatementScope(InsertStatement node, Action continueDescent)
-        {
-            var spec = node.InsertSpecification;
-            node.WithCtesAndXmlNamespaces?.Accept(this);
-            AnalyzeInsertWriteLoss(spec);
-            spec.Accept(this);
-        }
-
-        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
-        {
-            var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
-            continueDescent();
-            _statementHasOptionRecompile = previousStatementHasOptionRecompile;
-        }
-
-        protected override void OnMergeStatementScope(MergeStatement node, ScopeChain scopeChain, Action continueDescent)
-        {
-            var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
-            continueDescent();
-            _statementHasOptionRecompile = previousStatementHasOptionRecompile;
-        }
-
-        public override void ExplicitVisit(MergeSpecification node)
-        {
-            node.Target?.Accept(this);
-            node.TableReference?.Accept(this);
-            node.TopRowFilter?.Accept(this);
-
-            var previousPosition = _position;
-            _position = PredicatePosition.Seekable;
-            node.SearchCondition?.Accept(this);
-            _position = previousPosition;
-
-            foreach (var actionClause in node.ActionClauses)
+            var scopeChain = walker.CurrentScopeChain();
+            if (ResolveOperand(columnRef, scopeChain, walker) is PredicateOperand.Column target && target.Type is { } targetType)
             {
-                actionClause.Accept(this);
+                var sourceType = OperandType(ResolveOperand(node.NewValue, scopeChain, walker));
+                EmitWriteLossFinding(target.TableQualifiedName, target.ColumnName, targetType, sourceType, node.NewValue);
+            }
+        }
+
+        public void OnEnterSetVariableStatement(SetVariableStatement node, ModuleWalker walker)
+        {
+            if (node.AssignmentKind != AssignmentKind.Equals || node.Expression is not { } sourceExpression
+                || !_variables.TryGetValue(node.Variable.Name, out var targetType) || targetType is not { } target)
+            {
+                return;
             }
 
-            node.OutputClause?.Accept(this);
-            node.OutputIntoClause?.Accept(this);
+            var scopeChain = walker.CurrentScopeChain();
+            var sourceType = OperandType(ResolveOperand(sourceExpression, scopeChain, walker));
+            EmitWriteLossFinding(tableQualifiedName: null, node.Variable.Name, target, sourceType, sourceExpression);
         }
 
-        public override void ExplicitVisit(MergeActionClause node)
-        {
-            var previousPosition = _position;
-            _position = PredicatePosition.Seekable;
-            node.SearchCondition?.Accept(this);
-            _position = previousPosition;
-
-            node.Action?.Accept(this);
-        }
-
-        public override void ExplicitVisit(AssignmentSetClause node)
-        {
-            if (node.Column is { } columnRef)
-            {
-                var scopeChain = CurrentScopeChain();
-                if (ResolveOperand(columnRef, scopeChain) is PredicateOperand.Column target && target.Type is { } targetType)
-                {
-                    var sourceType = OperandType(ResolveOperand(node.NewValue, scopeChain));
-                    EmitWriteLossFinding(target.TableQualifiedName, target.ColumnName, targetType, sourceType, node.NewValue);
-                }
-            }
-
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(SetVariableStatement node)
-        {
-            if (node.AssignmentKind == AssignmentKind.Equals && node.Expression is { } sourceExpression
-                && _variables.TryGetValue(node.Variable.Name, out var targetType) && targetType is { } target)
-            {
-                var scopeChain = CurrentScopeChain();
-                var sourceType = OperandType(ResolveOperand(sourceExpression, scopeChain));
-                EmitWriteLossFinding(tableQualifiedName: null, node.Variable.Name, target, sourceType, sourceExpression);
-            }
-
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(TSqlBatch node)
+        public void OnEnterTSqlBatch(TSqlBatch node, ModuleWalker walker)
         {
             _variables.Clear();
             _formalParameterNames.Clear();
@@ -316,50 +306,33 @@ public static class TypedPredicateExtractor
                     _formalParameterNames.Add(name);
                 }
             }
-
-            node.AcceptChildren(this);
         }
 
-        public override void ExplicitVisit(DeclareVariableStatement node)
+        public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)
         {
             foreach (var declaration in node.Declarations)
             {
                 _variables[declaration.VariableName.Value] = SqlTypeReferenceResolver.Resolve(declaration.DataType, columnCollation: null, catalog.TypeAliases);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(BooleanNotExpression node)
+        public void OnEnterBooleanNotExpression(BooleanNotExpression node, ModuleWalker walker) => _negated = !_negated;
+
+        public void OnLeaveBooleanNotExpression(BooleanNotExpression node, ModuleWalker walker) => _negated = !_negated;
+
+        public void OnEnterOperandPosition(TSqlFragment node, ModuleWalker walker)
         {
-            _negated = !_negated;
-            node.AcceptChildren(this);
-            _negated = !_negated;
+            _positionStack.Push(_position);
+            _position = _position == PredicatePosition.Seekable ? PredicatePosition.SuppressedOperand : PredicatePosition.NotSeekable;
         }
 
-        public override void ExplicitVisit(SearchedCaseExpression node) => EnterOperandPosition(node);
-
-        public override void ExplicitVisit(SimpleCaseExpression node) => EnterOperandPosition(node);
-
-        public override void ExplicitVisit(IIfCall node) => EnterOperandPosition(node);
-
-        public override void ExplicitVisit(CoalesceExpression node) => EnterOperandPosition(node);
-
-        public override void ExplicitVisit(NullIfExpression node) => EnterOperandPosition(node);
+        public void OnLeaveOperandPosition(TSqlFragment node, ModuleWalker walker) => _position = _positionStack.Pop();
 
         private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)
         {
             var previous = _statementHasOptionRecompile;
             _statementHasOptionRecompile = hints.Any(h => h.HintKind == OptimizerHintKind.Recompile);
             return previous;
-        }
-
-        private void EnterOperandPosition(TSqlFragment node)
-        {
-            var previousPosition = _position;
-            _position = previousPosition == PredicatePosition.Seekable ? PredicatePosition.SuppressedOperand : PredicatePosition.NotSeekable;
-            node.AcceptChildren(this);
-            _position = previousPosition;
         }
 
         private bool SkipIfNotSeekable(TSqlFragment node)
@@ -377,9 +350,9 @@ public static class TypedPredicateExtractor
             return true;
         }
 
-        private void AnalyzeInsertWriteLoss(InsertSpecification spec)
+        private void AnalyzeInsertWriteLoss(InsertSpecification spec, ModuleWalker walker)
         {
-            var table = ResolveWriteTargetTable(spec.Target);
+            var table = ResolveWriteTargetTable(spec.Target, walker);
             if (table is null)
             {
                 ledger.Record(
@@ -393,7 +366,7 @@ public static class TypedPredicateExtractor
             switch (spec.InsertSource)
             {
                 case ValuesInsertSource values:
-                    AnalyzeValuesInsertSource(values, targetColumns, table.QualifiedName);
+                    AnalyzeValuesInsertSource(values, targetColumns, table.QualifiedName, walker);
                     return;
 
                 case SelectInsertSource { Select: QuerySpecification querySpec }
@@ -410,7 +383,7 @@ public static class TypedPredicateExtractor
             }
         }
 
-        private CatalogTable? ResolveWriteTargetTable(TableReference target)
+        private CatalogTable? ResolveWriteTargetTable(TableReference target, ModuleWalker walker)
         {
             if (target is not NamedTableReference named)
             {
@@ -418,11 +391,11 @@ public static class TypedPredicateExtractor
             }
 
             var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            var table = catalog.Find(qualifiedName, CurrentProcScope);
+            var table = catalog.Find(qualifiedName, walker.CurrentProcScope);
 
-            if (table is null && CurrentProcScope is not null
+            if (table is null && walker.CurrentProcScope is not null
                 && callerScopeByCalleeScope is not null
-                && callerScopeByCalleeScope.TryGetValue(CurrentProcScope, out var callerScopes))
+                && callerScopeByCalleeScope.TryGetValue(walker.CurrentProcScope, out var callerScopes))
             {
                 table = FromScopeResolver.TryResolveFromCallerScopes(catalog, qualifiedName, callerScopes);
             }
@@ -455,9 +428,9 @@ public static class TypedPredicateExtractor
             return resolved;
         }
 
-        private void AnalyzeValuesInsertSource(ValuesInsertSource values, List<CatalogColumn?> targetColumns, string targetTableQualifiedName)
+        private void AnalyzeValuesInsertSource(ValuesInsertSource values, List<CatalogColumn?> targetColumns, string targetTableQualifiedName, ModuleWalker walker)
         {
-            var scopeChain = CurrentScopeChain();
+            var scopeChain = walker.CurrentScopeChain();
             foreach (var columnValues in values.RowValues.Select(row => row.ColumnValues))
             {
                 var count = Math.Min(columnValues.Count, targetColumns.Count);
@@ -470,15 +443,15 @@ public static class TypedPredicateExtractor
                     }
 
                     var sourceExpression = columnValues[i];
-                    var sourceType = OperandType(ResolveOperand(sourceExpression, scopeChain));
+                    var sourceType = OperandType(ResolveOperand(sourceExpression, scopeChain, walker));
                     EmitWriteLossFinding(targetTableQualifiedName, targetColumns[i]!.Name, targetType, sourceType, sourceExpression);
                 }
             }
         }
 
-        private void AnalyzeSelectListWriteLoss(IList<SelectElement> selectElements, IReadOnlyList<CatalogColumn?> targetColumns, string targetTableQualifiedName)
+        private void AnalyzeSelectListWriteLoss(
+            IList<SelectElement> selectElements, IReadOnlyList<CatalogColumn?> targetColumns, string targetTableQualifiedName, ScopeChain scopeChain, ModuleWalker walker)
         {
-            var scopeChain = CurrentScopeChain();
             var count = Math.Min(selectElements.Count, targetColumns.Count);
             for (var i = 0; i < count; i++)
             {
@@ -489,7 +462,7 @@ public static class TypedPredicateExtractor
                     continue;
                 }
 
-                var sourceType = OperandType(ResolveOperand(sourceExpression, scopeChain));
+                var sourceType = OperandType(ResolveOperand(sourceExpression, scopeChain, walker));
                 EmitWriteLossFinding(targetTableQualifiedName, targetColumns[i]!.Name, targetType, sourceType, sourceExpression);
             }
         }
@@ -507,33 +480,11 @@ public static class TypedPredicateExtractor
                 sourcePath, sourceExpression.StartLine, sourceExpression.StartColumn));
         }
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        public void OnBooleanComparisonExpression(BooleanComparisonExpression node, ModuleWalker walker)
         {
-            _variables.Clear();
-            _formalParameterNames.Clear();
-            RecordParameters(node.Parameters);
-
-            _previousProcedureHasWithRecompile = _procedureHasWithRecompile;
-            _procedureHasWithRecompile = node is ProcedureStatementBody { Options: { } options }
-                && options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile);
-        }
-
-        protected override void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
-            _procedureHasWithRecompile = _previousProcedureHasWithRecompile;
-
-        private bool _previousProcedureHasWithRecompile;
-
-        protected override void OnEnterTriggerBody(TriggerStatementBody node)
-        {
-            _variables.Clear();
-            _formalParameterNames.Clear();
-        }
-
-        public override void Visit(BooleanComparisonExpression node)
-        {
-            if (IsDeadPredicate(node))
+            if (walker.IsDeadPredicate(node))
             {
-                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, ModuleWalker.NormalizationEliminatedConstructKind, ModuleWalker.NormalizationEliminatedLedgerReason);
                 return;
             }
 
@@ -544,26 +495,26 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            TryAddFinding(node.FirstExpression, node.SecondExpression, _negated ? Negate(operatorText) : operatorText, node);
+            TryAddFinding(node.FirstExpression, node.SecondExpression, _negated ? Negate(operatorText) : operatorText, node, walker);
         }
 
-        public override void Visit(BooleanTernaryExpression node)
+        public void OnBooleanTernaryExpression(BooleanTernaryExpression node, ModuleWalker walker)
         {
             if (node.TernaryExpressionType is not (BooleanTernaryExpressionType.Between or BooleanTernaryExpressionType.NotBetween))
             {
                 return;
             }
 
-            if (IsDeadPredicate(node))
+            if (walker.IsDeadPredicate(node))
             {
-                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, ModuleWalker.NormalizationEliminatedConstructKind, ModuleWalker.NormalizationEliminatedLedgerReason);
                 return;
             }
 
             var isNotBetween = node.TernaryExpressionType == BooleanTernaryExpressionType.NotBetween || _negated;
             if (isNotBetween)
             {
-                if (ScopeStack.Count > 0 && _position == PredicatePosition.Seekable)
+                if (walker.CurrentScopeChain().Count > 0 && _position == PredicatePosition.Seekable)
                 {
                     ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "NOT BETWEEN is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 }
@@ -575,22 +526,22 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            TryAddFinding(node.FirstExpression, node.SecondExpression, ">=", node);
-            TryAddFinding(node.FirstExpression, node.ThirdExpression, "<=", node);
+            TryAddFinding(node.FirstExpression, node.SecondExpression, ">=", node, walker);
+            TryAddFinding(node.FirstExpression, node.ThirdExpression, "<=", node, walker);
         }
 
-        public override void Visit(LikePredicate node)
+        public void OnLikePredicate(LikePredicate node, ModuleWalker walker)
         {
-            if (IsDeadPredicate(node))
+            if (walker.IsDeadPredicate(node))
             {
-                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, ModuleWalker.NormalizationEliminatedConstructKind, ModuleWalker.NormalizationEliminatedLedgerReason);
                 return;
             }
 
             if (node.NotDefined || _negated)
             {
 
-                if (ScopeStack.Count > 0 && _position == PredicatePosition.Seekable)
+                if (walker.CurrentScopeChain().Count > 0 && _position == PredicatePosition.Seekable)
                 {
                     ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "NOT LIKE is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 }
@@ -602,18 +553,19 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            TryAddFinding(node.FirstExpression, node.SecondExpression, "LIKE", node);
+            TryAddFinding(node.FirstExpression, node.SecondExpression, "LIKE", node, walker);
         }
 
-        public override void Visit(InPredicate node)
+        public void OnInPredicate(InPredicate node, ModuleWalker walker)
         {
-            if (IsDeadPredicate(node))
+            if (walker.IsDeadPredicate(node))
             {
-                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, ModuleWalker.NormalizationEliminatedConstructKind, ModuleWalker.NormalizationEliminatedLedgerReason);
                 return;
             }
 
-            if (ScopeStack.Count == 0)
+            var scopeChain = walker.CurrentScopeChain();
+            if (scopeChain.Count == 0)
             {
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
                 return;
@@ -631,17 +583,16 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var scopeChain = CurrentScopeChain();
             _currentPredicateFragment = node;
-            if (ResolveOperand(node.Expression, scopeChain) is not PredicateOperand.Column column)
+            if (ResolveOperand(node.Expression, scopeChain, walker) is not PredicateOperand.Column column)
             {
 
                 return;
             }
 
             var otherType = node.Subquery is not null
-                ? ResolveInSubqueryType(node.Subquery)
-                : CombineListElementTypes(node.Values, scopeChain);
+                ? ResolveInSubqueryType(node.Subquery, walker)
+                : CombineListElementTypes(node.Values, scopeChain, walker);
 
             if (otherType is null)
             {
@@ -653,15 +604,16 @@ public static class TypedPredicateExtractor
             Findings.Add(new TypedPredicateFinding(verdict, column, new PredicateOperand.Value(otherType), "IN", sourcePath, node.StartLine, node.StartColumn));
         }
 
-        public override void Visit(SubqueryComparisonPredicate node)
+        public void OnSubqueryComparisonPredicate(SubqueryComparisonPredicate node, ModuleWalker walker)
         {
-            if (IsDeadPredicate(node))
+            if (walker.IsDeadPredicate(node))
             {
-                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, ModuleWalker.NormalizationEliminatedConstructKind, ModuleWalker.NormalizationEliminatedLedgerReason);
                 return;
             }
 
-            if (ScopeStack.Count == 0)
+            var scopeChain = walker.CurrentScopeChain();
+            if (scopeChain.Count == 0)
             {
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
                 return;
@@ -689,14 +641,13 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var scopeChain = CurrentScopeChain();
             _currentPredicateFragment = node;
-            if (ResolveOperand(node.Expression, scopeChain) is not PredicateOperand.Column column)
+            if (ResolveOperand(node.Expression, scopeChain, walker) is not PredicateOperand.Column column)
             {
                 return;
             }
 
-            var otherType = ResolveInSubqueryType(node.Subquery);
+            var otherType = ResolveInSubqueryType(node.Subquery, walker);
             if (otherType is null)
             {
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "subquery comparison predicate", "the subquery's output column type could not be resolved");
@@ -705,11 +656,6 @@ public static class TypedPredicateExtractor
 
             var verdict = VerdictClassifier.Classify(column.Type, otherType, operatorText: "IN");
             Findings.Add(new TypedPredicateFinding(verdict, column, new PredicateOperand.Value(otherType), "IN", sourcePath, node.StartLine, node.StartColumn));
-        }
-
-        public override void Visit(BooleanIsNullExpression node)
-        {
-            _ = node;
         }
 
         private static string? ToOperatorText(BooleanComparisonType comparisonType) => comparisonType switch
@@ -748,9 +694,10 @@ public static class TypedPredicateExtractor
             }
         }
 
-        private void TryAddFinding(ScalarExpression first, ScalarExpression second, string operatorText, TSqlFragment node)
+        private void TryAddFinding(ScalarExpression first, ScalarExpression second, string operatorText, TSqlFragment node, ModuleWalker walker)
         {
-            if (ScopeStack.Count == 0)
+            var scopeChain = walker.CurrentScopeChain();
+            if (scopeChain.Count == 0)
             {
 
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
@@ -769,10 +716,9 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var scopeChain = CurrentScopeChain();
             _currentPredicateFragment = node;
-            var left = ResolveOperand(first, scopeChain);
-            var right = ResolveOperand(second, scopeChain);
+            var left = ResolveOperand(first, scopeChain, walker);
+            var right = ResolveOperand(second, scopeChain, walker);
 
             if (left is PredicateOperand.Column leftColumn && right is PredicateOperand.Column rightColumn)
             {
@@ -782,8 +728,8 @@ public static class TypedPredicateExtractor
                     return;
                 }
 
-                AddFinding(leftColumn, rightColumn, operatorText, node);
-                AddFinding(rightColumn, leftColumn, operatorText, node);
+                AddFinding(leftColumn, rightColumn, operatorText, node, walker);
+                AddFinding(rightColumn, leftColumn, operatorText, node, walker);
                 return;
             }
 
@@ -808,7 +754,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            AddFinding(column, other, operatorText, node);
+            AddFinding(column, other, operatorText, node, walker);
         }
 
         private void RecordNoColumnOperand(ScalarExpression first, ScalarExpression second, TSqlFragment node)
@@ -835,7 +781,7 @@ public static class TypedPredicateExtractor
                 "neither side of this comparison resolved to a real column - most commonly both sides are expressions (e.g. a column wrapped in COALESCE/CASE/NULLIF/IIF compared to a literal)");
         }
 
-        private void AddFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
+        private void AddFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node, ModuleWalker walker)
         {
             var otherIsLiteral = other is PredicateOperand.Value { IsLiteral: true };
             var otherType = other is PredicateOperand.Value value ? value.Type : ((PredicateOperand.Column)other).Type;
@@ -849,7 +795,7 @@ public static class TypedPredicateExtractor
 
             TryAddOversizedParameterFinding(column, other, otherIsLiteral, node);
             TryAddUnderLengthParameterFinding(column, other, otherIsLiteral, operatorText, node);
-            TryAddAnsiPaddingMismatchFinding(column, other, operatorText, node);
+            TryAddAnsiPaddingMismatchFinding(column, other, operatorText, node, walker);
             TryAddLocalVariablePredicateFinding(column, other, operatorText, node);
             TryAddFilteredIndexParameterMismatchFinding(column, other, operatorText, node);
         }
@@ -910,7 +856,7 @@ public static class TypedPredicateExtractor
                 operatorText, changesRangeOrPatternShape, sourcePath, node.StartLine, node.StartColumn));
         }
 
-        private void TryAddAnsiPaddingMismatchFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
+        private void TryAddAnsiPaddingMismatchFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node, ModuleWalker walker)
         {
             if (operatorText != "LIKE"
                 || column.Type is not { Category: SqlTypeCategory.VarChar or SqlTypeCategory.VarBinary }
@@ -920,7 +866,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var catalogColumn = catalog.Find(column.TableQualifiedName, CurrentProcScope)?.FindColumn(column.ColumnName, catalog.IdentifierComparer);
+            var catalogColumn = catalog.Find(column.TableQualifiedName, walker.CurrentProcScope)?.FindColumn(column.ColumnName, catalog.IdentifierComparer);
             if (catalogColumn is not { IsAnsiPadded: false })
             {
                 return;
@@ -958,13 +904,12 @@ public static class TypedPredicateExtractor
             return true;
         }
 
-        private PredicateOperand ResolveOperand(
-            ScalarExpression expression, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        private PredicateOperand ResolveOperand(ScalarExpression expression, ScopeChain scopeChain, ModuleWalker walker)
         {
             switch (expression)
             {
                 case ColumnReferenceExpression columnRef:
-                    return ResolveColumnOperand(columnRef, scopeChain);
+                    return ResolveColumnOperand(columnRef, scopeChain, walker);
 
                 case VariableReference variableRef:
                     return new PredicateOperand.Value(
@@ -978,22 +923,22 @@ public static class TypedPredicateExtractor
                     return ResolveGlobalVariableOperand(globalVariable);
 
                 case FunctionCall functionCall:
-                    return ResolveFunctionCallOperand(functionCall, scopeChain);
+                    return ResolveFunctionCallOperand(functionCall, scopeChain, walker);
 
                 case CastCall castCall:
-                    return ResolveCastOrConvertOperand(castCall.DataType, castCall.Parameter, scopeChain, castCall);
+                    return ResolveCastOrConvertOperand(castCall.DataType, castCall.Parameter, scopeChain, walker);
 
                 case ConvertCall convertCall:
-                    return ResolveCastOrConvertOperand(convertCall.DataType, convertCall.Parameter, scopeChain, convertCall);
+                    return ResolveCastOrConvertOperand(convertCall.DataType, convertCall.Parameter, scopeChain, walker);
 
                 case ScalarSubquery scalarSubquery:
-                    return new PredicateOperand.Value(ResolveInSubqueryType(scalarSubquery));
+                    return new PredicateOperand.Value(ResolveInSubqueryType(scalarSubquery, walker));
 
                 case ParenthesisExpression or UnaryExpression or BinaryExpression
                     or CoalesceExpression or NullIfExpression or IIfCall
                     or SearchedCaseExpression or SimpleCaseExpression:
                     return new PredicateOperand.Value(
-                        ExpressionTypeInferencer.Resolve(expression, e => OperandType(ResolveOperand(e, scopeChain)), catalog.TypeAliases));
+                        ExpressionTypeInferencer.Resolve(expression, e => OperandType(ResolveOperand(e, scopeChain, walker)), catalog.TypeAliases));
 
                 default:
 
@@ -1024,14 +969,13 @@ public static class TypedPredicateExtractor
             return new PredicateOperand.Value(type);
         }
 
-        private PredicateOperand.Value ResolveFunctionCallOperand(
-            FunctionCall functionCall, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        private PredicateOperand.Value ResolveFunctionCallOperand(FunctionCall functionCall, ScopeChain scopeChain, ModuleWalker walker)
         {
             var name = functionCall.FunctionName.Value;
 
             if (TypeInference.BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
             {
-                var argumentType = OperandType(ResolveOperand(functionCall.Parameters[argumentIndex], scopeChain));
+                var argumentType = OperandType(ResolveOperand(functionCall.Parameters[argumentIndex], scopeChain, walker));
                 argumentType = TypeInference.BuiltinFunctionTypeResolver.AdjustArgumentTypeFunctionResult(name, argumentType);
                 return new PredicateOperand.Value(argumentType);
             }
@@ -1063,23 +1007,21 @@ public static class TypedPredicateExtractor
         }
 
         private PredicateOperand.Value ResolveCastOrConvertOperand(
-            DataTypeReference dataType, ScalarExpression parameter,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
-            TSqlFragment node)
+            DataTypeReference dataType, ScalarExpression parameter, ScopeChain scopeChain, ModuleWalker walker)
         {
 
             var type = Parsing.SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null, catalog.TypeAliases, unsizedStringOrBinaryDefaultLength: 30);
             if (type is null)
             {
                 ledger.Record(
-                    AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn,
+                    AnalysisPass.Predicates, sourcePath, parameter.StartLine, parameter.StartColumn,
                     PredicateOperandConstructKind, "CAST/CONVERT target type could not be resolved - resolved Unknown");
                 return new PredicateOperand.Value(Type: null);
             }
 
             if (type.IsStringFamily)
             {
-                var innerType = OperandType(ResolveOperand(parameter, scopeChain));
+                var innerType = OperandType(ResolveOperand(parameter, scopeChain, walker));
 
                 if (innerType is { IsStringFamily: true, Collation: { } innerCollation })
                 {
@@ -1090,13 +1032,12 @@ public static class TypedPredicateExtractor
             return new PredicateOperand.Value(type);
         }
 
-        private SqlType? CombineListElementTypes(
-            IList<ScalarExpression> values, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        private SqlType? CombineListElementTypes(IList<ScalarExpression> values, ScopeChain scopeChain, ModuleWalker walker)
         {
             SqlType? best = null;
             foreach (var value in values)
             {
-                var type = OperandType(ResolveOperand(value, scopeChain));
+                var type = OperandType(ResolveOperand(value, scopeChain, walker));
 
                 if (type is null)
                 {
@@ -1112,10 +1053,10 @@ public static class TypedPredicateExtractor
             return best;
         }
 
-        private SqlType? ResolveInSubqueryType(ScalarSubquery subquery)
+        private SqlType? ResolveInSubqueryType(ScalarSubquery subquery, ModuleWalker walker)
         {
-            var innerCtes = CurrentCteRelations();
-            var columns = QueryExpressionResolver.Resolve(subquery.QueryExpression, catalog, resolvedViews, sourcePath, ledger, innerCtes, CurrentProcScope);
+            var innerCtes = walker.CurrentCteRelations();
+            var columns = QueryExpressionResolver.Resolve(subquery.QueryExpression, catalog, resolvedViews, sourcePath, ledger, innerCtes, walker.CurrentProcScope);
             if (columns.Count != 1)
             {
 
@@ -1125,8 +1066,7 @@ public static class TypedPredicateExtractor
             return ColumnProvenanceAnalysis.TryGetScalarType(columns[0].Provenance);
         }
 
-        private PredicateOperand ResolveColumnOperand(
-            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        private PredicateOperand ResolveColumnOperand(ColumnReferenceExpression columnRef, ScopeChain scopeChain, ModuleWalker walker)
         {
 
             var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger, catalog);
@@ -1135,7 +1075,7 @@ public static class TypedPredicateExtractor
             if (provenance is ColumnProvenance.BaseColumn baseColumn)
             {
 
-                var tableEntry = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope);
+                var tableEntry = catalog.Find(baseColumn.TableQualifiedName, walker.CurrentProcScope);
                 var matchedIndex = tableEntry?.FindIndexedColumn(baseColumn.ColumnName, catalog.IdentifierComparer);
 
                 bool? indexed = tableEntry is null ? null : matchedIndex is not null;
@@ -1153,7 +1093,7 @@ public static class TypedPredicateExtractor
 
             if (ColumnProvenanceAnalysis.IsExpressionDerived(provenance))
             {
-                RecordExpressionDerivedFinding(columnName, columnRef, provenance, scopeChain);
+                RecordExpressionDerivedFinding(columnName, columnRef, provenance, scopeChain, walker);
             }
             else if (provenance is ColumnProvenance.Union union)
             {
@@ -1173,11 +1113,10 @@ public static class TypedPredicateExtractor
         }
 
         private void RecordExpressionDerivedFinding(
-            string columnName, ColumnReferenceExpression columnRef, ColumnProvenance provenance,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+            string columnName, ColumnReferenceExpression columnRef, ColumnProvenance provenance, ScopeChain scopeChain, ModuleWalker walker)
         {
             var underlyingBaseColumns = ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(provenance)
-                .Select(bc => new UnderlyingBaseColumn(bc.TableQualifiedName, bc.ColumnName, catalog.Find(bc.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(bc.ColumnName, catalog.IdentifierComparer) ?? false))
+                .Select(bc => new UnderlyingBaseColumn(bc.TableQualifiedName, bc.ColumnName, catalog.Find(bc.TableQualifiedName, walker.CurrentProcScope)?.IsIndexedColumn(bc.ColumnName, catalog.IdentifierComparer) ?? false))
                 .ToList();
 
             if (underlyingBaseColumns.Count == 0)

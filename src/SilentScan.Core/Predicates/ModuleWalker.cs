@@ -274,18 +274,292 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
     public sealed override void ExplicitVisit(InsertStatement node) =>
         WithCteScope(node.WithCtesAndXmlNamespaces, () =>
         {
+            node.WithCtesAndXmlNamespaces?.Accept(this);
+
             foreach (var rule in _rules)
             {
                 rule.OnEnterInsertStatementScope(node, this);
             }
 
-            base.ExplicitVisit(node);
+            node.InsertSpecification.Accept(this);
 
             foreach (var rule in _rules)
             {
                 rule.OnLeaveInsertStatementScope(node, this);
             }
         });
+
+    public sealed override void ExplicitVisit(AssignmentSetClause node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterAssignmentSetClause(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(SetVariableStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterSetVariableStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(TSqlBatch node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterTSqlBatch(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(DeclareVariableStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterDeclareVariableStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(BooleanNotExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterBooleanNotExpression(node, this);
+        }
+
+        base.ExplicitVisit(node);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveBooleanNotExpression(node, this);
+        }
+    }
+
+    public sealed override void ExplicitVisit(SearchedCaseExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterOperandPosition(node, this);
+        }
+
+        base.ExplicitVisit(node);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveOperandPosition(node, this);
+        }
+    }
+
+    public sealed override void ExplicitVisit(SimpleCaseExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterOperandPosition(node, this);
+        }
+
+        base.ExplicitVisit(node);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveOperandPosition(node, this);
+        }
+    }
+
+    public sealed override void ExplicitVisit(IIfCall node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterOperandPosition(node, this);
+        }
+
+        base.ExplicitVisit(node);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveOperandPosition(node, this);
+        }
+    }
+
+    public sealed override void ExplicitVisit(CoalesceExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterOperandPosition(node, this);
+        }
+
+        base.ExplicitVisit(node);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveOperandPosition(node, this);
+        }
+    }
+
+    public sealed override void ExplicitVisit(NullIfExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterOperandPosition(node, this);
+        }
+
+        base.ExplicitVisit(node);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveOperandPosition(node, this);
+        }
+    }
+
+    public sealed override void ExplicitVisit(WhereClause node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterWhereClause(node, this);
+        }
+
+        WithPredicateLocation(node.SearchCondition, () => base.ExplicitVisit(node));
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveWhereClause(node, this);
+        }
+    }
+
+    public sealed override void ExplicitVisit(HavingClause node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterHavingClause(node, this);
+        }
+
+        WithPredicateLocation(node.SearchCondition, () => base.ExplicitVisit(node));
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveHavingClause(node, this);
+        }
+    }
+
+    public sealed override void ExplicitVisit(QualifiedJoin node)
+    {
+        node.FirstTableReference?.Accept(this);
+        node.SecondTableReference?.Accept(this);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterJoinSearchCondition(node, this);
+        }
+
+        WithPredicateLocation(node.SearchCondition, () => node.SearchCondition?.Accept(this));
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveJoinSearchCondition(node, this);
+        }
+    }
+
+    public sealed override void ExplicitVisit(MergeSpecification node)
+    {
+        node.Target?.Accept(this);
+        node.TableReference?.Accept(this);
+        node.TopRowFilter?.Accept(this);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterMergeSearchCondition(node, this);
+        }
+
+        node.SearchCondition?.Accept(this);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveMergeSearchCondition(node, this);
+        }
+
+        foreach (var actionClause in node.ActionClauses)
+        {
+            actionClause.Accept(this);
+        }
+
+        node.OutputClause?.Accept(this);
+        node.OutputIntoClause?.Accept(this);
+    }
+
+    public sealed override void ExplicitVisit(MergeActionClause node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterMergeActionSearchCondition(node, this);
+        }
+
+        node.SearchCondition?.Accept(this);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveMergeActionSearchCondition(node, this);
+        }
+
+        node.Action?.Accept(this);
+    }
+
+    public override void Visit(BooleanComparisonExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnBooleanComparisonExpression(node, this);
+        }
+
+        base.Visit(node);
+    }
+
+    public override void Visit(BooleanTernaryExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnBooleanTernaryExpression(node, this);
+        }
+
+        base.Visit(node);
+    }
+
+    public override void Visit(LikePredicate node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnLikePredicate(node, this);
+        }
+
+        base.Visit(node);
+    }
+
+    public override void Visit(InPredicate node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnInPredicate(node, this);
+        }
+
+        base.Visit(node);
+    }
+
+    public override void Visit(SubqueryComparisonPredicate node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnSubqueryComparisonPredicate(node, this);
+        }
+
+        base.Visit(node);
+    }
 
     private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)
     {
