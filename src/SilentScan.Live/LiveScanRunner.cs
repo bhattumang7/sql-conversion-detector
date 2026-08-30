@@ -56,7 +56,7 @@ public static class LiveScanRunner
 
         using (var extrasStage = progress.Begin("merging module-body catalog extras"))
         {
-            catalog.MergeFileModeExtras(CatalogBuilder.Build(parseResultSource(), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name));
+            catalog.MergeFileModeExtras(CatalogBuilder.Build(parseResultSource(), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name, catalog.IsAnsiNullDefaultOn));
             extrasStage.Complete($"{catalog.Tables.Count:N0} tables");
         }
         PhaseMemory.ReleaseBetweenPhases();

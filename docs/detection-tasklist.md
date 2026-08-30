@@ -28,18 +28,6 @@ Competitor tools are referred to generically; real identities are in
       minimum needed (does it need its own category, or fold into an opaque
       "unknown, never guess" bucket for now) before touching the type table.
 
-- [ ] **`CatalogBuilder`'s column-nullability fallback ignores
-      `ANSI_NULL_DFLT_OFF`/`ON`.** Oracle-confirmed: a `CREATE TABLE` column
-      with no explicit `NULL`/`NOT NULL` is created `NOT NULL` under `SET
-      ANSI_NULL_DFLT_OFF ON` (or the database-level `ANSI_NULL_DEFAULT`
-      option, common in legacy/migrated databases) - but
-      `CatalogBuilder.cs`'s fallback hardcodes `isNullable = true`
-      unconditionally when no explicit constraint is present. Highest
-      fan-out item on this list: every rule that reads column nullability
-      from the catalog (null-comparison predicates, write-loss, join
-      semantics) inherits the wrong fact for any script scanned under this
-      setting.
-
 - [ ] **`TransactionHygieneScanner`'s transaction-state model has three
       distinct blind spots**, all confirmed live, best fixed as one
       redesign rather than three patches: (1) `SAVE TRANSACTION` /

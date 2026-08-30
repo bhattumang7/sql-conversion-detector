@@ -450,6 +450,49 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`CatalogBuilder`'s column-nullability fallback: shipped, branch-aware.**
+  Oracle-confirmed (Docker, SQL Server 2025): a `CREATE TABLE` column with no
+  explicit `NULL`/`NOT NULL` is created `NOT NULL` under `SET
+  ANSI_NULL_DFLT_OFF ON`, `NULL` under `SET ANSI_NULL_DFLT_ON ON`, and
+  otherwise inherits the database's own `sys.databases.is_ansi_null_default_on`
+  (`DatabaseCatalog.IsAnsiNullDefaultOn`). Tracking goes through the shared
+  `AnsiNullDfltFlowResolver` (`Common/AnsiNullDfltFlowResolver.cs`), built
+  on the same `ProcedureBodyFlowWalker`/`IStatementFlowPolicy` branch-merge
+  walker already used for `SET ANSI_NULLS`/`SET QUOTED_IDENTIFIER` tracking -
+  a `SET ANSI_NULL_DFLT_*` inside an `IF`/`WHILE` branch that cannot have run
+  does not leak into code after it, and each procedure/function/trigger body
+  is its own flow scope (an ambient `SET` in the deployment script does not
+  leak into a module's body, matching that a module's later execution is a
+  separate session). Like the existing `ANSI_NULLS`/`QUOTED_IDENTIFIER`
+  trackers, this is not full data-flow analysis: after an `IF/ELSE` or
+  `TRY/CATCH`, state conservatively reverts to whatever was true before the
+  branch even when one arm is provably always taken (e.g. `IF 1=0 ... ELSE
+  SET ANSI_NULL_DFLT_OFF ON` still reverts to the pre-branch value for code
+  after the block) - a shared, pre-existing limit of the walker itself, not
+  new to this rule. The dynamic-SQL path (`DynamicSqlTempTableDiscovery`)
+  resolves the same per-statement map by call-site position in the enclosing
+  module and synthesizes it as a `SET` prefix on the wrapped snippet, so an
+  outer `SET ANSI_NULL_DFLT_OFF ON` still applies to a `CREATE TABLE` inside a
+  later, separate `EXEC(...)` string - an explicit override inside the exec
+  string itself still wins, since it's textually later. Both paths are
+  oracle-verified end-to-end against a real database, including never-taken
+  `IF`/`WHILE` branches and cross-batch module-body isolation
+  (`CatalogBuilderAnsiNullDfltBranchOracleTests`,
+  `DynamicSqlTempTableDiscoveryAnsiNullDfltOracleTests`). Two further gaps,
+  both oracle-confirmed and both deliberately not modeled: (1) a calling
+  session's own ambient `SET ANSI_NULL_DFLT_*` governs a called procedure's
+  temp-table default whenever the body has no `SET` of its own - not
+  statically decidable (the caller is arbitrary, possibly external
+  application code), so the database-level fallback is the best available
+  signal, matching this file's own scope rule; (2) `GOTO` truncates
+  `ProcedureBodyFlowWalker`'s traversal of a statement list (it returns
+  immediately on `GoToStatement`), so a statement textually after a `GOTO` -
+  even one reachable via a forward label - gets no map entry and silently
+  falls back to the database default instead of an in-scope `SET` that
+  precedes the `GOTO`. This is a limit of the shared walker itself (all six
+  `ProcedureBodyFlowWalker` consumers have it, not just this rule); fixing it
+  needs real label/jump-target resolution across the walker, out of
+  proportion for this rule alone.
 * **Rule harness (`Reporting/RuleHarness/`): 5 catalog rules deliberately skip
   centralized confidence filtering.** `ColumnstoreUnsupportedColumnTypeScanner`,
   `MemoryOptimizedUnsupportedColumnTypeScanner`,

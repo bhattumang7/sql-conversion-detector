@@ -1030,6 +1030,42 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_ColumnWithNoExplicitNullability_UnderAnsiNullDfltOffOn_DefaultsToNotNull()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("SET ANSI_NULL_DFLT_OFF ON; CREATE TABLE dbo.T (Col INT);")]);
+
+        Assert.False(catalog.Find("dbo.T")!.FindColumn("Col")!.IsNullable);
+    }
+
+    [Fact]
+    public void Build_ColumnWithNoExplicitNullability_UnderAnsiNullDfltOnOn_DefaultsToNullable()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("SET ANSI_NULL_DFLT_ON ON; CREATE TABLE dbo.T (Col INT);")]);
+
+        Assert.True(catalog.Find("dbo.T")!.FindColumn("Col")!.IsNullable);
+    }
+
+    [Fact]
+    public void Build_ColumnWithNoExplicitNullability_UnderDatabaseAnsiNullDefaultOff_DefaultsToNotNull()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("CREATE TABLE dbo.T (Col INT);")], manifestAnsiNullDefaultOn: false);
+
+        Assert.False(catalog.Find("dbo.T")!.FindColumn("Col")!.IsNullable);
+    }
+
+    [Fact]
+    public void Build_ColumnWithNoExplicitNullability_InScriptSetOverridesDatabaseAnsiNullDefault()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("SET ANSI_NULL_DFLT_ON ON; CREATE TABLE dbo.T (Col INT);")], manifestAnsiNullDefaultOn: false);
+
+        Assert.True(catalog.Find("dbo.T")!.FindColumn("Col")!.IsNullable);
+    }
+
+    [Fact]
     public void Build_SpatialColumn_TypeIsNullAndLedgered()
     {
 

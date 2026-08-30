@@ -39,6 +39,38 @@ public sealed class DynamicSqlTempTableDiscoveryTests
     }
 
     [Fact]
+    public void Discover_OuterAnsiNullDfltOffOn_AppliesToCreateTableInsideLaterExecString()
+    {
+        var catalog = DiscoverFrom("""
+            CREATE PROCEDURE dbo.usp_BuildRuns AS
+            BEGIN
+                SET ANSI_NULL_DFLT_OFF ON;
+                EXEC ('CREATE TABLE #Runs (RunID INT)');
+            END
+            """);
+
+        var table = catalog.Find("#Runs", "dbo.usp_BuildRuns");
+        Assert.NotNull(table);
+        Assert.False(table.FindColumn("RunID")!.IsNullable);
+    }
+
+    [Fact]
+    public void Discover_ExecStringOwnAnsiNullDfltOverridesOuterSetting()
+    {
+        var catalog = DiscoverFrom("""
+            CREATE PROCEDURE dbo.usp_BuildRuns AS
+            BEGIN
+                SET ANSI_NULL_DFLT_OFF ON;
+                EXEC ('SET ANSI_NULL_DFLT_ON ON; CREATE TABLE #Runs (RunID INT)');
+            END
+            """);
+
+        var table = catalog.Find("#Runs", "dbo.usp_BuildRuns");
+        Assert.NotNull(table);
+        Assert.True(table.FindColumn("RunID")!.IsNullable);
+    }
+
+    [Fact]
     public void Discover_NoDynamicSql_ReturnsEmptyCatalog()
     {
 

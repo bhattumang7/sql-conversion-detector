@@ -10,7 +10,9 @@ public static class CatalogBuilder
 {
     private const string SpRenameConstructKind = "sp_rename";
 
-    public static DatabaseCatalog Build(IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null)
+    public static DatabaseCatalog Build(
+        IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null,
+        bool? manifestAnsiNullDefaultOn = null)
     {
         var catalog = new DatabaseCatalog();
         var results = parseResults as IReadOnlyList<SqlParseResult> ?? parseResults.ToList();
@@ -19,20 +21,21 @@ public static class CatalogBuilder
         catalog.TempdbCollation = manifestTempdbCollation is { Length: > 0 }
             ? new Collation(manifestTempdbCollation, CollationSource.DatabaseDefaultFromManifest)
             : null;
+        catalog.IsAnsiNullDefaultOn = manifestAnsiNullDefaultOn;
 
         foreach (var result in results)
         {
-            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTypeAliases));
+            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTypeAliases, result.Fragment));
         }
 
         foreach (var result in results)
         {
-            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTables));
+            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTables, result.Fragment));
         }
 
         foreach (var result in results)
         {
-            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.ApplyEverythingElse));
+            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.ApplyEverythingElse, result.Fragment));
         }
 
         return catalog;
@@ -99,9 +102,14 @@ public static class CatalogBuilder
         ApplyEverythingElse,
     }
 
-    private sealed class Visitor(DatabaseCatalog catalog, string sourcePath, BuildPhase phase) : TSqlFragmentVisitor
+    private sealed class Visitor(DatabaseCatalog catalog, string sourcePath, BuildPhase phase, TSqlFragment fragment) : TSqlFragmentVisitor
     {
+        private readonly Dictionary<TSqlStatement, bool?> _ansiNullDfltByStatement = AnsiNullDfltFlowResolver.Resolve(fragment);
+
         private string? _currentScope;
+
+        private bool ResolveDefaultNullable(TSqlStatement node) =>
+            (_ansiNullDfltByStatement.TryGetValue(node, out var value) ? value : null) ?? catalog.IsAnsiNullDefaultOn ?? true;
 
         public override void ExplicitVisit(CreateTypeUddtStatement node)
         {
@@ -118,7 +126,7 @@ public static class CatalogBuilder
             if (phase == BuildPhase.CollectTypeAliases)
             {
                 var (schema, name) = SchemaObjectNameHelper.Resolve(node.Name);
-                var (columns, indexesFromColumns) = BuildColumns(node.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog);
+                var (columns, indexesFromColumns) = BuildColumns(node.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, ResolveDefaultNullable(node));
                 var indexesFromConstraints = BuildIndexesFromTableConstraints(node.Definition.TableConstraints);
 
                 catalog.AddOrReplace(new CatalogTable(
@@ -554,7 +562,7 @@ public static class CatalogBuilder
             if (phase == BuildPhase.ApplyEverythingElse
                 && returnType is TableValuedFunctionReturnType { DeclareTableVariableBody: { VariableName: { } variableName, Definition: { } definition } body })
             {
-                var (columns, indexesFromColumns) = BuildColumns(definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog);
+                var (columns, indexesFromColumns) = BuildColumns(definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, ResolveDefaultNullable(node));
                 var indexesFromConstraints = BuildIndexesFromTableConstraints(definition.TableConstraints);
 
                 var returnTable = new CatalogTable(
@@ -873,7 +881,7 @@ public static class CatalogBuilder
             var isTemp = schema is null;
             var kind = isTemp ? CatalogTableKind.TemporaryTable : CatalogTableKind.Table;
 
-            var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, isTemp ? catalog.EffectiveTempdbCollation : catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog);
+            var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, isTemp ? catalog.EffectiveTempdbCollation : catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, ResolveDefaultNullable(createTable));
             var indexesFromConstraints = BuildIndexesFromTableConstraints(createTable.Definition.TableConstraints);
             var allIndexes = (List<CatalogIndex>)[.. indexesFromColumns, .. indexesFromConstraints];
             columns = ApplyPrimaryKeyNotNull(columns, allIndexes);
@@ -910,7 +918,7 @@ public static class CatalogBuilder
                 return;
             }
 
-            var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog);
+            var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, ResolveDefaultNullable(alterTable));
             var newIndexes = BuildIndexesFromTableConstraints(alterTable.Definition.TableConstraints);
             var mergedColumns = (List<CatalogColumn>)[.. existing.Columns, .. newColumns];
             var mergedIndexes = (List<CatalogIndex>)[.. existing.Indexes, .. indexesFromColumns, .. newIndexes];
@@ -1094,7 +1102,7 @@ public static class CatalogBuilder
                 return;
             }
 
-            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.EffectiveTempdbCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog);
+            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.EffectiveTempdbCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, ResolveDefaultNullable(declareTableVar));
             var indexesFromConstraints = BuildIndexesFromTableConstraints(body.Definition.TableConstraints);
 
             var table = new CatalogTable(
@@ -1172,16 +1180,17 @@ public static class CatalogBuilder
 
     public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(
         TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null, SkipLedger? ledger = null, string? sourcePath = null) =>
-        BuildColumns(definition, defaultCollation, typeAliases, ledger, sourcePath, catalog: null).Columns;
+        BuildColumns(definition, defaultCollation, typeAliases, ledger, sourcePath, catalog: null, defaultNullable: true).Columns;
 
     private static (List<CatalogColumn> Columns, List<CatalogIndex> InlineIndexes) BuildColumns(
-        TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases, SkipLedger? ledger, string? sourcePath, DatabaseCatalog? catalog)
+        TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases, SkipLedger? ledger, string? sourcePath,
+        DatabaseCatalog? catalog, bool defaultNullable)
     {
         var columns = new List<CatalogColumn>();
         var inlineIndexes = new List<CatalogIndex>();
         var computedExpressions = new Dictionary<string, ScalarExpression>(StringComparer.OrdinalIgnoreCase);
         var computedColumnLines = new Dictionary<string, (int Line, int Column)>(StringComparer.OrdinalIgnoreCase);
-        var context = new ColumnBuildContext(defaultCollation, typeAliases, ledger, sourcePath, catalog);
+        var context = new ColumnBuildContext(defaultCollation, typeAliases, ledger, sourcePath, catalog, defaultNullable);
 
         foreach (var columnDefinition in definition.ColumnDefinitions)
         {
@@ -1195,14 +1204,16 @@ public static class CatalogBuilder
         return (columns, inlineIndexes);
     }
 
-    private readonly record struct ColumnBuildContext(Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger, string? SourcePath, DatabaseCatalog? Catalog);
+    private readonly record struct ColumnBuildContext(
+        Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger, string? SourcePath,
+        DatabaseCatalog? Catalog, bool DefaultNullable);
 
     private static CatalogColumn BuildColumn(
         ColumnDefinition columnDefinition, ColumnBuildContext context,
         List<CatalogIndex> inlineIndexes, Dictionary<string, ScalarExpression> computedExpressions, Dictionary<string, (int Line, int Column)> computedColumnLines)
     {
         var name = columnDefinition.ColumnIdentifier.Value;
-        var isNullable = BuildColumnConstraints(columnDefinition, name, inlineIndexes);
+        var isNullable = BuildColumnConstraints(columnDefinition, name, inlineIndexes, context.DefaultNullable);
 
         if (columnDefinition.Index is { } inlineIndex)
         {
@@ -1287,9 +1298,9 @@ public static class CatalogBuilder
         return columns;
     }
 
-    private static bool BuildColumnConstraints(ColumnDefinition columnDefinition, string columnName, List<CatalogIndex> inlineIndexes)
+    private static bool BuildColumnConstraints(ColumnDefinition columnDefinition, string columnName, List<CatalogIndex> inlineIndexes, bool defaultNullable)
     {
-        var isNullable = true;
+        var isNullable = defaultNullable;
 
         foreach (var constraint in columnDefinition.Constraints)
         {

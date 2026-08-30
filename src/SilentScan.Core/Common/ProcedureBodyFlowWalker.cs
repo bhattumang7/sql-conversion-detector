@@ -1,6 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 
-namespace SilentScan.Core.Predicates;
+namespace SilentScan.Core.Common;
 
 internal interface IStatementFlowPolicy<TState>
 {

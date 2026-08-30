@@ -16,6 +16,8 @@ public sealed class LiveCatalogReaderCatalogMetadataTests : OracleTestFixture
         GO
         ALTER DATABASE CURRENT SET AUTO_CREATE_STATISTICS OFF;
         GO
+        ALTER DATABASE CURRENT SET ANSI_NULL_DEFAULT ON;
+        GO
         CREATE TABLE dbo.Widgets (
             WidgetId INT NOT NULL PRIMARY KEY,
             Code VARCHAR(20) NOT NULL);
@@ -122,6 +124,14 @@ public sealed class LiveCatalogReaderCatalogMetadataTests : OracleTestFixture
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.False(catalog.IsAutoCreateStatsOn);
+    }
+
+    [Fact]
+    public async Task ReadAsync_AnsiNullDefaultToggledOn_ReadsRealFlagFromSysDatabases()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.IsAnsiNullDefaultOn);
     }
 
     [Fact]

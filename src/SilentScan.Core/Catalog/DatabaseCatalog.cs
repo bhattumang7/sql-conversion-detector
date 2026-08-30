@@ -377,6 +377,8 @@ public sealed class DatabaseCatalog
 
     public bool? IsAutoCreateStatsOn { get; set; }
 
+    public bool? IsAnsiNullDefaultOn { get; set; }
+
     public SkipLedger Skipped { get; } = new();
 
     public void AddOrReplace(CatalogTable table) => AddOrReplace(table, scope: null);
