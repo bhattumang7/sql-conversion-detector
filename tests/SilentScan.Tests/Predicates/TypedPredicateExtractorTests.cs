@@ -1428,6 +1428,18 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_ColumnComparedToUpperOfDifferentCollationColumn_PropagatesInputCollation()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Code VARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.Raw (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT 1 FROM dbo.T, dbo.Raw WHERE Code = UPPER(Value);");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.OperandClash, finding.Verdict);
+    }
+
+    [Fact]
     public void Extract_PredicateAgainstLegacySysobjectsCompatibilityView_ColumnSideConverts()
     {
 
