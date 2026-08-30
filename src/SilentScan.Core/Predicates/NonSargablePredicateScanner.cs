@@ -88,9 +88,7 @@ public static class NonSargablePredicateScanner
         {
             var previous = _inFilterContext;
             _inFilterContext = true;
-            DeadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
-            node.AcceptChildren(this);
-            DeadPredicateStack.Pop();
+            WithPredicateLocation(node.SearchCondition, () => node.AcceptChildren(this));
             _inFilterContext = previous;
         }
 
@@ -98,9 +96,7 @@ public static class NonSargablePredicateScanner
         {
             var previous = _inFilterContext;
             _inFilterContext = true;
-            DeadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
-            node.AcceptChildren(this);
-            DeadPredicateStack.Pop();
+            WithPredicateLocation(node.SearchCondition, () => node.AcceptChildren(this));
             _inFilterContext = previous;
         }
 
@@ -111,9 +107,7 @@ public static class NonSargablePredicateScanner
 
             var previous = _inFilterContext;
             _inFilterContext = true;
-            DeadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
-            node.SearchCondition?.Accept(this);
-            DeadPredicateStack.Pop();
+            WithPredicateLocation(node.SearchCondition, () => node.SearchCondition?.Accept(this));
             _inFilterContext = previous;
         }
 

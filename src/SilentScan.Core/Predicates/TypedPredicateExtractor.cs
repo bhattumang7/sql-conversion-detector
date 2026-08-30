@@ -194,9 +194,7 @@ public static class TypedPredicateExtractor
         {
             var previous = _position;
             _position = PredicatePosition.Seekable;
-            DeadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
-            node.AcceptChildren(this);
-            DeadPredicateStack.Pop();
+            WithPredicateLocation(node.SearchCondition, () => node.AcceptChildren(this));
             _position = previous;
         }
 
@@ -204,9 +202,7 @@ public static class TypedPredicateExtractor
         {
             var previous = _position;
             _position = PredicatePosition.Seekable;
-            DeadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
-            node.AcceptChildren(this);
-            DeadPredicateStack.Pop();
+            WithPredicateLocation(node.SearchCondition, () => node.AcceptChildren(this));
             _position = previous;
         }
 
@@ -217,9 +213,7 @@ public static class TypedPredicateExtractor
 
             var previous = _position;
             _position = PredicatePosition.Seekable;
-            DeadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
-            node.SearchCondition?.Accept(this);
-            DeadPredicateStack.Pop();
+            WithPredicateLocation(node.SearchCondition, () => node.SearchCondition?.Accept(this));
             _position = previous;
         }
 

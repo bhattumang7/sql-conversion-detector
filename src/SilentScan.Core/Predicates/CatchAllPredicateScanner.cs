@@ -38,26 +38,41 @@ public static class CatchAllPredicateScanner
 
         private bool HasActiveRecompileGuard => _procedureHasWithRecompile || _statementHasOptionRecompile;
 
-        public override void ExplicitVisit(CreateProcedureStatement node) =>
-            VisitProcedureOrFunctionBody(node.Parameters, node.Options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile), node);
+        private HashSet<string> _previousFormalParameterNames = new(StringComparer.OrdinalIgnoreCase);
 
-        public override void ExplicitVisit(AlterProcedureStatement node) =>
-            VisitProcedureOrFunctionBody(node.Parameters, node.Options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile), node);
+        private bool _previousProcedureHasWithRecompile;
 
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) =>
-            VisitProcedureOrFunctionBody(node.Parameters, node.Options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile), node);
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        {
+            _previousFormalParameterNames = new HashSet<string>(_formalParameterNames, StringComparer.OrdinalIgnoreCase);
+            _previousProcedureHasWithRecompile = _procedureHasWithRecompile;
 
-        public override void ExplicitVisit(CreateFunctionStatement node) => VisitProcedureOrFunctionBody(node.Parameters, hasWithRecompile: false, node);
+            _formalParameterNames.Clear();
+            foreach (var parameter in node.Parameters)
+            {
+                _formalParameterNames.Add(parameter.VariableName.Value);
+            }
 
-        public override void ExplicitVisit(AlterFunctionStatement node) => VisitProcedureOrFunctionBody(node.Parameters, hasWithRecompile: false, node);
+            _procedureHasWithRecompile = node is ProcedureStatementBody { Options: { } options }
+                && options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile);
+        }
 
-        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitProcedureOrFunctionBody(node.Parameters, hasWithRecompile: false, node);
+        protected override void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        {
+            _formalParameterNames.Clear();
+            foreach (var name in _previousFormalParameterNames)
+            {
+                _formalParameterNames.Add(name);
+            }
 
-        public override void ExplicitVisit(CreateTriggerStatement node) => VisitProcedureOrFunctionBody([], hasWithRecompile: false, node);
+            _procedureHasWithRecompile = _previousProcedureHasWithRecompile;
+        }
 
-        public override void ExplicitVisit(AlterTriggerStatement node) => VisitProcedureOrFunctionBody([], hasWithRecompile: false, node);
-
-        public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitProcedureOrFunctionBody([], hasWithRecompile: false, node);
+        protected override void OnEnterTriggerBody(TriggerStatementBody node)
+        {
+            _formalParameterNames.Clear();
+            _procedureHasWithRecompile = false;
+        }
 
         protected override void OnSelectStatementScope(SelectStatement node, Action continueDescent)
         {
@@ -105,29 +120,6 @@ public static class CatchAllPredicateScanner
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
             continueDescent();
             _statementHasOptionRecompile = previous;
-        }
-
-        private void VisitProcedureOrFunctionBody(IList<ProcedureParameter> parameters, bool hasWithRecompile, TSqlFragment node)
-        {
-            var previousFormalParameterNames = new HashSet<string>(_formalParameterNames, StringComparer.OrdinalIgnoreCase);
-            var previousProcedureHasWithRecompile = _procedureHasWithRecompile;
-
-            _formalParameterNames.Clear();
-            foreach (var parameter in parameters)
-            {
-                _formalParameterNames.Add(parameter.VariableName.Value);
-            }
-
-            _procedureHasWithRecompile = hasWithRecompile;
-            node.AcceptChildren(this);
-
-            _formalParameterNames.Clear();
-            foreach (var name in previousFormalParameterNames)
-            {
-                _formalParameterNames.Add(name);
-            }
-
-            _procedureHasWithRecompile = previousProcedureHasWithRecompile;
         }
 
         private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)

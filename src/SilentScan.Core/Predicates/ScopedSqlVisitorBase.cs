@@ -66,6 +66,13 @@ internal abstract class ScopedSqlVisitorBase(
             baseColumn.Type?.Collation?.GuaranteesDistinctLiteralsAreUnequal);
     }
 
+    protected void WithPredicateLocation(BooleanExpression? searchCondition, Action visitChildren)
+    {
+        DeadPredicateStack.Push(ComputeDeadPredicates(searchCondition));
+        visitChildren();
+        DeadPredicateStack.Pop();
+    }
+
     protected static void InspectJoinOnClauses(
         IList<TableReference>? tableReferences,
         ScopeChain scopeChain,
