@@ -1,7 +1,9 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Common;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Rules;
-using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
@@ -21,11 +23,20 @@ public static class ControlFlowRiskScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Visitor : ScopedRelationWalker
     {
+        private readonly string sourcePath;
+
+        public Visitor(string sourcePath)
+            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null) =>
+            this.sourcePath = sourcePath;
+
         public List<ControlFlowRiskFinding> Findings { get; } = [];
 
-        private string _moduleName = "(batch)";
+        private string CurrentModule => CurrentProcScope ?? "(batch)";
+
         private bool _inTrigger;
 
         private readonly Dictionary<string, int?> _cursorColumnCounts = new(StringComparer.OrdinalIgnoreCase);
@@ -35,46 +46,26 @@ public static class ControlFlowRiskScanner
         private static readonly HashSet<string> NonDeterministicFunctionNames =
             new(StringComparer.OrdinalIgnoreCase) { "NEWID", "RAND", "CRYPT_GEN_RANDOM" };
 
-        public override void ExplicitVisit(CreateProcedureStatement node)
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node) => ResetCursorTracking();
+
+        protected override void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node) => ResetCursorTracking();
+
+        protected override void OnEnterTriggerBody(TriggerStatementBody node)
         {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), isTrigger: false);
-            base.ExplicitVisit(node);
-            ExitRoutine();
+            _inTrigger = true;
+            ResetCursorTracking();
         }
 
-        public override void ExplicitVisit(AlterProcedureStatement node)
+        protected override void OnLeaveTriggerBody(TriggerStatementBody node)
         {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), isTrigger: false);
-            base.ExplicitVisit(node);
-            ExitRoutine();
+            _inTrigger = false;
+            ResetCursorTracking();
         }
 
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node)
+        private void ResetCursorTracking()
         {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), isTrigger: false);
-            base.ExplicitVisit(node);
-            ExitRoutine();
-        }
-
-        public override void ExplicitVisit(CreateTriggerStatement node)
-        {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), isTrigger: true);
-            base.ExplicitVisit(node);
-            ExitRoutine();
-        }
-
-        public override void ExplicitVisit(AlterTriggerStatement node)
-        {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), isTrigger: true);
-            base.ExplicitVisit(node);
-            ExitRoutine();
-        }
-
-        public override void ExplicitVisit(CreateOrAlterTriggerStatement node)
-        {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), isTrigger: true);
-            base.ExplicitVisit(node);
-            ExitRoutine();
+            _cursorColumnCounts.Clear();
+            _cursorDefiningSelects.Clear();
         }
 
         public override void ExplicitVisit(DeclareCursorStatement node)
@@ -100,7 +91,7 @@ public static class ControlFlowRiskScanner
             {
                 Findings.Add(new ControlFlowRiskFinding(
                     ControlFlowRiskFindingKind.CursorFetchColumnCountMismatch,
-                    _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                    CurrentModule, sourcePath, node.StartLine, node.StartColumn,
                     $"FETCH INTO lists {intoVariables.Count} variable(s) but cursor '{name}' selects " +
                     $"{declared} column(s) - this FETCH always fails at runtime (Msg 16924).",
                     FindingConfidence.High));
@@ -116,7 +107,7 @@ public static class ControlFlowRiskScanner
 
                 Findings.Add(new ControlFlowRiskFinding(
                     ControlFlowRiskFindingKind.EmptyCatchBlock,
-                    _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                    CurrentModule, sourcePath, node.StartLine, node.StartColumn,
                     "This CATCH block has no statements at all - every error reaching it is silently swallowed.",
                     FindingConfidence.High));
             }
@@ -130,7 +121,7 @@ public static class ControlFlowRiskScanner
             {
                 Findings.Add(new ControlFlowRiskFinding(
                     ControlFlowRiskFindingKind.TriggerEmitsOutput,
-                    _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                    CurrentModule, sourcePath, node.StartLine, node.StartColumn,
                     "A SELECT with a real result set inside a trigger sends output back to whatever connection fired the DML, not the application that issued it.",
                     FindingConfidence.Medium));
             }
@@ -144,7 +135,7 @@ public static class ControlFlowRiskScanner
             {
                 Findings.Add(new ControlFlowRiskFinding(
                     ControlFlowRiskFindingKind.TriggerEmitsOutput,
-                    _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                    CurrentModule, sourcePath, node.StartLine, node.StartColumn,
                     "A PRINT inside a trigger sends a message back to whatever connection fired the DML, not the application that issued it.",
                     FindingConfidence.Medium));
             }
@@ -158,7 +149,7 @@ public static class ControlFlowRiskScanner
             {
                 Findings.Add(new ControlFlowRiskFinding(
                     ControlFlowRiskFindingKind.DirtyReadIsolationHint,
-                    _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                    CurrentModule, sourcePath, node.StartLine, node.StartColumn,
                     "NOLOCK/READUNCOMMITTED allows dirty reads of uncommitted, possibly-rolled-back data, and can miss or double-count rows during a concurrent page split.",
                     FindingConfidence.Low));
             }
@@ -172,7 +163,7 @@ public static class ControlFlowRiskScanner
             {
                 Findings.Add(new ControlFlowRiskFinding(
                     ControlFlowRiskFindingKind.DirtyReadIsolationHint,
-                    _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                    CurrentModule, sourcePath, node.StartLine, node.StartColumn,
                     "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED allows dirty reads for the rest of the session.",
                     FindingConfidence.Low));
             }
@@ -186,7 +177,7 @@ public static class ControlFlowRiskScanner
             {
                 Findings.Add(new ControlFlowRiskFinding(
                     ControlFlowRiskFindingKind.LegacyIdentityIntrinsic,
-                    _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                    CurrentModule, sourcePath, node.StartLine, node.StartColumn,
                     "@@IDENTITY returns the last identity value inserted in this SESSION across ANY table/scope, including one inserted by a trigger fired as a side effect - prefer SCOPE_IDENTITY() unless that broader semantics is specifically wanted.",
                     FindingConfidence.Medium));
             }
@@ -198,7 +189,7 @@ public static class ControlFlowRiskScanner
         {
             Findings.Add(new ControlFlowRiskFinding(
                 ControlFlowRiskFindingKind.GotoUsage,
-                _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                CurrentModule, sourcePath, node.StartLine, node.StartColumn,
                 "GOTO makes control flow harder to follow, and this codebase's own dead-code analysis " +
                 "already declines its entire reachability check for any routine that contains one.",
                 FindingConfidence.High));
@@ -212,7 +203,7 @@ public static class ControlFlowRiskScanner
             {
                 Findings.Add(new ControlFlowRiskFinding(
                     ControlFlowRiskFindingKind.CaseExpressionMissingElse,
-                    _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                    CurrentModule, sourcePath, node.StartLine, node.StartColumn,
                     "This simple CASE has no ELSE - an input value matching none of the WHEN values " +
                     "silently evaluates to NULL, no error raised.",
                     FindingConfidence.High));
@@ -222,7 +213,7 @@ public static class ControlFlowRiskScanner
             {
                 Findings.Add(new ControlFlowRiskFinding(
                     ControlFlowRiskFindingKind.NonDeterministicCaseInput,
-                    _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                    CurrentModule, sourcePath, node.StartLine, node.StartColumn,
                     $"{functionName}() as a CASE input is re-evaluated separately for each WHEN " +
                     "comparison, not once - every WHEN branch is effectively unreachable and this " +
                     "always falls through to ELSE (or NULL, with no ELSE).",
@@ -248,20 +239,6 @@ public static class ControlFlowRiskScanner
             base.ExplicitVisit(node);
         }
 
-        private void EnterRoutine(string name, bool isTrigger)
-        {
-            _moduleName = name;
-            _inTrigger = isTrigger;
-            _cursorColumnCounts.Clear();
-            _cursorDefiningSelects.Clear();
-        }
-
-        private void ExitRoutine()
-        {
-            _inTrigger = false;
-            _cursorColumnCounts.Clear();
-            _cursorDefiningSelects.Clear();
-        }
 
         private static string? ContainsNonDeterministicCall(ScalarExpression expression)
         {
@@ -303,7 +280,7 @@ public static class ControlFlowRiskScanner
                     {
                         Findings.Add(new ControlFlowRiskFinding(
                             ControlFlowRiskFindingKind.DuplicatedCallArgument,
-                            _moduleName, sourcePath, nonLiteral[j].StartLine, nonLiteral[j].StartColumn,
+                            CurrentModule, sourcePath, nonLiteral[j].StartLine, nonLiteral[j].StartColumn,
                             "This argument is structurally identical to another argument in the same call - verify this isn't a copy-paste mistake naming the wrong parameter.",
                             FindingConfidence.Medium));
 

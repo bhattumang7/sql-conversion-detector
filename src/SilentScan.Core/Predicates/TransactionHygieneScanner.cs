@@ -1,4 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -26,21 +28,27 @@ public static class TransactionHygieneScanner
         public static readonly FlowState DeclinedState = new(null, true);
     }
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Visitor : ScopedRelationWalker
     {
+        private readonly string sourcePath;
+
+        public Visitor(string sourcePath)
+            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null) =>
+            this.sourcePath = sourcePath;
+
         public List<TransactionHygieneFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(CreateProcedureStatement node) => AnalyzeScope(node.StatementList);
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        {
+            if (node is ProcedureStatementBody)
+            {
+                AnalyzeScope(node.StatementList);
+            }
+        }
 
-        public override void ExplicitVisit(AlterProcedureStatement node) => AnalyzeScope(node.StatementList);
-
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => AnalyzeScope(node.StatementList);
-
-        public override void ExplicitVisit(CreateTriggerStatement node) => AnalyzeScope(node.StatementList);
-
-        public override void ExplicitVisit(AlterTriggerStatement node) => AnalyzeScope(node.StatementList);
-
-        public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => AnalyzeScope(node.StatementList);
+        protected override void OnEnterTriggerBody(TriggerStatementBody node) => AnalyzeScope(node.StatementList);
 
         private void AnalyzeScope(StatementList? statementList)
         {

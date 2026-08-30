@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
-using SilentScan.Core.Common;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -89,47 +90,48 @@ public static class CodeMetricScanner
         return text.Split('\n');
     }
 
-    private sealed class Visitor(string sourcePath, CodeMetricThresholds thresholds) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Visitor : ScopedRelationWalker
     {
+        private readonly string sourcePath;
+
+        private readonly CodeMetricThresholds thresholds;
+
+        public Visitor(string sourcePath, CodeMetricThresholds thresholds)
+            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+        {
+            this.sourcePath = sourcePath;
+            this.thresholds = thresholds;
+        }
+
         public List<CodeMetricFinding> Findings { get; } = [];
 
         private int _nestingDepth;
 
-        public override void ExplicitVisit(CreateProcedureStatement node)
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
         {
-            AnalyzeRoutine("procedure", SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.ProcedureReference.Name, node.Parameters, node.StatementList);
-            base.ExplicitVisit(node);
+            var (kindLabel, name) = node switch
+            {
+                CreateProcedureStatement p => ("procedure", p.ProcedureReference.Name),
+                AlterProcedureStatement p => ("procedure", p.ProcedureReference.Name),
+                CreateOrAlterProcedureStatement p => ("procedure", p.ProcedureReference.Name),
+                CreateFunctionStatement f => ("function", f.Name),
+                AlterFunctionStatement f => ("function", f.Name),
+                CreateOrAlterFunctionStatement f => ("function", f.Name),
+                _ => (null, null),
+            };
+
+            if (name is null)
+            {
+                return;
+            }
+
+            AnalyzeRoutine(kindLabel!, name, node.Parameters, node.StatementList);
         }
 
-        public override void ExplicitVisit(AlterProcedureStatement node)
-        {
-            AnalyzeRoutine("procedure", SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.ProcedureReference.Name, node.Parameters, node.StatementList);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateFunctionStatement node)
-        {
-            AnalyzeRoutine("function", SchemaObjectNameHelper.Qualify(node.Name), node.Name, node.Parameters, node.StatementList);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterFunctionStatement node)
-        {
-            AnalyzeRoutine("function", SchemaObjectNameHelper.Qualify(node.Name), node.Name, node.Parameters, node.StatementList);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateTriggerStatement node)
-        {
-            AnalyzeRoutine("trigger", SchemaObjectNameHelper.Qualify(node.Name), node.Name, [], node.StatementList);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterTriggerStatement node)
-        {
-            AnalyzeRoutine("trigger", SchemaObjectNameHelper.Qualify(node.Name), node.Name, [], node.StatementList);
-            base.ExplicitVisit(node);
-        }
+        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
+            AnalyzeRoutine("trigger", node.Name, [], node.StatementList);
 
         public override void ExplicitVisit(IfStatement node)
         {
@@ -184,9 +186,10 @@ public static class CodeMetricScanner
         }
 
         private void AnalyzeRoutine(
-            string kindLabel, string qualifiedName, SchemaObjectName nameNode, IList<ProcedureParameter> parameters, StatementList? statementList)
+            string kindLabel, SchemaObjectName nameNode, IList<ProcedureParameter> parameters, StatementList? statementList)
         {
             _nestingDepth = 0;
+            var qualifiedName = CurrentProcScope!;
 
             if (parameters.Count > thresholds.MaxParameters)
             {

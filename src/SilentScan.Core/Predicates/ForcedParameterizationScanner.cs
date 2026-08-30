@@ -1,7 +1,7 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
-using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
@@ -27,54 +27,19 @@ public static class ForcedParameterizationScanner
         ];
     }
 
-    private sealed class Visitor : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Visitor : ScopedRelationWalker
     {
         private readonly string sourcePath;
-        private string currentModule;
 
         public Visitor(string sourcePath)
-        {
+            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null) =>
             this.sourcePath = sourcePath;
-            currentModule = sourcePath;
-        }
 
         public List<ForcedParameterizationFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(CreateProcedureStatement node)
-        {
-            currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterProcedureStatement node)
-        {
-            currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateFunctionStatement node)
-        {
-            currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterFunctionStatement node)
-        {
-            currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateTriggerStatement node)
-        {
-            currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterTriggerStatement node)
-        {
-            currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            base.ExplicitVisit(node);
-        }
+        private string CurrentModule => CurrentProcScope ?? sourcePath;
 
         public override void ExplicitVisit(LikePredicate node)
         {
@@ -244,7 +209,7 @@ public static class ForcedParameterizationScanner
 
         private void Add(ForcedParameterizationFindingKind kind, TSqlFragment site, string detailText, FindingConfidence confidence = FindingConfidence.High) =>
             Findings.Add(new ForcedParameterizationFinding(
-                kind, currentModule, sourcePath, site.StartLine, site.StartColumn, detailText, confidence));
+                kind, CurrentModule, sourcePath, site.StartLine, site.StartColumn, detailText, confidence));
 
         private static string LiteralText(Literal literal) => literal.Value ?? "NULL";
 

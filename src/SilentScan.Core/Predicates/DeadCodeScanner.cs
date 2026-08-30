@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
-using SilentScan.Core.Common;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -20,30 +21,32 @@ public static class DeadCodeScanner
         ];
     }
 
-    private sealed class RoutineVisitor(string sourcePath) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class RoutineVisitor : ScopedRelationWalker
     {
+        private readonly string sourcePath;
+
+        public RoutineVisitor(string sourcePath)
+            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null) =>
+            this.sourcePath = sourcePath;
+
         public List<DeadCodeFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(CreateProcedureStatement node) =>
-            Analyze(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.Parameters, node.StatementList);
-
-        public override void ExplicitVisit(AlterProcedureStatement node) =>
-            Analyze(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.Parameters, node.StatementList);
-
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) =>
-            Analyze(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.Parameters, node.StatementList);
-
-        public override void ExplicitVisit(CreateTriggerStatement node) =>
-            Analyze(SchemaObjectNameHelper.Qualify(node.Name), [], node.StatementList);
-
-        public override void ExplicitVisit(AlterTriggerStatement node) =>
-            Analyze(SchemaObjectNameHelper.Qualify(node.Name), [], node.StatementList);
-
-        public override void ExplicitVisit(CreateOrAlterTriggerStatement node) =>
-            Analyze(SchemaObjectNameHelper.Qualify(node.Name), [], node.StatementList);
-
-        private void Analyze(string moduleName, IList<ProcedureParameter> parameters, StatementList? statementList)
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
         {
+            if (node is ProcedureStatementBody)
+            {
+                Analyze(node.Parameters, node.StatementList);
+            }
+        }
+
+        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
+            Analyze([], node.StatementList);
+
+        private void Analyze(IList<ProcedureParameter> parameters, StatementList? statementList)
+        {
+            var moduleName = CurrentProcScope!;
 
             if (statementList is null)
             {
