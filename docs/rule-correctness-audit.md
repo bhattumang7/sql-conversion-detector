@@ -471,6 +471,32 @@ worse than not reporting it at all.
       `RuleCatalog.cs:49`'s "A computed column, DEFAULT, or CHECK constraint
       definition calls a scalar UDF" claim already covers in principle.
 
+- [ ] **`SpExecuteSqlParameterMismatchScanner` never records a parameter
+      binding for a positional `sp_executesql` call — only named
+      (`@Param = value`) syntax is recognized — so the rule silently never
+      fires for one of the two standard `sp_executesql` calling
+      conventions, regardless of any real type-narrowing mismatch.**
+      (`src/SilentScan.Core/Predicates/ProcCallGraphBuilder.cs:210-229`,
+      `TryRecordSpExecuteSqlParameterBindings`: the binding loop only
+      matches when `actual.Variable is { } namedFormal` and looks it up by
+      name; ScriptDom's `ExecuteParameter.Variable` is null for a plain
+      positional actual argument, so a positional call produces zero
+      bindings.) Oracle-confirmed (SQL Server 2025): `EXEC sp_executesql
+      @sql, N'@SkuCode VARCHAR(10), @out VARCHAR(20) OUTPUT', @sku,
+      @result OUTPUT` — with `@sku` declared `VARCHAR(20)` holding a
+      22-character value — silently truncates to 10 characters
+      (`@result = 'WIDGET-202'`, `LEN = 10`), the exact narrowing scenario
+      the rule's own doc example describes, reproduced with positional
+      instead of named syntax. The scanner's own regular-EXEC call-folding
+      path in the same file already handles positional arguments correctly
+      (`MatchFoldedArguments`), so this is specifically an
+      `sp_executesql`-binding-path omission, not a parser limitation.
+      Positional `sp_executesql` calls are a real, commonly used calling
+      convention (this repo's own test fixtures for other scanners use it),
+      not a contrived edge case, and every existing test for this
+      scanner/binder exclusively uses named syntax, so the gap was never
+      exercised.
+
 ---
 
 ## Audited, no bug found
@@ -683,14 +709,37 @@ statement — is uncontroversial syntax, not a claim needing verification).
   (a multi-path form is a parse error), so it does not share
   `IndexDesignScanner`'s composite-key-sum gap — checked and ruled out, not
   overlooked.
+- `SelectStarViewScanner` — star-consumer exclusion, full-explicit-selection
+  exclusion, multi-source unqualified-column decline, and CTE/derived-table
+  non-attribution all match existing test coverage; a pure code-structure
+  claim (frozen metadata), no engine-timing dependency to diverge on.
+- `SelfReferencingDmlScanner` — `HasLiteralTopOne`'s PERCENT/variable/
+  non-literal exclusions and the target-alias-skip logic across self-join
+  aliases match already-oracle-confirmed Eager Spool/Distinct Sort presence
+  and absence across INSERT/UPDATE/DELETE/MERGE, direct and through-view.
+- `SessionDateSettingScanner` — deliberately coarse (any `SET
+  DATEFORMAT`/`DATEFIRST` presence, no literal-pattern matching, `Low`
+  confidence by design); both underlying claims (DATEFORMAT mdy/dmy
+  resolving a literal differently, DATEFIRST 1/7 shifting `DATEPART(weekday,
+  ...)`) verified live.
+- `SetOptionScanner` — ARITHABORT's exclusion from `SyntaxOnlyTriggers` was
+  already oracle-tested for filtered indexes; newly verified it also holds
+  for indexed views (ARITHABORT made no difference to the NOEXPAND path,
+  while ANSI_NULLS/QUOTED_IDENTIFIER OFF correctly triggered the documented
+  silent view-expansion fallback).
+- `StaleSelectStarViewScanner` — `FindSingleBaseTable`'s join/CTE-shadowing
+  exclusion, real-table-only resolution, and the order-sensitive
+  `SequenceEqual` column comparison (correct, since `SELECT *` is
+  positional) all check out; the rule's motivating "not merely a
+  missing/extra column" phrasing is contextual illustration, not
+  contradicted by the scanner's own intentionally-broader trigger
+  condition.
 
 ---
 
 ## Not yet audited
 
-SelectStarView, SelfReferencingDml,
-SessionDateSetting, SetOption, SpExecuteSqlParameterMismatch,
-StaleSelectStarView, StatementShape, StringConcatNull,
+StatementShape, StringConcatNull,
 TemporalTableHistoryIndexGap, TempTableExecShapeCandidate,
 TransactionHygiene, TriggerCorrectness, TriggerOrder,
 TriggerRecursionCycle, TruncateSwallowed, TryCastComputedColumnPredicate,
