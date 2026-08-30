@@ -193,6 +193,80 @@ worse than not reporting it at all.
       has an ordinary object literally named `syslocks`, the scanner falsely
       claims it "is a pre-SQL-Server-2005 system compatibility view."
 
+- [ ] **`FloatEqualityPredicateScanner`'s published rule doc claims `<>`
+      coverage the scanner never implements.**
+      (`src/SilentScan.Core/Predicates/FloatEqualityPredicateScanner.cs:81-89`
+      only matches `BooleanComparisonType.Equals`, never
+      `NotEqualToBrackets`/`NotEqualToExclamation`; but
+      `src/SilentScan.Core/Reporting/RuleDocs/Predicates/FloatEquality.cs:22`
+      says "A WHERE or ON predicate using `=` (or `<>`) against a
+      FLOAT/REAL value...". `RuleCatalog.cs:61`'s own SARIF message correctly
+      says only "(=)" — so the RuleCatalog and the RuleDoc disagree with each
+      other, and the shipped code matches RuleCatalog, not the published
+      doc.) A `WHERE FloatCol <> 0.3` predicate against a float/real column
+      is silently never flagged despite the published doc explicitly
+      claiming it would be.
+
+- [ ] **`ForcedParameterizationScanner` has two finding kinds that falsely
+      claim their literal argument stays unparameterized under
+      `PARAMETERIZATION FORCED`, when the real engine parameterizes both.**
+      (`src/SilentScan.Core/Predicates/ForcedParameterizationScanner.cs:119-138`,
+      `CheckSumArgumentLiteral` and `DoubleColonCallArgumentLiteral`;
+      messages at `RuleCatalog.cs:287,291`.) Oracle-confirmed (SQL Server
+      2022 and 2025, `ALTER DATABASE ... SET PARAMETERIZATION FORCED`, cached
+      plan text inspection): `WHERE Val > 22 AND CHECKSUM('LitArgX') = 0`
+      compiles to `... and CHECKSUM ( @1 ) = @2` — the CHECKSUM literal
+      argument is parameterized, not left literal. Likewise `WHERE Val > 55
+      AND geography::Parse('POINT(1 1)').STAsText() = 'x'` compiles to `...
+      and geography :: Parse ( @1 ) . STAsText ( ) = @2` — the static-call
+      literal argument is also parameterized. Both finding kinds are false
+      positives with a factually wrong message claim; all other kinds in
+      this family (LIKE pattern, TOP/OFFSET-FETCH, SELECT-list, HAVING,
+      ORDER BY/GROUP BY expression, TABLESAMPLE size, DML OUTPUT list,
+      CONVERT style code, constant-foldable expression) were independently
+      re-verified correct via matched-pair cached-plan probes.
+
+- [ ] **`IdentityRangeScanner` crashes (unhandled `OverflowException`)
+      instead of reporting for `DECIMAL`/`NUMERIC` IDENTITY columns with
+      precision 29-38, a legal and reachable range.**
+      (`src/SilentScan.Core/Predicates/IdentityRangeScanner.cs:86-95`,
+      `DecimalMax` computes `10^precision - 1` by repeated `decimal`
+      multiplication; `decimal.MaxValue` has 29 significant digits and C#
+      `decimal` arithmetic is always overflow-checked, so precision ≥ 29
+      throws instead of returning a value.) Oracle-confirmed (SQL Server
+      2025): `CREATE TABLE ... (Id DECIMAL(38,0) IDENTITY(1,1) ...)` —
+      `IDENTITY` on `DECIMAL(38,0)`, the maximum legal precision, is valid
+      and commonly reachable, and the scanner's own `TypeBound` switch
+      already claims to handle `SqlTypeCategory.Decimal` — so this is a
+      real crash on a legal schema across roughly a quarter of the type's
+      legal precision range, not a theoretical input.
+
+- [ ] **`IndexCoverageScanner`'s clustering-key fallback picks any
+      `PRIMARY KEY`-kind index without checking it's actually the table's
+      clustering key, so a table with a `NONCLUSTERED PRIMARY KEY` can miss
+      a real Key/RID Lookup.**
+      (`src/SilentScan.Core/Predicates/IndexCoverageScanner.cs:80-83`: the
+      second fallback branch selects
+      `table.Indexes.FirstOrDefault(i => i.Kind == CatalogIndexKind.PrimaryKey)`
+      without an `IsClustered` check, then unions those columns into the
+      "already covered by every nonclustered index" set — but only a real
+      clustering key or heap RID is actually carried into a nonclustered
+      index's leaf rows, not a nonclustered primary key's own columns.)
+      Oracle-confirmed (SQL Server 2025) via plan XML: a heap table with
+      `CONSTRAINT PK_HeapT PRIMARY KEY NONCLUSTERED (Id)` and a separate
+      nonclustered index on `A` — `SELECT Id, A FROM ... WHERE A = 5`
+      forced onto the `A` index produces `PhysicalOp="RID Lookup"` in the
+      real plan, because that index's leaf rows carry only the heap's RID,
+      not `Id`. Tracing the scanner's own logic against this shape: the
+      incorrect fallback resolves `clusteringKeyColumns` to `[Id]`, marks
+      `Id` as covered, and the scanner reports no finding at all for a
+      query that provably needs a lookup — a false negative directly
+      contradicting the rule's own "oracle-confirmed via real plan XML"
+      claim. `CatalogIndex.IsClustered` is already populated correctly from
+      `sys.indexes.type_desc` in the tool's live-catalog path, so this is a
+      genuine logic bug reachable through the shipped tool, not a
+      data-population artifact.
+
 ---
 
 ## Audited, no bug found
@@ -264,14 +338,28 @@ worse than not reporting it at all.
   (synonyms resolved through), matching its "direct DML target" framing —
   writes through an updatable view are intentionally out of scope, same as
   sibling rules.
+- `FloatOrderDependentAggregateScanner` — aggregate-name gate (SUM/AVG/VAR/
+  VARP/STDEV/STDEVP only, MIN/MAX/COUNT excluded) matches the rule doc's
+  explicit claim; `OverClause is null` deliberately excludes windowed
+  aggregates, a documented scope boundary rather than a divergence;
+  `BaseColumnResolver` only resolving direct column-reference arguments
+  (not an expression like `Value * 2`) is a precision-first scope limit,
+  not a false claim.
+- `ForcedSerialScanner` — all three `NonParallelPlanReason` claims
+  oracle-verified via real plan XML (table-variable INSERT target →
+  no-parallel-nested-transaction; `OBJECT_ID`/`@@TRANCOUNT`/
+  `IDENT_CURRENT`/`ERROR_MESSAGE` inside a query with FROM →
+  nonparallelizable intrinsic; FAST_FORWARD/bare FORWARD_ONLY READ_ONLY
+  cursors → no-parallel cursor), including the negative cases
+  (`@@ROWCOUNT`, `SCOPE_IDENTITY()`, `LOCAL STATIC FORWARD_ONLY READ_ONLY`,
+  a no-option cursor, a `DYNAMIC` cursor) correctly never firing.
 
 ---
 
 ## Not yet audited
 
-CatchAllPredicate, CodeMetric, Duplication, FloatEqualityPredicate,
-FloatOrderDependentAggregate, ForcedParameterization, ForcedSerial,
-Formatting, IdentityRange, IndexCoverage, IndexHint, MaxTypedColumn,
+CatchAllPredicate, CodeMetric, Duplication,
+Formatting, IndexHint, MaxTypedColumn,
 MemoryOptimizedForeignKey, MemoryOptimizedUnsupportedColumnType,
 MemoryOptimizedUnsupportedIndexOption, MissingStatistics,
 ModuleCompileFlag, MultiReferencedCte, Naming, NestedViewDepth,
