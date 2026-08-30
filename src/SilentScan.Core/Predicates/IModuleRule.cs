@@ -168,7 +168,23 @@ internal interface IModuleRule
     {
     }
 
+    void OnLeaveWhileStatement(WhileStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterIfStatement(IfStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveIfStatement(IfStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterTryCatchStatement(TryCatchStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveTryCatchStatement(TryCatchStatement node, ModuleWalker walker)
     {
     }
 
@@ -269,6 +285,34 @@ internal interface IModuleRule
     }
 
     void OnEnterConvertCall(ConvertCall node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterFetchCursorStatement(FetchCursorStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterPrintStatement(PrintStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterTableHint(TableHint node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterSetTransactionIsolationLevelStatement(SetTransactionIsolationLevelStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterGlobalVariableExpression(GlobalVariableExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterGoToStatement(GoToStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterExecutableProcedureReference(ExecutableProcedureReference node, ModuleWalker walker)
     {
     }
 }

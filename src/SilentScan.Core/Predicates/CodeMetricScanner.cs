@@ -28,9 +28,10 @@ public static class CodeMetricScanner
         ScanLineLength(parseResult, thresholds, findings);
         ScanModuleLength(parseResult, thresholds, findings);
 
-        var visitor = new Visitor(parseResult.SourcePath, thresholds);
-        parseResult.Fragment.Accept(visitor);
-        findings.AddRange(visitor.Findings);
+        var rule = new Rule(parseResult.SourcePath, thresholds);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
+        findings.AddRange(rule.Findings);
 
         return
         [
@@ -92,24 +93,13 @@ public static class CodeMetricScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Visitor : ScopedRelationWalker
+    private sealed class Rule(string sourcePath, CodeMetricThresholds thresholds) : IModuleRule
     {
-        private readonly string sourcePath;
-
-        private readonly CodeMetricThresholds thresholds;
-
-        public Visitor(string sourcePath, CodeMetricThresholds thresholds)
-            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-        {
-            this.sourcePath = sourcePath;
-            this.thresholds = thresholds;
-        }
-
         public List<CodeMetricFinding> Findings { get; } = [];
 
         private int _nestingDepth;
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
         {
             var (kindLabel, name) = node switch
             {
@@ -127,50 +117,70 @@ public static class CodeMetricScanner
                 return;
             }
 
-            AnalyzeRoutine(kindLabel!, name, node.Parameters, node.StatementList);
+            AnalyzeRoutine(kindLabel!, name, node.Parameters, node.StatementList, walker);
         }
 
-        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
-            AnalyzeRoutine("trigger", node.Name, [], node.StatementList);
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) =>
+            AnalyzeRoutine("trigger", node.Name, [], node.StatementList, walker);
 
-        public override void ExplicitVisit(IfStatement node)
+        public void OnEnterIfStatement(IfStatement node, ModuleWalker walker)
         {
             CheckConditionalOperatorCount(node.Predicate, node.StartLine, node.StartColumn);
-            VisitNested(node, base.ExplicitVisit);
+            EnterNested(node);
         }
 
-        public override void ExplicitVisit(WhileStatement node)
+        public void OnLeaveIfStatement(IfStatement node, ModuleWalker walker) => LeaveNested();
+
+        public void OnEnterWhileStatement(WhileStatement node, ModuleWalker walker)
         {
             CheckConditionalOperatorCount(node.Predicate, node.StartLine, node.StartColumn);
-            VisitNested(node, base.ExplicitVisit);
+            EnterNested(node);
         }
 
-        public override void ExplicitVisit(TryCatchStatement node) => VisitNested(node, base.ExplicitVisit);
+        public void OnLeaveWhileStatement(WhileStatement node, ModuleWalker walker) => LeaveNested();
 
-        public override void ExplicitVisit(SearchedCaseExpression node)
+        public void OnEnterTryCatchStatement(TryCatchStatement node, ModuleWalker walker) => EnterNested(node);
+
+        public void OnLeaveTryCatchStatement(TryCatchStatement node, ModuleWalker walker) => LeaveNested();
+
+        public void OnEnterOperandPosition(TSqlFragment node, ModuleWalker walker)
         {
-            CheckCaseBranches(node.WhenClauses.Count, node.StartLine, node.StartColumn);
-            foreach (var when in node.WhenClauses)
+            IList<SimpleWhenClause>? simpleWhens = null;
+            IList<SearchedWhenClause>? searchedWhens = null;
+
+            switch (node)
             {
-                CheckCaseBranchLength(when.ThenExpression);
+                case SearchedCaseExpression searched:
+                    searchedWhens = searched.WhenClauses;
+                    break;
+
+                case SimpleCaseExpression simple:
+                    simpleWhens = simple.WhenClauses;
+                    break;
+
+                default:
+                    return;
             }
 
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(SimpleCaseExpression node)
-        {
-            CheckCaseBranches(node.WhenClauses.Count, node.StartLine, node.StartColumn);
-            foreach (var when in node.WhenClauses)
+            if (searchedWhens is not null)
             {
-                CheckCaseBranchLength(when.ThenExpression);
+                CheckCaseBranches(searchedWhens.Count, node.StartLine, node.StartColumn);
+                foreach (var when in searchedWhens)
+                {
+                    CheckCaseBranchLength(when.ThenExpression);
+                }
             }
-
-            base.ExplicitVisit(node);
+            else if (simpleWhens is not null)
+            {
+                CheckCaseBranches(simpleWhens.Count, node.StartLine, node.StartColumn);
+                foreach (var when in simpleWhens)
+                {
+                    CheckCaseBranchLength(when.ThenExpression);
+                }
+            }
         }
 
-        private void VisitNested<TNode>(TNode node, Action<TNode> visitChildren)
-            where TNode : TSqlStatement
+        private void EnterNested(TSqlStatement node)
         {
             _nestingDepth++;
             if (_nestingDepth == thresholds.MaxNestingDepth + 1)
@@ -180,16 +190,15 @@ public static class CodeMetricScanner
                     CodeMetricFindingKind.NestingTooDeep, sourcePath, sourcePath,
                     node.StartLine, node.StartColumn, _nestingDepth, thresholds.MaxNestingDepth));
             }
-
-            visitChildren(node);
-            _nestingDepth--;
         }
 
+        private void LeaveNested() => _nestingDepth--;
+
         private void AnalyzeRoutine(
-            string kindLabel, SchemaObjectName nameNode, IList<ProcedureParameter> parameters, StatementList? statementList)
+            string kindLabel, SchemaObjectName nameNode, IList<ProcedureParameter> parameters, StatementList? statementList, ModuleWalker walker)
         {
             _nestingDepth = 0;
-            var qualifiedName = CurrentProcScope!;
+            var qualifiedName = walker.CurrentProcScope!;
 
             if (parameters.Count > thresholds.MaxParameters)
             {

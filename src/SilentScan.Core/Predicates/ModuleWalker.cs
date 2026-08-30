@@ -579,6 +579,11 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         }
 
         base.ExplicitVisit(node);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveWhileStatement(node, this);
+        }
     }
 
     public sealed override void ExplicitVisit(IfStatement node)
@@ -589,6 +594,26 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         }
 
         base.ExplicitVisit(node);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveIfStatement(node, this);
+        }
+    }
+
+    public sealed override void ExplicitVisit(TryCatchStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterTryCatchStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveTryCatchStatement(node, this);
+        }
     }
 
     public sealed override void ExplicitVisit(BooleanBinaryExpression node)
@@ -826,6 +851,76 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         foreach (var rule in _rules)
         {
             rule.OnEnterConvertCall(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(FetchCursorStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterFetchCursorStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(PrintStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterPrintStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(TableHint node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterTableHint(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(SetTransactionIsolationLevelStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterSetTransactionIsolationLevelStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(GlobalVariableExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterGlobalVariableExpression(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(GoToStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterGoToStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(ExecutableProcedureReference node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterExecutableProcedureReference(node, this);
         }
 
         base.ExplicitVisit(node);
