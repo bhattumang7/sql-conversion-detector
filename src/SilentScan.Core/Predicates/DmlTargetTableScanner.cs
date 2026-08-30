@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -9,40 +10,31 @@ public static class DmlTargetTableScanner
     public static IReadOnlySet<string> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog)
     {
         var targets = new HashSet<string>(catalog.IdentifierComparer);
+        var rule = new Rule(catalog, targets);
         foreach (var parseResult in parseResults)
         {
-            var visitor = new Visitor(catalog, targets);
-            parseResult.Fragment.Accept(visitor);
+            var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+            parseResult.Fragment.Accept(walker);
         }
 
         return targets;
     }
 
-    private sealed class Visitor(DatabaseCatalog catalog, HashSet<string> targets) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Rule(DatabaseCatalog catalog, HashSet<string> targets) : IModuleRule
     {
-        public override void ExplicitVisit(InsertStatement node)
-        {
+        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker) =>
             RecordWrite(node.InsertSpecification.Target, node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(UpdateStatement node)
-        {
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             RecordWrite(node.UpdateSpecification.Target, node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(DeleteStatement node)
-        {
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             RecordWrite(node.DeleteSpecification.Target, node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(MergeStatement node)
-        {
+        public void OnEnterMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             RecordWrite(node.MergeSpecification.Target, node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-        }
 
         private void RecordWrite(TableReference? target, WithCtesAndXmlNamespaces? withCtes)
         {

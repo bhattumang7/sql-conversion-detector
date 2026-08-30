@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
 
@@ -20,9 +21,10 @@ public static class TriggerRecursionCycleScanner
         var edges = new List<TriggerRecursionCycleHop>();
         foreach (var result in parseResults)
         {
-            var visitor = new Visitor(result.SourcePath, catalog);
-            result.Fragment.Accept(visitor);
-            edges.AddRange(visitor.Edges);
+            var rule = new Rule(result.SourcePath, catalog);
+            var walker = new ModuleWalker(result.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+            result.Fragment.Accept(walker);
+            edges.AddRange(rule.Edges);
         }
 
         var byFromTable = edges
@@ -117,15 +119,14 @@ public static class TriggerRecursionCycleScanner
         findings.Add(new TriggerRecursionCycleFinding(cycleTables, rotatedHops));
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<TriggerRecursionCycleHop> Edges { get; } = [];
 
-        public override void ExplicitVisit(CreateTriggerStatement node) => VisitTrigger(node, node.Name, node.TriggerObject, node.StatementList);
-
-        public override void ExplicitVisit(AlterTriggerStatement node) => VisitTrigger(node, node.Name, node.TriggerObject, node.StatementList);
-
-        public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitTrigger(node, node.Name, node.TriggerObject, node.StatementList);
+        public void OnEnterTriggerStatementScope(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject, ModuleWalker walker) =>
+            VisitTrigger(node, name, triggerObject, node.StatementList);
 
         private void VisitTrigger(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject, StatementList? statementList)
         {

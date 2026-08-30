@@ -25,10 +25,10 @@ public sealed class StatementVariantParityTests
     }
 
     [Fact]
-    public void ScopedSqlVisitorBase_PushesCteScopeForEveryConcreteCteBearingStatement()
+    public void ModuleWalker_PushesCteScopeForEveryConcreteCteBearingStatement()
     {
-        var scopedSqlVisitorBase = typeof(TypedPredicateExtractor).Assembly.GetType("SilentScan.Core.Predicates.ScopedSqlVisitorBase")!;
-        AssertHandlesEveryCteBearingStatement(GetExplicitVisitParameterTypeNames(scopedSqlVisitorBase));
+        var moduleWalker = typeof(TypedPredicateExtractor).Assembly.GetType("SilentScan.Core.Predicates.ModuleWalker")!;
+        AssertHandlesEveryCteBearingStatement(GetExplicitVisitParameterTypeNames(moduleWalker));
     }
 
     private static readonly Type CteBearingStatementBaseType =

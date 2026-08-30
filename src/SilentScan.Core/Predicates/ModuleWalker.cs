@@ -1,3 +1,7 @@
+global using ScopeChain = System.Collections.Generic.IReadOnlyList<(
+    System.Collections.Generic.IReadOnlyDictionary<string, SilentScan.Core.Lineage.ScopeEntry> ByAlias,
+    System.Collections.Generic.IReadOnlyList<SilentScan.Core.Lineage.ScopeEntry> Ordered)>;
+
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Common;
@@ -157,17 +161,80 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, inspect);
     }
 
-    public override void ExplicitVisit(CreateProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
+    public override void ExplicitVisit(CreateProcedureStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterCreateProcedureStatement(node, this);
+        }
 
-    public override void ExplicitVisit(AlterProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
+        VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
 
-    public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveCreateProcedureStatement(node, this);
+        }
+    }
 
-    public override void ExplicitVisit(CreateFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
+    public override void ExplicitVisit(AlterProcedureStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterAlterProcedureStatement(node, this);
+        }
 
-    public override void ExplicitVisit(AlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
+        VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
 
-    public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveAlterProcedureStatement(node, this);
+        }
+    }
+
+    public override void ExplicitVisit(CreateOrAlterProcedureStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterCreateOrAlterProcedureStatement(node, this);
+        }
+
+        VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveCreateOrAlterProcedureStatement(node, this);
+        }
+    }
+
+    public override void ExplicitVisit(CreateFunctionStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterCreateFunctionStatement(node, this);
+        }
+
+        VisitProcedureOrFunctionBody(node, node.Name);
+    }
+
+    public override void ExplicitVisit(AlterFunctionStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterAlterFunctionStatement(node, this);
+        }
+
+        VisitProcedureOrFunctionBody(node, node.Name);
+    }
+
+    public override void ExplicitVisit(CreateOrAlterFunctionStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterCreateOrAlterFunctionStatement(node, this);
+        }
+
+        VisitProcedureOrFunctionBody(node, node.Name);
+    }
 
     public override void ExplicitVisit(CreateTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
 
@@ -746,6 +813,21 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         }
     }
 
+    public sealed override void ExplicitVisit(CreateOrAlterViewStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterCreateOrAlterViewStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveCreateOrAlterViewStatement(node, this);
+        }
+    }
+
     public sealed override void ExplicitVisit(CreateTableStatement node)
     {
         foreach (var rule in _rules)
@@ -966,6 +1048,101 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         base.ExplicitVisit(node);
     }
 
+    public sealed override void ExplicitVisit(SetCommandStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterSetCommandStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(OverClause node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterOverClause(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(BeginTransactionStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterBeginTransactionStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(CommitTransactionStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterCommitTransactionStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(RollbackTransactionStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterRollbackTransactionStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(WaitForStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterWaitForStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(SetRowCountStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterSetRowCountStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(StringLiteral node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterStringLiteral(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(BooleanComparisonExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterBooleanComparisonExpressionScope(node, this);
+        }
+
+        base.ExplicitVisit(node);
+
+        foreach (var rule in _rules)
+        {
+            rule.OnLeaveBooleanComparisonExpressionScope(node, this);
+        }
+    }
+
     private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)
     {
         var previousScope = CurrentProcScope;
@@ -993,6 +1170,11 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         foreach (var rule in _rules)
         {
             rule.OnEnterTriggerBody(node, this);
+        }
+
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterTriggerStatementScope(node, name, triggerObject, this);
         }
 
         if (triggerObject.Name is not { } targetTableName)

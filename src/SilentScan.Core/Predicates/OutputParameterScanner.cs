@@ -1,4 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -7,36 +9,39 @@ public static class OutputParameterScanner
 {
     public static IReadOnlyList<OutputParameterFinding> Scan(SqlParseResult parseResult)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.ProcedureLine)
                 .ThenBy(f => f.ParameterName, StringComparer.OrdinalIgnoreCase),
         ];
     }
 
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     private readonly record struct FlowState(HashSet<string>? Unassigned, bool Declined)
     {
         public static FlowState Declined_() => new(null, true);
     }
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor, IStatementFlowPolicy<FlowState>
+    private sealed class Rule(string sourcePath) : IModuleRule, IStatementFlowPolicy<FlowState>
     {
         private int _procedureLine;
         private int _procedureColumn;
 
         public List<OutputParameterFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(CreateProcedureStatement node) =>
+        public void OnEnterCreateProcedureStatement(CreateProcedureStatement node, ModuleWalker walker) =>
             AnalyzeProcedure(node.Parameters, node.StatementList, node.ProcedureReference.Name);
 
-        public override void ExplicitVisit(AlterProcedureStatement node) =>
+        public void OnEnterAlterProcedureStatement(AlterProcedureStatement node, ModuleWalker walker) =>
             AnalyzeProcedure(node.Parameters, node.StatementList, node.ProcedureReference.Name);
 
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) =>
+        public void OnEnterCreateOrAlterProcedureStatement(CreateOrAlterProcedureStatement node, ModuleWalker walker) =>
             AnalyzeProcedure(node.Parameters, node.StatementList, node.ProcedureReference.Name);
 
         private void AnalyzeProcedure(

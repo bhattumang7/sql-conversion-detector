@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
 
@@ -10,14 +11,17 @@ public static class CrossModuleLockOrderScanner
     private sealed record ProcedureWriteOrder(
         string ProcedureQualifiedName, string SourcePath, int ProcedureLine, IReadOnlyList<(string TableQualifiedName, int Line)> Writes);
 
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     public static IReadOnlyList<CrossModuleLockOrderFinding> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog)
     {
         var procedures = new List<ProcedureWriteOrder>();
         foreach (var result in parseResults)
         {
-            var visitor = new Visitor(result.SourcePath, catalog);
-            result.Fragment.Accept(visitor);
-            procedures.AddRange(visitor.Orderings);
+            var rule = new Rule(result.SourcePath, catalog);
+            var walker = new ModuleWalker(result.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+            result.Fragment.Accept(walker);
+            procedures.AddRange(rule.Orderings);
         }
 
         var findings = new List<CrossModuleLockOrderFinding>();
@@ -93,87 +97,76 @@ public static class CrossModuleLockOrderScanner
         return -1;
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<ProcedureWriteOrder> Orderings { get; } = [];
 
         private int _openTransactionDepth;
         private List<(string TableQualifiedName, int Line)>? _writes;
 
-        public override void ExplicitVisit(CreateProcedureStatement node) =>
-            VisitProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine, node.StatementList);
+        public void OnEnterCreateProcedureStatement(CreateProcedureStatement node, ModuleWalker walker) =>
+            EnterProcedure();
 
-        public override void ExplicitVisit(AlterProcedureStatement node) =>
-            VisitProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine, node.StatementList);
+        public void OnLeaveCreateProcedureStatement(CreateProcedureStatement node, ModuleWalker walker) =>
+            LeaveProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine);
 
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) =>
-            VisitProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine, node.StatementList);
+        public void OnEnterAlterProcedureStatement(AlterProcedureStatement node, ModuleWalker walker) =>
+            EnterProcedure();
 
-        public override void ExplicitVisit(BeginTransactionStatement node)
-        {
+        public void OnLeaveAlterProcedureStatement(AlterProcedureStatement node, ModuleWalker walker) =>
+            LeaveProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine);
+
+        public void OnEnterCreateOrAlterProcedureStatement(CreateOrAlterProcedureStatement node, ModuleWalker walker) =>
+            EnterProcedure();
+
+        public void OnLeaveCreateOrAlterProcedureStatement(CreateOrAlterProcedureStatement node, ModuleWalker walker) =>
+            LeaveProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine);
+
+        public void OnEnterBeginTransactionStatement(BeginTransactionStatement node, ModuleWalker walker) =>
             _openTransactionDepth++;
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(CommitTransactionStatement node)
+        public void OnEnterCommitTransactionStatement(CommitTransactionStatement node, ModuleWalker walker)
         {
-
 #pragma warning disable S2583
             if (_openTransactionDepth > 0)
             {
                 _openTransactionDepth--;
             }
 #pragma warning restore S2583
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(RollbackTransactionStatement node)
+        public void OnEnterRollbackTransactionStatement(RollbackTransactionStatement node, ModuleWalker walker)
         {
-
 #pragma warning disable S2583
             if (_openTransactionDepth > 0)
             {
                 _openTransactionDepth--;
             }
 #pragma warning restore S2583
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(InsertStatement node)
-        {
+        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker) =>
             RecordWrite(node.InsertSpecification.Target, node.StartLine, node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(UpdateStatement node)
-        {
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             RecordWrite(node.UpdateSpecification.Target, node.StartLine, node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(DeleteStatement node)
-        {
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             RecordWrite(node.DeleteSpecification.Target, node.StartLine, node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(MergeStatement node)
-        {
+        public void OnEnterMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             RecordWrite(node.MergeSpecification.Target, node.StartLine, node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-        }
 
-        private void VisitProcedure(string qualifiedName, int line, StatementList? statementList)
+        private void EnterProcedure()
         {
             _openTransactionDepth = 0;
             _writes = [];
+        }
 
-            statementList?.AcceptChildren(this);
-
+        private void LeaveProcedure(string qualifiedName, int line)
+        {
 #pragma warning disable S2583
-            if (_writes.Count >= 2)
+            if (_writes is { Count: >= 2 })
             {
                 Orderings.Add(new ProcedureWriteOrder(qualifiedName, sourcePath, line, _writes));
             }

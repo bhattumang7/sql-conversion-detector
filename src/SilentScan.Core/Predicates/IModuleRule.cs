@@ -331,4 +331,92 @@ internal interface IModuleRule
     void OnEnterExecuteStatement(ExecuteStatement node, ModuleWalker walker)
     {
     }
+
+    void OnEnterSetCommandStatement(SetCommandStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterOverClause(OverClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterBeginTransactionStatement(BeginTransactionStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterCommitTransactionStatement(CommitTransactionStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterRollbackTransactionStatement(RollbackTransactionStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterWaitForStatement(WaitForStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterCreateProcedureStatement(CreateProcedureStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveCreateProcedureStatement(CreateProcedureStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterAlterProcedureStatement(AlterProcedureStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveAlterProcedureStatement(AlterProcedureStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterCreateOrAlterProcedureStatement(CreateOrAlterProcedureStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveCreateOrAlterProcedureStatement(CreateOrAlterProcedureStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterSetRowCountStatement(SetRowCountStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterBooleanComparisonExpressionScope(BooleanComparisonExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveBooleanComparisonExpressionScope(BooleanComparisonExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterStringLiteral(StringLiteral node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterTriggerStatementScope(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterCreateOrAlterViewStatement(CreateOrAlterViewStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveCreateOrAlterViewStatement(CreateOrAlterViewStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterCreateFunctionStatement(CreateFunctionStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterAlterFunctionStatement(AlterFunctionStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterCreateOrAlterFunctionStatement(CreateOrAlterFunctionStatement node, ModuleWalker walker)
+    {
+    }
 }

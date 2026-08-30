@@ -2,6 +2,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Lineage;
@@ -12,37 +13,32 @@ public static class SelectIntoLineagePass
     {
         foreach (var result in parseResults)
         {
-            var visitor = new Visitor(catalog, lineage.AllRelations, result.SourcePath);
-            result.Fragment.Accept(visitor);
+            var rule = new Rule(catalog, lineage.AllRelations, result.SourcePath);
+            var walker = new ModuleWalker(
+                result.SourcePath, catalog, lineage.AllRelations, catalog.Skipped, currentProcScope: null, callerScopeByCalleeScope: null,
+                rules: [rule], triggerScopeAnalysisPass: AnalysisPass.Lineage);
+            result.Fragment.Accept(walker);
         }
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath)
-        : ScopedRelationWalker(sourcePath, catalog, resolvedViews, catalog.Skipped, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath) : IModuleRule
     {
-        public override void ExplicitVisit(SelectStatement node)
+        public void OnEnterSelectStatementScope(SelectStatement node, ModuleWalker walker)
         {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-
             if (node.Into is not null)
             {
-                ResolveSelectIntoTarget(node);
+                ResolveSelectIntoTarget(node, walker);
             }
-
-            node.AcceptChildren(this);
-            PopCteScope();
         }
 
-        private void ResolveSelectIntoTarget(SelectStatement select)
+        private void ResolveSelectIntoTarget(SelectStatement select, ModuleWalker walker)
         {
             var targetName = select.Into!;
             var (schema, _) = SchemaObjectNameHelper.Resolve(targetName);
             var isTemp = schema is null;
             var qualifiedName = SchemaObjectNameHelper.Qualify(targetName);
 
-            var existing = catalog.Find(qualifiedName, isTemp ? CurrentProcScope : null);
+            var existing = catalog.Find(qualifiedName, isTemp ? walker.CurrentProcScope : null);
             if (existing is null)
             {
 
@@ -53,7 +49,7 @@ public static class SelectIntoLineagePass
             }
 
             var resolved = QueryExpressionResolver.Resolve(
-                select.QueryExpression, catalog, resolvedViews, sourcePath, catalog.Skipped, CurrentCteRelations(), CurrentProcScope);
+                select.QueryExpression, catalog, resolvedViews, sourcePath, catalog.Skipped, walker.CurrentCteRelations(), walker.CurrentProcScope);
 
             if (existing.Columns.Count == 0 && resolved.Count > 0)
             {
@@ -61,7 +57,7 @@ public static class SelectIntoLineagePass
                 var freshColumns = resolved
                     .Select(r => new CatalogColumn(r.Name, ColumnProvenanceAnalysis.TryGetScalarType(r.Provenance), IsNullable: true, IsIdentity: false, IsComputed: false, IsPersisted: false))
                     .ToList();
-                catalog.AddOrReplace(existing with { Columns = freshColumns }, isTemp ? CurrentProcScope : null);
+                catalog.AddOrReplace(existing with { Columns = freshColumns }, isTemp ? walker.CurrentProcScope : null);
                 return;
             }
 
@@ -77,7 +73,7 @@ public static class SelectIntoLineagePass
                     : column)
                 .ToList();
 
-            catalog.AddOrReplace(existing with { Columns = mergedColumns }, isTemp ? CurrentProcScope : null);
+            catalog.AddOrReplace(existing with { Columns = mergedColumns }, isTemp ? walker.CurrentProcScope : null);
         }
     }
 }

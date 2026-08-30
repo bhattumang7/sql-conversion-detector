@@ -12,16 +12,19 @@ public static class TvfFenceScanner
     public static IReadOnlyList<TvfFenceFinding> Scan(
         SqlParseResult parseResult, DatabaseCatalog catalog, IReadOnlyDictionary<string, TvfFenceOrigin> fenceMap)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog, fenceMap);
-        parseResult.Fragment.Accept(visitor);
-        return visitor.Findings;
+        var rule = new Rule(parseResult.SourcePath, catalog, fenceMap);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
+        return rule.Findings;
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, TvfFenceOrigin> fenceMap) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, TvfFenceOrigin> fenceMap) : IModuleRule
     {
         public List<TvfFenceFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(FromClause node)
+        public void OnEnterFromClause(FromClause node, ModuleWalker walker)
         {
             var isStandalone = node.TableReferences.Count == 1 && node.TableReferences[0] is SchemaObjectFunctionTableReference;
 
@@ -29,11 +32,9 @@ public static class TvfFenceScanner
             {
                 Flatten(tableReference, isApplySecondSide: false, isStandalone);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(InsertStatement node)
+        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker)
         {
             if (node.InsertSpecification.InsertSource is ExecuteInsertSource { Execute.ExecutableEntity: ExecutableProcedureReference { ProcedureReference.ProcedureReference.Name: { } procedureName } })
             {
@@ -47,8 +48,6 @@ public static class TvfFenceScanner
                     Column: node.StartColumn,
                     ReferenceFragmentText: FragmentTextRenderer.Render(node.InsertSpecification.InsertSource)));
             }
-
-            base.ExplicitVisit(node);
         }
 
         private void Flatten(TableReference tableReference, bool isApplySecondSide, bool isStandalone)

@@ -17,6 +17,7 @@ public sealed partial class PassOrderTests
     private static readonly (string File, string LaterFolder)[] AllowedForwardReferences =
     [
         (Path.Combine("Catalog", "DynamicSqlTempTableDiscovery.cs"), "Predicates"),
+        (Path.Combine("Lineage", "SelectIntoLineagePass.cs"), "Predicates"),
     ];
 
     [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline)]

@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
 
@@ -9,29 +10,30 @@ public static class CartesianJoinScanner
 {
     public static IReadOnlyList<CartesianJoinFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog ?? new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
     }
 
-    private sealed class Visitor(string sourcePath, StringComparer identifierComparer) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Rule(string sourcePath, StringComparer identifierComparer) : IModuleRule
     {
         public List<CartesianJoinFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(QuerySpecification node)
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker)
         {
             if (node.FromClause is { } from)
             {
                 AnalyzeFromClause(from, node.WhereClause);
             }
-
-            base.ExplicitVisit(node);
         }
 
         private void AnalyzeFromClause(FromClause from, WhereClause? whereClause)

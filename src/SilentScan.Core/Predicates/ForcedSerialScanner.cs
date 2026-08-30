@@ -1,4 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -13,11 +15,12 @@ public static class ForcedSerialScanner
 
     public static IReadOnlyList<ForcedSerialFinding> Scan(SqlParseResult parseResult)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
@@ -25,7 +28,9 @@ public static class ForcedSerialScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Rule(string sourcePath) : IModuleRule
     {
         public List<ForcedSerialFinding> Findings { get; } = [];
 
@@ -33,75 +38,51 @@ public static class ForcedSerialScanner
 
         private int _queryWithFromDepth;
 
-        public override void ExplicitVisit(TSqlBatch node)
-        {
-            _tableVariableNames.Clear();
-            base.ExplicitVisit(node);
-        }
+        public void OnEnterTSqlBatch(TSqlBatch node, ModuleWalker walker) => _tableVariableNames.Clear();
 
-        public override void ExplicitVisit(DeclareTableVariableStatement node)
-        {
+        public void OnEnterDeclareTableVariableStatement(DeclareTableVariableStatement node, ModuleWalker walker) =>
             _tableVariableNames.Add(node.Body.VariableName.Value);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(InsertStatement node)
-        {
+        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker) =>
             InspectDataModification(node.InsertSpecification);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(UpdateStatement node)
-        {
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             InspectDataModification(node.UpdateSpecification);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(DeleteStatement node)
-        {
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             InspectDataModification(node.DeleteSpecification);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(MergeStatement node)
-        {
+        public void OnEnterMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             InspectDataModification(node.MergeSpecification);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(DeclareCursorStatement node)
-        {
+        public void OnEnterDeclareCursorStatement(DeclareCursorStatement node, ModuleWalker walker) =>
             InspectCursorDefinition(node.CursorDefinition, node.Name.Value);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(SetVariableStatement node)
+        public void OnEnterSetVariableStatement(SetVariableStatement node, ModuleWalker walker)
         {
             if (node.CursorDefinition is not null)
             {
                 InspectCursorDefinition(node.CursorDefinition, node.Variable.Name);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(QuerySpecification node)
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker)
         {
-            var hasFrom = node.FromClause is not null;
-            if (hasFrom)
+            if (node.FromClause is not null)
             {
                 _queryWithFromDepth++;
             }
+        }
 
-            base.ExplicitVisit(node);
-
-            if (hasFrom)
+        public void OnLeaveQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker)
+        {
+            if (node.FromClause is not null)
             {
                 _queryWithFromDepth--;
             }
         }
 
-        public override void ExplicitVisit(FunctionCall node)
+        public void OnEnterFunctionCall(FunctionCall node, ModuleWalker walker)
         {
             if (_queryWithFromDepth > 0 && NonParallelizableIntrinsicFunctionNames.Contains(node.FunctionName.Value))
             {
@@ -109,11 +90,9 @@ public static class ForcedSerialScanner
                     ForcedSerialFindingKind.NonParallelizableIntrinsic, sourcePath, sourcePath,
                     node.StartLine, node.StartColumn, DetailText: node.FunctionName.Value));
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(GlobalVariableExpression node)
+        public void OnEnterGlobalVariableExpression(GlobalVariableExpression node, ModuleWalker walker)
         {
             if (_queryWithFromDepth > 0 && string.Equals(node.Name, "@@TRANCOUNT", StringComparison.OrdinalIgnoreCase))
             {
@@ -121,8 +100,6 @@ public static class ForcedSerialScanner
                     ForcedSerialFindingKind.NonParallelizableIntrinsic, sourcePath, sourcePath,
                     node.StartLine, node.StartColumn, DetailText: "@@TRANCOUNT"));
             }
-
-            base.ExplicitVisit(node);
         }
 
         private void InspectDataModification(DataModificationSpecification spec)

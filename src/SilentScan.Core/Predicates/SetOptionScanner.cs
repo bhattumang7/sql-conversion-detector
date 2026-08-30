@@ -21,8 +21,9 @@ public static class SetOptionScanner
         var moduleQualifiedName = parseResult.SourcePath;
         var findings = new List<SetOptionFinding>();
 
-        var visitor = new SetStatementVisitor();
-        parseResult.Fragment.Accept(visitor);
+        var rule = new SetStatementRule();
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
 
         var isAdHocScript = IsAdHocScript(parseResult.Fragment);
 
@@ -34,7 +35,7 @@ public static class SetOptionScanner
             ? SetOptionFlowTracker.ComputeFinalOffState(parseResult.Fragment, SetOptions.AnsiNulls)
             : catalog.TryGetModuleUsesAnsiNulls(moduleQualifiedName, out var usesAnsiNulls) && !usesAnsiNulls;
 
-        if (!quotedIdentifierOff && !ansiNullsOff && visitor.MatchedStatements.Count == 0)
+        if (!quotedIdentifierOff && !ansiNullsOff && rule.MatchedStatements.Count == 0)
         {
 
             return findings;
@@ -61,7 +62,7 @@ public static class SetOptionScanner
                 touch.ObjectQualifiedName, touch.IndexName, touch.IsIndexedView));
         }
 
-        foreach (var (statement, kind) in visitor.MatchedStatements)
+        foreach (var (statement, kind) in rule.MatchedStatements)
         {
             findings.Add(new SetOptionFinding(
                 kind, moduleQualifiedName, parseResult.SourcePath,
@@ -79,11 +80,13 @@ public static class SetOptionScanner
         return collector.Names.Count == 0;
     }
 
-    private sealed class SetStatementVisitor : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class SetStatementRule : IModuleRule
     {
         public List<(PredicateSetStatement Statement, SetOptionFindingKind Kind)> MatchedStatements { get; } = [];
 
-        public override void Visit(PredicateSetStatement node)
+        public void OnEnterPredicateSetStatement(PredicateSetStatement node, ModuleWalker walker)
         {
             foreach (var (flag, triggerIsOn, kind) in SyntaxOnlyTriggers)
             {

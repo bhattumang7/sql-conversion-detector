@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
 
@@ -9,11 +10,12 @@ public static class ViewOrderingScanner
 {
     public static IReadOnlyList<ViewOrderingFinding> Scan(SqlParseResult parseResult)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
@@ -21,21 +23,23 @@ public static class ViewOrderingScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Rule(string sourcePath) : IModuleRule
     {
         public List<ViewOrderingFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(CreateViewStatement node) => Inspect(SchemaObjectNameHelper.Qualify(node.SchemaObjectName), node.SelectStatement.QueryExpression);
+        public void OnEnterCreateViewStatement(CreateViewStatement node, ModuleWalker walker) => Inspect(SchemaObjectNameHelper.Qualify(node.SchemaObjectName), node.SelectStatement.QueryExpression);
 
-        public override void ExplicitVisit(AlterViewStatement node) => Inspect(SchemaObjectNameHelper.Qualify(node.SchemaObjectName), node.SelectStatement.QueryExpression);
+        public void OnEnterAlterViewStatement(AlterViewStatement node, ModuleWalker walker) => Inspect(SchemaObjectNameHelper.Qualify(node.SchemaObjectName), node.SelectStatement.QueryExpression);
 
-        public override void ExplicitVisit(CreateOrAlterViewStatement node) => Inspect(SchemaObjectNameHelper.Qualify(node.SchemaObjectName), node.SelectStatement.QueryExpression);
+        public void OnEnterCreateOrAlterViewStatement(CreateOrAlterViewStatement node, ModuleWalker walker) => Inspect(SchemaObjectNameHelper.Qualify(node.SchemaObjectName), node.SelectStatement.QueryExpression);
 
-        public override void ExplicitVisit(CreateFunctionStatement node) => InspectFunction(node.Name, node.ReturnType);
+        public void OnEnterCreateFunctionStatement(CreateFunctionStatement node, ModuleWalker walker) => InspectFunction(node.Name, node.ReturnType);
 
-        public override void ExplicitVisit(AlterFunctionStatement node) => InspectFunction(node.Name, node.ReturnType);
+        public void OnEnterAlterFunctionStatement(AlterFunctionStatement node, ModuleWalker walker) => InspectFunction(node.Name, node.ReturnType);
 
-        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => InspectFunction(node.Name, node.ReturnType);
+        public void OnEnterCreateOrAlterFunctionStatement(CreateOrAlterFunctionStatement node, ModuleWalker walker) => InspectFunction(node.Name, node.ReturnType);
 
         private void InspectFunction(SchemaObjectName name, FunctionReturnType returnType)
         {

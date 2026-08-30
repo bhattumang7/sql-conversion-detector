@@ -1,5 +1,7 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Common;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -8,11 +10,12 @@ public static class WindowFunctionArgumentScanner
 {
     public static IReadOnlyList<WindowFunctionArgumentFinding> Scan(SqlParseResult parseResult)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
@@ -20,11 +23,13 @@ public static class WindowFunctionArgumentScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Rule(string sourcePath) : IModuleRule
     {
         public List<WindowFunctionArgumentFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(FunctionCall node)
+        public void OnEnterFunctionCall(FunctionCall node, ModuleWalker walker)
         {
             var name = node.FunctionName?.Value;
 
@@ -46,8 +51,6 @@ public static class WindowFunctionArgumentScanner
             {
                 Add(WindowFunctionArgumentFindingKind.PercentileOutOfRange, name!, node.Parameters[0]);
             }
-
-            base.ExplicitVisit(node);
         }
 
         private void Add(WindowFunctionArgumentFindingKind kind, string functionName, ScalarExpression argument) =>

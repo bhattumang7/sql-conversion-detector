@@ -1,6 +1,7 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Common;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -43,9 +44,10 @@ public static class DeprecatedSyntaxScanner
 
         var isAdHocScript = moduleQualifiedName is null && HasNoModuleDefinition(parseResult.Fragment);
 
-        var visitor = new Visitor(parseResult.SourcePath, ansiNullsIsOff, skipComparisonFindings: isAdHocScript);
-        parseResult.Fragment.Accept(visitor);
-        findings.AddRange(visitor.Findings);
+        var rule = new Rule(parseResult.SourcePath, ansiNullsIsOff, skipComparisonFindings: isAdHocScript);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog ?? new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
+        findings.AddRange(rule.Findings);
 
         if (isAdHocScript && parseResult.Fragment is TSqlScript script)
         {
@@ -196,6 +198,8 @@ public static class DeprecatedSyntaxScanner
         }
     }
 
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     private static bool IsNullLiteral(ScalarExpression expression) =>
         expression is NullLiteral;
 
@@ -252,13 +256,13 @@ public static class DeprecatedSyntaxScanner
         }
     }
 
-    private sealed class Visitor : TSqlFragmentVisitor
+    private sealed class Rule : IModuleRule
     {
         private readonly string sourcePath;
         private readonly bool ansiNullsIsOff;
         private readonly bool skipComparisonFindings;
 
-        public Visitor(string sourcePath, bool ansiNullsIsOff, bool skipComparisonFindings = false)
+        public Rule(string sourcePath, bool ansiNullsIsOff, bool skipComparisonFindings = false)
         {
             this.sourcePath = sourcePath;
             this.ansiNullsIsOff = ansiNullsIsOff;
@@ -267,18 +271,16 @@ public static class DeprecatedSyntaxScanner
 
         public List<DeprecatedSyntaxFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(BooleanComparisonExpression node)
+        public void OnBooleanComparisonExpression(BooleanComparisonExpression node, ModuleWalker walker)
         {
             var comparesToNull = IsNullLiteral(node.SecondExpression) || IsNullLiteral(node.FirstExpression);
             if (!skipComparisonFindings && ClassifyComparison(node.ComparisonType, comparesToNull, ansiNullsIsOff) is { } result)
             {
                 Add(result.Kind, node, result.Detail);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(LikePredicate node)
+        public void OnLikePredicate(LikePredicate node, ModuleWalker walker)
         {
             if (node.SecondExpression is StringLiteral { Value: { } pattern }
                 && !pattern.Contains('%') && !pattern.Contains('_') && !pattern.Contains('[')
@@ -287,11 +289,9 @@ public static class DeprecatedSyntaxScanner
                 Add(DeprecatedSyntaxFindingKind.LikeWithNoWildcard, node,
                     $"LIKE pattern \"{pattern}\" contains no wildcard - use \"=\" here instead, or add the intended wildcard.");
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(NamedTableReference node)
+        public void OnEnterNamedTableReference(NamedTableReference node, ModuleWalker walker)
         {
             if (node.SchemaObject.SchemaIdentifier is null or { Value: "sys" or "dbo" }
                 && LegacyCompatibilityViewNames.Contains(node.SchemaObject.BaseIdentifier.Value))
@@ -307,22 +307,18 @@ public static class DeprecatedSyntaxScanner
                 Add(DeprecatedSyntaxFindingKind.TableHintWithoutWith, node,
                     "Table hint written without the \"WITH\" keyword - a deprecated syntax form.");
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(CreateProcedureStatement node)
+        public void OnEnterCreateProcedureStatement(CreateProcedureStatement node, ModuleWalker walker)
         {
             if (node.ProcedureReference.Number is not null)
             {
                 Add(DeprecatedSyntaxFindingKind.NumberedProcedureDefinition, node.ProcedureReference,
                     $"\"{SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name)}\" is defined as a numbered-procedure-group member - a deprecated T-SQL feature.");
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(ExecutableProcedureReference node)
+        public void OnEnterExecutableProcedureReference(ExecutableProcedureReference node, ModuleWalker walker)
         {
             if (node.ProcedureReference?.ProcedureReference is { } procRef)
             {
@@ -339,26 +335,21 @@ public static class DeprecatedSyntaxScanner
                         $"\"{routineName}\" is a legacy security-administration procedure superseded by CREATE LOGIN/CREATE USER/ALTER ROLE - some names in this family are already fully removed from current SQL Server versions.");
                 }
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(SelectScalarExpression node)
+        public void OnEnterSelectScalarExpression(SelectScalarExpression node, ModuleWalker walker)
         {
             if (node.ColumnName?.ValueExpression is StringLiteral { Value: { } alias })
             {
                 Add(DeprecatedSyntaxFindingKind.StringLiteralColumnAlias, node.ColumnName,
                     $"Column alias \"{alias}\" is written as a string literal - a deprecated aliasing form.");
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(SetRowCountStatement node)
+        public void OnEnterSetRowCountStatement(SetRowCountStatement node, ModuleWalker walker)
         {
             Add(DeprecatedSyntaxFindingKind.DeprecatedSetRowcount, node,
                 "SET ROWCOUNT is deprecated - use TOP (n) instead; Microsoft documents it as not honored by INSERT/UPDATE/DELETE in a future release.");
-            base.ExplicitVisit(node);
         }
 
         private static bool HasPrecedingWithKeyword(IList<TSqlParserToken> tokens, int hintFirstTokenIndex)

@@ -64,20 +64,17 @@ public sealed partial class TypeInferenceConventionTests
     }
 
     [Fact]
-    public void ScopedSqlVisitorBaseIsTheOnlySourceOfScopeAwareColumnResolution()
+    public void ModuleWalkerIsTheOnlySourceOfScopeAwareColumnResolution()
     {
         var assembly = typeof(SilentScan.Core.Reporting.ScanReport).Assembly;
-        var baseType = assembly.GetType("SilentScan.Core.Predicates.ScopedSqlVisitorBase")
-            ?? throw new InvalidOperationException("SilentScan.Core.Predicates.ScopedSqlVisitorBase was not found - update this test if it was renamed or moved.");
         var moduleWalkerType = assembly.GetType("SilentScan.Core.Predicates.ModuleWalker")
             ?? throw new InvalidOperationException("SilentScan.Core.Predicates.ModuleWalker was not found - update this test if it was renamed or moved.");
 
         const BindingFlags AllDeclared = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
         var guardedMethodNames = new HashSet<string> { "ResolveColumnFacts", "CurrentResolutionContext", "InspectJoinOnClauses" };
-        var sanctionedTypes = new HashSet<Type> { baseType, moduleWalkerType };
 
         var offenders = assembly.GetTypes()
-            .Where(t => !sanctionedTypes.Contains(t))
+            .Where(t => t != moduleWalkerType)
             .SelectMany(t => t.GetMethods(AllDeclared).Select(m => (Type: t, Method: m)))
             .Where(tm => guardedMethodNames.Contains(tm.Method.Name))
             .Select(tm => $"{tm.Type.FullName}.{tm.Method.Name}")
@@ -85,8 +82,7 @@ public sealed partial class TypeInferenceConventionTests
 
         Assert.True(offenders.Count == 0,
             "A second implementation of scope-aware column/CTE resolution has appeared outside " +
-            "ScopedSqlVisitorBase/ModuleWalker - this is the PredicateVisitorSupport-shaped duplication " +
-            "that Phase 1 removed; scanners must consume ScopedSqlVisitorBase (not yet migrated) or " +
-            "ModuleWalker (migrated) rather than reintroducing a parallel helper:\n" + string.Join('\n', offenders));
+            "ModuleWalker - this is the PredicateVisitorSupport-shaped duplication that Phase 1 removed; " +
+            "scanners must consume ModuleWalker rather than reintroducing a parallel helper:\n" + string.Join('\n', offenders));
     }
 }

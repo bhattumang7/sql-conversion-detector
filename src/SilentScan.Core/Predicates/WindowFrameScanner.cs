@@ -1,4 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -7,11 +9,12 @@ public static class WindowFrameScanner
 {
     public static IReadOnlyList<WindowFrameFinding> Scan(SqlParseResult parseResult)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
@@ -19,17 +22,18 @@ public static class WindowFrameScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Rule(string sourcePath) : IModuleRule
     {
         public List<WindowFrameFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(OverClause node)
+        public void OnEnterOverClause(OverClause node, ModuleWalker walker)
         {
             if (node.OrderByClause is not null)
             {
                 if (node.WindowFrameClause is null)
                 {
-
                     Findings.Add(new WindowFrameFinding(
                         WindowFrameFindingKind.ImplicitDefaultRangeFrame, sourcePath, node.StartLine, node.StartColumn));
                 }
@@ -40,8 +44,6 @@ public static class WindowFrameScanner
                         node.WindowFrameClause.StartLine, node.WindowFrameClause.StartColumn));
                 }
             }
-
-            base.ExplicitVisit(node);
         }
     }
 }

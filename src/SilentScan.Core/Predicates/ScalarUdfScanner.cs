@@ -12,12 +12,15 @@ public static class ScalarUdfScanner
     public static IReadOnlyList<ScalarUdfFinding> Scan(
         SqlParseResult parseResult, DatabaseCatalog catalog, IReadOnlyDictionary<string, ScalarUdfOrigin> scalarUdfMap)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog, scalarUdfMap);
-        parseResult.Fragment.Accept(visitor);
-        return visitor.Findings;
+        var rule = new Rule(parseResult.SourcePath, catalog, scalarUdfMap);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
+        return rule.Findings;
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ScalarUdfOrigin> scalarUdfMap) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ScalarUdfOrigin> scalarUdfMap) : IModuleRule
     {
 
         private readonly List<(int Start, int End, ScalarUdfContext Context)> _regions = [];
@@ -26,42 +29,39 @@ public static class ScalarUdfScanner
 
         public List<ScalarUdfFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(WhereClause node) => ClaimRegion(node.SearchCondition, node, ScalarUdfContext.Where);
+        public void OnEnterWhereClause(WhereClause node, ModuleWalker walker) => RecordRegion(node.SearchCondition, ScalarUdfContext.Where);
 
-        public override void ExplicitVisit(HavingClause node) => ClaimRegion(node.SearchCondition, node, ScalarUdfContext.Having);
+        public void OnEnterHavingClause(HavingClause node, ModuleWalker walker) => RecordRegion(node.SearchCondition, ScalarUdfContext.Having);
 
-        public override void ExplicitVisit(QualifiedJoin node) => ClaimRegion(node.SearchCondition, node, ScalarUdfContext.JoinOn);
+        public void OnEnterJoinSearchCondition(QualifiedJoin node, ModuleWalker walker) => RecordRegion(node.SearchCondition, ScalarUdfContext.JoinOn);
 
-        public override void ExplicitVisit(MergeSpecification node) => ClaimRegion(node.SearchCondition, node, ScalarUdfContext.MergeOn);
+        public void OnEnterMergeSearchCondition(MergeSpecification node, ModuleWalker walker) => RecordRegion(node.SearchCondition, ScalarUdfContext.MergeOn);
 
-        public override void ExplicitVisit(SelectScalarExpression node) => ClaimRegion(node.Expression, node, ScalarUdfContext.SelectList);
+        public void OnEnterSelectScalarExpression(SelectScalarExpression node, ModuleWalker walker) => RecordRegion(node.Expression, ScalarUdfContext.SelectList);
 
-        public override void ExplicitVisit(OrderByClause node) => ClaimRegion(node, node, ScalarUdfContext.OrderBy);
+        public void OnEnterOrderByClause(OrderByClause node, ModuleWalker walker) => RecordRegion(node, ScalarUdfContext.OrderBy);
 
-        public override void ExplicitVisit(GroupByClause node) => ClaimRegion(node, node, ScalarUdfContext.GroupBy);
+        public void OnEnterGroupByClause(GroupByClause node, ModuleWalker walker) => RecordRegion(node, ScalarUdfContext.GroupBy);
 
-        public override void ExplicitVisit(AssignmentSetClause node) =>
-            ClaimRegion(node.NewValue, node, node.Variable is not null ? ScalarUdfContext.VariableAssignment : ScalarUdfContext.SetAssignment);
+        public void OnEnterAssignmentSetClause(AssignmentSetClause node, ModuleWalker walker) =>
+            RecordRegion(node.NewValue, node.Variable is not null ? ScalarUdfContext.VariableAssignment : ScalarUdfContext.SetAssignment);
 
-        public override void ExplicitVisit(SelectSetVariable node) => ClaimRegion(node.Expression, node, ScalarUdfContext.VariableAssignment);
+        public void OnEnterSelectSetVariable(SelectSetVariable node, ModuleWalker walker) => RecordRegion(node.Expression, ScalarUdfContext.VariableAssignment);
 
-        public override void ExplicitVisit(SetVariableStatement node) => ClaimRegion(node.Expression, node, ScalarUdfContext.VariableAssignment);
+        public void OnEnterSetVariableStatement(SetVariableStatement node, ModuleWalker walker) => RecordRegion(node.Expression, ScalarUdfContext.VariableAssignment);
 
-        public override void ExplicitVisit(FromClause node)
+        public void OnEnterFromClause(FromClause node, ModuleWalker walker)
         {
             foreach (var tableReference in node.TableReferences)
             {
                 Flatten(tableReference);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(FunctionCall node)
+        public void OnEnterFunctionCall(FunctionCall node, ModuleWalker walker)
         {
             if (_claimed.Contains(node))
             {
-                base.ExplicitVisit(node);
                 return;
             }
 
@@ -74,18 +74,14 @@ public static class ScalarUdfScanner
                     ClaimNestedFunctionCalls(node);
                 }
             }
-
-            base.ExplicitVisit(node);
         }
 
-        private void ClaimRegion(TSqlFragment? region, TSqlFragment node, ScalarUdfContext context)
+        private void RecordRegion(TSqlFragment? region, ScalarUdfContext context)
         {
             if (region is not null)
             {
                 _regions.Add((region.StartOffset, region.StartOffset + region.FragmentLength, context));
             }
-
-            node.AcceptChildren(this);
         }
 
         private void Flatten(TableReference tableReference)

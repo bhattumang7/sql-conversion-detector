@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -58,17 +60,20 @@ public static partial class SecurityScanner
 
     public static IReadOnlyList<SecurityFinding> Scan(SqlParseResult parseResult)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
     }
+
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
     public static IReadOnlyList<SecurityFinding> FromDynamicSqlFindings(IReadOnlyList<DynamicSqlFinding> dynamicSqlFindings) =>
     [
@@ -83,13 +88,13 @@ public static partial class SecurityScanner
             .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column),
     ];
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
+    private sealed class Rule(string sourcePath) : IModuleRule
     {
         public List<SecurityFinding> Findings { get; } = [];
 
         private bool _inBooleanComparison;
 
-        public override void ExplicitVisit(DeclareVariableStatement node)
+        public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)
         {
             foreach (var element in node.Declarations)
             {
@@ -97,32 +102,26 @@ public static partial class SecurityScanner
                 {
                     AddCredential(element.VariableName.Value, element.VariableName);
                 }
-
-                element.Value?.Accept(this);
             }
         }
 
-        public override void ExplicitVisit(SetVariableStatement node)
+        public void OnEnterSetVariableStatement(SetVariableStatement node, ModuleWalker walker)
         {
             if (node.Expression is StringLiteral && node.Variable is { Name: { } name } && IsCredentialSuggestiveName(name))
             {
                 AddCredential(name, node.Variable);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(SelectSetVariable node)
+        public void OnEnterSelectSetVariable(SelectSetVariable node, ModuleWalker walker)
         {
             if (node.Expression is StringLiteral && node.Variable is { Name: { } name } && IsCredentialSuggestiveName(name))
             {
                 AddCredential(name, node.Variable);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(StringLiteral node)
+        public void OnEnterStringLiteral(StringLiteral node, ModuleWalker walker)
         {
             if (node.Value is { Length: > 0 } text && TryGetIpAddress(text, out var ip) && !IsBenignIpAddress(ip))
             {
@@ -132,19 +131,15 @@ public static partial class SecurityScanner
                     $"'{ip}' is a hardcoded IP address embedded in source text - an environment-specific detail that becomes stale, a deployment-coupling smell, and occasionally a genuine indicator of a hardcoded backdoor/debug endpoint. Make sure using it here is safe/intentional.",
                     FindingConfidence.High));
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(BooleanComparisonExpression node)
-        {
+        public void OnEnterBooleanComparisonExpressionScope(BooleanComparisonExpression node, ModuleWalker walker) =>
             _inBooleanComparison = true;
-            node.FirstExpression?.Accept(this);
-            node.SecondExpression?.Accept(this);
-            _inBooleanComparison = false;
-        }
 
-        public override void ExplicitVisit(FunctionCall node)
+        public void OnLeaveBooleanComparisonExpressionScope(BooleanComparisonExpression node, ModuleWalker walker) =>
+            _inBooleanComparison = false;
+
+        public void OnEnterFunctionCall(FunctionCall node, ModuleWalker walker)
         {
             if (string.Equals(node.FunctionName?.Value, "HASHBYTES", StringComparison.OrdinalIgnoreCase)
                 && node.Parameters is [StringLiteral { Value: { } algorithm }, ..] parameters
@@ -161,8 +156,6 @@ public static partial class SecurityScanner
                         : $"HASHBYTES('{algorithm}', ...) uses a cryptographically broken/deprecated algorithm - fine for a non-security checksum/dedup use, but prefer SHA2_256/SHA2_512 if this value has any security purpose.",
                     sensitive ? FindingConfidence.Medium : FindingConfidence.High));
             }
-
-            base.ExplicitVisit(node);
         }
 
         private void AddCredential(string variableName, TSqlFragment site) =>
