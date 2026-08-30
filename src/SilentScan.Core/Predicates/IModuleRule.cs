@@ -235,4 +235,40 @@ internal interface IModuleRule
     void OnEnterCreateIndexStatement(CreateIndexStatement node, ModuleWalker walker)
     {
     }
+
+    void OnEnterTopRowFilter(TopRowFilter node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterOffsetClause(OffsetClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterSelectScalarExpression(SelectScalarExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterOrderByClause(OrderByClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterGroupByClause(GroupByClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterFunctionCall(FunctionCall node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterNamedTableReference(NamedTableReference node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterOutputClause(OutputClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterConvertCall(ConvertCall node, ModuleWalker walker)
+    {
+    }
 }

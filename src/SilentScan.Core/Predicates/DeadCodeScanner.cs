@@ -9,11 +9,12 @@ public static class DeadCodeScanner
 {
     public static IReadOnlyList<DeadCodeFinding> Scan(SqlParseResult parseResult)
     {
-        var visitor = new RoutineVisitor(parseResult.SourcePath);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
@@ -23,30 +24,24 @@ public static class DeadCodeScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class RoutineVisitor : ScopedRelationWalker
+    private sealed class Rule(string sourcePath) : IModuleRule
     {
-        private readonly string sourcePath;
-
-        public RoutineVisitor(string sourcePath)
-            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null) =>
-            this.sourcePath = sourcePath;
-
         public List<DeadCodeFinding> Findings { get; } = [];
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
         {
             if (node is ProcedureStatementBody)
             {
-                Analyze(node.Parameters, node.StatementList);
+                Analyze(node.Parameters, node.StatementList, walker);
             }
         }
 
-        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
-            Analyze([], node.StatementList);
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) =>
+            Analyze([], node.StatementList, walker);
 
-        private void Analyze(IList<ProcedureParameter> parameters, StatementList? statementList)
+        private void Analyze(IList<ProcedureParameter> parameters, StatementList? statementList, ModuleWalker walker)
         {
-            var moduleName = CurrentProcScope!;
+            var moduleName = walker.CurrentProcScope!;
 
             if (statementList is null)
             {

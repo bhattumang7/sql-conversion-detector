@@ -12,9 +12,10 @@ public static class ForcedParameterizationScanner
         var findings = new List<ForcedParameterizationFinding>();
         foreach (var parseResult in parseResults)
         {
-            var visitor = new Visitor(parseResult.SourcePath);
-            parseResult.Fragment.Accept(visitor);
-            findings.AddRange(visitor.Findings);
+            var rule = new Rule(parseResult.SourcePath);
+            var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+            parseResult.Fragment.Accept(walker);
+            findings.AddRange(rule.Findings);
         }
 
         return
@@ -29,75 +30,59 @@ public static class ForcedParameterizationScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Visitor : ScopedRelationWalker
+    private sealed class Rule(string sourcePath) : IModuleRule
     {
-        private readonly string sourcePath;
-
-        public Visitor(string sourcePath)
-            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null) =>
-            this.sourcePath = sourcePath;
-
         public List<ForcedParameterizationFinding> Findings { get; } = [];
 
-        private string CurrentModule => CurrentProcScope ?? sourcePath;
+        private string CurrentModule(ModuleWalker walker) => walker.CurrentProcScope ?? sourcePath;
 
-        public override void ExplicitVisit(LikePredicate node)
+        public void OnLikePredicate(LikePredicate node, ModuleWalker walker)
         {
             if (node.SecondExpression is Literal literal)
             {
                 Add(ForcedParameterizationFindingKind.LikePatternLiteral, literal,
-                    $"LIKE pattern '{LiteralText(literal)}' is a literal - the engine leaves it unparameterized even under PARAMETERIZATION FORCED, so a workload varying only this pattern still recompiles per distinct value.");
+                    $"LIKE pattern '{LiteralText(literal)}' is a literal - the engine leaves it unparameterized even under PARAMETERIZATION FORCED, so a workload varying only this pattern still recompiles per distinct value.", walker);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(TopRowFilter node)
+        public void OnEnterTopRowFilter(TopRowFilter node, ModuleWalker walker)
         {
             if (node.Expression is Literal literal)
             {
                 Add(ForcedParameterizationFindingKind.TopOrPagingLiteral, literal,
-                    $"TOP row count '{LiteralText(literal)}' is a literal - the engine leaves it unparameterized even under PARAMETERIZATION FORCED, so a workload varying the row count still recompiles per distinct value.");
+                    $"TOP row count '{LiteralText(literal)}' is a literal - the engine leaves it unparameterized even under PARAMETERIZATION FORCED, so a workload varying the row count still recompiles per distinct value.", walker);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(OffsetClause node)
+        public void OnEnterOffsetClause(OffsetClause node, ModuleWalker walker)
         {
             var literal = node.OffsetExpression as Literal ?? node.FetchExpression as Literal;
             if (literal is not null)
             {
                 Add(ForcedParameterizationFindingKind.TopOrPagingLiteral, literal,
-                    $"OFFSET/FETCH row count '{LiteralText(literal)}' is a literal - the engine leaves it unparameterized even under PARAMETERIZATION FORCED, so a workload varying the page size still recompiles per distinct value.");
+                    $"OFFSET/FETCH row count '{LiteralText(literal)}' is a literal - the engine leaves it unparameterized even under PARAMETERIZATION FORCED, so a workload varying the page size still recompiles per distinct value.", walker);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(SelectScalarExpression node)
+        public void OnEnterSelectScalarExpression(SelectScalarExpression node, ModuleWalker walker)
         {
             if (node.Expression is Literal literal)
             {
                 Add(ForcedParameterizationFindingKind.SelectListLiteral, literal,
-                    $"Select-list literal '{LiteralText(literal)}' stays unparameterized even under PARAMETERIZATION FORCED.");
+                    $"Select-list literal '{LiteralText(literal)}' stays unparameterized even under PARAMETERIZATION FORCED.", walker);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(HavingClause node)
+        public void OnEnterHavingClause(HavingClause node, ModuleWalker walker)
         {
             foreach (var literal in FindDirectComparisonLiterals(node.SearchCondition))
             {
                 Add(ForcedParameterizationFindingKind.HavingLiteral, literal,
-                    $"HAVING comparand '{LiteralText(literal)}' is a literal - the engine leaves it unparameterized even under PARAMETERIZATION FORCED.");
+                    $"HAVING comparand '{LiteralText(literal)}' is a literal - the engine leaves it unparameterized even under PARAMETERIZATION FORCED.", walker);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(OrderByClause node)
+        public void OnEnterOrderByClause(OrderByClause node, ModuleWalker walker)
         {
             foreach (var element in node.OrderByElements)
             {
@@ -112,14 +97,12 @@ public static class ForcedParameterizationScanner
                 if (finder.Found is { } literal)
                 {
                     Add(ForcedParameterizationFindingKind.OrderByExpressionLiteral, element,
-                        $"ORDER BY expression contains literal '{LiteralText(literal)}' - the engine leaves it unparameterized even under PARAMETERIZATION FORCED.");
+                        $"ORDER BY expression contains literal '{LiteralText(literal)}' - the engine leaves it unparameterized even under PARAMETERIZATION FORCED.", walker);
                 }
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(GroupByClause node)
+        public void OnEnterGroupByClause(GroupByClause node, ModuleWalker walker)
         {
             foreach (var specification in node.GroupingSpecifications.OfType<ExpressionGroupingSpecification>())
             {
@@ -128,14 +111,12 @@ public static class ForcedParameterizationScanner
                 if (finder.Found is { } literal)
                 {
                     Add(ForcedParameterizationFindingKind.GroupByExpressionLiteral, specification,
-                        $"GROUP BY expression contains literal '{LiteralText(literal)}' - the engine leaves it unparameterized even under PARAMETERIZATION FORCED.");
+                        $"GROUP BY expression contains literal '{LiteralText(literal)}' - the engine leaves it unparameterized even under PARAMETERIZATION FORCED.", walker);
                 }
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(FunctionCall node)
+        public void OnEnterFunctionCall(FunctionCall node, ModuleWalker walker)
         {
             if (node.CallTarget is UserDefinedTypeCallTarget)
             {
@@ -143,7 +124,7 @@ public static class ForcedParameterizationScanner
                 if (literalArg is not null)
                 {
                     Add(ForcedParameterizationFindingKind.DoubleColonCallArgumentLiteral, literalArg,
-                        $"Literal argument '{LiteralText(literalArg)}' to a TypeName::Method(...) static call stays unparameterized even under PARAMETERIZATION FORCED.");
+                        $"Literal argument '{LiteralText(literalArg)}' to a TypeName::Method(...) static call stays unparameterized even under PARAMETERIZATION FORCED.", walker);
                 }
             }
             else if (string.Equals(node.FunctionName?.Value, "CHECKSUM", StringComparison.OrdinalIgnoreCase))
@@ -152,64 +133,54 @@ public static class ForcedParameterizationScanner
                 if (literalArg is not null)
                 {
                     Add(ForcedParameterizationFindingKind.CheckSumArgumentLiteral, literalArg,
-                        $"CHECKSUM(...) literal argument '{LiteralText(literalArg)}' stays unparameterized even under PARAMETERIZATION FORCED.");
+                        $"CHECKSUM(...) literal argument '{LiteralText(literalArg)}' stays unparameterized even under PARAMETERIZATION FORCED.", walker);
                 }
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(NamedTableReference node)
+        public void OnEnterNamedTableReference(NamedTableReference node, ModuleWalker walker)
         {
             if (node.TableSampleClause?.SampleNumber is Literal literal)
             {
                 Add(ForcedParameterizationFindingKind.TableSampleSizeLiteral, literal,
-                    $"TABLESAMPLE size '{LiteralText(literal)}' is a literal - the engine leaves it unparameterized even under PARAMETERIZATION FORCED.");
+                    $"TABLESAMPLE size '{LiteralText(literal)}' is a literal - the engine leaves it unparameterized even under PARAMETERIZATION FORCED.", walker);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(OutputClause node)
+        public void OnEnterOutputClause(OutputClause node, ModuleWalker walker)
         {
             foreach (var column in node.SelectColumns)
             {
                 if (column is SelectScalarExpression { Expression: Literal literal })
                 {
                     Add(ForcedParameterizationFindingKind.DmlOutputListLiteral, literal,
-                        $"OUTPUT clause literal '{LiteralText(literal)}' stays unparameterized even under PARAMETERIZATION FORCED.");
+                        $"OUTPUT clause literal '{LiteralText(literal)}' stays unparameterized even under PARAMETERIZATION FORCED.", walker);
                 }
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(ConvertCall node)
+        public void OnEnterConvertCall(ConvertCall node, ModuleWalker walker)
         {
             if (node.Style is Literal literal)
             {
                 Add(ForcedParameterizationFindingKind.ConvertStyleCodeLiteral, literal,
-                    $"CONVERT style code '{LiteralText(literal)}' stays unparameterized even under PARAMETERIZATION FORCED.");
+                    $"CONVERT style code '{LiteralText(literal)}' stays unparameterized even under PARAMETERIZATION FORCED.", walker);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(BinaryExpression node)
+        public void OnEnterBinaryExpression(BinaryExpression node, ModuleWalker walker)
         {
             if (node.FirstExpression is Literal && node.SecondExpression is Literal)
             {
                 Add(ForcedParameterizationFindingKind.ConstantFoldableExpressionLiteral, node,
                     "Constant-foldable literal expression parameterizes as separate parameters instead of one folded value under PARAMETERIZATION FORCED.",
-                    FindingConfidence.Low);
+                    walker, FindingConfidence.Low);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        private void Add(ForcedParameterizationFindingKind kind, TSqlFragment site, string detailText, FindingConfidence confidence = FindingConfidence.High) =>
+        private void Add(ForcedParameterizationFindingKind kind, TSqlFragment site, string detailText, ModuleWalker walker, FindingConfidence confidence = FindingConfidence.High) =>
             Findings.Add(new ForcedParameterizationFinding(
-                kind, CurrentModule, sourcePath, site.StartLine, site.StartColumn, detailText, confidence));
+                kind, CurrentModule(walker), sourcePath, site.StartLine, site.StartColumn, detailText, confidence));
 
         private static string LiteralText(Literal literal) => literal.Value ?? "NULL";
 

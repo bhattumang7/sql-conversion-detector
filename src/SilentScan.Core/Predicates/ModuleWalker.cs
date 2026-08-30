@@ -741,6 +741,96 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         base.ExplicitVisit(node);
     }
 
+    public sealed override void ExplicitVisit(TopRowFilter node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterTopRowFilter(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(OffsetClause node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterOffsetClause(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(SelectScalarExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterSelectScalarExpression(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(OrderByClause node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterOrderByClause(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(GroupByClause node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterGroupByClause(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(FunctionCall node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterFunctionCall(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(NamedTableReference node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterNamedTableReference(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(OutputClause node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterOutputClause(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(ConvertCall node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterConvertCall(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
     private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)
     {
         var previousScope = CurrentProcScope;
