@@ -29,9 +29,13 @@ public static class ProcCallGraphBuilder
     private const string CallGraphConstructKind = "procedure call graph edge";
     private const string SpExecuteSqlName = "sp_executesql";
 
-    private sealed class Visitor(DatabaseCatalog catalog, SkipLedger ledger, string sourcePath) : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+#pragma warning disable CS9107
+    private sealed class Visitor(DatabaseCatalog catalog, SkipLedger ledger, string sourcePath)
+        : ScopedRelationWalker(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
+#pragma warning restore CS9107
     {
-        private string? _currentScope;
         private IList<TSqlStatement>? _currentScopeStatements;
 
         private readonly Dictionary<string, SqlType?> _variableTypes = new(StringComparer.OrdinalIgnoreCase);
@@ -60,23 +64,17 @@ public static class ProcCallGraphBuilder
             _currentScopeStatements = previousStatements;
         }
 
-        public override void ExplicitVisit(CreateProcedureStatement node) => VisitScopedBody(node.ProcedureReference.Name, node.StatementList);
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
+            EnterScopedBody(node.StatementList);
 
-        public override void ExplicitVisit(AlterProcedureStatement node) => VisitScopedBody(node.ProcedureReference.Name, node.StatementList);
+        protected override void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
+            LeaveScopedBody();
 
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => VisitScopedBody(node.ProcedureReference.Name, node.StatementList);
+        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
+            EnterScopedBody(node.StatementList);
 
-        public override void ExplicitVisit(CreateFunctionStatement node) => VisitScopedBody(node.Name, node.StatementList);
-
-        public override void ExplicitVisit(AlterFunctionStatement node) => VisitScopedBody(node.Name, node.StatementList);
-
-        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitScopedBody(node.Name, node.StatementList);
-
-        public override void ExplicitVisit(CreateTriggerStatement node) => VisitScopedBody(node.Name, node.StatementList);
-
-        public override void ExplicitVisit(AlterTriggerStatement node) => VisitScopedBody(node.Name, node.StatementList);
-
-        public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitScopedBody(node.Name, node.StatementList);
+        protected override void OnLeaveTriggerBody(TriggerStatementBody node) =>
+            LeaveScopedBody();
 
         public override void ExplicitVisit(ExecuteStatement node)
         {
@@ -165,13 +163,13 @@ public static class ProcCallGraphBuilder
             }
 
             var matched = MatchFoldedArguments(innerProcedureReference.Parameters, formalParameters, rendered.SegmentMap);
-            Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, site, matched));
+            Edges.Add(new ProcCallEdge(CurrentProcScope, qualifiedName, site, matched));
         }
 
         private bool TryResolveFoldedProcedureCall(string innerText, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ExecutableProcedureReference? procedureReference)
         {
             procedureReference = null;
-            var initialQuotedIdentifiers = catalog.ResolveDynamicSqlQuotedIdentifier(_currentScope);
+            var initialQuotedIdentifiers = catalog.ResolveDynamicSqlQuotedIdentifier(CurrentProcScope);
             var parseResult = SqlScriptParser.ParseText(sourcePath, innerText, initialQuotedIdentifiers, catalog.CompatibilityLevel);
             if (parseResult.Errors.Count > 0
                 || parseResult.Fragment is not TSqlScript { Batches: [{ Statements: [ExecuteStatement innerExecute] }] }
@@ -241,7 +239,7 @@ public static class ProcCallGraphBuilder
 
             if (bindings.Count > 0)
             {
-                SpExecuteSqlCallSites.Add(new SpExecuteSqlCallSite(_currentScope, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), bindings));
+                SpExecuteSqlCallSites.Add(new SpExecuteSqlCallSite(CurrentProcScope, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), bindings));
             }
         }
 
@@ -327,7 +325,7 @@ public static class ProcCallGraphBuilder
             }
 
             var context = new TransferContext(
-                declaredTypes, sourcePath, DynamicSqlFoldCap, new DynamicSqlScope(_currentScope, TriggerTarget: null),
+                declaredTypes, sourcePath, DynamicSqlFoldCap, new DynamicSqlScope(CurrentProcScope, TriggerTarget: null),
                 Findings: [], Scripts: [], OutputSummaries: [], CallGraph: null, OutputSummaryIndex: null, Catalog: catalog);
 
             Dictionary<string, SqlTextValue>? capturedState = null;
@@ -357,15 +355,17 @@ public static class ProcCallGraphBuilder
         private void RecordUnresolvableCall(ExecuteStatement node, string reason) =>
             ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, CallGraphConstructKind, reason);
 
-        private void VisitScopedBody(SchemaObjectName name, StatementList? statementList)
+        private Dictionary<string, SqlType?>? _previousVariableTypes;
+
+        private IList<TSqlStatement>? _previousScopeStatements;
+
+        private void EnterScopedBody(StatementList? statementList)
         {
-            var previous = _currentScope;
-            var previousStatements = _currentScopeStatements;
-            var previousVariableTypes = new Dictionary<string, SqlType?>(_variableTypes, StringComparer.OrdinalIgnoreCase);
-            _currentScope = SchemaObjectNameHelper.Qualify(name);
+            _previousScopeStatements = _currentScopeStatements;
+            _previousVariableTypes = new Dictionary<string, SqlType?>(_variableTypes, StringComparer.OrdinalIgnoreCase);
 
             _variableTypes.Clear();
-            if (catalog.TryGetProcedureParameters(_currentScope, out var ownFormalParameters))
+            if (catalog.TryGetProcedureParameters(CurrentProcScope!, out var ownFormalParameters))
             {
                 foreach (var parameter in ownFormalParameters)
                 {
@@ -374,12 +374,13 @@ public static class ProcCallGraphBuilder
             }
 
             _currentScopeStatements = FlattenBeginEndBlocks(statementList?.Statements);
+        }
 
-            statementList?.AcceptChildren(this);
-            _currentScope = previous;
-            _currentScopeStatements = previousStatements;
+        private void LeaveScopedBody()
+        {
+            _currentScopeStatements = _previousScopeStatements;
             _variableTypes.Clear();
-            foreach (var (variableName, variableType) in previousVariableTypes)
+            foreach (var (variableName, variableType) in _previousVariableTypes!)
             {
                 _variableTypes[variableName] = variableType;
             }
@@ -426,7 +427,7 @@ public static class ProcCallGraphBuilder
             var arguments = MatchArguments(
                 procedureReference.Parameters, formalParameters,
                 new MatchArgumentsContext(sourcePath, _currentScopeStatements, node, _variableTypes, catalog, qualifiedName, ledger));
-            Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
+            Edges.Add(new ProcCallEdge(CurrentProcScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
 
         private readonly record struct MatchArgumentsContext(
