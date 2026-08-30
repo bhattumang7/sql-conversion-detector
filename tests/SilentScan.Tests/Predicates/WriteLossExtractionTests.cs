@@ -362,9 +362,43 @@ public sealed class WriteLossExtractionTests
     }
 
     [Fact]
-    public void Extract_SetVariableCompoundAssignment_NotAnalyzed()
+    public void Extract_SetVariableCompoundAssignmentWithLossyLiteral_FlagsWriteLoss()
     {
         var findings = Extract("DECLARE @v DECIMAL(10,2) = 0; SET @v += 123.456;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+        Assert.Null(finding.TableQualifiedName);
+        Assert.Equal("@v", finding.ColumnName);
+    }
+
+    [Fact]
+    public void Extract_SetVariableCompoundAssignmentWithinScale_NoFinding()
+    {
+        var findings = Extract("DECLARE @v DECIMAL(10,2) = 0; SET @v += 1;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_UpdateSetCompoundAssignmentWithLossyLiteral_FlagsWriteLoss()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (DecCol DECIMAL(10,2) NULL);",
+            "UPDATE dbo.T SET DecCol += 123.456 WHERE DecCol IS NOT NULL;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+        Assert.Equal("dbo.T", finding.TableQualifiedName);
+        Assert.Equal("DecCol", finding.ColumnName);
+    }
+
+    [Fact]
+    public void Extract_UpdateSetCompoundAssignmentWithinScale_NoFinding()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (DecCol DECIMAL(10,2) NULL);",
+            "UPDATE dbo.T SET DecCol += 1 WHERE DecCol IS NOT NULL;");
 
         Assert.Empty(findings);
     }

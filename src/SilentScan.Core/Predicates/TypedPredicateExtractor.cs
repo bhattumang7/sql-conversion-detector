@@ -283,7 +283,7 @@ public static class TypedPredicateExtractor
 
         public void OnEnterSetVariableStatement(SetVariableStatement node, ModuleWalker walker)
         {
-            if (node.AssignmentKind != AssignmentKind.Equals || node.Expression is not { } sourceExpression
+            if (node.Expression is not { } sourceExpression
                 || !_variables.TryGetValue(node.Variable.Name, out var targetType) || targetType is not { } target)
             {
                 return;
