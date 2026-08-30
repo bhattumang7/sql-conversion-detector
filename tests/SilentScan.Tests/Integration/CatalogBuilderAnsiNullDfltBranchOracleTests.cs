@@ -146,6 +146,124 @@ public sealed class CatalogBuilderAnsiNullDfltBranchOracleTests
     }
 
     [Fact]
+    public async Task Build_TableVariableColumnUnderAnsiNullDfltOff_MatchesRealEngineIgnoringTheOverride()
+    {
+        const string deploymentSql = "SET ANSI_NULL_DFLT_OFF ON; DECLARE @t TABLE (Col INT);";
+
+        var connectionString = Options.BuildConnectionString();
+
+        bool realIsNullable;
+        await using (var connection = new SqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT is_nullable FROM sys.dm_exec_describe_first_result_set(@batch, NULL, 0) WHERE name = 'Col';";
+            command.Parameters.AddWithValue("@batch", deploymentSql + " SELECT Col FROM @t;");
+            realIsNullable = (bool)(await command.ExecuteScalarAsync())!;
+        }
+
+        var deploymentScriptResult = SqlScriptParser.ParseText("deploy.sql", deploymentSql);
+        Assert.False(deploymentScriptResult.HasErrors);
+
+        var catalog = CatalogBuilder.Build([deploymentScriptResult]);
+        var staticIsNullable = catalog.Find("@t")!.FindColumn("Col")!.IsNullable;
+
+        Assert.Equal(realIsNullable, staticIsNullable);
+    }
+
+    [Fact]
+    public async Task Build_CreateTypeAsTableColumnUnderAnsiNullDfltOff_MatchesRealEngineIgnoringTheOverride()
+    {
+        const string deploymentSql = """
+            SET ANSI_NULL_DFLT_OFF ON;
+            CREATE TYPE dbo.T AS TABLE (Col INT);
+            """;
+
+        var databaseName = $"SilentScanTest_{Guid.NewGuid():N}";
+        var provisioner = new DatabaseProvisioner(Options);
+        await provisioner.CreateFreshAsync(databaseName);
+        try
+        {
+            await new ScriptDeployer(Options).DeployAsync(deploymentSql, databaseName);
+            var connectionString = Options.BuildConnectionString(databaseName);
+
+            bool realIsNullable;
+            await using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    SELECT c.is_nullable FROM sys.columns c
+                    JOIN sys.table_types tt ON tt.type_table_object_id = c.object_id
+                    WHERE tt.name = 'T' AND c.name = 'Col';
+                    """;
+                realIsNullable = (bool)(await command.ExecuteScalarAsync())!;
+            }
+
+            var deploymentScriptResult = SqlScriptParser.ParseText("deploy.sql", deploymentSql);
+            Assert.False(deploymentScriptResult.HasErrors);
+
+            var catalog = CatalogBuilder.Build([deploymentScriptResult]);
+            var staticIsNullable = catalog.Find("dbo.T")!.FindColumn("Col")!.IsNullable;
+
+            Assert.Equal(realIsNullable, staticIsNullable);
+        }
+        finally
+        {
+            await provisioner.DropIfExistsAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Build_MultiStatementTvfReturnColumnUnderAnsiNullDfltOff_MatchesRealEngineIgnoringTheOverride()
+    {
+        const string deploymentSql = """
+            SET ANSI_NULL_DFLT_OFF ON;
+            GO
+            CREATE FUNCTION dbo.fn_Probe()
+            RETURNS @t TABLE (Col INT)
+            AS
+            BEGIN
+                RETURN;
+            END
+            """;
+
+        var databaseName = $"SilentScanTest_{Guid.NewGuid():N}";
+        var provisioner = new DatabaseProvisioner(Options);
+        await provisioner.CreateFreshAsync(databaseName);
+        try
+        {
+            await new ScriptDeployer(Options).DeployAsync(deploymentSql, databaseName);
+            var connectionString = Options.BuildConnectionString(databaseName);
+
+            bool realIsNullable;
+            await using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    SELECT c.is_nullable FROM sys.columns c
+                    JOIN sys.objects o ON o.object_id = c.object_id
+                    WHERE o.name = 'fn_Probe' AND c.name = 'Col';
+                    """;
+                realIsNullable = (bool)(await command.ExecuteScalarAsync())!;
+            }
+
+            var deploymentScriptResult = SqlScriptParser.ParseText("deploy.sql", deploymentSql);
+            Assert.False(deploymentScriptResult.HasErrors);
+
+            var catalog = CatalogBuilder.Build([deploymentScriptResult]);
+            var staticIsNullable = catalog.Find("@t", "dbo.fn_Probe")!.FindColumn("Col")!.IsNullable;
+
+            Assert.Equal(realIsNullable, staticIsNullable);
+        }
+        finally
+        {
+            await provisioner.DropIfExistsAsync(databaseName);
+        }
+    }
+
+    [Fact]
     public async Task Build_AmbientAnsiNullDfltBeforeCreateProcedure_DoesNotLeakIntoProcedureBodyOnLaterExecution()
     {
         const string deploymentSql = """
