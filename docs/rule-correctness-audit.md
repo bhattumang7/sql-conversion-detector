@@ -289,6 +289,95 @@ worse than not reporting it at all.
       asserting claims that are empirically false for non-deterministic
       functions (`NEWID`, `RAND`, `NEWSEQUENTIALID`, `CHECKSUM`, etc.).
 
+- [ ] **`NamingScanner`'s `SpPrefixOnUserRoutine` reverses the real
+      name-resolution order — it claims `master` is checked before the
+      caller's own database, but the engine checks the current database
+      first and only falls back to `master` when no local match exists.**
+      (`src/SilentScan.Core/Predicates/NamingScanner.cs:156-162`; claim text
+      in `RuleCatalog.cs:208` and
+      `Reporting/RuleDocs/Naming/SpPrefixOnUserRoutine.cs:12-23` — "SQL
+      Server searches the master database first for any unqualified
+      call.") Oracle-confirmed (SQL Server 2025 and 2022, both directions,
+      creation-order swapped to rule out cache/creation-order artifacts): a
+      user database's own `sp_`-prefixed routine always wins over a
+      same-named `master` procedure when both exist — an unqualified call
+      resolves to the local copy, not `master`. `master` only gets used
+      when the local routine is absent. The described danger direction is
+      backwards: the real risk is a local `sp_`-prefixed routine silently
+      shadowing a same-named system procedure (or falling through to
+      `master` only when the local one is missing), not `master` winning
+      outright.
+
+- [ ] **`NamingScanner`'s `RedundantTypeQualifier` claims a `dbo.` schema
+      qualifier on a user-defined type "adds nothing" unconditionally, but
+      the same default-schema dependency the rule's own doc cites for other
+      schemas also applies to `dbo`.**
+      (`src/SilentScan.Core/Predicates/NamingScanner.cs:190-206` special-cases
+      `dbo` via `Common/SchemaObjectNameHelper.cs:7`; claim text in
+      `RuleCatalog.cs:210` and
+      `Reporting/RuleDocs/Naming/RedundantTypeQualifier.cs:10-25` asserts
+      `dbo.MyType` and `MyType` "resolve to the exact same object" for "the
+      overwhelming majority of databases.") Oracle-confirmed (SQL Server
+      2025): an unqualified user-defined type reference resolves via the
+      connecting principal's own default schema first, exactly like an
+      unqualified table/object name — not unconditionally to `dbo`. With
+      both `dbo.mytype` (`FROM int`) and `alt.mytype` (`FROM varchar(50)`)
+      defined in the same database, and a principal whose
+      `DEFAULT_SCHEMA = alt`, `CREATE TABLE ... (col mytype)` run under that
+      principal binds the column to `alt.mytype`, not `dbo.mytype`. The
+      rule's own stated mechanism for why other schemas are risky to
+      de-qualify applies equally to `dbo` whenever a same-named type exists
+      in another schema and the DDL later runs under a principal whose
+      default schema is that other one — stripping the qualifier per this
+      rule's own fix guidance can silently change which type gets bound.
+
+- [ ] **`NonPersistedComputedColumnScanner` claims a non-persisted computed
+      column "recalculates its own expression from the base row every
+      single time a query touches it," unconditionally — false whenever the
+      column is covered by an index.**
+      (`src/SilentScan.Core/Predicates/NonPersistedComputedColumnScanner.cs:17-22`
+      fires for `IsComputed && !IsPersisted` with no indexing check;
+      `RuleCatalog.cs:145` and
+      `Reporting/RuleDocs/Catalog/NonPersistedComputedColumn.cs:10-28`
+      explicitly frame the "recomputes on every read" claim as
+      "definitionally true... not something that needs confirming against a
+      real engine," regardless of indexing.) Oracle-confirmed (SQL Server
+      2025): a non-persisted computed column (`Sum AS (A + B)`, no
+      `PERSISTED`) covered by a nonclustered index (`CREATE INDEX ... ON
+      T1(Sum)`) — `SELECT Sum FROM T1 WHERE Sum = 12345` plans to an `Index
+      Seek` on that index, with the plan's `Compute Scalar` operator doing a
+      pure pass-through of the already-materialized `Sum` column, not an
+      `A+B` re-evaluation. The index itself stores the computed value; no
+      base-row recompute happens for reads served from it. The finding's own
+      premise that no oracle confirmation is needed is the bug — the claim
+      is only true in the unindexed case.
+
+- [ ] **`NonSargablePredicateScanner`'s computed-column match for
+      `YEAR`/`MONTH`/`DAY` predicates compares the canonicalized `DATEPART`
+      unit argument with plain case-insensitive string equality, missing
+      T-SQL's standard datepart synonym spellings — so an indexed computed
+      column the real optimizer actually uses via an index seek still gets
+      reported as a forced scan.**
+      (`src/SilentScan.Core/Predicates/ComputedColumnMatcher.cs:59-104`,
+      `StructurallyEqual`/`TryAsCanonicalDatePart` — canonicalizes
+      `YEAR(x)`/`MONTH(x)`/`DAY(x)` to `DATEPART(<func-name>, x)` but then
+      compares the datepart-unit identifier literally, e.g. `"YEAR"` against
+      a computed column defined with `DATEPART(yy, ...)`, without
+      normalizing synonym spellings like `yy`/`yyyy`/`year`.)
+      Oracle-confirmed (SQL Server 2025): a computed column defined as
+      `DATEPART(yy, Col) PERSISTED` and indexed is matched by the real
+      optimizer to both `WHERE YEAR(Col) = 2024` and `WHERE DATEPART(year,
+      Col) = 2024` — both produce `Index Seek` in the plan. Because the
+      scanner's synonym comparison fails (`"YEAR"` ≠ `"yy"` as plain
+      strings), `HasIndexedMatchingComputedColumn` returns `false` and the
+      scanner reports `DateFunctionOnColumn`/non-sargable ("forcing a
+      scan") for a predicate the engine actually seeks on. False positive.
+      (Verified as correct in the same pass, not a bug: `ISNULL` suppression
+      on a known-not-null indexed column; `col + 0`/`col * 1`/`col - 0`
+      still forcing a scan, not simplified away by the optimizer;
+      `UPPER`/`LOWER` on a case-insensitive-collation indexed column still
+      forcing a scan.)
+
 ---
 
 ## Audited, no bug found
@@ -435,14 +524,24 @@ Skipped as pure style/structural, no real-engine claim to diverge from:
 plan is affected") and `FormattingScanner` (same framing; the one
 underlying T-SQL fact — an unbraced `IF`/`WHILE` body is exactly one
 statement — is uncontroversial syntax, not a claim needing verification).
+- `NestedViewDepthScanner` — depth-accumulation arithmetic (`deepestChild +
+  1`) matches the doc's own "2+ layers deep before reaching a base table"
+  definition exactly; inline TVFs correctly folded into the same view map.
+- `NonUniqueUpdateSourceScanner` — the uniqueness proof correctly requires
+  the *entire* key-column set of a non-filtered, non-disabled unique index
+  to be covered by the join's equality columns (a subset is correctly
+  rejected); the `MERGE` Msg 8672 framing is already oracle-verified.
+- `NotInNullableSubqueryScanner` — requires base-column provenance with no
+  view indirection for the subquery's selected column, and only recognizes
+  a top-level AND-flattened `IS NOT NULL` guard (an OR-nested one correctly
+  does not suppress); the core three-valued-logic claim is already
+  oracle-verified.
 
 ---
 
 ## Not yet audited
 
-Naming, NestedViewDepth,
-NonPersistedComputedColumn, NonSargablePredicate, NonUniqueUpdateSource,
-NotInNullableSubquery, OperandComparability, OutputParameter,
+OperandComparability, OutputParameter,
 ParameterReassignmentPredicate, PartialCompositeForeignKeyJoin,
 PostExpansionJoinWidth, ProcCallArgumentMismatch, QueryAntiPattern,
 ScalarUdf, SchemaDependency, Security, SecurityPredicateIndex,
