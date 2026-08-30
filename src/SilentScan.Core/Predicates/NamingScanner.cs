@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
 
@@ -50,83 +51,70 @@ public static class NamingScanner
         ];
     }
 
-    private sealed class Visitor : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Visitor : ScopedRelationWalker
     {
         private readonly string sourcePath;
 
         private readonly StringComparer identifierComparer;
 
+        private string? _currentViewModule;
+
         public Visitor(string sourcePath, StringComparer identifierComparer)
+            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
         {
             this.sourcePath = sourcePath;
             this.identifierComparer = identifierComparer;
-            _currentModule = sourcePath;
         }
 
         public List<NamingFinding> Findings { get; } = [];
 
-        private string _currentModule;
+        private string CurrentModule => _currentViewModule ?? CurrentProcScope ?? sourcePath;
 
-        public override void ExplicitVisit(CreateProcedureStatement node)
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
         {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
-            CheckRoutineName(node.ProcedureReference.Name, "procedure", checkQualification: true);
+            var (name, kindLabel) = node switch
+            {
+                CreateProcedureStatement p => (p.ProcedureReference.Name, "procedure"),
+                AlterProcedureStatement p => (p.ProcedureReference.Name, "procedure"),
+                CreateOrAlterProcedureStatement p => (p.ProcedureReference.Name, "procedure"),
+                CreateFunctionStatement f => (f.Name, "function"),
+                AlterFunctionStatement f => (f.Name, "function"),
+                CreateOrAlterFunctionStatement f => (f.Name, "function"),
+                _ => (null, null),
+            };
+
+            if (name is null)
+            {
+                return;
+            }
+
+            CheckRoutineName(name, kindLabel!, checkQualification: true);
             CheckParameters(node.Parameters);
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(AlterProcedureStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
-            CheckRoutineName(node.ProcedureReference.Name, "procedure", checkQualification: true);
-            CheckParameters(node.Parameters);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateFunctionStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckRoutineName(node.Name, "function", checkQualification: true);
-            CheckParameters(node.Parameters);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterFunctionStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckRoutineName(node.Name, "function", checkQualification: true);
-            CheckParameters(node.Parameters);
-            base.ExplicitVisit(node);
-        }
+        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
+            CheckReservedName(node.Name.BaseIdentifier, "trigger");
 
         public override void ExplicitVisit(CreateViewStatement node)
         {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.SchemaObjectName);
+            var previous = _currentViewModule;
+            _currentViewModule = SchemaObjectNameHelper.Qualify(node.SchemaObjectName);
             CheckReservedName(node.SchemaObjectName.BaseIdentifier, "view");
             CheckQualification(node.SchemaObjectName, "view");
             base.ExplicitVisit(node);
+            _currentViewModule = previous;
         }
 
         public override void ExplicitVisit(AlterViewStatement node)
         {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.SchemaObjectName);
+            var previous = _currentViewModule;
+            _currentViewModule = SchemaObjectNameHelper.Qualify(node.SchemaObjectName);
             CheckReservedName(node.SchemaObjectName.BaseIdentifier, "view");
             CheckQualification(node.SchemaObjectName, "view");
             base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateTriggerStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckReservedName(node.Name.BaseIdentifier, "trigger");
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterTriggerStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckReservedName(node.Name.BaseIdentifier, "trigger");
-            base.ExplicitVisit(node);
+            _currentViewModule = previous;
         }
 
         public override void ExplicitVisit(CreateTableStatement node)
@@ -183,7 +171,7 @@ public static class NamingScanner
             if (name.BaseIdentifier.Value.StartsWith("sp_", StringComparison.OrdinalIgnoreCase))
             {
                 Findings.Add(new NamingFinding(
-                    NamingFindingKind.SpPrefixOnUserRoutine, _currentModule, sourcePath,
+                    NamingFindingKind.SpPrefixOnUserRoutine, CurrentModule, sourcePath,
                     name.BaseIdentifier.StartLine, name.BaseIdentifier.StartColumn,
                     $"User-defined {kindLabel} \"{name.BaseIdentifier.Value}\" uses the \"sp_\" prefix reserved for system-shipped procedures."));
             }
@@ -194,7 +182,7 @@ public static class NamingScanner
             if (name.SchemaIdentifier is null)
             {
                 Findings.Add(new NamingFinding(
-                    NamingFindingKind.UnqualifiedCreate, _currentModule, sourcePath,
+                    NamingFindingKind.UnqualifiedCreate, CurrentModule, sourcePath,
                     name.BaseIdentifier.StartLine, name.BaseIdentifier.StartColumn,
                     $"{char.ToUpperInvariant(kindLabel[0])}{kindLabel[1..]} \"{name.BaseIdentifier.Value}\" is created with no explicit schema qualifier - its real owning schema depends on the connecting principal's own default schema."));
             }
@@ -209,7 +197,7 @@ public static class NamingScanner
             }
 
             Findings.Add(new NamingFinding(
-                NamingFindingKind.ReservedKeywordAsIdentifier, _currentModule, sourcePath,
+                NamingFindingKind.ReservedKeywordAsIdentifier, CurrentModule, sourcePath,
                 id.StartLine, id.StartColumn,
                 $"{char.ToUpperInvariant(kindLabel[0])}{kindLabel[1..]} name \"{id.Value}\" is a reserved T-SQL keyword."));
         }
@@ -227,7 +215,7 @@ public static class NamingScanner
             }
 
             Findings.Add(new NamingFinding(
-                NamingFindingKind.RedundantTypeQualifier, _currentModule, sourcePath,
+                NamingFindingKind.RedundantTypeQualifier, CurrentModule, sourcePath,
                 userType.StartLine, userType.StartColumn,
                 $"Type reference \"{schema.Value}.{userType.Name.BaseIdentifier.Value}\" carries a redundant schema qualifier."));
         }
