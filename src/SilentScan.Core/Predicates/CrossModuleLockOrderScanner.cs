@@ -8,21 +8,30 @@ namespace SilentScan.Core.Predicates;
 
 public static class CrossModuleLockOrderScanner
 {
-    private sealed record ProcedureWriteOrder(
+    internal sealed record ProcedureWriteOrder(
         string ProcedureQualifiedName, string SourcePath, int ProcedureLine, IReadOnlyList<(string TableQualifiedName, int Line)> Writes);
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
     public static IReadOnlyList<CrossModuleLockOrderFinding> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog)
     {
-        var procedures = new List<ProcedureWriteOrder>();
+        var rules = new List<Rule>();
         foreach (var result in parseResults)
         {
-            var rule = new Rule(result.SourcePath, catalog);
+            var rule = CreateRule(result.SourcePath, catalog);
             var walker = new ModuleWalker(result.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
             result.Fragment.Accept(walker);
-            procedures.AddRange(rule.Orderings);
+            rules.Add(rule);
         }
+
+        return Harvest(catalog, rules);
+    }
+
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog) => new(sourcePath, catalog);
+
+    internal static IReadOnlyList<CrossModuleLockOrderFinding> Harvest(DatabaseCatalog catalog, IReadOnlyList<Rule> rules)
+    {
+        var procedures = rules.SelectMany(r => r.Orderings).ToList();
 
         var findings = new List<CrossModuleLockOrderFinding>();
         for (var i = 0; i < procedures.Count; i++)
@@ -97,7 +106,7 @@ public static class CrossModuleLockOrderScanner
         return -1;
     }
 
-    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<ProcedureWriteOrder> Orderings { get; } = [];
 

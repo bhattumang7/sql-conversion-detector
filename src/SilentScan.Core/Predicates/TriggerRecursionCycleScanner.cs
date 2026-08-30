@@ -18,14 +18,23 @@ public static class TriggerRecursionCycleScanner
             return [];
         }
 
-        var edges = new List<TriggerRecursionCycleHop>();
+        var rules = new List<Rule>();
         foreach (var result in parseResults)
         {
-            var rule = new Rule(result.SourcePath, catalog);
+            var rule = CreateRule(result.SourcePath, catalog);
             var walker = new ModuleWalker(result.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
             result.Fragment.Accept(walker);
-            edges.AddRange(rule.Edges);
+            rules.Add(rule);
         }
+
+        return Harvest(catalog, rules);
+    }
+
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog) => new(sourcePath, catalog);
+
+    internal static IReadOnlyList<TriggerRecursionCycleFinding> Harvest(DatabaseCatalog catalog, IReadOnlyList<Rule> rules)
+    {
+        var edges = rules.SelectMany(r => r.Edges).ToList();
 
         var byFromTable = edges
             .GroupBy(e => e.FromTableQualifiedName, catalog.IdentifierComparer)
@@ -121,7 +130,7 @@ public static class TriggerRecursionCycleScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<TriggerRecursionCycleHop> Edges { get; } = [];
 

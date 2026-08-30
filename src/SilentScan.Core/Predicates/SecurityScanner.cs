@@ -60,10 +60,15 @@ public static partial class SecurityScanner
 
     public static IReadOnlyList<SecurityFinding> Scan(SqlParseResult parseResult)
     {
-        var rule = new Rule(parseResult.SourcePath);
+        var rule = CreateRule(parseResult.SourcePath);
         var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
-        return
+        return Harvest(rule);
+    }
+
+    internal static Rule CreateRule(string sourcePath) => new(sourcePath);
+
+    internal static IReadOnlyList<SecurityFinding> Harvest(Rule rule) =>
         [
             .. rule.Findings
                 .OrderBy(f => f.Kind)
@@ -71,7 +76,6 @@ public static partial class SecurityScanner
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
-    }
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
@@ -88,7 +92,7 @@ public static partial class SecurityScanner
             .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column),
     ];
 
-    private sealed class Rule(string sourcePath) : IModuleRule
+    internal sealed class Rule(string sourcePath) : IModuleRule
     {
         public List<SecurityFinding> Findings { get; } = [];
 

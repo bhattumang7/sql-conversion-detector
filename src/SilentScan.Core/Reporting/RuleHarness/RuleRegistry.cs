@@ -77,5 +77,9 @@ public static class RuleRegistry
 
         new CrossModuleLockOrderRule(),
         new TriggerRecursionCycleRule(),
+
+        new TvfFenceRule(),
+        new ScalarUdfRule(),
+        new SecurityRule(),
     ];
 }

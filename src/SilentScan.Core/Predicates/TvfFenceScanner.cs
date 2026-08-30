@@ -12,15 +12,20 @@ public static class TvfFenceScanner
     public static IReadOnlyList<TvfFenceFinding> Scan(
         SqlParseResult parseResult, DatabaseCatalog catalog, IReadOnlyDictionary<string, TvfFenceOrigin> fenceMap)
     {
-        var rule = new Rule(parseResult.SourcePath, catalog, fenceMap);
+        var rule = CreateRule(parseResult.SourcePath, catalog, fenceMap);
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
-        return rule.Findings;
+        return Harvest(rule);
     }
+
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, TvfFenceOrigin> fenceMap) =>
+        new(sourcePath, catalog, fenceMap);
+
+    internal static IReadOnlyList<TvfFenceFinding> Harvest(Rule rule) => rule.Findings;
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, TvfFenceOrigin> fenceMap) : IModuleRule
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, TvfFenceOrigin> fenceMap) : IModuleRule
     {
         public List<TvfFenceFinding> Findings { get; } = [];
 

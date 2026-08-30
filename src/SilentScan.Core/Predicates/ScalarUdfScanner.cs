@@ -12,15 +12,20 @@ public static class ScalarUdfScanner
     public static IReadOnlyList<ScalarUdfFinding> Scan(
         SqlParseResult parseResult, DatabaseCatalog catalog, IReadOnlyDictionary<string, ScalarUdfOrigin> scalarUdfMap)
     {
-        var rule = new Rule(parseResult.SourcePath, catalog, scalarUdfMap);
+        var rule = CreateRule(parseResult.SourcePath, catalog, scalarUdfMap);
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
-        return rule.Findings;
+        return Harvest(rule);
     }
+
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ScalarUdfOrigin> scalarUdfMap) =>
+        new(sourcePath, catalog, scalarUdfMap);
+
+    internal static IReadOnlyList<ScalarUdfFinding> Harvest(Rule rule) => rule.Findings;
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ScalarUdfOrigin> scalarUdfMap) : IModuleRule
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ScalarUdfOrigin> scalarUdfMap) : IModuleRule
     {
 
         private readonly List<(int Start, int End, ScalarUdfContext Context)> _regions = [];

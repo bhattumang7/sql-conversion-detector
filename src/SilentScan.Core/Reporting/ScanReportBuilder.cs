@@ -109,36 +109,9 @@ public static class ScanReportBuilder
         var tier1SkippedEntries = tier1PerFile.SelectMany(p => p.Skipped).ToList();
         PhaseMemory.ReleaseBetweenPhases();
 
-        List<TvfFenceFinding> tvfFenceFindings;
-        using (var tvfFenceStage = progress.Begin("scanning TVF fences", usableCount))
-        {
-            tvfFenceFindings = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = TvfFenceScanner.Scan(r, catalog, tvfFenceMap);
-                    tvfFenceStage.Advance();
-                    return findings;
-                })
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
+        var tvfFenceFindings = ruleResults.For<TvfFenceFinding>("TvfFenceScanner").ToList();
 
-        List<ScalarUdfFinding> scalarUdfFindings;
-        using (var scalarUdfStage = progress.Begin("scanning scalar UDFs", usableCount))
-        {
-            scalarUdfFindings = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = ScalarUdfScanner.Scan(r, catalog, scalarUdfMap);
-                    scalarUdfStage.Advance();
-                    return findings;
-                })
-                .ToList();
-        }
-        PhaseMemory.ReleaseBetweenPhases();
-
+        var scalarUdfFindings = ruleResults.For<ScalarUdfFinding>("ScalarUdfScanner").ToList();
         using (var schemaDependencyStage = progress.Begin("scanning schema-level scalar UDF dependencies"))
         {
             var schemaDependencyFindings = SchemaDependencyScanner.Scan(catalog);
@@ -146,22 +119,7 @@ public static class ScanReportBuilder
             schemaDependencyStage.Complete($"{schemaDependencyFindings.Count:N0} findings");
         }
 
-        List<SecurityFinding> securityFindings;
-        using (var securityStage = progress.Begin("scanning security risks", usableCount))
-        {
-            var unordered = usableParseResults
-                .AsParallel()
-                .SelectMany(r =>
-                {
-                    var findings = SecurityScanner.Scan(r);
-                    securityStage.Advance();
-                    return findings;
-                })
-                .ToList();
-            securityFindings = unordered
-                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
-                .ToList();
-        }
+        var securityFindings = ruleResults.For<SecurityFinding>("SecurityScanner").ToList();
         PhaseMemory.ReleaseBetweenPhases();
 
         List<PredicateExtractionResult> extractionResults;
