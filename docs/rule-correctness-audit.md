@@ -96,6 +96,67 @@ worse than not reporting it at all.
       well-established tokenization rules and this codebase's own existing
       usage, not from re-running the built scanner against the input.
 
+- [ ] **`CheckConstraintScanner`'s identity-column finding overclaims
+      "failures silently stop forever" for any CHECK on an identity column,
+      but that's only true for a monotonic one-sided threshold.**
+      (`src/SilentScan.Core/Predicates/CheckConstraintScanner.cs:74` fires
+      for any CHECK constraint referencing an identity column, regardless of
+      predicate shape; the shipped message —
+      `RuleCatalog.cs:129`/`Sarif/SarifReportWriter.cs:790-791` — says every
+      failing insert "fails deterministically (Msg 547)... until the counter
+      catches up and failures silently stop forever" for every case it
+      fires on.) Oracle-confirmed (SQL Server 2025): a periodic predicate
+      like `CHECK (Id % 2 = 0)` on an identity column alternates
+      succeed/fail forever and never "stops" — inserting 4 rows in sequence
+      against `IDENTITY(1,1)` fails on odd values (Msg 547) and succeeds on
+      even ones, indefinitely. A reverse-direction threshold like `CHECK (Id
+      < 1000)` is the mirror-image divergence: satisfied at first, then
+      *permanently* failing once the counter passes 1000 — the opposite of
+      "stops mattering." The message's narrative only actually holds for a
+      one-sided `col > N`/`col >= N` shape, which the scanner's trigger
+      condition doesn't require.
+
+- [ ] **`ColumnstoreUnsupportedColumnTypeScanner` only ever flags
+      `SQL_VARIANT`; the real columnstore column-type gate is materially
+      broader and, for MAX-length string/binary types, depends on clustered
+      vs. nonclustered — a distinction the scanner already has available but
+      doesn't use for type-gating.**
+      (`src/SilentScan.Core/Predicates/ColumnstoreUnsupportedColumnTypeScanner.cs:14-16`
+      — the only type check is `Category: SqlTypeCategory.SqlVariant`.)
+      Oracle-confirmed (SQL Server 2025), same Msg 35343 ("has a data type
+      that cannot participate in a columnstore index") the shipped rule is
+      built around: `xml`, `hierarchyid`, `geometry`, `geography`, `ntext`,
+      `text`, `image`, and `rowversion` columns are all rejected on both
+      clustered and nonclustered columnstore indexes, the same as
+      `sql_variant`. Separately, `varchar(max)`/`nvarchar(max)`/
+      `varbinary(max)` are rejected on a NONCLUSTERED columnstore index but
+      explicitly *allowed* on a CLUSTERED columnstore index on the same
+      table/column — a real clustered/nonclustered split in the engine's own
+      gate that a single unconditional type check can't express. (Already
+      flagged in general terms by `docs/detection-tasklist.md`; this entry
+      adds the concrete confirmed type list and the clustered/nonclustered
+      MAX-type split.)
+
+- [ ] **`ControlFlowRiskScanner`'s `TriggerEmitsOutputRuleId` unconditionally
+      claims a trigger's SELECT/PRINT "sends output back to whatever
+      connection fired the DML," but under the server-level `disallow
+      results from triggers` setting a trigger SELECT hard-fails the
+      triggering DML instead of silently forwarding anything.**
+      (`src/SilentScan.Core/Predicates/ControlFlowRiskScanner.cs:111-133`
+      fires unconditionally for a real SELECT/PRINT in a trigger body;
+      `RuleCatalog.cs:251` and
+      `Reporting/RuleDocs/ControlFlow/TriggerEmitsOutput.cs:11-19` state the
+      "sends output back" framing with no caveat.) Oracle-confirmed (SQL
+      Server 2025): with `sp_configure 'disallow results from triggers'` set
+      to `1` (a real, documented, off-by-default server option), a trigger
+      body's `SELECT 1 AS x` against a fired `INSERT` raises `Msg 524, A
+      trigger returned a resultset and the server option 'disallow results
+      from triggers' is true` instead of returning anything to the caller —
+      a genuine server-setting-dependent behavior split the rule's message
+      doesn't acknowledge. (Whether the same setting affects `PRINT` the
+      same way as `SELECT` was not directly tested — Msg 524's own wording
+      says "resultset" specifically, so this is noted but not asserted.)
+
 ---
 
 ## Audited, no bug found
@@ -128,14 +189,28 @@ worse than not reporting it at all.
   predicates, `CROSS APPLY` exclusion, and the conservative bail-out on any
   unqualified column reference — all consistent with the existing test
   suite and the project's deliberately false-negative-favoring design here.
+- `CascadingForeignKeyScanner` — fires on any FK action other than
+  `NO ACTION` (CASCADE/SET NULL/SET DEFAULT); message and rule doc already
+  hedge with "or nulls, or resets" rather than overclaiming "cascade" for
+  the non-CASCADE actions. Purely catalog-derived, no session/DB-setting
+  dependency to diverge on.
+- `ColumnCollationDriftScanner` — baseline resolution (database default vs.
+  tempdb-effective collation for temp objects/table variables) matches
+  existing scanner tests; message is already hedged ("risks a
+  collation-conflict compile error or a forced-scan implicit conversion")
+  and carries only `FindingConfidence.Medium`, consistent with its
+  heuristic scope.
+- `CompositeIndexLeadingColumnScanner` — the "cannot be seek-used at all
+  without a bound leading column" claim holds on SQL Server 2025, including
+  with an explicit `WITH (INDEX(...))` hint forcing the index; verified no
+  newer "index skip scan" feature invalidates it (still a full `Index
+  Scan`, never a seek, when only the non-leading column is bound).
 
 ---
 
 ## Not yet audited
 
-CascadingForeignKey, CatchAllPredicate, CheckConstraint, CodeMetric,
-ColumnCollationDrift, ColumnstoreUnsupportedColumnType,
-CompositeIndexLeadingColumn, ControlFlowRisk, CrossModuleLockOrder,
+CatchAllPredicate, CodeMetric, CrossModuleLockOrder,
 CrossTableTypeDrift, DeadCode, DefaultNullableConstraint, DeprecatedSyntax,
 DmlTargetTable, Duplication, FloatEqualityPredicate,
 FloatOrderDependentAggregate, ForcedParameterization, ForcedSerial,
