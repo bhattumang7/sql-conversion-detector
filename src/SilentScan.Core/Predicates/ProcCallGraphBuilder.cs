@@ -17,10 +17,11 @@ public static class ProcCallGraphBuilder
         var spExecuteSqlCallSites = new List<SpExecuteSqlCallSite>();
         foreach (var result in parseResults)
         {
-            var visitor = new Visitor(catalog, ledger, result.SourcePath);
-            result.Fragment.Accept(visitor);
-            edges.AddRange(visitor.Edges);
-            spExecuteSqlCallSites.AddRange(visitor.SpExecuteSqlCallSites);
+            var rule = new Rule(catalog, ledger, result.SourcePath);
+            var walker = new ModuleWalker(result.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+            result.Fragment.Accept(walker);
+            edges.AddRange(rule.Edges);
+            spExecuteSqlCallSites.AddRange(rule.SpExecuteSqlCallSites);
         }
 
         return new ProcCallGraph(edges, spExecuteSqlCallSites, catalog.IdentifierComparer);
@@ -31,10 +32,7 @@ public static class ProcCallGraphBuilder
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-#pragma warning disable CS9107
-    private sealed class Visitor(DatabaseCatalog catalog, SkipLedger ledger, string sourcePath)
-        : ScopedRelationWalker(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(DatabaseCatalog catalog, SkipLedger ledger, string sourcePath) : IModuleRule
     {
         private IList<TSqlStatement>? _currentScopeStatements;
 
@@ -44,39 +42,34 @@ public static class ProcCallGraphBuilder
 
         public List<SpExecuteSqlCallSite> SpExecuteSqlCallSites { get; } = [];
 
-        public override void ExplicitVisit(DeclareVariableStatement node)
+        public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)
         {
             foreach (var declaration in node.Declarations)
             {
                 _variableTypes[declaration.VariableName.Value] =
                     Parsing.SqlTypeReferenceResolver.Resolve(declaration.DataType, columnCollation: null, catalog.TypeAliases);
             }
-
-            node.AcceptChildren(this);
         }
 
-        public override void ExplicitVisit(TSqlBatch node)
+        public void OnEnterTSqlBatch(TSqlBatch node, ModuleWalker walker)
         {
-            var previousStatements = _currentScopeStatements;
             _currentScopeStatements = FlattenBeginEndBlocks(node.Statements);
             _variableTypes.Clear();
-            node.AcceptChildren(this);
-            _currentScopeStatements = previousStatements;
         }
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
-            EnterScopedBody(node.StatementList);
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker) =>
+            EnterScopedBody(node.StatementList, walker);
 
-        protected override void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
+        public void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker) =>
             LeaveScopedBody();
 
-        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
-            EnterScopedBody(node.StatementList);
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) =>
+            EnterScopedBody(node.StatementList, walker);
 
-        protected override void OnLeaveTriggerBody(TriggerStatementBody node) =>
+        public void OnLeaveTriggerBody(TriggerStatementBody node, ModuleWalker walker) =>
             LeaveScopedBody();
 
-        public override void ExplicitVisit(ExecuteStatement node)
+        public void OnEnterExecuteStatement(ExecuteStatement node, ModuleWalker walker)
         {
             switch (node.ExecuteSpecification.ExecutableEntity)
             {
@@ -85,7 +78,7 @@ public static class ProcCallGraphBuilder
                     ProcedureReference.ProcedureReference.Name: { } calleeName,
                 } procedureReference
                     when !string.Equals(calleeName.BaseIdentifier.Value, SpExecuteSqlName, StringComparison.OrdinalIgnoreCase):
-                    VisitProcedureCall(node, procedureReference, calleeName);
+                    VisitProcedureCall(node, procedureReference, calleeName, walker);
                     break;
 
                 case ExecutableProcedureReference { ProcedureReference.ProcedureVariable: { } }:
@@ -97,8 +90,8 @@ public static class ProcCallGraphBuilder
                     ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: var spExecutesqlName,
                     Parameters: [{ ParameterValue: { } statementExpression }, ..],
                 } spExecuteSqlCall when string.Equals(spExecutesqlName, SpExecuteSqlName, StringComparison.OrdinalIgnoreCase):
-                    TryFoldDynamicCall(node, [statementExpression]);
-                    TryRecordSpExecuteSqlParameterBindings(node, spExecuteSqlCall.Parameters);
+                    TryFoldDynamicCall(node, [statementExpression], walker);
+                    TryRecordSpExecuteSqlParameterBindings(node, spExecuteSqlCall.Parameters, walker);
                     break;
 
                 case ExecutableProcedureReference
@@ -109,23 +102,21 @@ public static class ProcCallGraphBuilder
                     break;
 
                 case ExecutableStringList { Strings.Count: > 0 } stringList:
-                    TryFoldDynamicCall(node, [.. stringList.Strings]);
+                    TryFoldDynamicCall(node, [.. stringList.Strings], walker);
                     break;
 
                 case ExecutableStringList:
                     RecordUnresolvableCall(node, "EXEC target is a dynamic SQL string, not a statically known procedure");
                     break;
             }
-
-            node.AcceptChildren(this);
         }
 
         private const int DynamicSqlFoldCap = 32;
 
-        private void TryFoldDynamicCall(ExecuteStatement node, IReadOnlyList<ScalarExpression> statementExpressions)
+        private void TryFoldDynamicCall(ExecuteStatement node, IReadOnlyList<ScalarExpression> statementExpressions, ModuleWalker walker)
         {
             var site = new SourceSpan(sourcePath, node.StartLine, node.StartColumn);
-            var state = ResolveVariableStateAtCallSite(node);
+            var state = ResolveVariableStateAtCallSite(node, walker);
 
             SqlTextValue combined = new SqlTextValue.Template([]);
             foreach (var expression in statementExpressions)
@@ -147,7 +138,7 @@ public static class ProcCallGraphBuilder
             }
 
             var rendered = TemplateRenderer.Render(assemblies[0]);
-            if (!TryResolveFoldedProcedureCall(rendered.InnerText, out var innerProcedureReference))
+            if (!TryResolveFoldedProcedureCall(rendered.InnerText, walker, out var innerProcedureReference))
             {
                 RecordUnresolvableCall(node, "dynamic SQL literal does not fold to a single statically named EXEC call");
                 return;
@@ -163,13 +154,13 @@ public static class ProcCallGraphBuilder
             }
 
             var matched = MatchFoldedArguments(innerProcedureReference.Parameters, formalParameters, rendered.SegmentMap);
-            Edges.Add(new ProcCallEdge(CurrentProcScope, qualifiedName, site, matched));
+            Edges.Add(new ProcCallEdge(walker.CurrentProcScope, qualifiedName, site, matched));
         }
 
-        private bool TryResolveFoldedProcedureCall(string innerText, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ExecutableProcedureReference? procedureReference)
+        private bool TryResolveFoldedProcedureCall(string innerText, ModuleWalker walker, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ExecutableProcedureReference? procedureReference)
         {
             procedureReference = null;
-            var initialQuotedIdentifiers = catalog.ResolveDynamicSqlQuotedIdentifier(CurrentProcScope);
+            var initialQuotedIdentifiers = catalog.ResolveDynamicSqlQuotedIdentifier(walker.CurrentProcScope);
             var parseResult = SqlScriptParser.ParseText(sourcePath, innerText, initialQuotedIdentifiers, catalog.CompatibilityLevel);
             if (parseResult.Errors.Count > 0
                 || parseResult.Fragment is not TSqlScript { Batches: [{ Statements: [ExecuteStatement innerExecute] }] }
@@ -190,7 +181,7 @@ public static class ProcCallGraphBuilder
         private const string SpExecuteSqlParameterConstructKind = "sp_executesql inline parameter type";
         private const string SpExecuteSqlSyntheticParameterListName = "dbo.__silentscan_sp_executesql_params";
 
-        private void TryRecordSpExecuteSqlParameterBindings(ExecuteStatement node, IList<ExecuteParameter> parameters)
+        private void TryRecordSpExecuteSqlParameterBindings(ExecuteStatement node, IList<ExecuteParameter> parameters, ModuleWalker walker)
         {
             if (parameters.Count < 2)
             {
@@ -239,7 +230,7 @@ public static class ProcCallGraphBuilder
 
             if (bindings.Count > 0)
             {
-                SpExecuteSqlCallSites.Add(new SpExecuteSqlCallSite(CurrentProcScope, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), bindings));
+                SpExecuteSqlCallSites.Add(new SpExecuteSqlCallSite(walker.CurrentProcScope, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), bindings));
             }
         }
 
@@ -307,7 +298,7 @@ public static class ProcCallGraphBuilder
             return matched;
         }
 
-        private Dictionary<string, SqlTextValue> ResolveVariableStateAtCallSite(ExecuteStatement callSite)
+        private Dictionary<string, SqlTextValue> ResolveVariableStateAtCallSite(ExecuteStatement callSite, ModuleWalker walker)
         {
             var emptyState = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
             if (_currentScopeStatements is null)
@@ -325,7 +316,7 @@ public static class ProcCallGraphBuilder
             }
 
             var context = new TransferContext(
-                declaredTypes, sourcePath, DynamicSqlFoldCap, new DynamicSqlScope(CurrentProcScope, TriggerTarget: null),
+                declaredTypes, sourcePath, DynamicSqlFoldCap, new DynamicSqlScope(walker.CurrentProcScope, TriggerTarget: null),
                 Findings: [], Scripts: [], OutputSummaries: [], CallGraph: null, OutputSummaryIndex: null, Catalog: catalog);
 
             Dictionary<string, SqlTextValue>? capturedState = null;
@@ -359,13 +350,13 @@ public static class ProcCallGraphBuilder
 
         private IList<TSqlStatement>? _previousScopeStatements;
 
-        private void EnterScopedBody(StatementList? statementList)
+        private void EnterScopedBody(StatementList? statementList, ModuleWalker walker)
         {
             _previousScopeStatements = _currentScopeStatements;
             _previousVariableTypes = new Dictionary<string, SqlType?>(_variableTypes, StringComparer.OrdinalIgnoreCase);
 
             _variableTypes.Clear();
-            if (catalog.TryGetProcedureParameters(CurrentProcScope!, out var ownFormalParameters))
+            if (catalog.TryGetProcedureParameters(walker.CurrentProcScope!, out var ownFormalParameters))
             {
                 foreach (var parameter in ownFormalParameters)
                 {
@@ -413,7 +404,7 @@ public static class ProcCallGraphBuilder
             }
         }
 
-        private void VisitProcedureCall(ExecuteStatement node, ExecutableProcedureReference procedureReference, SchemaObjectName calleeName)
+        private void VisitProcedureCall(ExecuteStatement node, ExecutableProcedureReference procedureReference, SchemaObjectName calleeName, ModuleWalker walker)
         {
             var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(calleeName));
             if (!catalog.TryGetProcedureParameters(qualifiedName, out var formalParameters))
@@ -427,7 +418,7 @@ public static class ProcCallGraphBuilder
             var arguments = MatchArguments(
                 procedureReference.Parameters, formalParameters,
                 new MatchArgumentsContext(sourcePath, _currentScopeStatements, node, _variableTypes, catalog, qualifiedName, ledger));
-            Edges.Add(new ProcCallEdge(CurrentProcScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
+            Edges.Add(new ProcCallEdge(walker.CurrentProcScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
 
         private readonly record struct MatchArgumentsContext(

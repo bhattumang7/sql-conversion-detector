@@ -315,4 +315,20 @@ internal interface IModuleRule
     void OnEnterExecutableProcedureReference(ExecutableProcedureReference node, ModuleWalker walker)
     {
     }
+
+    void OnEnterBeginEndBlockStatement(BeginEndBlockStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterParenthesisExpression(ParenthesisExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterBooleanParenthesisExpression(BooleanParenthesisExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterExecuteStatement(ExecuteStatement node, ModuleWalker walker)
+    {
+    }
 }

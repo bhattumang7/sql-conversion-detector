@@ -15,9 +15,10 @@ public static class FormattingScanner
         ScanTabCharacters(parseResult, findings);
         ScanFileHeader(parseResult, findings);
 
-        var visitor = new Visitor(parseResult.SourcePath);
-        parseResult.Fragment.Accept(visitor);
-        findings.AddRange(visitor.Findings);
+        var rule = new Rule(parseResult.SourcePath);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
+        findings.AddRange(rule.Findings);
 
         return
         [
@@ -88,86 +89,64 @@ public static class FormattingScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Visitor : ScopedRelationWalker
+    private sealed class Rule(string sourcePath) : IModuleRule
     {
-        private readonly string sourcePath;
-
-        public Visitor(string sourcePath)
-            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-        {
-            this.sourcePath = sourcePath;
-        }
-
         public List<FormattingFinding> Findings { get; } = [];
 
-        private string CurrentModule => CurrentProcScope ?? sourcePath;
+        private string CurrentModule(ModuleWalker walker) => walker.CurrentProcScope ?? sourcePath;
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
-            CheckStatements(node.StatementList?.Statements);
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker) =>
+            CheckStatements(node.StatementList?.Statements, walker);
 
-        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
-            CheckStatements(node.StatementList?.Statements);
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) =>
+            CheckStatements(node.StatementList?.Statements, walker);
 
-        public override void ExplicitVisit(BeginEndBlockStatement node)
+        public void OnEnterBeginEndBlockStatement(BeginEndBlockStatement node, ModuleWalker walker)
         {
 
             if (node.StatementList is not null)
             {
-                CheckStatements(node.StatementList.Statements);
+                CheckStatements(node.StatementList.Statements, walker);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(DeclareVariableStatement node)
-        {
-            CheckDeclarations(node.Declarations);
-            base.ExplicitVisit(node);
-        }
+        public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker) =>
+            CheckDeclarations(node.Declarations, walker);
 
-        public override void ExplicitVisit(IfStatement node)
+        public void OnEnterIfStatement(IfStatement node, ModuleWalker walker)
         {
-            CheckConditionalBody(node.StartLine, node.StartColumn, node.ThenStatement);
+            CheckConditionalBody(node.StartLine, node.StartColumn, node.ThenStatement, walker);
 
             if (node.ElseStatement is not null and not IfStatement)
             {
                 var elseLine = FindPrecedingKeywordLine(node.ThenStatement, node.ElseStatement, "ELSE");
-                CheckConditionalBody(elseLine, node.StartColumn, node.ElseStatement);
+                CheckConditionalBody(elseLine, node.StartColumn, node.ElseStatement, walker);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(WhileStatement node)
-        {
-            CheckConditionalBody(node.StartLine, node.StartColumn, node.Statement);
-            base.ExplicitVisit(node);
-        }
+        public void OnEnterWhileStatement(WhileStatement node, ModuleWalker walker) =>
+            CheckConditionalBody(node.StartLine, node.StartColumn, node.Statement, walker);
 
-        public override void ExplicitVisit(ParenthesisExpression node)
+        public void OnEnterParenthesisExpression(ParenthesisExpression node, ModuleWalker walker)
         {
             if (IsRedundantlyWrapped(node.Expression))
             {
                 Findings.Add(new FormattingFinding(
-                    FormattingFindingKind.RedundantParentheses, CurrentModule, sourcePath, node.StartLine, node.StartColumn));
+                    FormattingFindingKind.RedundantParentheses, CurrentModule(walker), sourcePath, node.StartLine, node.StartColumn));
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(BooleanParenthesisExpression node)
+        public void OnEnterBooleanParenthesisExpression(BooleanParenthesisExpression node, ModuleWalker walker)
         {
             if (node.Expression is BooleanParenthesisExpression)
             {
 
                 Findings.Add(new FormattingFinding(
-                    FormattingFindingKind.RedundantParentheses, CurrentModule, sourcePath, node.StartLine, node.StartColumn));
+                    FormattingFindingKind.RedundantParentheses, CurrentModule(walker), sourcePath, node.StartLine, node.StartColumn));
             }
-
-            base.ExplicitVisit(node);
         }
 
-        private void CheckStatements(IList<TSqlStatement>? statements)
+        private void CheckStatements(IList<TSqlStatement>? statements, ModuleWalker walker)
         {
             if (statements is null)
             {
@@ -179,16 +158,16 @@ public static class FormattingScanner
                 if (i > 0 && statements[i].StartLine == statements[i - 1].StartLine)
                 {
                     Findings.Add(new FormattingFinding(
-                        FormattingFindingKind.MultipleStatementsOnSameLine, CurrentModule, sourcePath,
+                        FormattingFindingKind.MultipleStatementsOnSameLine, CurrentModule(walker), sourcePath,
                         statements[i].StartLine, statements[i].StartColumn));
                 }
 
-                CheckDanglingStatement(statements, i);
-                CheckIfFollowingPriorBlockEnd(statements, i);
+                CheckDanglingStatement(statements, i, walker);
+                CheckIfFollowingPriorBlockEnd(statements, i, walker);
             }
         }
 
-        private void CheckDanglingStatement(IList<TSqlStatement> statements, int index)
+        private void CheckDanglingStatement(IList<TSqlStatement> statements, int index, ModuleWalker walker)
         {
             if (index == 0)
             {
@@ -219,12 +198,12 @@ public static class FormattingScanner
             if (current.StartLine == bodyLastLine + 1 && current.StartColumn >= bodyStatement.StartColumn)
             {
                 Findings.Add(new FormattingFinding(
-                    FormattingFindingKind.DanglingStatementAfterUnbracedBody, CurrentModule, sourcePath,
+                    FormattingFindingKind.DanglingStatementAfterUnbracedBody, CurrentModule(walker), sourcePath,
                     current.StartLine, current.StartColumn));
             }
         }
 
-        private void CheckIfFollowingPriorBlockEnd(IList<TSqlStatement> statements, int index)
+        private void CheckIfFollowingPriorBlockEnd(IList<TSqlStatement> statements, int index, ModuleWalker walker)
         {
             if (index == 0 || statements[index] is not IfStatement current)
             {
@@ -240,12 +219,12 @@ public static class FormattingScanner
             if (current.StartLine == endLine)
             {
                 Findings.Add(new FormattingFinding(
-                    FormattingFindingKind.IfImmediatelyFollowingPriorBlockEnd, CurrentModule, sourcePath,
+                    FormattingFindingKind.IfImmediatelyFollowingPriorBlockEnd, CurrentModule(walker), sourcePath,
                     current.StartLine, current.StartColumn));
             }
         }
 
-        private void CheckConditionalBody(int keywordLine, int keywordColumn, TSqlStatement? body)
+        private void CheckConditionalBody(int keywordLine, int keywordColumn, TSqlStatement? body, ModuleWalker walker)
         {
             if (body is null or BeginEndBlockStatement or IfStatement)
             {
@@ -256,17 +235,17 @@ public static class FormattingScanner
             var kind = body.StartLine == keywordLine
                 ? FormattingFindingKind.SingleLineConditionalBody
                 : FormattingFindingKind.MissingBeginEndBlock;
-            Findings.Add(new FormattingFinding(kind, CurrentModule, sourcePath, keywordLine, keywordColumn));
+            Findings.Add(new FormattingFinding(kind, CurrentModule(walker), sourcePath, keywordLine, keywordColumn));
         }
 
-        private void CheckDeclarations(IList<DeclareVariableElement> declarations)
+        private void CheckDeclarations(IList<DeclareVariableElement> declarations, ModuleWalker walker)
         {
             for (var i = 1; i < declarations.Count; i++)
             {
                 if (declarations[i].StartLine == declarations[i - 1].StartLine)
                 {
                     Findings.Add(new FormattingFinding(
-                        FormattingFindingKind.MultipleDeclarationsOnSameLine, CurrentModule, sourcePath,
+                        FormattingFindingKind.MultipleDeclarationsOnSameLine, CurrentModule(walker), sourcePath,
                         declarations[i].StartLine, declarations[i].StartColumn,
                         DetailText: declarations[i].VariableName?.Value));
                 }
