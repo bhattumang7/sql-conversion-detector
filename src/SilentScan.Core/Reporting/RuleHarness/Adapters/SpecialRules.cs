@@ -11,6 +11,15 @@ internal sealed class PartialCompositeForeignKeyJoinRule : IPerFileRule
 
     public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) =>
         PartialCompositeForeignKeyJoinScanner.Scan(parseResult, context.Catalog, (IReadOnlyList<PartialCompositeForeignKeyJoinScanner.CompositeForeignKey>)state!);
+
+    public IModuleRule? CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state)
+    {
+        var compositeForeignKeys = (IReadOnlyList<PartialCompositeForeignKeyJoinScanner.CompositeForeignKey>)state!;
+        return compositeForeignKeys.Count == 0 ? null : PartialCompositeForeignKeyJoinScanner.CreateRule(parseResult.SourcePath, context.Catalog, compositeForeignKeys);
+    }
+
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) =>
+        PartialCompositeForeignKeyJoinScanner.Harvest((PartialCompositeForeignKeyJoinScanner.Rule)moduleRule);
 }
 
 internal sealed class TryCastComputedColumnPredicateRule : IPerFileRule
@@ -24,6 +33,15 @@ internal sealed class TryCastComputedColumnPredicateRule : IPerFileRule
             parseResult,
             context.Catalog,
             (IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), TryCastComputedColumnPredicateScanner.Candidate>)state!);
+
+    public IModuleRule? CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state)
+    {
+        var candidates = (IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), TryCastComputedColumnPredicateScanner.Candidate>)state!;
+        return candidates.Count == 0 ? null : TryCastComputedColumnPredicateScanner.CreateRule(parseResult.SourcePath, context.Catalog, candidates);
+    }
+
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) =>
+        TryCastComputedColumnPredicateScanner.Harvest((TryCastComputedColumnPredicateScanner.Rule)moduleRule);
 
     public IComparer<IFinding>? Comparer => Comparer<IFinding>.Create((x, y) =>
     {
@@ -61,6 +79,10 @@ internal sealed class StatementShapeRule : IPerFileRule
     public IReadOnlyList<IFinding> ScanCatalogOnce(RuleContext context) => StatementShapeScanner.ScanCatalog(context.Catalog);
 
     public IComparer<IFinding>? Comparer => new KindThenLocationComparer<StatementShapeFinding>(f => f.Kind);
+
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => StatementShapeScanner.CreateRule(parseResult.SourcePath);
+
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => StatementShapeScanner.Harvest((StatementShapeScanner.Rule)moduleRule);
 }
 
 internal sealed class MultiReferencedCteRule : IPerFileRule
@@ -68,6 +90,10 @@ internal sealed class MultiReferencedCteRule : IPerFileRule
     public string Id => "MultiReferencedCteScanner";
 
     public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => MultiReferencedCteScanner.Scan(parseResult, context.Catalog);
+
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => MultiReferencedCteScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => MultiReferencedCteScanner.Harvest((MultiReferencedCteScanner.Rule)moduleRule);
 
     public IComparer<IFinding>? Comparer => Comparer<IFinding>.Create((x, y) =>
     {
@@ -91,6 +117,12 @@ internal sealed class PostExpansionJoinWidthRule : IPerFileRule
     public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) =>
         PostExpansionJoinWidthScanner.Scan(parseResult, context.Catalog, context.ViewExpansionMap);
 
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) =>
+        PostExpansionJoinWidthScanner.CreateRule(parseResult.SourcePath, context.Catalog, context.ViewExpansionMap);
+
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) =>
+        PostExpansionJoinWidthScanner.Harvest((PostExpansionJoinWidthScanner.Rule)moduleRule);
+
     public IComparer<IFinding>? Comparer => Comparer<IFinding>.Create((x, y) =>
     {
         var a = (PostExpansionJoinWidthFinding)x;
@@ -112,6 +144,14 @@ internal sealed class SelectStarViewRule : IPerFileRule
 
     public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) =>
         SelectStarViewScanner.Scan(parseResult, context.Catalog, context.Lineage, context.SelectStarViewCandidates);
+
+    public IModuleRule? CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) =>
+        context.SelectStarViewCandidates.Count == 0
+            ? null
+            : SelectStarViewScanner.CreateRule(parseResult.SourcePath, context.Catalog, context.Lineage, context.SelectStarViewCandidates);
+
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) =>
+        SelectStarViewScanner.Harvest((SelectStarViewScanner.Rule)moduleRule);
 
     public IComparer<IFinding>? Comparer => Comparer<IFinding>.Create((x, y) =>
     {
@@ -158,6 +198,10 @@ internal sealed class OutputParameterRule : IPerFileRule
 
     public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => OutputParameterScanner.Scan(parseResult);
 
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => OutputParameterScanner.CreateRule(parseResult.SourcePath);
+
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => OutputParameterScanner.Harvest((OutputParameterScanner.Rule)moduleRule);
+
     public IComparer<IFinding>? Comparer => Comparer<IFinding>.Create((x, y) =>
     {
         var a = (OutputParameterFinding)x;
@@ -178,6 +222,11 @@ internal sealed class UnindexedTempTableUsageRule : IPerFileRule
     public string Id => "UnindexedTempTableUsageScanner";
 
     public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => UnindexedTempTableUsageScanner.Scan(parseResult, context.Catalog);
+
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => UnindexedTempTableUsageScanner.CreateRule(context.Catalog);
+
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) =>
+        UnindexedTempTableUsageScanner.Harvest(parseResult, context.Catalog, (UnindexedTempTableUsageScanner.Rule)moduleRule);
 
     public IComparer<IFinding>? Comparer => Comparer<IFinding>.Create((x, y) =>
     {

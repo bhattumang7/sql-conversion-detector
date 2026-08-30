@@ -107,3 +107,6 @@ Never call something done unless it was actually verified.
 End with a concise status summary:
 Done | Not Done/Unverified | Issues | Next.
 No work-log narration. Distinguish implemented from verified.
+
+# Compile and test 
+Compile and test takes 5 minutes. So, try to complete as much work as possible before doing this.

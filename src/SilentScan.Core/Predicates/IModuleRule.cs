@@ -2,7 +2,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 
 namespace SilentScan.Core.Predicates;
 
-internal interface IModuleRule
+public interface IModuleRule
 {
     void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
     {

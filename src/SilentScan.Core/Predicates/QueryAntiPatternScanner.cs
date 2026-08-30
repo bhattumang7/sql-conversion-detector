@@ -23,22 +23,28 @@ public static class QueryAntiPatternScanner
 
     public static IReadOnlyList<QueryAntiPatternFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-
-        var cteNameCollector = new Rule.CteNameCollector(catalog.IdentifierComparer);
-        parseResult.Fragment.Accept(cteNameCollector);
-
-        var rule = new Rule(parseResult.SourcePath, catalog, cteNameCollector.Names);
+        var rule = CreateRule(parseResult, catalog);
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
-        return
-        [
+        return Harvest(rule);
+    }
+
+    internal static Rule CreateRule(SqlParseResult parseResult, DatabaseCatalog catalog)
+    {
+        var cteNameCollector = new Rule.CteNameCollector(catalog.IdentifierComparer);
+        parseResult.Fragment.Accept(cteNameCollector);
+        return new Rule(parseResult.SourcePath, catalog, cteNameCollector.Names);
+    }
+
+    internal static IReadOnlyList<QueryAntiPatternFinding> Harvest(Rule rule) =>
+            [
             .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
-    }
+
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
@@ -47,7 +53,7 @@ public static class QueryAntiPatternScanner
         "master", "tempdb", "msdb", "model",
     };
 
-    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, HashSet<string> cteNames) : IModuleRule
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog, HashSet<string> cteNames) : IModuleRule
     {
         public List<QueryAntiPatternFinding> Findings { get; } = [];
 

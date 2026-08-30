@@ -11,19 +11,23 @@ public static class AlwaysEncryptedOrderByScanner
 
     public static IReadOnlyList<AlwaysEncryptedOrderByFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var rule = new Rule(parseResult.SourcePath, catalog);
+        var rule = CreateRule(parseResult.SourcePath, catalog);
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
-        return
-        [
+    return Harvest(rule);
+    }
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog) => new(sourcePath, catalog);
+
+    internal static IReadOnlyList<AlwaysEncryptedOrderByFinding> Harvest(Rule rule) =>
+            [
             .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
-    }
 
-    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
+
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<AlwaysEncryptedOrderByFinding> Findings { get; } = [];
 

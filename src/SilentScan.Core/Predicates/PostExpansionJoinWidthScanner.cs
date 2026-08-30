@@ -14,19 +14,24 @@ public static class PostExpansionJoinWidthScanner
     public static IReadOnlyList<PostExpansionJoinWidthFinding> Scan(
         SqlParseResult parseResult, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap)
     {
-        var rule = new Rule(parseResult.SourcePath, catalog, viewExpansionMap);
+        var rule = CreateRule(parseResult.SourcePath, catalog, viewExpansionMap);
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
-        return
+        return Harvest(rule);
+    }
+
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap) =>
+        new(sourcePath, catalog, viewExpansionMap);
+
+    internal static IReadOnlyList<PostExpansionJoinWidthFinding> Harvest(Rule rule) =>
         [
             .. rule.Findings
                 .OrderByDescending(f => f.ExpandedCount - f.WrittenCount)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line),
         ];
-    }
 
-    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap) : IModuleRule
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap) : IModuleRule
     {
         public List<PostExpansionJoinWidthFinding> Findings { get; } = [];
 

@@ -10,14 +10,20 @@ public static class FormattingScanner
 {
     public static IReadOnlyList<FormattingFinding> Scan(SqlParseResult parseResult)
     {
+        var rule = CreateRule(parseResult.SourcePath);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
+        return Harvest(parseResult, rule);
+    }
+
+    internal static Rule CreateRule(string sourcePath) => new(sourcePath);
+
+    internal static IReadOnlyList<FormattingFinding> Harvest(SqlParseResult parseResult, Rule rule)
+    {
         var findings = new List<FormattingFinding>();
 
         ScanTabCharacters(parseResult, findings);
         ScanFileHeader(parseResult, findings);
-
-        var rule = new Rule(parseResult.SourcePath);
-        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
-        parseResult.Fragment.Accept(walker);
         findings.AddRange(rule.Findings);
 
         return
@@ -89,7 +95,7 @@ public static class FormattingScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Rule(string sourcePath) : IModuleRule
+    internal sealed class Rule(string sourcePath) : IModuleRule
     {
         public List<FormattingFinding> Findings { get; } = [];
 

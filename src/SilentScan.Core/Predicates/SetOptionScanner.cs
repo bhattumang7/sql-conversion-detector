@@ -18,12 +18,18 @@ public static class SetOptionScanner
 
     public static IReadOnlyList<SetOptionFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage)
     {
-        var moduleQualifiedName = parseResult.SourcePath;
-        var findings = new List<SetOptionFinding>();
-
-        var rule = new SetStatementRule();
+        var rule = CreateRule();
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
+        return Harvest(parseResult, catalog, lineage, rule);
+    }
+
+    internal static SetStatementRule CreateRule() => new();
+
+    internal static IReadOnlyList<SetOptionFinding> Harvest(SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, SetStatementRule rule)
+    {
+        var moduleQualifiedName = parseResult.SourcePath;
+        var findings = new List<SetOptionFinding>();
 
         var isAdHocScript = IsAdHocScript(parseResult.Fragment);
 
@@ -82,7 +88,7 @@ public static class SetOptionScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class SetStatementRule : IModuleRule
+    internal sealed class SetStatementRule : IModuleRule
     {
         public List<(PredicateSetStatement Statement, SetOptionFindingKind Kind)> MatchedStatements { get; } = [];
 

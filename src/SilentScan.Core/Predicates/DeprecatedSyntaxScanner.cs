@@ -32,10 +32,14 @@ public static class DeprecatedSyntaxScanner
 
     public static IReadOnlyList<DeprecatedSyntaxFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
     {
-        var findings = new List<DeprecatedSyntaxFinding>();
+        var rule = CreateRule(parseResult, catalog);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog ?? new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
+        return Harvest(parseResult, rule);
+    }
 
-        ScanTaskComments(parseResult, findings);
-
+    internal static Rule CreateRule(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
+    {
         var moduleQualifiedName = TryGetModuleQualifiedName(parseResult.Fragment);
         var ansiNullsIsOff = catalog is not null
             && moduleQualifiedName is { } qualifiedName
@@ -44,11 +48,18 @@ public static class DeprecatedSyntaxScanner
 
         var isAdHocScript = moduleQualifiedName is null && HasNoModuleDefinition(parseResult.Fragment);
 
-        var rule = new Rule(parseResult.SourcePath, ansiNullsIsOff, skipComparisonFindings: isAdHocScript);
-        var walker = new ModuleWalker(parseResult.SourcePath, catalog ?? new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
-        parseResult.Fragment.Accept(walker);
+        return new Rule(parseResult.SourcePath, ansiNullsIsOff, skipComparisonFindings: isAdHocScript);
+    }
+
+    internal static IReadOnlyList<DeprecatedSyntaxFinding> Harvest(SqlParseResult parseResult, Rule rule)
+    {
+        var findings = new List<DeprecatedSyntaxFinding>();
+
+        ScanTaskComments(parseResult, findings);
         findings.AddRange(rule.Findings);
 
+        var moduleQualifiedName = TryGetModuleQualifiedName(parseResult.Fragment);
+        var isAdHocScript = moduleQualifiedName is null && HasNoModuleDefinition(parseResult.Fragment);
         if (isAdHocScript && parseResult.Fragment is TSqlScript script)
         {
             findings.AddRange(ScanAdHocAnsiNullComparisons(script, parseResult.SourcePath));
@@ -256,7 +267,7 @@ public static class DeprecatedSyntaxScanner
         }
     }
 
-    private sealed class Rule : IModuleRule
+    internal sealed class Rule : IModuleRule
     {
         private readonly string sourcePath;
         private readonly bool ansiNullsIsOff;

@@ -70,11 +70,17 @@ public static class TryCastComputedColumnPredicateScanner
             return [];
         }
 
-        var rule = new Rule(parseResult.SourcePath, catalog, candidates);
+        var rule = CreateRule(parseResult.SourcePath, catalog, candidates);
         var emptyResolvedViews = new Dictionary<string, ResolvedRelation>();
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, emptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
-        return
+        return Harvest(rule);
+    }
+
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> candidates) =>
+        new(sourcePath, catalog, candidates);
+
+    internal static IReadOnlyList<TryCastComputedColumnPredicateFinding> Harvest(Rule rule) =>
         [
             .. rule.Findings
                 .OrderBy(f => f.TableQualifiedName, StringComparer.Ordinal)
@@ -83,9 +89,8 @@ public static class TryCastComputedColumnPredicateScanner
                 .ThenBy(f => f.Location.Line)
                 .ThenBy(f => f.Location.Column),
         ];
-    }
 
-    private sealed class Rule(
+    internal sealed class Rule(
         string sourcePath, DatabaseCatalog catalog,
         IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> candidates) : IModuleRule
     {

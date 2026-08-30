@@ -22,15 +22,20 @@ public static class CodeMetricScanner
 {
     public static IReadOnlyList<CodeMetricFinding> Scan(SqlParseResult parseResult, CodeMetricThresholds? thresholds = null)
     {
-        thresholds ??= CodeMetricThresholds.Default;
+        var rule = CreateRule(parseResult.SourcePath, thresholds ?? CodeMetricThresholds.Default);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
+        return Harvest(parseResult, thresholds ?? CodeMetricThresholds.Default, rule);
+    }
+
+    internal static Rule CreateRule(string sourcePath, CodeMetricThresholds thresholds) => new(sourcePath, thresholds);
+
+    internal static IReadOnlyList<CodeMetricFinding> Harvest(SqlParseResult parseResult, CodeMetricThresholds thresholds, Rule rule)
+    {
         var findings = new List<CodeMetricFinding>();
 
         ScanLineLength(parseResult, thresholds, findings);
         ScanModuleLength(parseResult, thresholds, findings);
-
-        var rule = new Rule(parseResult.SourcePath, thresholds);
-        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
-        parseResult.Fragment.Accept(walker);
         findings.AddRange(rule.Findings);
 
         return
@@ -93,7 +98,7 @@ public static class CodeMetricScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Rule(string sourcePath, CodeMetricThresholds thresholds) : IModuleRule
+    internal sealed class Rule(string sourcePath, CodeMetricThresholds thresholds) : IModuleRule
     {
         public List<CodeMetricFinding> Findings { get; } = [];
 

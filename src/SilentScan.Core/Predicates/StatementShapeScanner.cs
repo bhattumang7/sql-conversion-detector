@@ -10,19 +10,23 @@ public static class StatementShapeScanner
 {
     public static IReadOnlyList<StatementShapeFinding> Scan(SqlParseResult parseResult)
     {
-        var rule = new Rule(parseResult.SourcePath);
+        var rule = CreateRule(parseResult.SourcePath);
         var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
 
-        return
-        [
+    return Harvest(rule);
+    }
+    internal static Rule CreateRule(string sourcePath) => new(sourcePath);
+
+    internal static IReadOnlyList<StatementShapeFinding> Harvest(Rule rule) =>
+            [
             .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
-    }
+
 
     public static IReadOnlyList<StatementShapeFinding> ScanCatalog(DatabaseCatalog catalog)
     {
@@ -62,7 +66,7 @@ public static class StatementShapeScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Rule(string sourcePath) : IModuleRule
+    internal sealed class Rule(string sourcePath) : IModuleRule
     {
         private bool? _currentRoutineHasSetNocountOn;
         private int _currentRoutineLine;

@@ -11,7 +11,7 @@ using SilentScan.Core.Predicates.Normalization;
 
 namespace SilentScan.Core.Predicates;
 
-internal sealed class ModuleWalker : TSqlFragmentVisitor
+public sealed class ModuleWalker : TSqlFragmentVisitor
 {
     public const string NormalizationEliminatedConstructKind = "predicate eliminated by normalization";
 
@@ -89,7 +89,7 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         }
     }
 
-    public FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
+    internal FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
         new(_catalog, _resolvedViews, _sourcePath, _ledger, CurrentCteRelations(), CurrentProcScope, _callerScopeByCalleeScope);
 
     public ScopeChain CurrentScopeChain() =>

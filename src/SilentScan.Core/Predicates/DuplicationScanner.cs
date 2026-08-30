@@ -18,13 +18,19 @@ public static class DuplicationScanner
 
     public static IReadOnlyList<DuplicationFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
+        var rule = CreateRule(parseResult.SourcePath, catalog);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
+        return Harvest(parseResult, catalog, rule);
+    }
+
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog) => new(sourcePath, catalog);
+
+    internal static IReadOnlyList<DuplicationFinding> Harvest(SqlParseResult parseResult, DatabaseCatalog catalog, Rule rule)
+    {
         var findings = new List<DuplicationFinding>();
 
         ScanComments(parseResult, catalog.CompatibilityLevel, findings);
-
-        var rule = new Rule(parseResult.SourcePath, catalog);
-        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
-        parseResult.Fragment.Accept(walker);
         findings.AddRange(rule.Findings);
 
         return
@@ -112,7 +118,7 @@ public static class DuplicationScanner
             && script.Batches.Any(b => b.Statements.Count > 0);
     }
 
-    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<DuplicationFinding> Findings { get; } = [];
 

@@ -9,26 +9,30 @@ public static class OutputParameterScanner
 {
     public static IReadOnlyList<OutputParameterFinding> Scan(SqlParseResult parseResult)
     {
-        var rule = new Rule(parseResult.SourcePath);
+        var rule = CreateRule(parseResult.SourcePath);
         var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
-        return
-        [
+    return Harvest(rule);
+    }
+    internal static Rule CreateRule(string sourcePath) => new(sourcePath);
+
+    internal static IReadOnlyList<OutputParameterFinding> Harvest(Rule rule) =>
+            [
             .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.ProcedureLine)
                 .ThenBy(f => f.ParameterName, StringComparer.OrdinalIgnoreCase),
         ];
-    }
+
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private readonly record struct FlowState(HashSet<string>? Unassigned, bool Declined)
+    internal readonly record struct FlowState(HashSet<string>? Unassigned, bool Declined)
     {
         public static FlowState Declined_() => new(null, true);
     }
 
-    private sealed class Rule(string sourcePath) : IModuleRule, IStatementFlowPolicy<FlowState>
+    internal sealed class Rule(string sourcePath) : IModuleRule, IStatementFlowPolicy<FlowState>
     {
         private int _procedureLine;
         private int _procedureColumn;

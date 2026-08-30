@@ -34,19 +34,24 @@ public static class PartialCompositeForeignKeyJoinScanner
             return [];
         }
 
-        var rule = new Rule(parseResult.SourcePath, catalog, compositeForeignKeys);
+        var rule = CreateRule(parseResult.SourcePath, catalog, compositeForeignKeys);
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
-        return
+        return Harvest(rule);
+    }
+
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog, IReadOnlyList<CompositeForeignKey> compositeForeignKeys) =>
+        new(sourcePath, catalog, compositeForeignKeys);
+
+    internal static IReadOnlyList<PartialCompositeForeignKeyJoinFinding> Harvest(Rule rule) =>
         [
             .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
-    }
 
-    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyList<CompositeForeignKey> compositeForeignKeys) : IModuleRule
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyList<CompositeForeignKey> compositeForeignKeys) : IModuleRule
     {
         public List<PartialCompositeForeignKeyJoinFinding> Findings { get; } = [];
 

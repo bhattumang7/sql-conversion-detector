@@ -57,10 +57,16 @@ public static class SelectStarViewScanner
             return [];
         }
 
-        var rule = new Rule(parseResult.SourcePath, catalog, lineage, candidates);
+        var rule = CreateRule(parseResult.SourcePath, catalog, lineage, candidates);
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, lineage.AllRelations, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
-        return
+        return Harvest(rule);
+    }
+
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SelectStarViewCandidate> candidates) =>
+        new(sourcePath, catalog, lineage, candidates);
+
+    internal static IReadOnlyList<SelectStarViewFinding> Harvest(Rule rule) =>
         [
             .. rule.Findings
                 .OrderBy(f => f.ViewQualifiedName, StringComparer.Ordinal)
@@ -68,9 +74,8 @@ public static class SelectStarViewScanner
                 .ThenBy(f => f.ConsumerLine)
                 .ThenBy(f => f.ConsumerColumn),
         ];
-    }
 
-    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SelectStarViewCandidate> candidates) : IModuleRule
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SelectStarViewCandidate> candidates) : IModuleRule
     {
         public List<SelectStarViewFinding> Findings { get; } = [];
 

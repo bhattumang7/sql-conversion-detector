@@ -19,6 +19,10 @@ public interface IPerFileRule : IRule
     IReadOnlyList<IFinding> ScanCatalogOnce(RuleContext context) => [];
 
     IComparer<IFinding>? Comparer => null;
+
+    IModuleRule? CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => null;
+
+    IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => [];
 }
 
 public interface ICatalogRule : IRule

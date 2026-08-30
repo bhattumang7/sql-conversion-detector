@@ -38,23 +38,27 @@ public static class NamingScanner
 
     public static IReadOnlyList<NamingFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
     {
-        var rule = new Rule(parseResult.SourcePath, catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase);
+        var rule = CreateRule(parseResult.SourcePath, catalog);
         var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
 
-        return
-        [
+    return Harvest(rule);
+    }
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog? catalog = null) => new(sourcePath, catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase);
+
+    internal static IReadOnlyList<NamingFinding> Harvest(Rule rule) =>
+            [
             .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
-    }
+
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Rule(string sourcePath, StringComparer identifierComparer) : IModuleRule
+    internal sealed class Rule(string sourcePath, StringComparer identifierComparer) : IModuleRule
     {
         private string? _currentViewModule;
 

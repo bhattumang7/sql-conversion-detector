@@ -11,20 +11,24 @@ public static class IndexCoverageScanner
 
     public static IReadOnlyList<IndexCoverageFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
+        var visitor = CreateRule(parseResult.SourcePath, catalog);
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [visitor]);
         parseResult.Fragment.Accept(walker);
-        return
-        [
+    return Harvest(visitor);
+    }
+    internal static Visitor CreateRule(string sourcePath, DatabaseCatalog catalog) => new(sourcePath, catalog);
+
+    internal static IReadOnlyList<IndexCoverageFinding> Harvest(Visitor visitor) =>
+            [
             .. visitor.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column)
                 .ThenBy(f => f.IndexName, StringComparer.OrdinalIgnoreCase),
         ];
-    }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
+
+    internal sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
         : ConstrainedColumnStatementVisitor(sourcePath, catalog)
     {
         public List<IndexCoverageFinding> Findings { get; } = [];

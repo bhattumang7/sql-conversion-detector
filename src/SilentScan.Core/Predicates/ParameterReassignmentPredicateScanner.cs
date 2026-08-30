@@ -11,24 +11,28 @@ public static class ParameterReassignmentPredicateScanner
 
     public static IReadOnlyList<ParameterReassignmentPredicateFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var rule = new Rule(parseResult.SourcePath, catalog);
+        var rule = CreateRule(parseResult.SourcePath, catalog);
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
-        return
-        [
+    return Harvest(rule);
+    }
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog) => new(sourcePath, catalog);
+
+    internal static IReadOnlyList<ParameterReassignmentPredicateFinding> Harvest(Rule rule) =>
+            [
             .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
-    }
 
-    private readonly record struct FlowState(HashSet<string>? Reassigned, Dictionary<string, TSqlFragment>? ReassignmentSites, bool Declined)
+
+    internal readonly record struct FlowState(HashSet<string>? Reassigned, Dictionary<string, TSqlFragment>? ReassignmentSites, bool Declined)
     {
         public static FlowState Declined_() => new(null, null, true);
     }
 
-    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule, IStatementFlowPolicy<FlowState>
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule, IStatementFlowPolicy<FlowState>
     {
         public List<ParameterReassignmentPredicateFinding> Findings { get; } = [];
 

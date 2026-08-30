@@ -10,10 +10,16 @@ public static class UnindexedTempTableUsageScanner
 {
     public static IReadOnlyList<UnindexedTempTableUsageFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var rule = new Rule(catalog);
+        var rule = CreateRule(catalog);
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
         parseResult.Fragment.Accept(walker);
+        return Harvest(parseResult, catalog, rule);
+    }
 
+    internal static Rule CreateRule(DatabaseCatalog catalog) => new(catalog);
+
+    internal static IReadOnlyList<UnindexedTempTableUsageFinding> Harvest(SqlParseResult parseResult, DatabaseCatalog catalog, Rule rule)
+    {
         var tempIdentifierComparer = TypeInference.Collation.IdentifierComparer(catalog.EffectiveTempdbCollation);
         var findings = new List<UnindexedTempTableUsageFinding>();
 
@@ -51,13 +57,13 @@ public static class UnindexedTempTableUsageScanner
         ];
     }
 
-    private sealed record Declaration(string TempTableName, string TempQualifiedName, string? Scope, int Line);
+    internal sealed record Declaration(string TempTableName, string TempQualifiedName, string? Scope, int Line);
 
-    private sealed record Usage(string TempTableName, string? Scope, UnindexedTempTableUsageKind Kind, int Line, int Column);
+    internal sealed record Usage(string TempTableName, string? Scope, UnindexedTempTableUsageKind Kind, int Line, int Column);
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Rule(DatabaseCatalog catalog) : IModuleRule
+    internal sealed class Rule(DatabaseCatalog catalog) : IModuleRule
     {
         public List<Declaration> Declarations { get; } = [];
 
