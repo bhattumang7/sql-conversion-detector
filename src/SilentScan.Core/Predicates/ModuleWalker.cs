@@ -54,6 +54,8 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
 
     public string SourcePath => _sourcePath;
 
+    public SkipLedger? Ledger => _ledger;
+
     public DatabaseCatalog Catalog => _catalog;
 
     public string? CurrentProcScope { get; private set; }
@@ -342,7 +344,7 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         }
     }
 
-    private IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
+    public IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
     {
         var qualifiedName = SchemaObjectNameHelper.Qualify(targetTableName);
 
@@ -377,7 +379,7 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes));
     }
 
-    private void PushCteRelations(IReadOnlyDictionary<string, ResolvedRelation> relations) => _cteStack.Push(relations);
+    public void PushCteRelations(IReadOnlyDictionary<string, ResolvedRelation> relations) => _cteStack.Push(relations);
 
     private void PopCteScope() => _cteStack.Pop();
 

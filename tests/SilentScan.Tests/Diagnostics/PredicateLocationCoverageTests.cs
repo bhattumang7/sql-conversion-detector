@@ -23,11 +23,11 @@ public sealed class PredicateLocationCoverageTests
         "SilentScan.Core.Predicates.NotInNullableSubqueryScanner+Rule",
         "SilentScan.Core.Predicates.OperandComparabilityScanner+Rule",
         "SilentScan.Core.Predicates.TryCastComputedColumnPredicateScanner+Rule",
+        "SilentScan.Core.Predicates.NonSargablePredicateScanner+Rule",
     };
 
     private static readonly HashSet<string> HandRolledJoinWalkScannerVisitorTypeNames = new(StringComparer.Ordinal)
     {
-        "SilentScan.Core.Predicates.NonSargablePredicateScanner+Visitor",
         "SilentScan.Core.Predicates.TypedPredicateExtractor+Visitor",
     };
 
