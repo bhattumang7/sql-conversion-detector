@@ -142,4 +142,16 @@ public sealed class FloatEqualityPredicateScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void EqualityAgainstOuterAliasFloatColumn_InsideCorrelatedExistsSubquery_Fires()
+    {
+        var findings = Scan(
+            "SELECT * FROM dbo.Prices p WHERE EXISTS ("
+            + "SELECT 1 FROM dbo.Other o WHERE o.Id = p.Id AND p.Amount = p.Rate);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Prices", finding.TableQualifiedName);
+        Assert.Equal("Amount", finding.ColumnName);
+    }
 }

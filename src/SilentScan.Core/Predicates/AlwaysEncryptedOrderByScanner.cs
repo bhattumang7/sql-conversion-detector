@@ -38,13 +38,11 @@ public static class AlwaysEncryptedOrderByScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
+            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
+
             if (node.OrderByClause is { OrderByElements.Count: > 0 } orderByClause)
             {
-                var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
-                {
-                    FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()),
-                };
-
+                var scopeChain = CurrentScopeChain();
                 foreach (var element in orderByClause.OrderByElements)
                 {
                     Inspect(element, scopeChain);
@@ -52,6 +50,7 @@ public static class AlwaysEncryptedOrderByScanner
             }
 
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
         }
 
         private void Inspect(

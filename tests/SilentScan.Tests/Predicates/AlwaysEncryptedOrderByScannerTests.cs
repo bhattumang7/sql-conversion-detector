@@ -22,6 +22,8 @@ public sealed class AlwaysEncryptedOrderByScannerTests
                 ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = CEK1, ENCRYPTION_TYPE = RANDOMIZED, ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256') NOT NULL,
             PlainName  NVARCHAR(100) NOT NULL
         );
+        GO
+        CREATE TABLE dbo.Orders (CustomerId INT NOT NULL, Amount INT NOT NULL);
         """;
 
     private static IReadOnlyList<AlwaysEncryptedOrderByFinding> Scan(string sql)
@@ -101,5 +103,17 @@ public sealed class AlwaysEncryptedOrderByScannerTests
 
         Assert.Equal(2, findings.Count);
         Assert.Equal(["Ssn", "Notes"], findings.Select(f => f.ColumnName));
+    }
+
+    [Fact]
+    public void OrderByOuterAliasEncryptedColumn_InsideCorrelatedApplySubquery_Fires()
+    {
+        var findings = Scan(
+            "SELECT c.CustomerId FROM dbo.Customer c "
+            + "CROSS APPLY (SELECT TOP 1 o.Amount FROM dbo.Orders o WHERE o.CustomerId = c.CustomerId ORDER BY c.Ssn) t;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Customer", finding.TableQualifiedName);
+        Assert.Equal("Ssn", finding.ColumnName);
     }
 }

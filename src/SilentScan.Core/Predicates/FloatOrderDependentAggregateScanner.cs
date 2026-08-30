@@ -44,10 +44,8 @@ public static class FloatOrderDependentAggregateScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
-            {
-                FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()),
-            };
+            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
+            var scopeChain = CurrentScopeChain();
 
             foreach (var element in node.SelectElements.OfType<SelectScalarExpression>())
             {
@@ -60,6 +58,7 @@ public static class FloatOrderDependentAggregateScanner
             }
 
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
         }
 
         private void Inspect(

@@ -39,10 +39,8 @@ public static class FloatEqualityPredicateScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
-            {
-                FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()),
-            };
+            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
+            var scopeChain = CurrentScopeChain();
 
             if (node.WhereClause?.SearchCondition is { } whereCondition)
             {
@@ -52,17 +50,16 @@ public static class FloatEqualityPredicateScanner
             InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain, Inspect);
 
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
-            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
-            {
-                FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()),
-            };
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
             PopCteScope();
+            var scopeChain = CurrentScopeChain();
 
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
             {
@@ -72,17 +69,16 @@ public static class FloatEqualityPredicateScanner
             InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, Inspect);
 
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
-            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
-            {
-                FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()),
-            };
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
             PopCteScope();
+            var scopeChain = CurrentScopeChain();
 
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
             {
@@ -92,6 +88,7 @@ public static class FloatEqualityPredicateScanner
             InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, Inspect);
 
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
         }
 
         private void Inspect(

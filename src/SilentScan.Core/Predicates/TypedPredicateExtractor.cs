@@ -312,7 +312,7 @@ public static class TypedPredicateExtractor
         {
             if (node.Column is { } columnRef)
             {
-                var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+                var scopeChain = CurrentScopeChain();
                 if (ResolveOperand(columnRef, scopeChain) is PredicateOperand.Column target && target.Type is { } targetType)
                 {
                     var sourceType = OperandType(ResolveOperand(node.NewValue, scopeChain));
@@ -328,7 +328,7 @@ public static class TypedPredicateExtractor
             if (node.AssignmentKind == AssignmentKind.Equals && node.Expression is { } sourceExpression
                 && _variables.TryGetValue(node.Variable.Name, out var targetType) && targetType is { } target)
             {
-                var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+                var scopeChain = CurrentScopeChain();
                 var sourceType = OperandType(ResolveOperand(sourceExpression, scopeChain));
                 EmitWriteLossFinding(tableQualifiedName: null, node.Variable.Name, target, sourceType, sourceExpression);
             }
@@ -489,7 +489,7 @@ public static class TypedPredicateExtractor
 
         private void AnalyzeValuesInsertSource(ValuesInsertSource values, List<CatalogColumn?> targetColumns, string targetTableQualifiedName)
         {
-            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = CurrentScopeChain();
             foreach (var columnValues in values.RowValues.Select(row => row.ColumnValues))
             {
                 var count = Math.Min(columnValues.Count, targetColumns.Count);
@@ -510,7 +510,7 @@ public static class TypedPredicateExtractor
 
         private void AnalyzeSelectListWriteLoss(IList<SelectElement> selectElements, IReadOnlyList<CatalogColumn?> targetColumns, string targetTableQualifiedName)
         {
-            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = CurrentScopeChain();
             var count = Math.Min(selectElements.Count, targetColumns.Count);
             for (var i = 0; i < count; i++)
             {
@@ -663,7 +663,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = CurrentScopeChain();
             _currentPredicateFragment = node;
             if (ResolveOperand(node.Expression, scopeChain) is not PredicateOperand.Column column)
             {
@@ -721,7 +721,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = CurrentScopeChain();
             _currentPredicateFragment = node;
             if (ResolveOperand(node.Expression, scopeChain) is not PredicateOperand.Column column)
             {
@@ -801,7 +801,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = CurrentScopeChain();
             _currentPredicateFragment = node;
             var left = ResolveOperand(first, scopeChain);
             var right = ResolveOperand(second, scopeChain);

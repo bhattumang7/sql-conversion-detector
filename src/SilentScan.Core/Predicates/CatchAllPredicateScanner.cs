@@ -70,26 +70,33 @@ public static class CatchAllPredicateScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            if (!HasActiveRecompileGuard)
+            if (HasActiveRecompileGuard)
             {
-                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext());
-                InspectSearchCondition(node.WhereClause?.SearchCondition, byAlias, ordered);
+                base.ExplicitVisit(node);
+                return;
             }
 
+            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
+            InspectSearchCondition(node.WhereClause?.SearchCondition);
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(UpdateStatement node)
         {
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
             var spec = node.UpdateSpecification;
-            if (!HasActiveRecompileGuard)
+            if (HasActiveRecompileGuard)
             {
-                var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
-                InspectSearchCondition(spec.WhereClause?.SearchCondition, byAlias, ordered);
+                base.ExplicitVisit(node);
+                _statementHasOptionRecompile = previous;
+                return;
             }
 
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces)));
+            InspectSearchCondition(spec.WhereClause?.SearchCondition);
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
             _statementHasOptionRecompile = previous;
         }
 
@@ -97,13 +104,17 @@ public static class CatchAllPredicateScanner
         {
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
             var spec = node.DeleteSpecification;
-            if (!HasActiveRecompileGuard)
+            if (HasActiveRecompileGuard)
             {
-                var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
-                InspectSearchCondition(spec.WhereClause?.SearchCondition, byAlias, ordered);
+                base.ExplicitVisit(node);
+                _statementHasOptionRecompile = previous;
+                return;
             }
 
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces)));
+            InspectSearchCondition(spec.WhereClause?.SearchCondition);
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
             _statementHasOptionRecompile = previous;
         }
 
@@ -153,17 +164,14 @@ public static class CatchAllPredicateScanner
             return previous;
         }
 
-        private void InspectSearchCondition(
-            BooleanExpression? searchCondition,
-            IReadOnlyDictionary<string, ScopeEntry> byAlias,
-            IReadOnlyList<ScopeEntry> ordered)
+        private void InspectSearchCondition(BooleanExpression? searchCondition)
         {
             if (searchCondition is null)
             {
                 return;
             }
 
-            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
+            var scopeChain = CurrentScopeChain();
             var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
 
             foreach (var orClause in FlattenOr(searchCondition))

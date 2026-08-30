@@ -135,6 +135,19 @@ public sealed class TryCastComputedColumnPredicateScannerTests
     }
 
     [Fact]
+    public void TryCastComputedColumnOnOuterAlias_ReferencedInsideCorrelatedExistsSubquery_Fires()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Find AS BEGIN "
+            + "SELECT e.Id FROM dbo.Events e WHERE EXISTS ("
+            + "SELECT 1 FROM dbo.Events e2 WHERE e2.Id <> e.Id AND e.ParsedDate = '2024-01-01'); END");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Events", finding.TableQualifiedName);
+        Assert.Equal("ParsedDate", finding.ColumnName);
+    }
+
+    [Fact]
     public async Task LiveDeployment_TryCastComputedColumnInPredicate_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(

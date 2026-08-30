@@ -154,4 +154,18 @@ public sealed class NotInNullableSubqueryScannerTests
         var finding = Assert.Single(findings);
         Assert.Null(finding.OuterColumnName);
     }
+
+    [Fact]
+    public void SubqueryColumnNotOnItsOwnFromTable_SilentlyCorrelatesToOuterNullableColumn_Fires()
+    {
+        var findings = Scan(
+            "SELECT * FROM dbo.CorrOuter WHERE Id NOT IN (SELECT RefId FROM dbo.CorrInner);",
+            extraDdl: "CREATE TABLE dbo.CorrOuter (Id INT NOT NULL, RefId INT NULL);"
+                + "CREATE TABLE dbo.CorrInner (OtherCol INT NOT NULL);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.CorrOuter", finding.SubqueryTableQualifiedName);
+        Assert.Equal("RefId", finding.SubqueryColumnName);
+        Assert.Equal("Id", finding.OuterColumnName);
+    }
 }

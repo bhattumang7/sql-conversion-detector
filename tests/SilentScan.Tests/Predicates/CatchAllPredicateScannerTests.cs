@@ -8,7 +8,13 @@ public sealed class CatchAllPredicateScannerTests
 {
     private static IReadOnlyList<CatchAllPredicateFinding> Scan(string sql)
     {
-        var ddl = "CREATE TABLE dbo.Customers (Id INT NOT NULL, Code VARCHAR(20) NOT NULL, Region VARCHAR(20) NOT NULL, INDEX IX_Customers_Code (Code));";
+        var ddl = "CREATE TABLE dbo.Customers (Id INT NOT NULL, Code VARCHAR(20) NOT NULL, Region VARCHAR(20) NOT NULL, INDEX IX_Customers_Code (Code));"
+            + "CREATE TABLE dbo.Orders (CustomerId INT NOT NULL, Code VARCHAR(20) NOT NULL);";
+        return ScanWithDdl(ddl, sql);
+    }
+
+    private static IReadOnlyList<CatchAllPredicateFinding> ScanWithDdl(string ddl, string sql)
+    {
         var result = SqlScriptParser.ParseText("test.sql", $"{ddl}\nGO\n{sql}");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
 
@@ -316,6 +322,47 @@ public sealed class CatchAllPredicateScannerTests
             "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN "
             + "WITH C AS (SELECT Code + '' AS Code FROM dbo.Customers) "
             + "SELECT 1 FROM C WHERE (C.Code = @p OR @p IS NULL); END");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CatchAllPair_InsideExistsSubqueryGuardedByUnsatisfiableOuterAliasPredicate_ShouldBeEliminatedByNormalization()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SELECT 1 FROM dbo.Customers c
+                WHERE EXISTS (
+                    SELECT 1 FROM dbo.Orders o
+                    WHERE o.CustomerId = c.Id AND c.Id = 1 AND c.Id = 2 AND (o.Code = @p OR @p IS NULL)
+                );
+            END
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CatchAllPair_InsideExistsSubqueryGuardedByOuterAliasCaseSensitiveColumnCompareSameValueDifferentCase_ShouldBeEliminatedByNormalization()
+    {
+        var ddl =
+            "CREATE TABLE dbo.Customers (Id INT NOT NULL, Code VARCHAR(20) COLLATE Latin1_General_CS_AS NOT NULL, INDEX IX_Customers_Code (Code));"
+            + "CREATE TABLE dbo.Orders (CustomerId INT NOT NULL, Code VARCHAR(20) NOT NULL);";
+
+        var findings = ScanWithDdl(
+            ddl,
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SELECT 1 FROM dbo.Customers c
+                WHERE EXISTS (
+                    SELECT 1 FROM dbo.Orders o
+                    WHERE o.CustomerId = c.Id AND c.Code = 'ABC' AND c.Code = 'abc' AND (o.Code = @p OR @p IS NULL)
+                );
+            END
+            """);
 
         Assert.Empty(findings);
     }

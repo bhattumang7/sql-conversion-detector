@@ -103,10 +103,11 @@ public static class TryCastComputedColumnPredicateScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
+            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
+
             if (node.FromClause is not null)
             {
-                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, CurrentCteRelations(), procScope: null);
-                var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
+                var scopeChain = CurrentScopeChain();
 
                 InspectSearchCondition(node.WhereClause?.SearchCondition, scopeChain);
                 InspectSearchCondition(node.HavingClause?.SearchCondition, scopeChain);
@@ -117,30 +118,31 @@ public static class TryCastComputedColumnPredicateScanner
             }
 
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
-            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
-            InspectSearchCondition(spec.WhereClause?.SearchCondition, scopeChain);
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces)));
+            InspectSearchCondition(spec.WhereClause?.SearchCondition, CurrentScopeChain());
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
-            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
-            InspectSearchCondition(spec.WhereClause?.SearchCondition, scopeChain);
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces)));
+            InspectSearchCondition(spec.WhereClause?.SearchCondition, CurrentScopeChain());
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
         }
 
         private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
             new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
-        private void InspectJoins(TableReference tableReference, List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        private void InspectJoins(TableReference tableReference, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             switch (tableReference)
             {
@@ -160,7 +162,7 @@ public static class TryCastComputedColumnPredicateScanner
 
         private void InspectSearchCondition(
             BooleanExpression? searchCondition,
-            List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             if (searchCondition is null)
             {

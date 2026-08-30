@@ -547,7 +547,7 @@ public static class NonSargablePredicateScanner
                 return (null, null, null);
             }
 
-            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = CurrentScopeChain();
             var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger, catalog);
 
             return provenance switch

@@ -369,6 +369,28 @@ public sealed class QueryAntiPatternScannerTests
     }
 
     [Fact]
+    public void SelectDistinctJoinOnNonUniqueColumn_InsideCorrelatedExists_ControlStillFires()
+    {
+        var findings = Scan(
+            "CREATE TABLE dbo.OuterTagged (Id INT NOT NULL, Tag VARCHAR(20) COLLATE Latin1_General_CS_AS NOT NULL);\nGO\n"
+            + "SELECT 1 FROM dbo.OuterTagged outerA WHERE EXISTS ("
+            + "SELECT DISTINCT a.Id FROM dbo.A a JOIN dbo.C c ON a.Id = c.AId WHERE outerA.Tag = 'ABC');");
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.DistinctMaskingJoinFanout);
+    }
+
+    [Fact]
+    public void SelectDistinctJoinOnNonUniqueColumn_UnsatisfiableViaOuterAliasCaseSensitiveColumn_InsideCorrelatedExists_NeverFires()
+    {
+        var findings = Scan(
+            "CREATE TABLE dbo.OuterTagged (Id INT NOT NULL, Tag VARCHAR(20) COLLATE Latin1_General_CS_AS NOT NULL);\nGO\n"
+            + "SELECT 1 FROM dbo.OuterTagged outerA WHERE EXISTS ("
+            + "SELECT DISTINCT a.Id FROM dbo.A a JOIN dbo.C c ON a.Id = c.AId WHERE outerA.Tag = 'ABC' AND outerA.Tag = 'abc');");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.DistinctMaskingJoinFanout);
+    }
+
+    [Fact]
     public void UnqualifiedTableReferenceResolvingToRealTable_Fires()
     {
         var findings = Scan("SELECT Id FROM Big WHERE Id = 1;");

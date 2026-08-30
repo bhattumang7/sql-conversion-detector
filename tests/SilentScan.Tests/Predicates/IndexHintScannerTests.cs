@@ -136,4 +136,17 @@ public sealed class IndexHintScannerTests
         Assert.Equal(IndexHintFindingKind.HintedIndexNotSeekable, finding.Kind);
         Assert.Equal("IX_Orders_Status", finding.HintedIndexName);
     }
+
+    [Fact]
+    public void LeadingColumnReferencedFromNestedExistsAgainstOuterHintedAlias_CountsAsSeekable()
+    {
+        var catalog = CatalogWithIndex();
+        catalog.AddOrReplace(Table("dbo", "OrderLines", [Col("OrderId")], []));
+
+        var findings = Scan(
+            "SELECT 1 FROM dbo.Orders o WITH (INDEX(IX_Orders_Status)) "
+            + "WHERE EXISTS (SELECT 1 FROM dbo.OrderLines ol WHERE ol.OrderId = o.Status);", catalog);
+
+        Assert.Empty(findings);
+    }
 }

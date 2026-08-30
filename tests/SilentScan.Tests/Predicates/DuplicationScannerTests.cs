@@ -444,6 +444,20 @@ public sealed class DuplicationScannerTests
     }
 
     [Fact]
+    public void ColumnEqualsItself_ProvenNotNull_InsideMergeWhenMatchedCondition_FiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Orders (Id INT NOT NULL, Code VARCHAR(20) NOT NULL);
+            GO
+            MERGE dbo.Orders AS t USING (SELECT Id, Code FROM dbo.Orders) AS s ON t.Id = s.Id
+            WHEN MATCHED AND t.Code = t.Code THEN UPDATE SET t.Code = s.Code;
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
     public void DoubleNegation_FiresRepeatedUnaryOperator()
     {
         var findings = Scan("""

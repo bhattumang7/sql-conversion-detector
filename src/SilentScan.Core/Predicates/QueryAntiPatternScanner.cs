@@ -231,17 +231,16 @@ public static class QueryAntiPatternScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, ResolutionContext(CurrentCteRelations()));
-            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
-            {
-                (byAlias, ordered),
-            };
+            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, ResolutionContext(CurrentCteRelations())));
+            var (byAlias, _) = ScopeStack.Peek();
+            var scopeChain = CurrentScopeChain();
 
             InspectHaving(node, scopeChain);
             InspectDistinctJoinFanout(node, byAlias, scopeChain);
             InspectGroupBySetsCardinality(node.GroupByClause);
 
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(BinaryQueryExpression node)

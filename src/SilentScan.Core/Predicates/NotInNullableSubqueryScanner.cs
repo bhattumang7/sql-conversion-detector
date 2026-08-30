@@ -39,18 +39,20 @@ public static class NotInNullableSubqueryScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext());
-            InspectSearchCondition(node.WhereClause?.SearchCondition, byAlias, ordered);
+            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
+            InspectSearchCondition(node.WhereClause?.SearchCondition);
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(UpdateStatement node)
         {
             PushCteScope(node.WithCtesAndXmlNamespaces);
             var spec = node.UpdateSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext());
-            InspectSearchCondition(spec.WhereClause?.SearchCondition, byAlias, ordered);
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            InspectSearchCondition(spec.WhereClause?.SearchCondition);
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
             PopCteScope();
         }
 
@@ -58,21 +60,21 @@ public static class NotInNullableSubqueryScanner
         {
             PushCteScope(node.WithCtesAndXmlNamespaces);
             var spec = node.DeleteSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext());
-            InspectSearchCondition(spec.WhereClause?.SearchCondition, byAlias, ordered);
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            InspectSearchCondition(spec.WhereClause?.SearchCondition);
             base.ExplicitVisit(node);
+            ScopeStack.Pop();
             PopCteScope();
         }
 
-        private void InspectSearchCondition(
-            BooleanExpression? searchCondition, IReadOnlyDictionary<string, ScopeEntry> byAlias, IReadOnlyList<ScopeEntry> ordered)
+        private void InspectSearchCondition(BooleanExpression? searchCondition)
         {
             if (searchCondition is null)
             {
                 return;
             }
 
-            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
+            var scopeChain = CurrentScopeChain();
             if (PredicateSurvivalAnalyzer.IsUnsatisfiable(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
             {
                 return;
@@ -80,11 +82,13 @@ public static class NotInNullableSubqueryScanner
 
             foreach (var predicate in PredicateTreeWalker.FlattenAnd(searchCondition).OfType<InPredicate>())
             {
-                TryMatch(predicate);
+                TryMatch(predicate, scopeChain);
             }
         }
 
-        private void TryMatch(InPredicate predicate)
+        private void TryMatch(
+            InPredicate predicate,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> enclosingScopeChain)
         {
             if (!predicate.NotDefined || predicate.Subquery is not { QueryExpression: QuerySpecification subquerySpec })
             {
@@ -97,8 +101,11 @@ public static class NotInNullableSubqueryScanner
                 return;
             }
 
-            var (innerByAlias, innerOrdered) = FromScopeResolver.Resolve(subquerySpec.FromClause, CurrentResolutionContext());
-            var innerProvenance = ScalarExpressionResolver.ResolveColumnReference(innerColumnRef, [(innerByAlias, innerOrdered)], sourcePath, ledger: null, catalog);
+            var innerScope = FromScopeResolver.Resolve(subquerySpec.FromClause, CurrentResolutionContext());
+            var subqueryScopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { innerScope };
+            subqueryScopeChain.AddRange(enclosingScopeChain);
+
+            var innerProvenance = ScalarExpressionResolver.ResolveColumnReference(innerColumnRef, subqueryScopeChain, sourcePath, ledger: null, catalog);
             if (innerProvenance is not ColumnProvenance.BaseColumn { Depth: 0 } innerColumn)
             {
                 return;
@@ -110,7 +117,7 @@ public static class NotInNullableSubqueryScanner
                 return;
             }
 
-            if (HasDefensiveNotNullFilter(subquerySpec.WhereClause?.SearchCondition, innerColumn.TableQualifiedName, innerColumn.ColumnName, innerByAlias, innerOrdered))
+            if (HasDefensiveNotNullFilter(subquerySpec.WhereClause?.SearchCondition, innerColumn.TableQualifiedName, innerColumn.ColumnName, subqueryScopeChain))
             {
                 return;
             }
@@ -128,7 +135,7 @@ public static class NotInNullableSubqueryScanner
 
         private bool HasDefensiveNotNullFilter(
             BooleanExpression? subqueryWhere, string tableQualifiedName, string columnName,
-            IReadOnlyDictionary<string, ScopeEntry> innerByAlias, IReadOnlyList<ScopeEntry> innerOrdered)
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> subqueryScopeChain)
         {
             foreach (var clause in PredicateTreeWalker.FlattenAnd(subqueryWhere))
             {
@@ -137,7 +144,7 @@ public static class NotInNullableSubqueryScanner
                     continue;
                 }
 
-                var provenance = ScalarExpressionResolver.ResolveColumnReference(filterColumnRef, [(innerByAlias, innerOrdered)], sourcePath, ledger: null, catalog);
+                var provenance = ScalarExpressionResolver.ResolveColumnReference(filterColumnRef, subqueryScopeChain, sourcePath, ledger: null, catalog);
                 if (provenance is ColumnProvenance.BaseColumn { Depth: 0 } filterColumn
                     && catalog.IdentifierComparer.Equals(filterColumn.TableQualifiedName, tableQualifiedName)
                     && catalog.IdentifierComparer.Equals(filterColumn.ColumnName, columnName))

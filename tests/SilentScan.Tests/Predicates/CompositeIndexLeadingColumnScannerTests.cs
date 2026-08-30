@@ -165,6 +165,20 @@ public sealed class CompositeIndexLeadingColumnScannerTests
     }
 
     [Fact]
+    public void LeadingColumnReferencedOnlyFromNestedExistsAgainstOuterAlias_CountsAsReferencedAnywhere()
+    {
+        var catalog = CatalogWithComposite();
+        catalog.AddOrReplace(Table("dbo", "OrderLines", [Col("OrderId")], []));
+
+        var findings = Scan(
+            "SELECT 1 FROM dbo.Orders o WHERE Status = 5 "
+            + "AND EXISTS (SELECT 1 FROM dbo.OrderLines ol WHERE ol.OrderId = o.Region);",
+            catalog);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void ThreeColumnIndex_ViolatingColumnAtLaterPosition_ReportsCorrectPosition()
     {
         var threeCol = new CatalogIndex("IX_Orders_A_B_C", CatalogIndexKind.Index, IsUnique: false, KeyColumns: ["Region", "Status", "OrderId"], IncludedColumns: []);

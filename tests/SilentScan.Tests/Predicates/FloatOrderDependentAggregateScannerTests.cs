@@ -124,4 +124,15 @@ public sealed class FloatOrderDependentAggregateScannerTests
         var finding = Assert.Single(findings);
         Assert.Equal("dbo.Measurements", finding.TableQualifiedName);
     }
+
+    [Fact]
+    public void SumOfOuterAliasFloatColumn_ReferencedInsideCorrelatedScalarSubquery_Fires()
+    {
+        var findings = Scan(
+            "SELECT m.Id, (SELECT SUM(m.Amount) FROM dbo.Measurements x WHERE x.Id = m.Id) FROM dbo.Measurements m;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Measurements", finding.TableQualifiedName);
+        Assert.Equal("Amount", finding.ColumnName);
+    }
 }

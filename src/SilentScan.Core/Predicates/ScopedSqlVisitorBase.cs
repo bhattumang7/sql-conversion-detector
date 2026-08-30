@@ -35,6 +35,9 @@ internal abstract class ScopedSqlVisitorBase(
     protected FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
         new(catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), CurrentProcScope, callerScopeByCalleeScope);
 
+    protected IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> CurrentScopeChain() =>
+        ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+
     protected IReadOnlySet<TSqlFragment> ComputeDeadPredicates(BooleanExpression? searchCondition)
     {
         if (searchCondition is null || ScopeStack.Count == 0)
@@ -42,7 +45,7 @@ internal abstract class ScopedSqlVisitorBase(
             return EmptyDeadPredicateSet;
         }
 
-        var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+        var scopeChain = CurrentScopeChain();
         return PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
     }
 

@@ -218,6 +218,18 @@ public sealed class OperandComparabilityScannerTests
     }
 
     [Fact]
+    public void EqualityAgainstOuterAliasXmlColumn_InsideCorrelatedExistsSubquery_Fires()
+    {
+        var findings = Scan(
+            "SELECT Id FROM dbo.Document d WHERE EXISTS ("
+            + "SELECT 1 FROM dbo.Article a WHERE a.Id = d.Id AND d.Payload = d.Template);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Document", finding.TableQualifiedName);
+        Assert.Equal("Payload", finding.ColumnName);
+    }
+
+    [Fact]
     public void PositionedUpdateWhereCurrentOfCursor_NullSearchCondition_NeverThrows()
     {
         var findings = Scan(

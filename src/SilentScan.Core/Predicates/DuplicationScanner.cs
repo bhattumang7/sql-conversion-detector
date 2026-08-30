@@ -288,6 +288,15 @@ public static class DuplicationScanner
             ScopeStack.Pop();
         }
 
+        public override void ExplicitVisit(MergeStatement node)
+        {
+            var spec = node.MergeSpecification;
+            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
+            ScopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, ResolutionContext(cteRelations)));
+            base.ExplicitVisit(node);
+            ScopeStack.Pop();
+        }
+
         public override void ExplicitVisit(BooleanComparisonExpression node)
         {
             if (BothLiterals(node.FirstExpression, node.SecondExpression))
