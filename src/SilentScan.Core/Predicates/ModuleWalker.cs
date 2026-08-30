@@ -35,6 +35,7 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
     private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
     private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
     private readonly Stack<IReadOnlySet<TSqlFragment>> _deadPredicateStack = new();
+    private readonly Dictionary<IModuleRule, Exception> _crashed = new();
 
     public ModuleWalker(
         string sourcePath,
@@ -64,7 +65,29 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
 
     public string? CurrentProcScope { get; private set; }
 
+    public IReadOnlyDictionary<IModuleRule, Exception> CrashedRules => _crashed;
+
     public bool IsDeadPredicate(TSqlFragment node) => _deadPredicateStack.Count > 0 && _deadPredicateStack.Peek().Contains(node);
+
+    private void Dispatch(Action<IModuleRule> hook)
+    {
+        foreach (var rule in _rules)
+        {
+            if (_crashed.ContainsKey(rule))
+            {
+                continue;
+            }
+
+            try
+            {
+                hook(rule);
+            }
+            catch (Exception ex)
+            {
+                _crashed[rule] = ex;
+            }
+        }
+    }
 
     public FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
         new(_catalog, _resolvedViews, _sourcePath, _ledger, CurrentCteRelations(), CurrentProcScope, _callerScopeByCalleeScope);
@@ -163,75 +186,48 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
 
     public override void ExplicitVisit(CreateProcedureStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterCreateProcedureStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterCreateProcedureStatement(node, this));
 
         VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveCreateProcedureStatement(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveCreateProcedureStatement(node, this));
     }
 
     public override void ExplicitVisit(AlterProcedureStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterAlterProcedureStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterAlterProcedureStatement(node, this));
 
         VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveAlterProcedureStatement(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveAlterProcedureStatement(node, this));
     }
 
     public override void ExplicitVisit(CreateOrAlterProcedureStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterCreateOrAlterProcedureStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterCreateOrAlterProcedureStatement(node, this));
 
         VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveCreateOrAlterProcedureStatement(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveCreateOrAlterProcedureStatement(node, this));
     }
 
     public override void ExplicitVisit(CreateFunctionStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterCreateFunctionStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterCreateFunctionStatement(node, this));
 
         VisitProcedureOrFunctionBody(node, node.Name);
     }
 
     public override void ExplicitVisit(AlterFunctionStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterAlterFunctionStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterAlterFunctionStatement(node, this));
 
         VisitProcedureOrFunctionBody(node, node.Name);
     }
 
     public override void ExplicitVisit(CreateOrAlterFunctionStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterCreateOrAlterFunctionStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterCreateOrAlterFunctionStatement(node, this));
 
         VisitProcedureOrFunctionBody(node, node.Name);
     }
@@ -245,34 +241,22 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
     public sealed override void ExplicitVisit(SelectStatement node) =>
         WithCteScope(node.WithCtesAndXmlNamespaces, () =>
         {
-            foreach (var rule in _rules)
-            {
-                rule.OnEnterSelectStatementScope(node, this);
-            }
+            Dispatch(rule => rule.OnEnterSelectStatementScope(node, this));
 
             base.ExplicitVisit(node);
 
-            foreach (var rule in _rules)
-            {
-                rule.OnLeaveSelectStatementScope(node, this);
-            }
+            Dispatch(rule => rule.OnLeaveSelectStatementScope(node, this));
         });
 
     public sealed override void ExplicitVisit(QuerySpecification node) =>
         WithFromScope(node.FromClause, () =>
         {
             var scopeChain = CurrentScopeChain();
-            foreach (var rule in _rules)
-            {
-                rule.OnEnterQuerySpecificationScope(node, scopeChain, this);
-            }
+            Dispatch(rule => rule.OnEnterQuerySpecificationScope(node, scopeChain, this));
 
             base.ExplicitVisit(node);
 
-            foreach (var rule in _rules)
-            {
-                rule.OnLeaveQuerySpecificationScope(node, scopeChain, this);
-            }
+            Dispatch(rule => rule.OnLeaveQuerySpecificationScope(node, scopeChain, this));
         });
 
     public sealed override void ExplicitVisit(UpdateStatement node)
@@ -282,17 +266,11 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
             WithDataModificationScope(spec.Target, spec.FromClause, () =>
             {
                 var scopeChain = CurrentScopeChain();
-                foreach (var rule in _rules)
-                {
-                    rule.OnEnterUpdateStatementScope(node, scopeChain, this);
-                }
+                Dispatch(rule => rule.OnEnterUpdateStatementScope(node, scopeChain, this));
 
                 base.ExplicitVisit(node);
 
-                foreach (var rule in _rules)
-                {
-                    rule.OnLeaveUpdateStatementScope(node, scopeChain, this);
-                }
+                Dispatch(rule => rule.OnLeaveUpdateStatementScope(node, scopeChain, this));
             }));
     }
 
@@ -303,17 +281,11 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
             WithDataModificationScope(spec.Target, spec.FromClause, () =>
             {
                 var scopeChain = CurrentScopeChain();
-                foreach (var rule in _rules)
-                {
-                    rule.OnEnterDeleteStatementScope(node, scopeChain, this);
-                }
+                Dispatch(rule => rule.OnEnterDeleteStatementScope(node, scopeChain, this));
 
                 base.ExplicitVisit(node);
 
-                foreach (var rule in _rules)
-                {
-                    rule.OnLeaveDeleteStatementScope(node, scopeChain, this);
-                }
+                Dispatch(rule => rule.OnLeaveDeleteStatementScope(node, scopeChain, this));
             }));
     }
 
@@ -324,17 +296,11 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
             WithMergeScope(spec.Target, spec.TableAlias, spec.TableReference, () =>
             {
                 var scopeChain = CurrentScopeChain();
-                foreach (var rule in _rules)
-                {
-                    rule.OnEnterMergeStatementScope(node, scopeChain, this);
-                }
+                Dispatch(rule => rule.OnEnterMergeStatementScope(node, scopeChain, this));
 
                 base.ExplicitVisit(node);
 
-                foreach (var rule in _rules)
-                {
-                    rule.OnLeaveMergeStatementScope(node, scopeChain, this);
-                }
+                Dispatch(rule => rule.OnLeaveMergeStatementScope(node, scopeChain, this));
             }));
     }
 
@@ -343,177 +309,111 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         {
             node.WithCtesAndXmlNamespaces?.Accept(this);
 
-            foreach (var rule in _rules)
-            {
-                rule.OnEnterInsertStatementScope(node, this);
-            }
+            Dispatch(rule => rule.OnEnterInsertStatementScope(node, this));
 
             node.InsertSpecification.Accept(this);
 
-            foreach (var rule in _rules)
-            {
-                rule.OnLeaveInsertStatementScope(node, this);
-            }
+            Dispatch(rule => rule.OnLeaveInsertStatementScope(node, this));
         });
 
     public sealed override void ExplicitVisit(AssignmentSetClause node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterAssignmentSetClause(node, this);
-        }
+        Dispatch(rule => rule.OnEnterAssignmentSetClause(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(SetVariableStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterSetVariableStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterSetVariableStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(TSqlBatch node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterTSqlBatch(node, this);
-        }
+        Dispatch(rule => rule.OnEnterTSqlBatch(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(DeclareVariableStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterDeclareVariableStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterDeclareVariableStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(BooleanNotExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterBooleanNotExpression(node, this);
-        }
+        Dispatch(rule => rule.OnEnterBooleanNotExpression(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveBooleanNotExpression(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveBooleanNotExpression(node, this));
     }
 
     public sealed override void ExplicitVisit(SearchedCaseExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterOperandPosition(node, this);
-        }
+        Dispatch(rule => rule.OnEnterOperandPosition(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveOperandPosition(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveOperandPosition(node, this));
     }
 
     public sealed override void ExplicitVisit(SimpleCaseExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterOperandPosition(node, this);
-        }
+        Dispatch(rule => rule.OnEnterOperandPosition(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveOperandPosition(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveOperandPosition(node, this));
     }
 
     public sealed override void ExplicitVisit(IIfCall node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterOperandPosition(node, this);
-        }
+        Dispatch(rule => rule.OnEnterOperandPosition(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveOperandPosition(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveOperandPosition(node, this));
     }
 
     public sealed override void ExplicitVisit(CoalesceExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterOperandPosition(node, this);
-        }
+        Dispatch(rule => rule.OnEnterOperandPosition(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveOperandPosition(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveOperandPosition(node, this));
     }
 
     public sealed override void ExplicitVisit(NullIfExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterOperandPosition(node, this);
-        }
+        Dispatch(rule => rule.OnEnterOperandPosition(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveOperandPosition(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveOperandPosition(node, this));
     }
 
     public sealed override void ExplicitVisit(WhereClause node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterWhereClause(node, this);
-        }
+        Dispatch(rule => rule.OnEnterWhereClause(node, this));
 
         WithPredicateLocation(node.SearchCondition, () => base.ExplicitVisit(node));
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveWhereClause(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveWhereClause(node, this));
     }
 
     public sealed override void ExplicitVisit(HavingClause node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterHavingClause(node, this);
-        }
+        Dispatch(rule => rule.OnEnterHavingClause(node, this));
 
         WithPredicateLocation(node.SearchCondition, () => base.ExplicitVisit(node));
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveHavingClause(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveHavingClause(node, this));
     }
 
     public sealed override void ExplicitVisit(QualifiedJoin node)
@@ -521,17 +421,11 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         node.FirstTableReference?.Accept(this);
         node.SecondTableReference?.Accept(this);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterJoinSearchCondition(node, this);
-        }
+        Dispatch(rule => rule.OnEnterJoinSearchCondition(node, this));
 
         WithPredicateLocation(node.SearchCondition, () => node.SearchCondition?.Accept(this));
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveJoinSearchCondition(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveJoinSearchCondition(node, this));
     }
 
     public sealed override void ExplicitVisit(MergeSpecification node)
@@ -540,17 +434,11 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         node.TableReference?.Accept(this);
         node.TopRowFilter?.Accept(this);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterMergeSearchCondition(node, this);
-        }
+        Dispatch(rule => rule.OnEnterMergeSearchCondition(node, this));
 
         node.SearchCondition?.Accept(this);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveMergeSearchCondition(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveMergeSearchCondition(node, this));
 
         foreach (var actionClause in node.ActionClauses)
         {
@@ -563,584 +451,398 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
 
     public sealed override void ExplicitVisit(MergeActionClause node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterMergeActionSearchCondition(node, this);
-        }
+        Dispatch(rule => rule.OnEnterMergeActionSearchCondition(node, this));
 
         node.SearchCondition?.Accept(this);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveMergeActionSearchCondition(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveMergeActionSearchCondition(node, this));
 
         node.Action?.Accept(this);
     }
 
     public override void Visit(BooleanComparisonExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnBooleanComparisonExpression(node, this);
-        }
+        Dispatch(rule => rule.OnBooleanComparisonExpression(node, this));
 
         base.Visit(node);
     }
 
     public override void Visit(BooleanTernaryExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnBooleanTernaryExpression(node, this);
-        }
+        Dispatch(rule => rule.OnBooleanTernaryExpression(node, this));
 
         base.Visit(node);
     }
 
     public override void Visit(LikePredicate node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnLikePredicate(node, this);
-        }
+        Dispatch(rule => rule.OnLikePredicate(node, this));
 
         base.Visit(node);
     }
 
     public override void Visit(InPredicate node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnInPredicate(node, this);
-        }
+        Dispatch(rule => rule.OnInPredicate(node, this));
 
         base.Visit(node);
     }
 
     public override void Visit(SubqueryComparisonPredicate node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnSubqueryComparisonPredicate(node, this);
-        }
+        Dispatch(rule => rule.OnSubqueryComparisonPredicate(node, this));
 
         base.Visit(node);
     }
 
     public sealed override void ExplicitVisit(SelectSetVariable node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterSelectSetVariable(node, this);
-        }
+        Dispatch(rule => rule.OnEnterSelectSetVariable(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(WhileStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterWhileStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterWhileStatement(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveWhileStatement(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveWhileStatement(node, this));
     }
 
     public sealed override void ExplicitVisit(IfStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterIfStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterIfStatement(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveIfStatement(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveIfStatement(node, this));
     }
 
     public sealed override void ExplicitVisit(TryCatchStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterTryCatchStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterTryCatchStatement(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveTryCatchStatement(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveTryCatchStatement(node, this));
     }
 
     public sealed override void ExplicitVisit(BooleanBinaryExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterBooleanBinaryExpression(node, this);
-        }
+        Dispatch(rule => rule.OnEnterBooleanBinaryExpression(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(BinaryExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterBinaryExpression(node, this);
-        }
+        Dispatch(rule => rule.OnEnterBinaryExpression(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(UnaryExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterUnaryExpression(node, this);
-        }
+        Dispatch(rule => rule.OnEnterUnaryExpression(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(FromClause node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterFromClause(node, this);
-        }
+        Dispatch(rule => rule.OnEnterFromClause(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(AlterTableSwitchStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterAlterTableSwitchStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterAlterTableSwitchStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(DeclareCursorStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterDeclareCursorStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterDeclareCursorStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(StatementList node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterStatementList(node, this);
-        }
+        Dispatch(rule => rule.OnEnterStatementList(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(DeclareTableVariableStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterDeclareTableVariableStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterDeclareTableVariableStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(BinaryQueryExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterBinaryQueryExpression(node, this);
-        }
+        Dispatch(rule => rule.OnEnterBinaryQueryExpression(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(PredicateSetStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterPredicateSetStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterPredicateSetStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(CreateViewStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterCreateViewStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterCreateViewStatement(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveCreateViewStatement(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveCreateViewStatement(node, this));
     }
 
     public sealed override void ExplicitVisit(AlterViewStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterAlterViewStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterAlterViewStatement(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveAlterViewStatement(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveAlterViewStatement(node, this));
     }
 
     public sealed override void ExplicitVisit(CreateOrAlterViewStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterCreateOrAlterViewStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterCreateOrAlterViewStatement(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveCreateOrAlterViewStatement(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveCreateOrAlterViewStatement(node, this));
     }
 
     public sealed override void ExplicitVisit(CreateTableStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterCreateTableStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterCreateTableStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(CreateIndexStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterCreateIndexStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterCreateIndexStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(TopRowFilter node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterTopRowFilter(node, this);
-        }
+        Dispatch(rule => rule.OnEnterTopRowFilter(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(OffsetClause node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterOffsetClause(node, this);
-        }
+        Dispatch(rule => rule.OnEnterOffsetClause(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(SelectScalarExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterSelectScalarExpression(node, this);
-        }
+        Dispatch(rule => rule.OnEnterSelectScalarExpression(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(OrderByClause node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterOrderByClause(node, this);
-        }
+        Dispatch(rule => rule.OnEnterOrderByClause(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(GroupByClause node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterGroupByClause(node, this);
-        }
+        Dispatch(rule => rule.OnEnterGroupByClause(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(FunctionCall node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterFunctionCall(node, this);
-        }
+        Dispatch(rule => rule.OnEnterFunctionCall(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(NamedTableReference node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterNamedTableReference(node, this);
-        }
+        Dispatch(rule => rule.OnEnterNamedTableReference(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(OutputClause node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterOutputClause(node, this);
-        }
+        Dispatch(rule => rule.OnEnterOutputClause(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(ConvertCall node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterConvertCall(node, this);
-        }
+        Dispatch(rule => rule.OnEnterConvertCall(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(FetchCursorStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterFetchCursorStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterFetchCursorStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(PrintStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterPrintStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterPrintStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(TableHint node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterTableHint(node, this);
-        }
+        Dispatch(rule => rule.OnEnterTableHint(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(SetTransactionIsolationLevelStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterSetTransactionIsolationLevelStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterSetTransactionIsolationLevelStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(GlobalVariableExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterGlobalVariableExpression(node, this);
-        }
+        Dispatch(rule => rule.OnEnterGlobalVariableExpression(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(GoToStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterGoToStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterGoToStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(ExecutableProcedureReference node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterExecutableProcedureReference(node, this);
-        }
+        Dispatch(rule => rule.OnEnterExecutableProcedureReference(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(BeginEndBlockStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterBeginEndBlockStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterBeginEndBlockStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(ParenthesisExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterParenthesisExpression(node, this);
-        }
+        Dispatch(rule => rule.OnEnterParenthesisExpression(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(BooleanParenthesisExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterBooleanParenthesisExpression(node, this);
-        }
+        Dispatch(rule => rule.OnEnterBooleanParenthesisExpression(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(ExecuteStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterExecuteStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterExecuteStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(SetCommandStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterSetCommandStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterSetCommandStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(OverClause node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterOverClause(node, this);
-        }
+        Dispatch(rule => rule.OnEnterOverClause(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(BeginTransactionStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterBeginTransactionStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterBeginTransactionStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(CommitTransactionStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterCommitTransactionStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterCommitTransactionStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(RollbackTransactionStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterRollbackTransactionStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterRollbackTransactionStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(WaitForStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterWaitForStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterWaitForStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(SetRowCountStatement node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterSetRowCountStatement(node, this);
-        }
+        Dispatch(rule => rule.OnEnterSetRowCountStatement(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(StringLiteral node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterStringLiteral(node, this);
-        }
+        Dispatch(rule => rule.OnEnterStringLiteral(node, this));
 
         base.ExplicitVisit(node);
     }
 
     public sealed override void ExplicitVisit(BooleanComparisonExpression node)
     {
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterBooleanComparisonExpressionScope(node, this);
-        }
+        Dispatch(rule => rule.OnEnterBooleanComparisonExpressionScope(node, this));
 
         base.ExplicitVisit(node);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveBooleanComparisonExpressionScope(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveBooleanComparisonExpressionScope(node, this));
     }
 
     private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)
@@ -1148,18 +850,12 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         var previousScope = CurrentProcScope;
         CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterProcedureOrFunctionBody(node, this);
-        }
+        Dispatch(rule => rule.OnEnterProcedureOrFunctionBody(node, this));
 
         node.AcceptChildren(this);
         CurrentProcScope = previousScope;
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveProcedureOrFunctionBody(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveProcedureOrFunctionBody(node, this));
     }
 
     private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject)
@@ -1167,15 +863,9 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         var previousScope = CurrentProcScope;
         CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
 
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterTriggerBody(node, this);
-        }
+        Dispatch(rule => rule.OnEnterTriggerBody(node, this));
 
-        foreach (var rule in _rules)
-        {
-            rule.OnEnterTriggerStatementScope(node, name, triggerObject, this);
-        }
+        Dispatch(rule => rule.OnEnterTriggerStatementScope(node, name, triggerObject, this));
 
         if (triggerObject.Name is not { } targetTableName)
         {
@@ -1185,10 +875,7 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
             node.AcceptChildren(this);
             CurrentProcScope = previousScope;
 
-            foreach (var rule in _rules)
-            {
-                rule.OnLeaveTriggerBody(node, this);
-            }
+            Dispatch(rule => rule.OnLeaveTriggerBody(node, this));
 
             return;
         }
@@ -1199,10 +886,7 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
 
         CurrentProcScope = previousScope;
 
-        foreach (var rule in _rules)
-        {
-            rule.OnLeaveTriggerBody(node, this);
-        }
+        Dispatch(rule => rule.OnLeaveTriggerBody(node, this));
     }
 
     public IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
