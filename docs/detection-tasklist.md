@@ -142,18 +142,6 @@ Competitor tools are referred to generically; real identities are in
       cursors with a mid-flow commit - low priority relative to the rest of
       this list, recorded so it isn't rediscovered from scratch.
 
-- [ ] **Compound assignment (`+=`, `-=`, etc.) is invisible to write-loss
-      detection.** `VariableWriteSites.ResolveAssignedExpression` (and every
-      write-loss/narrowing rule built on it) only resolves a variable's
-      assigned value when `AssignmentKind` is `Equals` - all nine compound
-      forms (`+=`/`-=`/`*=`/`/=`/`%=`/`&=`/`|=`/`^=`/`+=` on strings) return
-      `null`, so `SET @decimal_var += @wider_value` gets no narrowing check
-      at all. `DynamicSqlTransfer.cs` already special-cases `AddEquals`
-      elsewhere in the codebase, so the pattern for handling it exists -
-      it's just not threaded through the shared write-resolution helper.
-      False-negative shaped (matches this project's precision bias), but on
-      an extremely common T-SQL idiom.
-
 - [ ] **`STRING_SPLIT` separator must be exactly one character.** A literal
       (or constant-folded) separator argument of any length other than 1 is
       a compile-error fact, pure source-level analysis, no catalog needed.
