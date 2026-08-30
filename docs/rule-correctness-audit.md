@@ -378,6 +378,60 @@ worse than not reporting it at all.
       `UPPER`/`LOWER` on a case-insensitive-collation indexed column still
       forcing a scan.)
 
+- [ ] **`OperandComparabilityScanner`'s comparability gate never checks the
+      native `json` type, so a `json`-typed operand in a comparison/IN/
+      BETWEEN/NULLIF/ORDER BY/GROUP BY/DISTINCT position is silently never
+      flagged.**
+      (`src/SilentScan.Core/Predicates/OperandComparabilityScanner.cs:176-181`,
+      `TryClassify`'s switch matches `Xml` and
+      `Text`/`NText`/`Image` but has no `SqlTypeCategory.Json` case, falling
+      through to `null`.) Oracle-confirmed (SQL Server 2025): `json = json`
+      raises `Msg 13636, The JSON data type cannot be compared or sorted,
+      except when using the IS NULL operator` — the identical restriction
+      shape as `xml`'s `Msg 305`, and this codebase's own sibling
+      `VerdictClassifier.IsOutOfModelCategory` already buckets `Json`
+      together with `Xml`/`Text`/`NText`/`Image` for exactly this reason.
+      False negative squarely inside the rule's own stated scope.
+
+- [ ] **`OperandComparabilityScanner`'s `IN` handling only inspects the
+      tested (left-hand) expression, never the value list, so an XML/legacy-
+      large-object value appearing as a member of the `IN (...)` list is
+      never flagged.**
+      (`src/SilentScan.Core/Predicates/OperandComparabilityScanner.cs:89-92`
+      calls `InspectMembership(inPredicate.Expression, ...)` and never
+      inspects `InPredicate.Values`.) Oracle-confirmed (SQL Server 2025):
+      `WHERE Name IN (XmlColumn)` (an ordinary `varchar` column being
+      compared against an `xml` value inside the list) raises `Msg 402, The
+      data types varchar and xml are incompatible in the equal to operator`
+      — exactly the "used in an IN list" shape `RuleCatalog.cs:69-70`
+      already claims to cover — but goes unflagged because only the tested
+      `varchar` expression is ever classified, not the `xml` member of the
+      list.
+
+- [ ] **`OutputParameterScanner` treats `SELECT @p = col FROM t WHERE ...`
+      (a non-aggregate variable-assignment SELECT) as an unconditional
+      write, when it silently does nothing if the WHERE clause matches zero
+      rows — so a procedure whose only assignment to an OUTPUT parameter
+      takes this form can leave the caller's variable completely unchanged
+      without the scanner ever reporting it.**
+      (`src/SilentScan.Core/Predicates/VariableWriteSites.cs:15-21` yields a
+      write for any `SelectSetVariable` in a `QuerySpecification`'s select
+      list, with no check for whether the query is guaranteed to produce a
+      row; this feeds `OutputParameterScanner.Rule.PerStatement`
+      (`OutputParameterScanner.cs:97-105`), which removes the parameter from
+      the unassigned set on any such statement.) Oracle-confirmed (SQL
+      Server 2025): `DECLARE @x INT = 42; SELECT @x = Val FROM #T WHERE Id =
+      1;` against a table with no matching row leaves `@x` at `42`,
+      completely unchanged — while the aggregate form, `SELECT @y =
+      SUM(Val) FROM #T2 WHERE Id = 1` under the identical zero-row
+      condition, does assign (`@y` becomes `NULL`), confirming aggregate
+      vs. non-aggregate is exactly the line that matters and the scanner
+      doesn't draw it. This is precisely the "caller's own variable is left
+      completely unchanged" scenario `RuleCatalog.cs:169` says the rule is
+      built to catch, but it produces no finding here. Not exercised by the
+      existing test suite, which only covers the always-executes,
+      no-`FROM`-clause form (`SELECT @x = 1;`).
+
 ---
 
 ## Audited, no bug found
@@ -536,14 +590,41 @@ statement — is uncontroversial syntax, not a claim needing verification).
   a top-level AND-flattened `IS NOT NULL` guard (an OR-nested one correctly
   does not suppress); the core three-valued-logic claim is already
   oracle-verified.
+- `ParameterReassignmentPredicateScanner` — WITH RECOMPILE/OPTION(RECOMPILE)
+  suppression at both proc and statement level, intersect-on-merge "every
+  path" semantics, and the `Depth: 0` correlated-subquery guard are all
+  correct. Note: this scanner shares `VariableWriteSites`
+  (`Predicates/VariableWriteSites.cs`) with `OutputParameterScanner` above,
+  so the same non-aggregate-`SELECT @p = col FROM t WHERE ...`-may-not-
+  execute gap could in principle affect this rule's "reassigned before this
+  predicate" claim in the opposite direction (false positive risk rather
+  than false negative) — not independently oracle-demonstrated as a
+  concrete divergence for this rule specifically, and the finding already
+  defaults to `Confidence: Low`, so not filed as a second confirmed bug;
+  worth re-checking once the shared primitive above is fixed.
+- `PartialCompositeForeignKeyJoinScanner` — composite-only grouping,
+  local-vs-statement-wide equality coverage split, comma-join dedup, and
+  the unique-index suppression direction (`i.KeyColumns.All(usedColumns.Contains)`,
+  confirmed as the mathematically correct direction) all check out against
+  the existing test suite's JOIN/comma-join/UPDATE-FROM/CTE-shadowing
+  coverage.
+- `PostExpansionJoinWidthScanner` — the `MinimumGap = 3` threshold and
+  unresolved/derived-table undercounting exactly match the doc's own
+  "lower bound, never exhaustive" framing.
+- `ProcCallArgumentMismatchScanner` — verified both directions:
+  `WriteLossClassifier.Classify(target, source, ...)` called correctly as
+  `(formal, caller)` for the in-direction and `(caller, formal)` for the
+  writeback direction; oracle-confirmed an OUTPUT parameter receives the
+  caller's pre-call value regardless of whether `OUTPUT` appears at the
+  call site, so the unconditional in-direction check is correct, and the
+  writeback direction is correctly gated on both the formal parameter being
+  OUTPUT and the call site supplying the `OUTPUT` keyword.
 
 ---
 
 ## Not yet audited
 
-OperandComparability, OutputParameter,
-ParameterReassignmentPredicate, PartialCompositeForeignKeyJoin,
-PostExpansionJoinWidth, ProcCallArgumentMismatch, QueryAntiPattern,
+QueryAntiPattern,
 ScalarUdf, SchemaDependency, Security, SecurityPredicateIndex,
 SelectiveXmlIndexValueColumn, SelectStarView, SelfReferencingDml,
 SessionDateSetting, SetOption, SpExecuteSqlParameterMismatch,
