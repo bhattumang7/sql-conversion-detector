@@ -3,9 +3,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
-using SilentScan.Core.Predicates.Normalization;
 using SilentScan.Core.TypeInference;
-using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
@@ -57,10 +55,8 @@ public static class NonSargablePredicateScanner
             }
         }
 
-        public override void ExplicitVisit(QuerySpecification node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
-
             var previous = _inFilterContext;
             _inFilterContext = false;
 
@@ -78,56 +74,14 @@ public static class NonSargablePredicateScanner
             node.WindowClause?.Accept(this);
 
             _inFilterContext = previous;
-            ScopeStack.Pop();
         }
 
-        public override void ExplicitVisit(SelectStatement node)
+        protected override void OnMergeStatementScope(MergeStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(UpdateStatement node)
-        {
-            var spec = node.UpdateSpecification;
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(DeleteStatement node)
-        {
-            var spec = node.DeleteSpecification;
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(MergeStatement node)
-        {
-            var spec = node.MergeSpecification;
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            ScopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, CurrentResolutionContext()));
-
             var previousFilterContext = _inFilterContext;
             _inFilterContext = true;
-            base.ExplicitVisit(node);
+            continueDescent();
             _inFilterContext = previousFilterContext;
-
-            ScopeStack.Pop();
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(InsertStatement node)
-        {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
         }
 
         public override void ExplicitVisit(WhereClause node)

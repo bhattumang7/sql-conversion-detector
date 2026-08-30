@@ -30,18 +30,18 @@ public static class NonUniqueUpdateSourceScanner
     {
         public List<NonUniqueUpdateSourceFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(UpdateStatement node)
+        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             var spec = node.UpdateSpecification;
             if (spec.FromClause is not null)
             {
-                Inspect(spec, node.WithCtesAndXmlNamespaces);
+                Inspect(spec);
             }
 
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
-        private void Inspect(UpdateSpecification spec, WithCtesAndXmlNamespaces? withClause)
+        private void Inspect(UpdateSpecification spec)
         {
             if (spec.Target is not NamedTableReference targetRef)
             {
@@ -50,9 +50,7 @@ public static class NonUniqueUpdateSourceScanner
 
             var targetAlias = targetRef.Alias?.Value ?? targetRef.SchemaObject.BaseIdentifier.Value;
 
-            PushCteScope(withClause);
             var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext());
-            PopCteScope();
             if (!byAlias.TryGetValue(targetAlias, out var targetEntry) || targetEntry.Relation.QualifiedName is not { } targetQualifiedName)
             {
                 return;

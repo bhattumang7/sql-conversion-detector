@@ -3,7 +3,6 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates.Normalization;
-using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
@@ -53,31 +52,22 @@ public static class PartialCompositeForeignKeyJoinScanner
     {
         public List<PartialCompositeForeignKeyJoinFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(SelectStatement node)
-        {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(QuerySpecification node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
             InspectFromClause(node.FromClause, node.WhereClause, CurrentCteRelations());
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
-        public override void ExplicitVisit(UpdateStatement node)
+        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            InspectFromClause(node.UpdateSpecification.FromClause, node.UpdateSpecification.WhereClause, cteRelations);
-            base.ExplicitVisit(node);
+            InspectFromClause(node.UpdateSpecification.FromClause, node.UpdateSpecification.WhereClause, CurrentCteRelations());
+            continueDescent();
         }
 
-        public override void ExplicitVisit(DeleteStatement node)
+        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            InspectFromClause(node.DeleteSpecification.FromClause, node.DeleteSpecification.WhereClause, cteRelations);
-            base.ExplicitVisit(node);
+            InspectFromClause(node.DeleteSpecification.FromClause, node.DeleteSpecification.WhereClause, CurrentCteRelations());
+            continueDescent();
         }
 
         private void InspectFromClause(FromClause? fromClause, WhereClause? whereClause, IReadOnlyDictionary<string, ResolvedRelation> cteRelations)

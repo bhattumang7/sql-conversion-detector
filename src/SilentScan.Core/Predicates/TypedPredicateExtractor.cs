@@ -3,7 +3,6 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
-using SilentScan.Core.Predicates.Normalization;
 using SilentScan.Core.Rules;
 using SilentScan.Core.TypeInference;
 using SilentScan.Core.Common;
@@ -152,20 +151,15 @@ public static class TypedPredicateExtractor
 
         private string? _pendingInsertTargetTable;
 
-        public override void ExplicitVisit(SelectStatement node)
+        protected override void OnSelectStatementScope(SelectStatement node, Action continueDescent)
         {
-
-            PushCteScope(node.WithCtesAndXmlNamespaces);
             var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
-            base.ExplicitVisit(node);
+            continueDescent();
             _statementHasOptionRecompile = previousStatementHasOptionRecompile;
-            PopCteScope();
         }
 
-        public override void ExplicitVisit(QuerySpecification node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
-
             if (_pendingInsertTargetColumns is { } pendingColumns)
             {
                 _pendingInsertTargetColumns = null;
@@ -194,7 +188,6 @@ public static class TypedPredicateExtractor
 
             _negated = previousNegated;
             _position = previousPosition;
-            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(WhereClause node)
@@ -230,52 +223,33 @@ public static class TypedPredicateExtractor
             _position = previous;
         }
 
-        public override void ExplicitVisit(UpdateStatement node)
+        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            var spec = node.UpdateSpecification;
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
             var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
-            base.ExplicitVisit(node);
+            continueDescent();
             _statementHasOptionRecompile = previousStatementHasOptionRecompile;
-            ScopeStack.Pop();
-            PopCteScope();
         }
 
-        public override void ExplicitVisit(InsertStatement node)
+        protected override void OnInsertStatementScope(InsertStatement node, Action continueDescent)
         {
             var spec = node.InsertSpecification;
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-
             node.WithCtesAndXmlNamespaces?.Accept(this);
             AnalyzeInsertWriteLoss(spec);
             spec.Accept(this);
-
-            PopCteScope();
         }
 
-        public override void ExplicitVisit(DeleteStatement node)
+        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            var spec = node.DeleteSpecification;
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
             var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
-            base.ExplicitVisit(node);
+            continueDescent();
             _statementHasOptionRecompile = previousStatementHasOptionRecompile;
-            ScopeStack.Pop();
-            PopCteScope();
         }
 
-        public override void ExplicitVisit(MergeStatement node)
+        protected override void OnMergeStatementScope(MergeStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            var spec = node.MergeSpecification;
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            ScopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, CurrentResolutionContext()));
             var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
-            base.ExplicitVisit(node);
+            continueDescent();
             _statementHasOptionRecompile = previousStatementHasOptionRecompile;
-            ScopeStack.Pop();
-            PopCteScope();
         }
 
         public override void ExplicitVisit(MergeSpecification node)

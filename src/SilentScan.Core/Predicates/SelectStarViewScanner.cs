@@ -76,17 +76,10 @@ public static class SelectStarViewScanner
     {
         public List<SelectStarViewFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(SelectStatement node)
-        {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(QuerySpecification node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
             InspectQuery(node);
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
         private void InspectQuery(QuerySpecification node)

@@ -1,3 +1,7 @@
+global using ScopeChain = System.Collections.Generic.IReadOnlyList<(
+    System.Collections.Generic.IReadOnlyDictionary<string, SilentScan.Core.Lineage.ScopeEntry> ByAlias,
+    System.Collections.Generic.IReadOnlyList<SilentScan.Core.Lineage.ScopeEntry> Ordered)>;
+
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
@@ -35,7 +39,7 @@ internal abstract class ScopedSqlVisitorBase(
     protected FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
         new(catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), CurrentProcScope, callerScopeByCalleeScope);
 
-    protected IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> CurrentScopeChain() =>
+    protected ScopeChain CurrentScopeChain() =>
         ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
 
     protected IReadOnlySet<TSqlFragment> ComputeDeadPredicates(BooleanExpression? searchCondition)
@@ -49,8 +53,7 @@ internal abstract class ScopedSqlVisitorBase(
         return PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
     }
 
-    protected PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
-        ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+    protected PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(ColumnReferenceExpression columnRef, ScopeChain scopeChain)
     {
         if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null, catalog) is not ColumnProvenance.BaseColumn baseColumn)
         {
@@ -65,8 +68,8 @@ internal abstract class ScopedSqlVisitorBase(
 
     protected static void InspectJoinOnClauses(
         IList<TableReference>? tableReferences,
-        IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
-        Action<BooleanExpression, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>> inspect)
+        ScopeChain scopeChain,
+        Action<BooleanExpression, ScopeChain> inspect)
     {
         if (tableReferences is null)
         {
@@ -79,6 +82,112 @@ internal abstract class ScopedSqlVisitorBase(
             {
                 inspect(join.SearchCondition!, scopeChain);
             }
+        }
+    }
+
+    public sealed override void ExplicitVisit(SelectStatement node) =>
+        WithCteScope(node.WithCtesAndXmlNamespaces, () =>
+            OnSelectStatementScope(node, () => base.ExplicitVisit(node)));
+
+    protected virtual void OnSelectStatementScope(SelectStatement node, Action continueDescent) =>
+        continueDescent();
+
+    public sealed override void ExplicitVisit(QuerySpecification node) =>
+        WithFromScope(node.FromClause, () =>
+            OnQuerySpecificationScope(node, CurrentScopeChain(), () => base.ExplicitVisit(node)));
+
+    protected virtual void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent) =>
+        continueDescent();
+
+    public sealed override void ExplicitVisit(UpdateStatement node)
+    {
+        var spec = node.UpdateSpecification;
+        WithCteScope(node.WithCtesAndXmlNamespaces, () =>
+            WithDataModificationScope(spec.Target, spec.FromClause, () =>
+                OnUpdateStatementScope(node, CurrentScopeChain(), () => base.ExplicitVisit(node))));
+    }
+
+    protected virtual void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent) =>
+        continueDescent();
+
+    public sealed override void ExplicitVisit(DeleteStatement node)
+    {
+        var spec = node.DeleteSpecification;
+        WithCteScope(node.WithCtesAndXmlNamespaces, () =>
+            WithDataModificationScope(spec.Target, spec.FromClause, () =>
+                OnDeleteStatementScope(node, CurrentScopeChain(), () => base.ExplicitVisit(node))));
+    }
+
+    protected virtual void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent) =>
+        continueDescent();
+
+    public sealed override void ExplicitVisit(MergeStatement node)
+    {
+        var spec = node.MergeSpecification;
+        WithCteScope(node.WithCtesAndXmlNamespaces, () =>
+            WithMergeScope(spec.Target, spec.TableAlias, spec.TableReference, () =>
+                OnMergeStatementScope(node, CurrentScopeChain(), () => base.ExplicitVisit(node))));
+    }
+
+    protected virtual void OnMergeStatementScope(MergeStatement node, ScopeChain scopeChain, Action continueDescent) =>
+        continueDescent();
+
+    public sealed override void ExplicitVisit(InsertStatement node) =>
+        WithCteScope(node.WithCtesAndXmlNamespaces, () =>
+            OnInsertStatementScope(node, () => base.ExplicitVisit(node)));
+
+    protected virtual void OnInsertStatementScope(InsertStatement node, Action continueDescent) =>
+        continueDescent();
+
+    private void WithCteScope(WithCtesAndXmlNamespaces? withClause, Action body)
+    {
+        PushCteScope(withClause);
+        try
+        {
+            body();
+        }
+        finally
+        {
+            PopCteScope();
+        }
+    }
+
+    private void WithFromScope(FromClause? fromClause, Action body)
+    {
+        ScopeStack.Push(FromScopeResolver.Resolve(fromClause, CurrentResolutionContext()));
+        try
+        {
+            body();
+        }
+        finally
+        {
+            ScopeStack.Pop();
+        }
+    }
+
+    private void WithDataModificationScope(TableReference target, FromClause? extraFromClause, Action body)
+    {
+        ScopeStack.Push(FromScopeResolver.ResolveForDataModification(target, extraFromClause, CurrentResolutionContext()));
+        try
+        {
+            body();
+        }
+        finally
+        {
+            ScopeStack.Pop();
+        }
+    }
+
+    private void WithMergeScope(TableReference target, Identifier? targetAlias, TableReference source, Action body)
+    {
+        ScopeStack.Push(FromScopeResolver.ResolveForMerge(target, targetAlias, source, CurrentResolutionContext()));
+        try
+        {
+            body();
+        }
+        finally
+        {
+            ScopeStack.Pop();
         }
     }
 }

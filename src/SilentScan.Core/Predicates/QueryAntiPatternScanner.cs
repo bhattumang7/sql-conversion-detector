@@ -136,33 +136,33 @@ public static class QueryAntiPatternScanner
             base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(InsertStatement node)
+        protected override void OnInsertStatementScope(InsertStatement node, Action continueDescent)
         {
             InspectSiteIfNamedTable(node.InsertSpecification.Target);
             InspectMultiRowInsertIgnoreDupKey(node);
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
-        public override void ExplicitVisit(UpdateStatement node)
+        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             InspectSiteIfNamedTable(node.UpdateSpecification.Target);
             InspectUnboundedWrite(node.UpdateSpecification.WhereClause, node.UpdateSpecification.TopRowFilter, node);
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
-        public override void ExplicitVisit(DeleteStatement node)
+        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             InspectSiteIfNamedTable(node.DeleteSpecification.Target);
             InspectUnboundedWrite(node.DeleteSpecification.WhereClause, node.DeleteSpecification.TopRowFilter, node);
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
-        public override void ExplicitVisit(MergeStatement node)
+        protected override void OnMergeStatementScope(MergeStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             InspectSiteIfNamedTable(node.MergeSpecification.Target);
             InspectSiteIfNamedTable(node.MergeSpecification.TableReference);
             InspectMergeHazards(node.MergeSpecification);
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
         public override void ExplicitVisit(AlterTableSwitchStatement node)
@@ -180,12 +180,10 @@ public static class QueryAntiPatternScanner
             base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(SelectStatement node)
+        protected override void OnSelectStatementScope(SelectStatement node, Action continueDescent)
         {
             InspectRecursiveCteMaxRecursion(node);
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
+            continueDescent();
         }
 
         public override void ExplicitVisit(WhileStatement node)
@@ -229,18 +227,15 @@ public static class QueryAntiPatternScanner
             base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(QuerySpecification node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, ResolutionContext(CurrentCteRelations())));
-            var (byAlias, _) = ScopeStack.Peek();
-            var scopeChain = CurrentScopeChain();
+            var byAlias = scopeChain[0].ByAlias;
 
             InspectHaving(node, scopeChain);
             InspectDistinctJoinFanout(node, byAlias, scopeChain);
             InspectGroupBySetsCardinality(node.GroupByClause);
 
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            continueDescent();
         }
 
         public override void ExplicitVisit(BinaryQueryExpression node)
@@ -1544,9 +1539,7 @@ public static class QueryAntiPatternScanner
             }
         }
 
-        private void InspectDistinctJoinFanout(
-            QuerySpecification node, Dictionary<string, ScopeEntry> byAlias,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        private void InspectDistinctJoinFanout(QuerySpecification node, IReadOnlyDictionary<string, ScopeEntry> byAlias, ScopeChain scopeChain)
         {
             if (node.UniqueRowFilter != UniqueRowFilter.Distinct || node.FromClause is null)
             {

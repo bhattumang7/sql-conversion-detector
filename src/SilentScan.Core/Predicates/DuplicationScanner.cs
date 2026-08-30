@@ -2,7 +2,6 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
-using SilentScan.Core.Rules;
 using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
@@ -129,9 +128,6 @@ public static class DuplicationScanner
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-        private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
-
         private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqualityComparer.Instance);
 
         public override void ExplicitVisit(CreateProcedureStatement node)
@@ -256,46 +252,6 @@ public static class DuplicationScanner
             base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(SelectStatement node)
-        {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(QuerySpecification node)
-        {
-            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, ResolutionContext(CurrentCteRelations())));
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
-        }
-
-        public override void ExplicitVisit(UpdateStatement node)
-        {
-            var spec = node.UpdateSpecification;
-            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations)));
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
-        }
-
-        public override void ExplicitVisit(DeleteStatement node)
-        {
-            var spec = node.DeleteSpecification;
-            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations)));
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
-        }
-
-        public override void ExplicitVisit(MergeStatement node)
-        {
-            var spec = node.MergeSpecification;
-            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            ScopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, ResolutionContext(cteRelations)));
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
-        }
 
         public override void ExplicitVisit(BooleanComparisonExpression node)
         {

@@ -32,17 +32,10 @@ public static class PostExpansionJoinWidthScanner
     {
         public List<PostExpansionJoinWidthFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(SelectStatement node)
-        {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(QuerySpecification node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
             InspectFromClause(node.FromClause);
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
         private void InspectFromClause(FromClause? fromClause)

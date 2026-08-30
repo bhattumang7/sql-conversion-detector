@@ -94,21 +94,10 @@ public static class TryCastComputedColumnPredicateScanner
 
         public List<TryCastComputedColumnPredicateFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(SelectStatement node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(QuerySpecification node)
-        {
-            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
-
             if (node.FromClause is not null)
             {
-                var scopeChain = CurrentScopeChain();
-
                 InspectSearchCondition(node.WhereClause?.SearchCondition, scopeChain);
                 InspectSearchCondition(node.HavingClause?.SearchCondition, scopeChain);
                 foreach (var tableReference in node.FromClause.TableReferences)
@@ -117,30 +106,20 @@ public static class TryCastComputedColumnPredicateScanner
                 }
             }
 
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            continueDescent();
         }
 
-        public override void ExplicitVisit(UpdateStatement node)
+        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            var spec = node.UpdateSpecification;
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces)));
-            InspectSearchCondition(spec.WhereClause?.SearchCondition, CurrentScopeChain());
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            InspectSearchCondition(node.UpdateSpecification.WhereClause?.SearchCondition, scopeChain);
+            continueDescent();
         }
 
-        public override void ExplicitVisit(DeleteStatement node)
+        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            var spec = node.DeleteSpecification;
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces)));
-            InspectSearchCondition(spec.WhereClause?.SearchCondition, CurrentScopeChain());
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            InspectSearchCondition(node.DeleteSpecification.WhereClause?.SearchCondition, scopeChain);
+            continueDescent();
         }
-
-        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
         private void InspectJoins(TableReference tableReference, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {

@@ -47,29 +47,19 @@ public static class StringConcatNullScanner
 
         public List<StringConcatNullFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(SelectStatement node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(QuerySpecification node)
-        {
-            var scopeChain = ScopeChainOf(FromScopeResolver.Resolve(node.FromClause, ResolutionContext(CurrentCteRelations())));
             foreach (var element in node.SelectElements.OfType<SelectScalarExpression>())
             {
                 InspectTopLevel(element.Expression, scopeChain);
             }
 
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
-        public override void ExplicitVisit(UpdateStatement node)
+        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             var spec = node.UpdateSpecification;
-            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            var scopeChain = ScopeChainOf(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations)));
             foreach (var setClause in spec.SetClauses.OfType<AssignmentSetClause>())
             {
                 if (setClause.NewValue is ScalarExpression newValue)
@@ -78,14 +68,8 @@ public static class StringConcatNullScanner
                 }
             }
 
-            base.ExplicitVisit(node);
+            continueDescent();
         }
-
-        private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
-
-        private static List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> ScopeChainOf(
-            (IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered) resolved) => [resolved];
 
         private void InspectTopLevel(
             ScalarExpression root,

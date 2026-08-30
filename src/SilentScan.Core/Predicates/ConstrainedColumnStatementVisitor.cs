@@ -25,35 +25,28 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
 
     protected abstract void InspectStatement(ConstrainedStatement statement);
 
-    public override void ExplicitVisit(SelectStatement node)
-    {
-        PushCteScope(node.WithCtesAndXmlNamespaces);
-        base.ExplicitVisit(node);
-        PopCteScope();
-    }
-
-    public override void ExplicitVisit(QuerySpecification node)
+    protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
     {
         Inspect(node.FromClause, node.WhereClause?.SearchCondition, node);
-        base.ExplicitVisit(node);
+        continueDescent();
     }
 
-    public override void ExplicitVisit(UpdateStatement node)
+    protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
     {
         var spec = node.UpdateSpecification;
         var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, Catalog, EmptyResolvedViews, SourcePath, ledger: null);
         var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
         Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node);
-        base.ExplicitVisit(node);
+        continueDescent();
     }
 
-    public override void ExplicitVisit(DeleteStatement node)
+    protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
     {
         var spec = node.DeleteSpecification;
         var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, Catalog, EmptyResolvedViews, SourcePath, ledger: null);
         var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
         Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node);
-        base.ExplicitVisit(node);
+        continueDescent();
     }
 
     private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>

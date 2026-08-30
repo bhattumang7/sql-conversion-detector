@@ -29,33 +29,20 @@ public static class AlwaysEncryptedOrderByScanner
     {
         public List<AlwaysEncryptedOrderByFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(SelectStatement node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(QuerySpecification node)
-        {
-            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
-
             if (node.OrderByClause is { OrderByElements.Count: > 0 } orderByClause)
             {
-                var scopeChain = CurrentScopeChain();
                 foreach (var element in orderByClause.OrderByElements)
                 {
                     Inspect(element, scopeChain);
                 }
             }
 
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            continueDescent();
         }
 
-        private void Inspect(
-            ExpressionWithSortOrder element,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        private void Inspect(ExpressionWithSortOrder element, ScopeChain scopeChain)
         {
             if (element.Expression is not ColumnReferenceExpression columnRef
                 || BaseColumnResolver.ResolveBaseColumn(columnRef, sourcePath, scopeChain, catalog) is not { } resolved

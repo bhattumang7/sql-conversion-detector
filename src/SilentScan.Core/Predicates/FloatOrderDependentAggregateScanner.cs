@@ -35,18 +35,8 @@ public static class FloatOrderDependentAggregateScanner
     {
         public List<FloatOrderDependentAggregateFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(SelectStatement node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(QuerySpecification node)
-        {
-            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
-            var scopeChain = CurrentScopeChain();
-
             foreach (var element in node.SelectElements.OfType<SelectScalarExpression>())
             {
                 Inspect(element.Expression, scopeChain);
@@ -57,13 +47,10 @@ public static class FloatOrderDependentAggregateScanner
                 Inspect(having, scopeChain);
             }
 
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            continueDescent();
         }
 
-        private void Inspect(
-            TSqlFragment root,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        private void Inspect(TSqlFragment root, ScopeChain scopeChain)
         {
             var collector = new AggregateCallCollector();
             root.Accept(collector);
@@ -73,9 +60,7 @@ public static class FloatOrderDependentAggregateScanner
             }
         }
 
-        private void InspectAggregateCall(
-            FunctionCall call,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        private void InspectAggregateCall(FunctionCall call, ScopeChain scopeChain)
         {
             foreach (var parameter in call.Parameters)
             {

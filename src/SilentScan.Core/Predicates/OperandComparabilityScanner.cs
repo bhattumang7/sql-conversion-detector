@@ -30,18 +30,8 @@ public static class OperandComparabilityScanner
     {
         public List<OperandComparabilityFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(SelectStatement node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(QuerySpecification node)
-        {
-            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
-            var scopeChain = CurrentScopeChain();
-
             if (node.WhereClause?.SearchCondition is { } whereCondition)
             {
                 InspectSearchCondition(whereCondition, scopeChain);
@@ -80,46 +70,31 @@ public static class OperandComparabilityScanner
                 InspectExpressionTree(expression, scopeChain);
             }
 
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            continueDescent();
         }
 
-        public override void ExplicitVisit(UpdateStatement node)
+        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             var spec = node.UpdateSpecification;
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
-            PopCteScope();
-            var scopeChain = CurrentScopeChain();
-
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
             {
                 InspectSearchCondition(whereCondition, scopeChain);
             }
 
             InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, InspectSearchCondition);
-
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            continueDescent();
         }
 
-        public override void ExplicitVisit(DeleteStatement node)
+        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             var spec = node.DeleteSpecification;
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
-            PopCteScope();
-            var scopeChain = CurrentScopeChain();
-
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
             {
                 InspectSearchCondition(whereCondition, scopeChain);
             }
 
             InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, InspectSearchCondition);
-
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            continueDescent();
         }
 
         private void InspectSearchCondition(

@@ -34,16 +34,9 @@ public static class AggregateDivisionColumnstoreScanner
     {
         public List<AggregateDivisionColumnstoreFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(SelectStatement node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
-        }
-
-        public override void ExplicitVisit(QuerySpecification node)
-        {
-            var (_, ordered) = FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext());
+            var ordered = scopeChain[0].Ordered;
             var tables = ordered
                 .Where(e => !e.IsViewLayer && e.Relation.QualifiedName is not null)
                 .Select(e => e.Relation.QualifiedName!)
@@ -67,7 +60,7 @@ public static class AggregateDivisionColumnstoreScanner
                 }
             }
 
-            base.ExplicitVisit(node);
+            continueDescent();
         }
 
         private void InspectTopLevel(TSqlFragment root, CatalogTable columnstoreTable)
