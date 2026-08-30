@@ -183,4 +183,28 @@ internal interface IModuleRule
     void OnEnterUnaryExpression(UnaryExpression node, ModuleWalker walker)
     {
     }
+
+    void OnEnterFromClause(FromClause node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterAlterTableSwitchStatement(AlterTableSwitchStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterDeclareCursorStatement(DeclareCursorStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterStatementList(StatementList node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterDeclareTableVariableStatement(DeclareTableVariableStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterBinaryQueryExpression(BinaryQueryExpression node, ModuleWalker walker)
+    {
+    }
 }

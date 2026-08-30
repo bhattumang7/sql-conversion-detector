@@ -24,14 +24,15 @@ public static class QueryAntiPatternScanner
     public static IReadOnlyList<QueryAntiPatternFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
 
-        var cteNameCollector = new Visitor.CteNameCollector(catalog.IdentifierComparer);
+        var cteNameCollector = new Rule.CteNameCollector(catalog.IdentifierComparer);
         parseResult.Fragment.Accept(cteNameCollector);
 
-        var visitor = new Visitor(parseResult.SourcePath, catalog, cteNameCollector.Names);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog, cteNameCollector.Names);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
@@ -39,21 +40,18 @@ public static class QueryAntiPatternScanner
         ];
     }
 
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     private static readonly HashSet<string> SystemDatabaseNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "master", "tempdb", "msdb", "model",
     };
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, HashSet<string> cteNames)
-        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, HashSet<string> cteNames) : IModuleRule
     {
         public List<QueryAntiPatternFinding> Findings { get; } = [];
 
         private readonly HashSet<string> _tableVariableNames = new(StringComparer.OrdinalIgnoreCase);
-
-        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
         private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
             new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
@@ -63,16 +61,13 @@ public static class QueryAntiPatternScanner
 
         private readonly HashSet<BinaryQueryExpression> _consumedUnionChainNodes = [];
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker) =>
             InspectTableValuedParameters(node.Parameters);
 
-        public override void ExplicitVisit(DeclareTableVariableStatement node)
-        {
+        public void OnEnterDeclareTableVariableStatement(DeclareTableVariableStatement node, ModuleWalker walker) =>
             _tableVariableNames.Add(node.Body.VariableName.Value);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(FromClause node)
+        public void OnEnterFromClause(FromClause node, ModuleWalker walker)
         {
             foreach (var tableReference in node.TableReferences)
             {
@@ -99,40 +94,34 @@ public static class QueryAntiPatternScanner
                     InspectLinkedServerOrCrossDatabase(named);
                 }
             }
-
-            base.ExplicitVisit(node);
         }
 
-        protected override void OnInsertStatementScope(InsertStatement node, Action continueDescent)
+        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker)
         {
             InspectSiteIfNamedTable(node.InsertSpecification.Target);
             InspectMultiRowInsertIgnoreDupKey(node);
-            continueDescent();
         }
 
-        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
             InspectSiteIfNamedTable(node.UpdateSpecification.Target);
             InspectUnboundedWrite(node.UpdateSpecification.WhereClause, node.UpdateSpecification.TopRowFilter, node);
-            continueDescent();
         }
 
-        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
             InspectSiteIfNamedTable(node.DeleteSpecification.Target);
             InspectUnboundedWrite(node.DeleteSpecification.WhereClause, node.DeleteSpecification.TopRowFilter, node);
-            continueDescent();
         }
 
-        protected override void OnMergeStatementScope(MergeStatement node, ScopeChain scopeChain, Action continueDescent)
+        public void OnEnterMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
             InspectSiteIfNamedTable(node.MergeSpecification.Target);
             InspectSiteIfNamedTable(node.MergeSpecification.TableReference);
-            InspectMergeHazards(node.MergeSpecification);
-            continueDescent();
+            InspectMergeHazards(node.MergeSpecification, walker);
         }
 
-        public override void ExplicitVisit(AlterTableSwitchStatement node)
+        public void OnEnterAlterTableSwitchStatement(AlterTableSwitchStatement node, ModuleWalker walker)
         {
             InspectAlterTableSwitchColumnMismatch(node);
             InspectAlterTableSwitchIndexMismatch(node);
@@ -144,16 +133,12 @@ public static class QueryAntiPatternScanner
             InspectAlterTableSwitchCdcPartitionSwitch(node);
             InspectAlterTableSwitchPartitionFilegroupMismatch(node);
             InspectAlterTableSwitchFullTextIndexRestriction(node);
-            base.ExplicitVisit(node);
         }
 
-        protected override void OnSelectStatementScope(SelectStatement node, Action continueDescent)
-        {
+        public void OnEnterSelectStatementScope(SelectStatement node, ModuleWalker walker) =>
             InspectRecursiveCteMaxRecursion(node);
-            continueDescent();
-        }
 
-        public override void ExplicitVisit(WhileStatement node)
+        public void OnEnterWhileStatement(WhileStatement node, ModuleWalker walker)
         {
             if (catalog.CompatibilityLevel is not { } knownLevel || knownLevel >= 150)
             {
@@ -161,51 +146,38 @@ public static class QueryAntiPatternScanner
             }
 
             InspectRbarSingleRowLoopDml(node);
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(DeclareCursorStatement node)
-        {
+        public void OnEnterDeclareCursorStatement(DeclareCursorStatement node, ModuleWalker walker) =>
             InspectCursorGlobalness(node.CursorDefinition, node.Name.Value, node.StartLine, node.StartColumn);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(SetVariableStatement node)
+        public void OnEnterSetVariableStatement(SetVariableStatement node, ModuleWalker walker)
         {
             if (node.CursorDefinition is not null)
             {
                 InspectCursorGlobalness(node.CursorDefinition, node.Variable.Name, node.StartLine, node.StartColumn);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(StatementList node)
-        {
+        public void OnEnterStatementList(StatementList node, ModuleWalker walker) =>
             InspectCountStarExistenceSequence(node.Statements);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(TSqlBatch node)
+        public void OnEnterTSqlBatch(TSqlBatch node, ModuleWalker walker)
         {
             InspectCountStarExistenceSequence(node.Statements);
             _tableVariableNames.Clear();
-            base.ExplicitVisit(node);
         }
 
-        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker)
         {
             var byAlias = scopeChain[0].ByAlias;
 
-            InspectHaving(node, scopeChain);
-            InspectDistinctJoinFanout(node, byAlias, scopeChain);
+            InspectHaving(node, scopeChain, walker);
+            InspectDistinctJoinFanout(node, byAlias, scopeChain, walker);
             InspectGroupBySetsCardinality(node.GroupByClause);
-
-            continueDescent();
         }
 
-        public override void ExplicitVisit(BinaryQueryExpression node)
+        public void OnEnterBinaryQueryExpression(BinaryQueryExpression node, ModuleWalker walker)
         {
             if (node.BinaryQueryExpressionType == BinaryQueryExpressionType.Union && !node.All
                 && !_consumedUnionChainNodes.Contains(node))
@@ -215,8 +187,6 @@ public static class QueryAntiPatternScanner
                 MarkNestedUnionChain(node.SecondQueryExpression, _consumedUnionChainNodes);
                 InspectUnionDisjointness(node);
             }
-
-            base.ExplicitVisit(node);
         }
 
         private void InspectTableValuedParameters(IList<ProcedureParameter> parameters)
@@ -888,10 +858,10 @@ public static class QueryAntiPatternScanner
                 FindingConfidence.Medium));
         }
 
-        private void InspectMergeHazards(MergeSpecification spec)
+        private void InspectMergeHazards(MergeSpecification spec, ModuleWalker walker)
         {
             InspectMergeMissingHoldlock(spec);
-            InspectMergeNonUniqueUsingSource(spec);
+            InspectMergeNonUniqueUsingSource(spec, walker);
             InspectMergeUnconditionalDelete(spec);
         }
 
@@ -915,7 +885,7 @@ public static class QueryAntiPatternScanner
                 FindingConfidence.Medium));
         }
 
-        private void InspectMergeNonUniqueUsingSource(MergeSpecification spec)
+        private void InspectMergeNonUniqueUsingSource(MergeSpecification spec, ModuleWalker walker)
         {
             if (spec.TableReference is not NamedTableReference sourceRef)
             {
@@ -941,13 +911,13 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
-            var (mergeByAlias, mergeOrdered) = FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, ResolutionContext(CurrentCteRelations()));
+            var (mergeByAlias, mergeOrdered) = FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, ResolutionContext(walker.CurrentCteRelations()));
             var mergeScopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
             {
                 (mergeByAlias, mergeOrdered),
             };
 
-            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(spec.SearchCondition, columnRef => ResolveColumnFacts(columnRef, mergeScopeChain)))
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(spec.SearchCondition, columnRef => walker.ResolveColumnFacts(columnRef, mergeScopeChain)))
             {
                 return;
             }
@@ -1439,7 +1409,7 @@ public static class QueryAntiPatternScanner
         };
 
         private void InspectHaving(
-            QuerySpecification node, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+            QuerySpecification node, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain, ModuleWalker walker)
         {
             if (node.HavingClause?.SearchCondition is not { } having || node.GroupByClause is not { } groupBy)
             {
@@ -1453,7 +1423,7 @@ public static class QueryAntiPatternScanner
                 .Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)
                 .ToHashSet(catalog.IdentifierComparer);
 
-            var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(having, columnRef => ResolveColumnFacts(columnRef, scopeChain));
+            var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(having, columnRef => walker.ResolveColumnFacts(columnRef, scopeChain));
 
             foreach (var condition in PredicateTreeWalker.FlattenAnd(having))
             {
@@ -1506,14 +1476,14 @@ public static class QueryAntiPatternScanner
             }
         }
 
-        private void InspectDistinctJoinFanout(QuerySpecification node, IReadOnlyDictionary<string, ScopeEntry> byAlias, ScopeChain scopeChain)
+        private void InspectDistinctJoinFanout(QuerySpecification node, IReadOnlyDictionary<string, ScopeEntry> byAlias, ScopeChain scopeChain, ModuleWalker walker)
         {
             if (node.UniqueRowFilter != UniqueRowFilter.Distinct || node.FromClause is null)
             {
                 return;
             }
 
-            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(node.WhereClause?.SearchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(node.WhereClause?.SearchCondition, columnRef => walker.ResolveColumnFacts(columnRef, scopeChain)))
             {
                 return;
             }
