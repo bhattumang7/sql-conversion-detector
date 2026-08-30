@@ -59,71 +59,56 @@ public static class CatchAllPredicateScanner
 
         public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitProcedureOrFunctionBody([], hasWithRecompile: false, node);
 
-        public override void ExplicitVisit(SelectStatement node)
+        protected override void OnSelectStatementScope(SelectStatement node, Action continueDescent)
         {
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
-            PushCteScope(node.WithCtesAndXmlNamespaces);
-            base.ExplicitVisit(node);
-            PopCteScope();
+            continueDescent();
             _statementHasOptionRecompile = previous;
         }
 
-        public override void ExplicitVisit(QuerySpecification node)
+        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            if (HasActiveRecompileGuard)
+            if (!HasActiveRecompileGuard)
             {
-                base.ExplicitVisit(node);
-                return;
+                InspectSearchCondition(node.WhereClause?.SearchCondition);
+                InspectSearchCondition(node.HavingClause?.SearchCondition);
+                InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain, (condition, _) => InspectSearchCondition(condition));
             }
 
-            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
-            InspectSearchCondition(node.WhereClause?.SearchCondition);
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            continueDescent();
         }
 
-        public override void ExplicitVisit(UpdateStatement node)
+        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
-            var spec = node.UpdateSpecification;
-            if (HasActiveRecompileGuard)
+            if (!HasActiveRecompileGuard)
             {
-                base.ExplicitVisit(node);
-                _statementHasOptionRecompile = previous;
-                return;
+                InspectSearchCondition(node.UpdateSpecification.WhereClause?.SearchCondition);
+                InspectJoinOnClauses(node.UpdateSpecification.FromClause?.TableReferences, scopeChain, (condition, _) => InspectSearchCondition(condition));
             }
 
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces)));
-            InspectSearchCondition(spec.WhereClause?.SearchCondition);
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            continueDescent();
             _statementHasOptionRecompile = previous;
         }
 
-        public override void ExplicitVisit(DeleteStatement node)
+        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
-            var spec = node.DeleteSpecification;
-            if (HasActiveRecompileGuard)
+            if (!HasActiveRecompileGuard)
             {
-                base.ExplicitVisit(node);
-                _statementHasOptionRecompile = previous;
-                return;
+                InspectSearchCondition(node.DeleteSpecification.WhereClause?.SearchCondition);
+                InspectJoinOnClauses(node.DeleteSpecification.FromClause?.TableReferences, scopeChain, (condition, _) => InspectSearchCondition(condition));
             }
 
-            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces)));
-            InspectSearchCondition(spec.WhereClause?.SearchCondition);
-            base.ExplicitVisit(node);
-            ScopeStack.Pop();
+            continueDescent();
             _statementHasOptionRecompile = previous;
         }
 
-        public override void ExplicitVisit(MergeStatement node)
+        protected override void OnMergeStatementScope(MergeStatement node, ScopeChain scopeChain, Action continueDescent)
         {
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
-            base.ExplicitVisit(node);
+            continueDescent();
             _statementHasOptionRecompile = previous;
-
         }
 
         private void VisitProcedureOrFunctionBody(IList<ProcedureParameter> parameters, bool hasWithRecompile, TSqlFragment node)
@@ -147,14 +132,6 @@ public static class CatchAllPredicateScanner
             }
 
             _procedureHasWithRecompile = previousProcedureHasWithRecompile;
-        }
-
-        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause)
-        {
-            PushCteScope(withClause);
-            var context = CurrentResolutionContext();
-            PopCteScope();
-            return context;
         }
 
         private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)

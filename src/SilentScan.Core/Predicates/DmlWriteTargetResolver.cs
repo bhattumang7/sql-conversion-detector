@@ -13,8 +13,7 @@ internal static class DmlWriteTargetResolver
             return null;
         }
 
-        if (named.SchemaObject.SchemaIdentifier is null && withCtes is { CommonTableExpressions: { } ctes }
-            && ctes.Any(cte => catalog.IdentifierComparer.Equals(cte.ExpressionName.Value, named.SchemaObject.BaseIdentifier.Value)))
+        if (CteNameHelper.IsCteReference(named.SchemaObject, withCtes, catalog.IdentifierComparer))
         {
             return null;
         }

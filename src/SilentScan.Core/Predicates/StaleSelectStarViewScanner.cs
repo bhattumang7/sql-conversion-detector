@@ -18,7 +18,7 @@ public static class StaleSelectStarViewScanner
                 continue;
             }
 
-            var cteNames = CteNamesOf(view.SelectStatement.WithCtesAndXmlNamespaces, catalog.IdentifierComparer);
+            var cteNames = CteNameHelper.Names(view.SelectStatement.WithCtesAndXmlNamespaces, catalog.IdentifierComparer);
             if (FindSingleBaseTable(view.SelectStatement.QueryExpression, cteNames) is not { } baseTableQualifiedName)
             {
                 continue;
@@ -71,9 +71,4 @@ public static class StaleSelectStarViewScanner
                 SchemaObjectNameHelper.Qualify(namedTable.SchemaObject),
             _ => null,
         };
-
-    private static HashSet<string> CteNamesOf(WithCtesAndXmlNamespaces? withClause, StringComparer identifierComparer) =>
-        withClause is { CommonTableExpressions: { } ctes }
-            ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), identifierComparer)
-            : [];
 }

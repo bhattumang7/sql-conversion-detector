@@ -109,9 +109,7 @@ public static class SelfReferencingDmlScanner
         }
 
         private HashSet<string> CteNamesOf(WithCtesAndXmlNamespaces? withClause) =>
-            withClause is { CommonTableExpressions: { } ctes }
-                ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), catalog.IdentifierComparer)
-                : [];
+            CteNameHelper.Names(withClause, catalog.IdentifierComparer);
 
         private void Report(SelfReferencingDmlFinding? match, string statementKind, string targetQualifiedName, TSqlFragment locationNode)
         {
