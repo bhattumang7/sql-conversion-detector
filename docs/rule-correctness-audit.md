@@ -267,6 +267,28 @@ worse than not reporting it at all.
       genuine logic bug reachable through the shipped tool, not a
       data-population artifact.
 
+- [ ] **`DuplicationScanner`'s `IdenticalBinaryOperands` finding treats any
+      two textually-identical non-column expressions as provably equal,
+      with no non-determinism gate — so a repeated non-deterministic
+      function call is claimed to be "always the same value, a tautology,
+      or a fixed degenerate result" when it demonstrably isn't.**
+      (`src/SilentScan.Core/Predicates/DuplicationScanner.cs`:
+      `CanClaimTautologyOrContradiction` (~line 282-290) returns `true` for
+      any non-`ColumnReferenceExpression`, with no determinism check, gating
+      the `Equals`-comparison path; the `AND`/`OR` path (~line 206-213) and
+      the `Subtract`/`Divide`/`Modulo` self-reference path (~line 215-224)
+      fire on same-text operands with no gate at all.) Oracle-confirmed (SQL
+      Server 2025): `NEWID() = NEWID()` across 7.6M cross-joined rows
+      matched zero times — never true, refuting "always the same value /
+      tautology" for the equality path; `RAND() - RAND()` across multiple
+      rows produced a fixed *non-zero* value every time (two textually
+      identical `RAND()` calls in one statement evaluate to two different
+      numbers), refuting "fixed degenerate result" (implying zero) for the
+      self-subtraction path. `WHERE NEWID() = NEWID()` and expressions like
+      `RAND() - RAND()` would both be flagged with `FindingConfidence.High`
+      asserting claims that are empirically false for non-deterministic
+      functions (`NEWID`, `RAND`, `NEWSEQUENTIALID`, `CHECKSUM`, etc.).
+
 ---
 
 ## Audited, no bug found
@@ -387,14 +409,38 @@ worse than not reporting it at all.
   oracle-tested end-to-end against a live catalog; the underlying catalog
   facts (`is_auto_create_stats_on`, `sys.stats`/`sys.stats_columns`) are
   read live, engine-authoritative by construction.
+- `CatchAllPredicateScanner` — `(Column = @p OR @p IS NULL)` detection scope
+  (equality-only, formal-parameter-only), the `WITH RECOMPILE`/
+  `OPTION(RECOMPILE)` guard's exhaustiveness (confirmed all three
+  CREATE/ALTER procedure statement forms share the same base type, and that
+  triggers/functions cannot syntactically carry `WITH RECOMPILE` at all),
+  and the dead-comparison absorption path are all correct or already
+  oracle-tested.
+- `ModuleCompileFlagScanner` — `RecompilesEveryCall` confirmed tied only to
+  `WITH RECOMPILE` at create/alter time, unaffected by `sp_recompile`;
+  `TableValuedFunctionReturnUsesDatabaseCollation` confirmed scoped exactly
+  as documented across procedures/views/scalar functions/triggers/inline
+  and multi-statement TVFs, including the schema-binding-sets-it-
+  unconditionally case.
+- `MultiReferencedCteScanner` — direct multi-reference already oracle-
+  tested; newly verified transitive multi-reference (CTE B referencing CTE
+  A twice, main body referencing only B once) via `STATISTICS IO` showing
+  the base table scanned exactly the predicted number of times; recursive
+  self-reference exclusion is structural; confirmed no CTE-shadowing path
+  exists since T-SQL doesn't allow a `WITH` clause nested inside a
+  subquery.
+
+Skipped as pure style/structural, no real-engine claim to diverge from:
+`CodeMetricScanner` (every finding kind's own text says "no query result or
+plan is affected") and `FormattingScanner` (same framing; the one
+underlying T-SQL fact — an unbraced `IF`/`WHILE` body is exactly one
+statement — is uncontroversial syntax, not a claim needing verification).
 
 ---
 
 ## Not yet audited
 
-CatchAllPredicate, CodeMetric, Duplication,
-Formatting,
-ModuleCompileFlag, MultiReferencedCte, Naming, NestedViewDepth,
+Naming, NestedViewDepth,
 NonPersistedComputedColumn, NonSargablePredicate, NonUniqueUpdateSource,
 NotInNullableSubquery, OperandComparability, OutputParameter,
 ParameterReassignmentPredicate, PartialCompositeForeignKeyJoin,
