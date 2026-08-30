@@ -12,10 +12,7 @@ internal sealed record ConstrainedStatement(
     BooleanExpression? WhereCondition,
     TSqlFragment Node);
 
-#pragma warning disable CS9107
-internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, DatabaseCatalog catalog)
-    : ScopedSqlVisitorBase(sourcePath, catalog, ConstrainedColumnStatementVisitor.EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, DatabaseCatalog catalog) : IModuleRule
 {
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
@@ -25,41 +22,36 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
 
     protected abstract void InspectStatement(ConstrainedStatement statement);
 
-    protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
-    {
-        Inspect(node.FromClause, node.WhereClause?.SearchCondition, node);
-        continueDescent();
-    }
+    public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker) =>
+        Inspect(node.FromClause, node.WhereClause?.SearchCondition, node, walker);
 
-    protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
+    public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker)
     {
         var spec = node.UpdateSpecification;
         var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, Catalog, EmptyResolvedViews, SourcePath, ledger: null);
         var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
         Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node);
-        continueDescent();
     }
 
-    protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
+    public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker)
     {
         var spec = node.DeleteSpecification;
         var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, Catalog, EmptyResolvedViews, SourcePath, ledger: null);
         var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
         Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node);
-        continueDescent();
     }
 
     private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
         new(Catalog, EmptyResolvedViews, SourcePath, Ledger: null, cteRelations, ProcScope: null);
 
-    private void Inspect(FromClause? fromClause, BooleanExpression? whereCondition, TSqlFragment node)
+    private void Inspect(FromClause? fromClause, BooleanExpression? whereCondition, TSqlFragment node, ModuleWalker walker)
     {
         if (fromClause is null)
         {
             return;
         }
 
-        var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, ResolutionContext(CurrentCteRelations()));
+        var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, ResolutionContext(walker.CurrentCteRelations()));
         Inspect(byAlias, ordered, fromClause, whereCondition, node);
     }
 

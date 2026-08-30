@@ -9,20 +9,20 @@ public sealed class PredicateLocationCoverageTests
 {
     private static readonly Assembly CoreAssembly = typeof(TypedPredicateExtractor).Assembly;
 
-    private static readonly string[] PredicateLocationScopeHookNames =
+    private static readonly string[] ModuleWalkerPredicateLocationHookNames =
     [
-        "OnQuerySpecificationScope",
-        "OnUpdateStatementScope",
-        "OnDeleteStatementScope",
+        "OnEnterQuerySpecificationScope",
+        "OnEnterUpdateStatementScope",
+        "OnEnterDeleteStatementScope",
     ];
 
-    private static readonly HashSet<string> SharedWalkerScannerVisitorTypeNames = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> ModuleWalkerRuleTypeNames = new(StringComparer.Ordinal)
     {
-        "SilentScan.Core.Predicates.CatchAllPredicateScanner+Visitor",
-        "SilentScan.Core.Predicates.FloatEqualityPredicateScanner+Visitor",
-        "SilentScan.Core.Predicates.NotInNullableSubqueryScanner+Visitor",
-        "SilentScan.Core.Predicates.OperandComparabilityScanner+Visitor",
-        "SilentScan.Core.Predicates.TryCastComputedColumnPredicateScanner+Visitor",
+        "SilentScan.Core.Predicates.CatchAllPredicateScanner+Rule",
+        "SilentScan.Core.Predicates.FloatEqualityPredicateScanner+Rule",
+        "SilentScan.Core.Predicates.NotInNullableSubqueryScanner+Rule",
+        "SilentScan.Core.Predicates.OperandComparabilityScanner+Rule",
+        "SilentScan.Core.Predicates.TryCastComputedColumnPredicateScanner+Rule",
     };
 
     private static readonly HashSet<string> HandRolledJoinWalkScannerVisitorTypeNames = new(StringComparer.Ordinal)
@@ -39,29 +39,29 @@ public sealed class PredicateLocationCoverageTests
     ];
 
     private static readonly (string TypeName, string MethodName) FlowDrivenPredicateLocationSites =
-        ("SilentScan.Core.Predicates.ParameterReassignmentPredicateScanner+Visitor", "InspectStatementForFindings");
+        ("SilentScan.Core.Predicates.ParameterReassignmentPredicateScanner+Rule", "InspectStatementForFindings");
 
     private static readonly (string TypeName, string MethodName)[] DmlTargetScopeHookSites =
     [
-        ("SilentScan.Core.Predicates.SelfReferencingDmlScanner+Visitor", "OnUpdateStatementScope"),
-        ("SilentScan.Core.Predicates.SelfReferencingDmlScanner+Visitor", "OnDeleteStatementScope"),
-        ("SilentScan.Core.Predicates.SelfReferencingDmlScanner+Visitor", "OnMergeStatementScope"),
+        ("SilentScan.Core.Predicates.SelfReferencingDmlScanner+Rule", "OnEnterUpdateStatementScope"),
+        ("SilentScan.Core.Predicates.SelfReferencingDmlScanner+Rule", "OnEnterDeleteStatementScope"),
+        ("SilentScan.Core.Predicates.SelfReferencingDmlScanner+Rule", "OnEnterMergeStatementScope"),
     ];
 
     private static readonly string[] HandRolledScopeResolutionCalleeNames = ["Resolve", "ResolveForDataModification", "ResolveForMerge"];
 
     [Fact]
-    public void SharedWalkerScanners_RouteEveryOverriddenScopeHookThroughInspectAllPredicateLocations()
+    public void ModuleWalkerRules_RouteEveryOverriddenScopeHookThroughInspectAllPredicateLocations()
     {
         var gaps = new List<string>();
 
-        foreach (var typeName in SharedWalkerScannerVisitorTypeNames)
+        foreach (var typeName in ModuleWalkerRuleTypeNames)
         {
-            var visitorType = ResolveRegisteredType(typeName);
+            var ruleType = ResolveRegisteredType(typeName);
 
-            foreach (var hookName in PredicateLocationScopeHookNames)
+            foreach (var hookName in ModuleWalkerPredicateLocationHookNames)
             {
-                var hook = visitorType.GetMethod(
+                var hook = ruleType.GetMethod(
                     hookName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
 
                 if (hook is not null && !IlCallGraph.Calls(hook, "InspectAllPredicateLocations"))

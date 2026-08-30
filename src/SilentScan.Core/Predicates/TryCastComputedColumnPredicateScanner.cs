@@ -70,11 +70,13 @@ public static class TryCastComputedColumnPredicateScanner
             return [];
         }
 
-        var visitor = new Visitor(parseResult.SourcePath, catalog, candidates);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog, candidates);
+        var emptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, emptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.TableQualifiedName, StringComparer.Ordinal)
                 .ThenBy(f => f.ColumnName, StringComparer.Ordinal)
                 .ThenBy(f => f.Location.SourcePath, StringComparer.Ordinal)
@@ -83,34 +85,20 @@ public static class TryCastComputedColumnPredicateScanner
         ];
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(
+    private sealed class Rule(
         string sourcePath, DatabaseCatalog catalog,
-        IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> candidates)
-        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+        IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> candidates) : IModuleRule
     {
-        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
-
         public List<TryCastComputedColumnPredicateFinding> Findings { get; } = [];
 
-        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
-        {
-            InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
-            continueDescent();
-        }
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker) =>
+            ModuleWalker.InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
 
-        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
-        {
-            InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
-            continueDescent();
-        }
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            ModuleWalker.InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
 
-        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
-        {
-            InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
-            continueDescent();
-        }
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            ModuleWalker.InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
 
         private void InspectSearchCondition(
             BooleanExpression? searchCondition,

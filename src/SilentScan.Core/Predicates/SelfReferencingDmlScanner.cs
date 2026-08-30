@@ -13,25 +13,23 @@ public static class SelfReferencingDmlScanner
     public static IReadOnlyList<SelfReferencingDmlFinding> Scan(
         SqlParseResult parseResult, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog, viewExpansionMap);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog, viewExpansionMap);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap)
-        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap) : IModuleRule
     {
         public List<SelfReferencingDmlFinding> Findings { get; } = [];
 
-        protected override void OnInsertStatementScope(InsertStatement node, Action continueDescent)
+        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker)
         {
             var spec = node.InsertSpecification;
             if (spec.Target is NamedTableReference targetRef && !HasLiteralTopOne(spec.TopRowFilter))
@@ -42,11 +40,9 @@ public static class SelfReferencingDmlScanner
                 var match = spec.InsertSource is SelectInsertSource select ? FindMatchInFragment(select.Select, targetQualifiedName, cteNames) : null;
                 Report(match, "INSERT", targetQualifiedName, node);
             }
-
-            continueDescent();
         }
 
-        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
             var spec = node.UpdateSpecification;
             var updateTargetAlias = (spec.Target as NamedTableReference)?.Alias?.Value ?? (spec.Target as NamedTableReference)?.SchemaObject.BaseIdentifier.Value;
@@ -61,11 +57,9 @@ public static class SelfReferencingDmlScanner
                         .FirstOrDefault(m => m is not null);
                 Report(match, "UPDATE", targetQualifiedName, node);
             }
-
-            continueDescent();
         }
 
-        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
             var spec = node.DeleteSpecification;
             var deleteTargetAlias = (spec.Target as NamedTableReference)?.Alias?.Value ?? (spec.Target as NamedTableReference)?.SchemaObject.BaseIdentifier.Value;
@@ -77,11 +71,9 @@ public static class SelfReferencingDmlScanner
                     ?? FindMatchInFragment(spec.WhereClause, targetQualifiedName, cteNames);
                 Report(match, "DELETE", targetQualifiedName, node);
             }
-
-            continueDescent();
         }
 
-        protected override void OnMergeStatementScope(MergeStatement node, ScopeChain scopeChain, Action continueDescent)
+        public void OnEnterMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
             var spec = node.MergeSpecification;
             var mergeTargetAlias = spec.TableAlias?.Value ?? (spec.Target as NamedTableReference)?.SchemaObject.BaseIdentifier.Value;
@@ -96,8 +88,6 @@ public static class SelfReferencingDmlScanner
                         .FirstOrDefault(m => m is not null);
                 Report(match, "MERGE", targetQualifiedName, node);
             }
-
-            continueDescent();
         }
 
         private static bool HasLiteralTopOne(TopRowFilter? topRowFilter)

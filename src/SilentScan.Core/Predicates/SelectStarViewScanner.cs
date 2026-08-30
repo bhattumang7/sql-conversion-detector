@@ -57,11 +57,12 @@ public static class SelectStarViewScanner
             return [];
         }
 
-        var visitor = new Visitor(parseResult.SourcePath, catalog, lineage, candidates);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog, lineage, candidates);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, lineage.AllRelations, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.ViewQualifiedName, StringComparer.Ordinal)
                 .ThenBy(f => f.ConsumerSourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.ConsumerLine)
@@ -69,27 +70,21 @@ public static class SelectStarViewScanner
         ];
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SelectStarViewCandidate> candidates)
-        : ScopedSqlVisitorBase(sourcePath, catalog, lineage.AllRelations, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SelectStarViewCandidate> candidates) : IModuleRule
     {
         public List<SelectStarViewFinding> Findings { get; } = [];
 
-        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
-        {
-            InspectQuery(node);
-            continueDescent();
-        }
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker) =>
+            InspectQuery(node, walker);
 
-        private void InspectQuery(QuerySpecification node)
+        private void InspectQuery(QuerySpecification node, ModuleWalker walker)
         {
             if (node.FromClause is null)
             {
                 return;
             }
 
-            var (byAlias, _) = FromScopeResolver.Resolve(node.FromClause, catalog, lineage.AllRelations, sourcePath, ledger: null, CurrentCteRelations(), procScope: null);
+            var (byAlias, _) = FromScopeResolver.Resolve(node.FromClause, catalog, lineage.AllRelations, sourcePath, ledger: null, walker.CurrentCteRelations(), procScope: null);
 
             var wholeQueryStar = node.SelectElements.OfType<SelectStarExpression>().FirstOrDefault(s => s.Qualifier is not { Count: > 0 });
 

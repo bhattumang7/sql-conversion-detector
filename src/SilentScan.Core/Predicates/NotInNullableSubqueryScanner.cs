@@ -12,64 +12,54 @@ public static class NotInNullableSubqueryScanner
 
     public static IReadOnlyList<NotInNullableSubqueryFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
-        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<NotInNullableSubqueryFinding> Findings { get; } = [];
 
-        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
-        {
-            InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
-            continueDescent();
-        }
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker) =>
+            ModuleWalker.InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition, walker));
 
-        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
-        {
-            InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
-            continueDescent();
-        }
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            ModuleWalker.InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition, walker));
 
-        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
-        {
-            InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
-            continueDescent();
-        }
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            ModuleWalker.InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition, walker));
 
-        private void InspectSearchCondition(BooleanExpression? searchCondition)
+        private void InspectSearchCondition(BooleanExpression? searchCondition, ModuleWalker walker)
         {
             if (searchCondition is null)
             {
                 return;
             }
 
-            var scopeChain = CurrentScopeChain();
-            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
+            var scopeChain = walker.CurrentScopeChain();
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(searchCondition, columnRef => walker.ResolveColumnFacts(columnRef, scopeChain)))
             {
                 return;
             }
 
             foreach (var predicate in PredicateTreeWalker.FlattenAnd(searchCondition).OfType<InPredicate>())
             {
-                TryMatch(predicate, scopeChain);
+                TryMatch(predicate, scopeChain, walker);
             }
         }
 
         private void TryMatch(
             InPredicate predicate,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> enclosingScopeChain)
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> enclosingScopeChain,
+            ModuleWalker walker)
         {
             if (!predicate.NotDefined || predicate.Subquery is not { QueryExpression: QuerySpecification subquerySpec })
             {
@@ -82,7 +72,7 @@ public static class NotInNullableSubqueryScanner
                 return;
             }
 
-            var innerScope = FromScopeResolver.Resolve(subquerySpec.FromClause, CurrentResolutionContext());
+            var innerScope = FromScopeResolver.Resolve(subquerySpec.FromClause, walker.CurrentResolutionContext());
             var subqueryScopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { innerScope };
             subqueryScopeChain.AddRange(enclosingScopeChain);
 

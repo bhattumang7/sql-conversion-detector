@@ -12,36 +12,32 @@ public static class NonUniqueUpdateSourceScanner
 
     public static IReadOnlyList<NonUniqueUpdateSourceFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
-        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<NonUniqueUpdateSourceFinding> Findings { get; } = [];
 
-        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
             var spec = node.UpdateSpecification;
             if (spec.FromClause is not null)
             {
-                Inspect(spec);
+                Inspect(spec, walker);
             }
-
-            continueDescent();
         }
 
-        private void Inspect(UpdateSpecification spec)
+        private void Inspect(UpdateSpecification spec, ModuleWalker walker)
         {
             if (spec.Target is not NamedTableReference targetRef)
             {
@@ -50,7 +46,7 @@ public static class NonUniqueUpdateSourceScanner
 
             var targetAlias = targetRef.Alias?.Value ?? targetRef.SchemaObject.BaseIdentifier.Value;
 
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext());
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, walker.CurrentResolutionContext());
             if (!byAlias.TryGetValue(targetAlias, out var targetEntry) || targetEntry.Relation.QualifiedName is not { } targetQualifiedName)
             {
                 return;
@@ -61,7 +57,7 @@ public static class NonUniqueUpdateSourceScanner
                 (byAlias, ordered),
             };
 
-            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(spec.WhereClause?.SearchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(spec.WhereClause?.SearchCondition, columnRef => walker.ResolveColumnFacts(columnRef, scopeChain)))
             {
                 return;
             }

@@ -34,43 +34,32 @@ public static class PartialCompositeForeignKeyJoinScanner
             return [];
         }
 
-        var visitor = new Visitor(parseResult.SourcePath, catalog, compositeForeignKeys);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog, compositeForeignKeys);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyList<CompositeForeignKey> compositeForeignKeys)
-        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyList<CompositeForeignKey> compositeForeignKeys) : IModuleRule
     {
         public List<PartialCompositeForeignKeyJoinFinding> Findings { get; } = [];
 
-        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
-        {
-            InspectFromClause(node.FromClause, node.WhereClause, CurrentCteRelations());
-            continueDescent();
-        }
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker) =>
+            InspectFromClause(node.FromClause, node.WhereClause, walker.CurrentCteRelations(), walker);
 
-        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
-        {
-            InspectFromClause(node.UpdateSpecification.FromClause, node.UpdateSpecification.WhereClause, CurrentCteRelations());
-            continueDescent();
-        }
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            InspectFromClause(node.UpdateSpecification.FromClause, node.UpdateSpecification.WhereClause, walker.CurrentCteRelations(), walker);
 
-        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
-        {
-            InspectFromClause(node.DeleteSpecification.FromClause, node.DeleteSpecification.WhereClause, CurrentCteRelations());
-            continueDescent();
-        }
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            InspectFromClause(node.DeleteSpecification.FromClause, node.DeleteSpecification.WhereClause, walker.CurrentCteRelations(), walker);
 
-        private void InspectFromClause(FromClause? fromClause, WhereClause? whereClause, IReadOnlyDictionary<string, ResolvedRelation> cteRelations)
+        private void InspectFromClause(FromClause? fromClause, WhereClause? whereClause, IReadOnlyDictionary<string, ResolvedRelation> cteRelations, ModuleWalker walker)
         {
             if (fromClause is null)
             {
@@ -88,7 +77,7 @@ public static class PartialCompositeForeignKeyJoinScanner
                 (byAlias, ordered),
             };
 
-            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(whereClause?.SearchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(whereClause?.SearchCondition, columnRef => walker.ResolveColumnFacts(columnRef, scopeChain)))
             {
                 return;
             }

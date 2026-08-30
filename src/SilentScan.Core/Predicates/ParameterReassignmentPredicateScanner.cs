@@ -11,11 +11,12 @@ public static class ParameterReassignmentPredicateScanner
 
     public static IReadOnlyList<ParameterReassignmentPredicateFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
@@ -27,10 +28,7 @@ public static class ParameterReassignmentPredicateScanner
         public static FlowState Declined_() => new(null, null, true);
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
-        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null), IStatementFlowPolicy<FlowState>
-#pragma warning restore CS9107
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule, IStatementFlowPolicy<FlowState>
     {
         public List<ParameterReassignmentPredicateFinding> Findings { get; } = [];
 
@@ -38,7 +36,9 @@ public static class ParameterReassignmentPredicateScanner
 
         private HashSet<string> _formalParameterNames = new(StringComparer.OrdinalIgnoreCase);
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        private ModuleWalker? _walker;
+
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
         {
             var hasWithRecompile = node switch
             {
@@ -48,7 +48,9 @@ public static class ParameterReassignmentPredicateScanner
                 _ => false,
             };
 
+            _walker = walker;
             AnalyzeProcedure(node.Parameters, node.StatementList, hasWithRecompile);
+            _walker = null;
         }
 
         private void AnalyzeProcedure(IList<ProcedureParameter> parameters, StatementList? statementList, bool hasWithRecompile)
@@ -120,17 +122,17 @@ public static class ParameterReassignmentPredicateScanner
             switch (statement)
             {
                 case SelectStatement { QueryExpression: QuerySpecification spec } select when !HasOptionRecompile(select.OptimizerHints):
-                    InspectAllPredicateLocations(
+                    ModuleWalker.InspectAllPredicateLocations(
                         spec, BuildScopeChain(spec.FromClause, select.WithCtesAndXmlNamespaces), (condition, chain) => InspectSearchConditionCore(condition, chain, state));
                     break;
 
                 case UpdateStatement { UpdateSpecification: { } upd } update when !HasOptionRecompile(update.OptimizerHints):
-                    InspectAllPredicateLocations(
+                    ModuleWalker.InspectAllPredicateLocations(
                         update, BuildDataModificationScopeChain(upd.Target, upd.FromClause, update.WithCtesAndXmlNamespaces), (condition, chain) => InspectSearchConditionCore(condition, chain, state));
                     break;
 
                 case DeleteStatement { DeleteSpecification: { } del } delete when !HasOptionRecompile(delete.OptimizerHints):
-                    InspectAllPredicateLocations(
+                    ModuleWalker.InspectAllPredicateLocations(
                         delete, BuildDataModificationScopeChain(del.Target, del.FromClause, delete.WithCtesAndXmlNamespaces), (condition, chain) => InspectSearchConditionCore(condition, chain, state));
                     break;
 
@@ -144,15 +146,15 @@ public static class ParameterReassignmentPredicateScanner
 
         private ScopeChain BuildScopeChain(FromClause? fromClause, WithCtesAndXmlNamespaces? withClause)
         {
-            var cteRelations = CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, CurrentProcScope);
-            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, CurrentProcScope);
+            var cteRelations = CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, _walker!.CurrentProcScope);
+            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, _walker!.CurrentProcScope);
             return [((IReadOnlyDictionary<string, ScopeEntry>)byAlias, (IReadOnlyList<ScopeEntry>)ordered)];
         }
 
         private ScopeChain BuildDataModificationScopeChain(TableReference target, FromClause? extraFromClause, WithCtesAndXmlNamespaces? withClause)
         {
-            var cteRelations = CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, CurrentProcScope);
-            var context = new FromScopeResolver.ResolutionContext(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, CurrentProcScope);
+            var cteRelations = CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, _walker!.CurrentProcScope);
+            var context = new FromScopeResolver.ResolutionContext(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, _walker!.CurrentProcScope);
             var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(target, extraFromClause, context);
             return [((IReadOnlyDictionary<string, ScopeEntry>)byAlias, (IReadOnlyList<ScopeEntry>)ordered)];
         }

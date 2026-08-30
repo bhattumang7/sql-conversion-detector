@@ -1,10 +1,13 @@
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
 public static class MissingStatisticsScanner
 {
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     public static IReadOnlyList<MissingStatisticsFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         if (catalog.IsAutoCreateStatsOn != false)
@@ -13,7 +16,8 @@ public static class MissingStatisticsScanner
         }
 
         var visitor = new Visitor(parseResult.SourcePath, catalog);
-        parseResult.Fragment.Accept(visitor);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [visitor]);
+        parseResult.Fragment.Accept(walker);
         return
         [
             .. visitor.Findings

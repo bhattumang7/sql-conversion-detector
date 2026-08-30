@@ -11,11 +11,12 @@ public static class IndexHintScanner
 
     public static IReadOnlyList<IndexHintFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column)
@@ -23,37 +24,29 @@ public static class IndexHintScanner
         ];
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
-        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<IndexHintFinding> Findings { get; } = [];
 
-        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
-        {
-            Inspect(node.FromClause, node.WhereClause?.SearchCondition, CurrentCteRelations());
-            continueDescent();
-        }
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker) =>
+            Inspect(node.FromClause, node.WhereClause?.SearchCondition, walker.CurrentCteRelations());
 
-        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
             var spec = node.UpdateSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(walker));
             InspectResolved(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, spec.Target);
-            continueDescent();
         }
 
-        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
             var spec = node.DeleteSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(walker));
             InspectResolved(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, spec.Target);
-            continueDescent();
         }
 
-        private FromScopeResolver.ResolutionContext ResolutionContext() =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CurrentCteRelations(), ProcScope: null);
+        private FromScopeResolver.ResolutionContext ResolutionContext(ModuleWalker walker) =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, walker.CurrentCteRelations(), ProcScope: null);
 
         private void Inspect(FromClause? fromClause, BooleanExpression? whereCondition, IReadOnlyDictionary<string, ResolvedRelation> cteRelations)
         {

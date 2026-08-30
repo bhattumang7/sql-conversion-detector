@@ -12,25 +12,25 @@ public static class CatchAllPredicateScanner
 
     public static IReadOnlyList<CatchAllPredicateFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
-        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<CatchAllPredicateFinding> Findings { get; } = [];
 
         private readonly HashSet<string> _formalParameterNames = new(StringComparer.OrdinalIgnoreCase);
+
+        private readonly Stack<bool> _statementRecompileStack = new();
 
         private bool _procedureHasWithRecompile;
 
@@ -42,7 +42,7 @@ public static class CatchAllPredicateScanner
 
         private bool _previousProcedureHasWithRecompile;
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
         {
             _previousFormalParameterNames = new HashSet<string>(_formalParameterNames, StringComparer.OrdinalIgnoreCase);
             _previousProcedureHasWithRecompile = _procedureHasWithRecompile;
@@ -57,7 +57,7 @@ public static class CatchAllPredicateScanner
                 && options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile);
         }
 
-        protected override void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        public void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
         {
             _formalParameterNames.Clear();
             foreach (var name in _previousFormalParameterNames)
@@ -68,59 +68,55 @@ public static class CatchAllPredicateScanner
             _procedureHasWithRecompile = _previousProcedureHasWithRecompile;
         }
 
-        protected override void OnEnterTriggerBody(TriggerStatementBody node)
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker)
         {
             _formalParameterNames.Clear();
             _procedureHasWithRecompile = false;
         }
 
-        protected override void OnSelectStatementScope(SelectStatement node, Action continueDescent)
-        {
-            var previous = BeginStatementOptimizerHints(node.OptimizerHints);
-            continueDescent();
-            _statementHasOptionRecompile = previous;
-        }
+        public void OnEnterSelectStatementScope(SelectStatement node, ModuleWalker walker) =>
+            _statementRecompileStack.Push(BeginStatementOptimizerHints(node.OptimizerHints));
 
-        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
+        public void OnLeaveSelectStatementScope(SelectStatement node, ModuleWalker walker) =>
+            _statementHasOptionRecompile = _statementRecompileStack.Pop();
+
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker)
         {
             if (!HasActiveRecompileGuard)
             {
-                InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
+                ModuleWalker.InspectAllPredicateLocations(node, scopeChain, (condition, chain) => InspectSearchCondition(condition, chain, walker));
             }
-
-            continueDescent();
         }
 
-        protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
-            var previous = BeginStatementOptimizerHints(node.OptimizerHints);
+            _statementRecompileStack.Push(BeginStatementOptimizerHints(node.OptimizerHints));
             if (!HasActiveRecompileGuard)
             {
-                InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
+                ModuleWalker.InspectAllPredicateLocations(node, scopeChain, (condition, chain) => InspectSearchCondition(condition, chain, walker));
             }
-
-            continueDescent();
-            _statementHasOptionRecompile = previous;
         }
 
-        protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
+        public void OnLeaveUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            _statementHasOptionRecompile = _statementRecompileStack.Pop();
+
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
-            var previous = BeginStatementOptimizerHints(node.OptimizerHints);
+            _statementRecompileStack.Push(BeginStatementOptimizerHints(node.OptimizerHints));
             if (!HasActiveRecompileGuard)
             {
-                InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
+                ModuleWalker.InspectAllPredicateLocations(node, scopeChain, (condition, chain) => InspectSearchCondition(condition, chain, walker));
             }
-
-            continueDescent();
-            _statementHasOptionRecompile = previous;
         }
 
-        protected override void OnMergeStatementScope(MergeStatement node, ScopeChain scopeChain, Action continueDescent)
-        {
-            var previous = BeginStatementOptimizerHints(node.OptimizerHints);
-            continueDescent();
-            _statementHasOptionRecompile = previous;
-        }
+        public void OnLeaveDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            _statementHasOptionRecompile = _statementRecompileStack.Pop();
+
+        public void OnEnterMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            _statementRecompileStack.Push(BeginStatementOptimizerHints(node.OptimizerHints));
+
+        public void OnLeaveMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+            _statementHasOptionRecompile = _statementRecompileStack.Pop();
 
         private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)
         {
@@ -129,15 +125,14 @@ public static class CatchAllPredicateScanner
             return previous;
         }
 
-        private void InspectSearchCondition(BooleanExpression? searchCondition)
+        private void InspectSearchCondition(BooleanExpression? searchCondition, ScopeChain scopeChain, ModuleWalker walker)
         {
             if (searchCondition is null)
             {
                 return;
             }
 
-            var scopeChain = CurrentScopeChain();
-            var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
+            var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => walker.ResolveColumnFacts(columnRef, scopeChain));
 
             foreach (var orClause in FlattenOr(searchCondition))
             {
@@ -212,7 +207,7 @@ public static class CatchAllPredicateScanner
 
         private void InspectOrClause(
             IReadOnlyList<BooleanExpression> orLeaves,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+            ScopeChain scopeChain,
             IReadOnlySet<TSqlFragment> dead)
         {
 
@@ -233,7 +228,7 @@ public static class CatchAllPredicateScanner
 
         private void TryMatchCatchAllPair(
             ScalarExpression columnSide, ScalarExpression variableSide, HashSet<string> isNullVariables,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+            ScopeChain scopeChain,
             TSqlFragment node)
         {
             if (columnSide is not ColumnReferenceExpression columnRef

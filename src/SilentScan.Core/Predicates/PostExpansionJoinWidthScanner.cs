@@ -14,38 +14,33 @@ public static class PostExpansionJoinWidthScanner
     public static IReadOnlyList<PostExpansionJoinWidthFinding> Scan(
         SqlParseResult parseResult, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog, viewExpansionMap);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog, viewExpansionMap);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderByDescending(f => f.ExpandedCount - f.WrittenCount)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line),
         ];
     }
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap)
-        : ScopedSqlVisitorBase(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ViewExpansionOrigin> viewExpansionMap) : IModuleRule
     {
         public List<PostExpansionJoinWidthFinding> Findings { get; } = [];
 
-        protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
-        {
-            InspectFromClause(node.FromClause);
-            continueDescent();
-        }
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker) =>
+            InspectFromClause(node.FromClause, walker);
 
-        private void InspectFromClause(FromClause? fromClause)
+        private void InspectFromClause(FromClause? fromClause, ModuleWalker walker)
         {
             if (fromClause is null)
             {
                 return;
             }
 
-            var (_, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, CurrentCteRelations(), procScope: null);
+            var (_, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, walker.CurrentCteRelations(), procScope: null);
             if (ordered.Count == 0)
             {
                 return;

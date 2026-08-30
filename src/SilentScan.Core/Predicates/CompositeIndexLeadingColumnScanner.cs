@@ -7,10 +7,13 @@ namespace SilentScan.Core.Predicates;
 
 public static class CompositeIndexLeadingColumnScanner
 {
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     public static IReadOnlyList<CompositeIndexLeadingColumnFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog);
-        parseResult.Fragment.Accept(visitor);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [visitor]);
+        parseResult.Fragment.Accept(walker);
         return
         [
             .. visitor.Findings
