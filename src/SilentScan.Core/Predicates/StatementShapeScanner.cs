@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
 
@@ -58,63 +59,46 @@ public static class StatementShapeScanner
         ];
     }
 
-    private sealed class Visitor : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Visitor : ScopedRelationWalker
     {
         private readonly string sourcePath;
-        private string _currentModule;
         private bool? _currentRoutineHasSetNocountOn;
         private int _currentRoutineLine;
         private int _currentRoutineColumn;
+        private string? _currentRoutineModule;
 
         public Visitor(string sourcePath)
+            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
         {
             this.sourcePath = sourcePath;
-            _currentModule = sourcePath;
         }
 
         public List<StatementShapeFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(CreateProcedureStatement node)
+        private string CurrentModule => CurrentProcScope ?? sourcePath;
+
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
         {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine, node.StartColumn);
-            base.ExplicitVisit(node);
-            ExitRoutine();
+            if (node is ProcedureStatementBody)
+            {
+                EnterRoutine(node.StartLine, node.StartColumn);
+            }
         }
 
-        public override void ExplicitVisit(AlterProcedureStatement node)
+        protected override void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node)
         {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine, node.StartColumn);
-            base.ExplicitVisit(node);
-            ExitRoutine();
+            if (node is ProcedureStatementBody)
+            {
+                ExitRoutine();
+            }
         }
 
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node)
-        {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine, node.StartColumn);
-            base.ExplicitVisit(node);
-            ExitRoutine();
-        }
+        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
+            EnterRoutine(node.StartLine, node.StartColumn);
 
-        public override void ExplicitVisit(CreateTriggerStatement node)
-        {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), node.StartLine, node.StartColumn);
-            base.ExplicitVisit(node);
-            ExitRoutine();
-        }
-
-        public override void ExplicitVisit(AlterTriggerStatement node)
-        {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), node.StartLine, node.StartColumn);
-            base.ExplicitVisit(node);
-            ExitRoutine();
-        }
-
-        public override void ExplicitVisit(CreateOrAlterTriggerStatement node)
-        {
-            EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), node.StartLine, node.StartColumn);
-            base.ExplicitVisit(node);
-            ExitRoutine();
-        }
+        protected override void OnLeaveTriggerBody(TriggerStatementBody node) => ExitRoutine();
 
         public override void ExplicitVisit(PredicateSetStatement node)
         {
@@ -135,7 +119,7 @@ public static class StatementShapeScanner
             {
                 Findings.Add(new StatementShapeFinding(
                     StatementShapeFindingKind.InsertWithoutColumnList,
-                    _currentModule,
+                    CurrentModule,
                     sourcePath,
                     node.StartLine,
                     node.StartColumn,
@@ -152,7 +136,7 @@ public static class StatementShapeScanner
             {
                 Findings.Add(new StatementShapeFinding(
                     StatementShapeFindingKind.OrdinalOrderBy,
-                    _currentModule,
+                    CurrentModule,
                     sourcePath,
                     ordinalElement.StartLine,
                     ordinalElement.StartColumn,
@@ -163,7 +147,7 @@ public static class StatementShapeScanner
             {
                 Findings.Add(new StatementShapeFinding(
                     StatementShapeFindingKind.BareSelectStar,
-                    _currentModule,
+                    CurrentModule,
                     sourcePath,
                     node.StartLine,
                     node.StartColumn,
@@ -174,9 +158,9 @@ public static class StatementShapeScanner
             base.ExplicitVisit(node);
         }
 
-        private void EnterRoutine(string qualifiedName, int line, int column)
+        private void EnterRoutine(int line, int column)
         {
-            _currentModule = qualifiedName;
+            _currentRoutineModule = CurrentModule;
             _currentRoutineHasSetNocountOn = false;
             _currentRoutineLine = line;
             _currentRoutineColumn = column;
@@ -188,11 +172,11 @@ public static class StatementShapeScanner
             {
                 Findings.Add(new StatementShapeFinding(
                     StatementShapeFindingKind.MissingSetNocountOn,
-                    _currentModule,
+                    _currentRoutineModule!,
                     sourcePath,
                     _currentRoutineLine,
                     _currentRoutineColumn,
-                    $"'{_currentModule}' never sets NOCOUNT ON - every DML statement it runs sends a client-visible rowcount message.",
+                    $"'{_currentRoutineModule}' never sets NOCOUNT ON - every DML statement it runs sends a client-visible rowcount message.",
                     FindingConfidence.Medium));
             }
 

@@ -1,5 +1,7 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Common;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -84,61 +86,27 @@ public static class FormattingScanner
         }
     }
 
-    private sealed class Visitor : TSqlFragmentVisitor
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    private sealed class Visitor : ScopedRelationWalker
     {
         private readonly string sourcePath;
 
         public Visitor(string sourcePath)
+            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
         {
             this.sourcePath = sourcePath;
-            _currentModule = sourcePath;
         }
 
         public List<FormattingFinding> Findings { get; } = [];
 
-        private string _currentModule;
+        private string CurrentModule => CurrentProcScope ?? sourcePath;
 
-        public override void ExplicitVisit(CreateProcedureStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
             CheckStatements(node.StatementList?.Statements);
-            base.ExplicitVisit(node);
-        }
 
-        public override void ExplicitVisit(AlterProcedureStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name);
+        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
             CheckStatements(node.StatementList?.Statements);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateFunctionStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckStatements(node.StatementList?.Statements);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterFunctionStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckStatements(node.StatementList?.Statements);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(CreateTriggerStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckStatements(node.StatementList?.Statements);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(AlterTriggerStatement node)
-        {
-            _currentModule = SchemaObjectNameHelper.Qualify(node.Name);
-            CheckStatements(node.StatementList?.Statements);
-            base.ExplicitVisit(node);
-        }
 
         public override void ExplicitVisit(BeginEndBlockStatement node)
         {
@@ -181,7 +149,7 @@ public static class FormattingScanner
             if (IsRedundantlyWrapped(node.Expression))
             {
                 Findings.Add(new FormattingFinding(
-                    FormattingFindingKind.RedundantParentheses, _currentModule, sourcePath, node.StartLine, node.StartColumn));
+                    FormattingFindingKind.RedundantParentheses, CurrentModule, sourcePath, node.StartLine, node.StartColumn));
             }
 
             base.ExplicitVisit(node);
@@ -193,7 +161,7 @@ public static class FormattingScanner
             {
 
                 Findings.Add(new FormattingFinding(
-                    FormattingFindingKind.RedundantParentheses, _currentModule, sourcePath, node.StartLine, node.StartColumn));
+                    FormattingFindingKind.RedundantParentheses, CurrentModule, sourcePath, node.StartLine, node.StartColumn));
             }
 
             base.ExplicitVisit(node);
@@ -211,7 +179,7 @@ public static class FormattingScanner
                 if (i > 0 && statements[i].StartLine == statements[i - 1].StartLine)
                 {
                     Findings.Add(new FormattingFinding(
-                        FormattingFindingKind.MultipleStatementsOnSameLine, _currentModule, sourcePath,
+                        FormattingFindingKind.MultipleStatementsOnSameLine, CurrentModule, sourcePath,
                         statements[i].StartLine, statements[i].StartColumn));
                 }
 
@@ -251,7 +219,7 @@ public static class FormattingScanner
             if (current.StartLine == bodyLastLine + 1 && current.StartColumn >= bodyStatement.StartColumn)
             {
                 Findings.Add(new FormattingFinding(
-                    FormattingFindingKind.DanglingStatementAfterUnbracedBody, _currentModule, sourcePath,
+                    FormattingFindingKind.DanglingStatementAfterUnbracedBody, CurrentModule, sourcePath,
                     current.StartLine, current.StartColumn));
             }
         }
@@ -272,7 +240,7 @@ public static class FormattingScanner
             if (current.StartLine == endLine)
             {
                 Findings.Add(new FormattingFinding(
-                    FormattingFindingKind.IfImmediatelyFollowingPriorBlockEnd, _currentModule, sourcePath,
+                    FormattingFindingKind.IfImmediatelyFollowingPriorBlockEnd, CurrentModule, sourcePath,
                     current.StartLine, current.StartColumn));
             }
         }
@@ -288,7 +256,7 @@ public static class FormattingScanner
             var kind = body.StartLine == keywordLine
                 ? FormattingFindingKind.SingleLineConditionalBody
                 : FormattingFindingKind.MissingBeginEndBlock;
-            Findings.Add(new FormattingFinding(kind, _currentModule, sourcePath, keywordLine, keywordColumn));
+            Findings.Add(new FormattingFinding(kind, CurrentModule, sourcePath, keywordLine, keywordColumn));
         }
 
         private void CheckDeclarations(IList<DeclareVariableElement> declarations)
@@ -298,7 +266,7 @@ public static class FormattingScanner
                 if (declarations[i].StartLine == declarations[i - 1].StartLine)
                 {
                     Findings.Add(new FormattingFinding(
-                        FormattingFindingKind.MultipleDeclarationsOnSameLine, _currentModule, sourcePath,
+                        FormattingFindingKind.MultipleDeclarationsOnSameLine, CurrentModule, sourcePath,
                         declarations[i].StartLine, declarations[i].StartColumn,
                         DetailText: declarations[i].VariableName?.Value));
                 }

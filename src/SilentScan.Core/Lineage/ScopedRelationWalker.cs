@@ -89,6 +89,10 @@ internal abstract class ScopedRelationWalker(
     {
     }
 
+    protected virtual void OnLeaveTriggerBody(TriggerStatementBody node)
+    {
+    }
+
     private const string DdlOrLogonTriggerConstructKind = "DDL/LOGON trigger";
     private const string TriggerInsertedDeletedConstructKind = "trigger inserted/deleted";
 
@@ -105,6 +109,7 @@ internal abstract class ScopedRelationWalker(
                 DdlOrLogonTriggerConstructKind, $"trigger scope '{triggerObject.TriggerScope}' has no target table - no inserted/deleted pseudo-tables to resolve");
             node.AcceptChildren(this);
             CurrentProcScope = previousScope;
+            OnLeaveTriggerBody(node);
             return;
         }
 
@@ -113,6 +118,7 @@ internal abstract class ScopedRelationWalker(
         PopCteScope();
 
         CurrentProcScope = previousScope;
+        OnLeaveTriggerBody(node);
     }
 
     protected IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
