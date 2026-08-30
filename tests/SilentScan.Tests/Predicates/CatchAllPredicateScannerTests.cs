@@ -184,6 +184,28 @@ public sealed class CatchAllPredicateScannerTests
     }
 
     [Fact]
+    public void CanonicalOrder_InJoinOnClause_Fires()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN "
+            + "SELECT 1 FROM dbo.Customers c JOIN dbo.Orders o ON (c.Code = @p OR @p IS NULL) WHERE o.CustomerId = c.Id; END");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.ColumnName);
+    }
+
+    [Fact]
+    public void CanonicalOrder_InHavingClause_Fires()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN "
+            + "SELECT Region FROM dbo.Customers GROUP BY Region HAVING (Region = @p OR @p IS NULL); END");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Region", finding.ColumnName);
+    }
+
+    [Fact]
     public void UpdateStatement_SameShapeInWhereClause_Fires()
     {
         var findings = Scan(

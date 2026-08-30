@@ -74,6 +74,21 @@ public sealed class TryCastComputedColumnPredicateScannerTests
     }
 
     [Fact]
+    public void TryCastComputedColumn_ReferencedInUpdateFromJoinOn_Fires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find AS
+            BEGIN
+                UPDATE e SET Amount = 0 FROM dbo.Events e JOIN dbo.Events e2 ON e.ParsedDate = e2.ParsedDate;
+            END
+            """);
+
+        Assert.NotEmpty(findings);
+        Assert.All(findings, f => Assert.Equal("ParsedDate", f.ColumnName));
+    }
+
+    [Fact]
     public void TryCastComputedColumn_NeverReferencedInPredicate_NeverFires()
     {
         var findings = Scan(

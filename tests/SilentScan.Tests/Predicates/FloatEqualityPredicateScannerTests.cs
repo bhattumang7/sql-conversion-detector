@@ -65,6 +65,22 @@ public sealed class FloatEqualityPredicateScannerTests
     }
 
     [Fact]
+    public void EqualityAgainstFloatColumn_InHavingClause_Fires()
+    {
+        var findings = Scan("SELECT Amount, COUNT(*) FROM dbo.Prices GROUP BY Amount HAVING Amount = 1.5;");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void EqualityAgainstFloatColumn_InUpdateFromJoinOn_Fires()
+    {
+        var findings = Scan("UPDATE p SET Name = 'x' FROM dbo.Prices p JOIN dbo.Other o ON p.Amount = o.Amount;");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
     public void EqualityAgainstFloatColumn_InUpdateWhere_Fires()
     {
         var findings = Scan("UPDATE dbo.Prices SET Name = 'x' WHERE Amount = 1.5;");

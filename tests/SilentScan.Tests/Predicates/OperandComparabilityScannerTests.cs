@@ -182,6 +182,14 @@ public sealed class OperandComparabilityScannerTests
     }
 
     [Fact]
+    public void EqualityAgainstXmlColumn_InHavingClause_Fires()
+    {
+        var findings = Scan("SELECT Payload, Template FROM dbo.Document GROUP BY Payload, Template HAVING Payload = Template;");
+
+        Assert.Contains(findings, f => f.Context == OperandComparabilityContext.Comparison && f.OperatorText == "=");
+    }
+
+    [Fact]
     public void EqualityAgainstXmlColumn_InUpdateWhere_Fires()
     {
         var findings = Scan("UPDATE dbo.Document SET Name = 'x' WHERE Payload = Template;");

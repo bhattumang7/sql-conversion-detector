@@ -139,6 +139,23 @@ public sealed class NotInNullableSubqueryScannerTests
     }
 
     [Fact]
+    public void NullableSubqueryColumn_InJoinOnClause_Fires()
+    {
+        var findings = Scan(
+            "SELECT p.Id FROM dbo.Parent p JOIN dbo.ChildNotNull c ON p.Id NOT IN (SELECT RefId FROM dbo.ChildNullable) WHERE c.RefId = p.Id;");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void NullableSubqueryColumn_InHavingClause_Fires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Parent GROUP BY Id HAVING Id NOT IN (SELECT RefId FROM dbo.ChildNullable);");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
     public void UpdateStatement_SameShapeInWhereClause_Fires()
     {
         var findings = Scan("UPDATE dbo.Parent SET Id = Id WHERE Id NOT IN (SELECT RefId FROM dbo.ChildNullable);");
