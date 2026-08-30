@@ -432,6 +432,45 @@ worse than not reporting it at all.
       existing test suite, which only covers the always-executes,
       no-`FROM`-clause form (`SELECT @x = 1;`).
 
+- [ ] **`QueryAntiPatternScanner`'s `AlterTableSwitchColumnMismatch` shape
+      check omits collation, missing a real, distinct engine error that's
+      squarely inside the rule's own stated scope.**
+      (`src/SilentScan.Core/Predicates/QueryAntiPatternScanner.cs:397-398`,
+      `HasSameShape` compares `Category`/`Length`/`Precision`/`Scale`/
+      `IsMax` but never `SqlType.Collation`, even though `Collation` is
+      already populated on both sides.) Oracle-confirmed (SQL Server 2025):
+      a partitioned target column declared `VARCHAR(10) COLLATE
+      Latin1_General_CI_AS` against a source staging column declared
+      `VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS` — identical in
+      every field `HasSameShape` checks — raises `Msg 4945, ALTER TABLE
+      SWITCH statement failed because column 'Col' does not have the same
+      collation` on `ALTER TABLE ... SWITCH TO ... PARTITION`, a distinct
+      error from the Msg 4944 type/length/precision/scale mismatch this
+      rule already documents. Neither `RuleCatalog.cs` nor the published
+      rule doc discloses collation as excluded, and the rule's own
+      column-pair walk already exists for exactly this purpose — false
+      negative. (IDENTITY mismatch was separately confirmed correct as a
+      non-blocker, so the gap is specifically collation.)
+
+- [ ] **`SchemaDependencyScanner` never detects a scalar UDF referenced
+      inside a table-level `DEFAULT` constraint added via `ALTER TABLE ...
+      ADD CONSTRAINT df DEFAULT dbo.fn() FOR col`, despite that shape being
+      squarely inside the rule's own documented scope.**
+      (`src/SilentScan.Core/Catalog/SchemaExpressionCollector.cs:38-50`,
+      `CollectCheckConstraints` only matches `CheckConstraintDefinition` in
+      a table's `TableConstraints` list; a table-level
+      `DefaultConstraintDefinition` lands in the exact same list for this
+      syntax form and is silently skipped — `DefaultConstraintDefinition`
+      isn't referenced anywhere else in `Catalog/`.) Confirmed the syntax is
+      real, standard, and works today (SQL Server 2025): `ALTER TABLE dbo.T
+      ADD CONSTRAINT DF_Col DEFAULT dbo.fn_Stamp() FOR Col` succeeds and the
+      function runs on every insert that omits the column. The equivalent
+      inline column-level form (`Col INT DEFAULT dbo.fn()` inside `CREATE
+      TABLE`) is correctly caught via a separate code path — the gap is
+      specific to the table-level/`ALTER TABLE ADD CONSTRAINT` form, which
+      `RuleCatalog.cs:49`'s "A computed column, DEFAULT, or CHECK constraint
+      definition calls a scalar UDF" claim already covers in principle.
+
 ---
 
 ## Audited, no bug found
@@ -619,14 +658,37 @@ statement — is uncontroversial syntax, not a claim needing verification).
   call site, so the unconditional in-direction check is correct, and the
   writeback direction is correctly gated on both the formal parameter being
   OUTPUT and the call site supplying the `OUTPUT` keyword.
+- `QueryAntiPatternScanner` (all other finding kinds) — `ALTER TABLE SWITCH`
+  index/constraint/filegroup/temporal/CDC/rule/full-text checks all
+  internally consistent with their claimed error codes; grouping-sets
+  cardinality limits oracle-verified at all three exact boundaries (CUBE
+  12/13, ROLLUP 32/33, GROUPING SETS 4096/4097); `RecursiveCteMissingMaxRecursion`'s
+  "default 100" claim is standard documented behavior.
+- `ScalarUdfInlineabilityScanner` — `MinInliningCompatibilityLevel = 150`
+  correct; `MaxInlineableTableReferenceCount = 49` independently
+  oracle-verified via a plan-inlining sweep (49 scalar-subquery table
+  references inlines, 50 doesn't) — exact match to the scanner's `> 49`
+  gate.
+- `SecurityScanner` — weak-hash-algorithm set (MD2/MD4/MD5/SHA/SHA1) matches
+  the documented `HASHBYTES` deprecated-algorithm list; credential/IP
+  heuristics carry no falsifiable engine-behavior claim.
+- `SecurityPredicateIndexScanner` — leading-key-column-only match is
+  explicitly documented as an intentional design choice (already
+  oracle-tested scan-vs-seek claim, deliberately declines an unproven
+  "forces serial execution" claim).
+- `SelectiveXmlIndexValueColumnScanner` — both the 900-byte boundary (900
+  OK, 901 fails Msg 6395) and the large-object case (Msg 6391)
+  oracle-confirmed exact; separately confirmed this rule's `FOR (...)`
+  clause is syntactically restricted to exactly one path on the real engine
+  (a multi-path form is a parse error), so it does not share
+  `IndexDesignScanner`'s composite-key-sum gap — checked and ruled out, not
+  overlooked.
 
 ---
 
 ## Not yet audited
 
-QueryAntiPattern,
-ScalarUdf, SchemaDependency, Security, SecurityPredicateIndex,
-SelectiveXmlIndexValueColumn, SelectStarView, SelfReferencingDml,
+SelectStarView, SelfReferencingDml,
 SessionDateSetting, SetOption, SpExecuteSqlParameterMismatch,
 StaleSelectStarView, StatementShape, StringConcatNull,
 TemporalTableHistoryIndexGap, TempTableExecShapeCandidate,
