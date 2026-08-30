@@ -14,15 +14,18 @@ public static class DuplicationScanner
 
     private const int MinDuplicatedLiteralLength = 3;
 
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
     public static IReadOnlyList<DuplicationFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         var findings = new List<DuplicationFinding>();
 
         ScanComments(parseResult, catalog.CompatibilityLevel, findings);
 
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
-        parseResult.Fragment.Accept(visitor);
-        findings.AddRange(visitor.Findings);
+        var rule = new Rule(parseResult.SourcePath, catalog);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
+        findings.AddRange(rule.Findings);
 
         return
         [
@@ -109,33 +112,29 @@ public static class DuplicationScanner
             && script.Batches.Any(b => b.Statements.Count > 0);
     }
 
-    private sealed class Visitor : ScopedSqlVisitorBase
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
-        private readonly string sourcePath;
-        private readonly DatabaseCatalog catalog;
-
-        public Visitor(string sourcePath, DatabaseCatalog catalog)
-            : base(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-        {
-            this.sourcePath = sourcePath;
-            this.catalog = catalog;
-        }
-
         public List<DuplicationFinding> Findings { get; } = [];
 
-        private string CurrentModule => CurrentProcScope ?? sourcePath;
+        private string? _currentProcScope;
 
-        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+        private string CurrentModule => _currentProcScope ?? sourcePath;
 
         private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqualityComparer.Instance);
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
+        {
+            _currentProcScope = walker.CurrentProcScope;
             CheckStringLiterals(node.StatementList);
+        }
 
-        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker)
+        {
+            _currentProcScope = walker.CurrentProcScope;
             CheckStringLiterals(node.StatementList);
+        }
 
-        public override void ExplicitVisit(SetVariableStatement node)
+        public void OnEnterSetVariableStatement(SetVariableStatement node, ModuleWalker walker)
         {
             if (node.AssignmentKind == AssignmentKind.Equals
                 && node.Expression is VariableReference sourceVariable
@@ -143,22 +142,18 @@ public static class DuplicationScanner
             {
                 Add(DuplicationFindingKind.SelfAssignment, node.Variable.Name, node, FindingConfidence.High);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(SelectSetVariable node)
+        public void OnEnterSelectSetVariable(SelectSetVariable node, ModuleWalker walker)
         {
             if (node.Expression is VariableReference sourceVariable
                 && string.Equals(sourceVariable.Name, node.Variable.Name, StringComparison.OrdinalIgnoreCase))
             {
                 Add(DuplicationFindingKind.SelfAssignment, node.Variable.Name, node, FindingConfidence.High);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(AssignmentSetClause node)
+        public void OnEnterAssignmentSetClause(AssignmentSetClause node, ModuleWalker walker)
         {
 
             if (node.Column is { } column && node.NewValue is ColumnReferenceExpression)
@@ -170,11 +165,9 @@ public static class DuplicationScanner
                     Add(DuplicationFindingKind.SelfAssignment, columnText, node, FindingConfidence.High);
                 }
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(WhileStatement node)
+        public void OnEnterWhileStatement(WhileStatement node, ModuleWalker walker)
         {
             var body = node.Statement is BeginEndBlockStatement block ? block.StatementList.Statements : [node.Statement];
 
@@ -190,37 +183,30 @@ public static class DuplicationScanner
             }
 
             CheckAndChainBounds(node.Predicate);
-
-            base.ExplicitVisit(node);
         }
 
-
-        public override void ExplicitVisit(BooleanComparisonExpression node)
+        public void OnBooleanComparisonExpression(BooleanComparisonExpression node, ModuleWalker walker)
         {
             if (BothLiterals(node.FirstExpression, node.SecondExpression))
             {
                 CheckAlwaysTrueOrFalseLiteralComparison(node);
             }
-            else if (SameText(node.FirstExpression, node.SecondExpression) && CanClaimTautologyOrContradiction(node.FirstExpression))
+            else if (SameText(node.FirstExpression, node.SecondExpression) && CanClaimTautologyOrContradiction(node.FirstExpression, walker))
             {
                 Add(DuplicationFindingKind.IdenticalBinaryOperands, node.ComparisonType.ToString(), node, FindingConfidence.High);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(BooleanBinaryExpression node)
+        public void OnEnterBooleanBinaryExpression(BooleanBinaryExpression node, ModuleWalker walker)
         {
             if (node.BinaryExpressionType is BooleanBinaryExpressionType.And or BooleanBinaryExpressionType.Or
                 && SameText(node.FirstExpression, node.SecondExpression))
             {
                 Add(DuplicationFindingKind.IdenticalBinaryOperands, node.BinaryExpressionType.ToString(), node, FindingConfidence.High);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(BinaryExpression node)
+        public void OnEnterBinaryExpression(BinaryExpression node, ModuleWalker walker)
         {
 
             if (node.BinaryExpressionType is BinaryExpressionType.Subtract or BinaryExpressionType.Divide or BinaryExpressionType.Modulo
@@ -229,21 +215,17 @@ public static class DuplicationScanner
             {
                 Add(DuplicationFindingKind.IdenticalBinaryOperands, node.BinaryExpressionType.ToString(), node, FindingConfidence.Medium);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(UnaryExpression node)
+        public void OnEnterUnaryExpression(UnaryExpression node, ModuleWalker walker)
         {
             if (node.Expression is UnaryExpression inner && inner.UnaryExpressionType == node.UnaryExpressionType)
             {
                 Add(DuplicationFindingKind.RepeatedUnaryOperator, node.UnaryExpressionType.ToString(), node, FindingConfidence.High);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(BooleanNotExpression node)
+        public void OnEnterBooleanNotExpression(BooleanNotExpression node, ModuleWalker walker)
         {
 
             var inner = Unwrap(node.Expression);
@@ -255,11 +237,9 @@ public static class DuplicationScanner
             {
                 CheckNegatedComparison(node, inner);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(IfStatement node)
+        public void OnEnterIfStatement(IfStatement node, ModuleWalker walker)
         {
             if (!_ifChainContinuations.Contains(node))
             {
@@ -267,53 +247,51 @@ public static class DuplicationScanner
             }
 
             CheckCollapsibleNestedIf(node);
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(SearchedCaseExpression node)
+        public void OnEnterOperandPosition(TSqlFragment node, ModuleWalker walker)
         {
-            var whens = node.WhenClauses;
+            switch (node)
+            {
+                case SearchedCaseExpression searchedCase:
+                    CheckCaseDuplicateWhenConditions(searchedCase.WhenClauses);
+                    CheckCaseBranchResultIdentity(searchedCase, searchedCase.WhenClauses);
+                    break;
 
-            CheckCaseDuplicateWhenConditions(whens);
-            CheckCaseBranchResultIdentity(node, whens);
+                case IIfCall iif:
+                    if (iif.ThenExpression is IIfCall)
+                    {
+                        Add(DuplicationFindingKind.NestedConditionalExpression, "THEN", iif, FindingConfidence.Medium);
+                    }
 
-            base.ExplicitVisit(node);
+                    if (iif.ElseExpression is IIfCall)
+                    {
+                        Add(DuplicationFindingKind.NestedConditionalExpression, "ELSE", iif, FindingConfidence.Medium);
+                    }
+
+                    break;
+            }
         }
 
-        public override void ExplicitVisit(IIfCall node)
-        {
-            if (node.ThenExpression is IIfCall)
-            {
-                Add(DuplicationFindingKind.NestedConditionalExpression, "THEN", node, FindingConfidence.Medium);
-            }
-
-            if (node.ElseExpression is IIfCall)
-            {
-                Add(DuplicationFindingKind.NestedConditionalExpression, "ELSE", node, FindingConfidence.Medium);
-            }
-
-            base.ExplicitVisit(node);
-        }
-
-        private bool CanClaimTautologyOrContradiction(ScalarExpression expression)
+        private bool CanClaimTautologyOrContradiction(ScalarExpression expression, ModuleWalker walker)
         {
             if (expression is not ColumnReferenceExpression columnRef)
             {
                 return true;
             }
 
-            return ResolveColumn(columnRef) is { IsNullable: false };
+            return ResolveColumn(columnRef, walker) is { IsNullable: false };
         }
 
-        private CatalogColumn? ResolveColumn(ColumnReferenceExpression columnRef)
+        private CatalogColumn? ResolveColumn(ColumnReferenceExpression columnRef, ModuleWalker walker)
         {
-            if (columnRef.MultiPartIdentifier is not { Identifiers: { Count: > 0 } identifiers } || ScopeStack.Count == 0)
+            var scopeChain = walker.CurrentScopeChain();
+            if (columnRef.MultiPartIdentifier is not { Identifiers: { Count: > 0 } identifiers } || scopeChain.Count == 0)
             {
                 return null;
             }
 
-            var scope = ScopeStack.Peek().ByAlias;
+            var scope = scopeChain[0].ByAlias;
             var columnName = identifiers[^1].Value;
 
             if (identifiers.Count >= 2 && scope.TryGetValue(identifiers[^2].Value, out var qualifiedEntry))

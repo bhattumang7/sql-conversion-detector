@@ -159,4 +159,28 @@ internal interface IModuleRule
     void OnSubqueryComparisonPredicate(SubqueryComparisonPredicate node, ModuleWalker walker)
     {
     }
+
+    void OnEnterSelectSetVariable(SelectSetVariable node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterWhileStatement(WhileStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterIfStatement(IfStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterBooleanBinaryExpression(BooleanBinaryExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterBinaryExpression(BinaryExpression node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterUnaryExpression(UnaryExpression node, ModuleWalker walker)
+    {
+    }
 }

@@ -561,6 +561,66 @@ internal sealed class ModuleWalker : TSqlFragmentVisitor
         base.Visit(node);
     }
 
+    public sealed override void ExplicitVisit(SelectSetVariable node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterSelectSetVariable(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(WhileStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterWhileStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(IfStatement node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterIfStatement(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(BooleanBinaryExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterBooleanBinaryExpression(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(BinaryExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterBinaryExpression(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(UnaryExpression node)
+    {
+        foreach (var rule in _rules)
+        {
+            rule.OnEnterUnaryExpression(node, this);
+        }
+
+        base.ExplicitVisit(node);
+    }
+
     private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)
     {
         var previousScope = CurrentProcScope;
