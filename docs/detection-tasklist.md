@@ -201,14 +201,6 @@ Competitor tools are referred to generically; real identities are in
       column violates the engine's own period-column contract at DDL time.
       Ships as one family covering both period kinds.
 
-- [ ] **`IIF()` branch type mismatch with a lossy implicit conversion.**
-      `IIF()` branches whose resolved types differ, where the engine's
-      chosen implicit conversion (by type precedence) is narrowing or
-      precision-losing, is a currently-uncovered correctness gap distinct
-      from `CASE` handling — decidable by reusing
-      `ExpressionTypeInferencer`'s branch-merge logic, kept separate from
-      arithmetic typing per the standing plan.
-
 - [ ] **`StringConcatNullRuleId` sibling: XML generation NULL coercion.**
       `FOR XML`/`.value()`-style XML generation silently coercing a nullable
       source to empty string, with no explicit NULL policy, is the same
