@@ -466,7 +466,15 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
   always defaults to `NULL` regardless of `ANSI_NULL_DFLT` or the source
   expression's own nullability (oracle-confirmed against `PERSISTED` and
   non-`PERSISTED` computed columns alike); an explicit `NULL`/`NOT NULL` on a
-  `PERSISTED` computed column is still honored normally. Tracking goes through
+  `PERSISTED` computed column is still honored normally. `ANSI_NULL_DFLT`
+  governs plain `CREATE TABLE` only - `ALTER TABLE ADD` columns, table
+  variables (`DECLARE @t TABLE`), `CREATE TYPE ... AS TABLE`, and a
+  multi-statement table-valued function's `RETURNS @t TABLE(...)` all
+  unconditionally default to `NULL` regardless of session or database
+  `ANSI_NULL_DFLT`/`ANSI_NULL_DEFAULT` state (oracle-confirmed, including
+  `ALTER TABLE ADD` on an empty table with the database-level option flipped
+  both ways); `CatalogBuilder` passes `defaultNullable: true` unconditionally
+  at each of those four call sites rather than resolving it. Tracking goes through
   the shared
   `AnsiNullDfltFlowResolver` (`Common/AnsiNullDfltFlowResolver.cs`), built
   on the same `ProcedureBodyFlowWalker`/`IStatementFlowPolicy` branch-merge

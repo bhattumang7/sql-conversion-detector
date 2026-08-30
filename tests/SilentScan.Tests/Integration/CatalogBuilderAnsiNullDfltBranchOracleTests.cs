@@ -105,6 +105,47 @@ public sealed class CatalogBuilderAnsiNullDfltBranchOracleTests
     }
 
     [Fact]
+    public async Task Build_AlterTableAddColumnUnderAnsiNullDfltOff_MatchesRealEngineIgnoringTheOverride()
+    {
+        const string deploymentSql = """
+            CREATE TABLE dbo.T (A INT NOT NULL);
+            GO
+            SET ANSI_NULL_DFLT_OFF ON;
+            ALTER TABLE dbo.T ADD Col INT;
+            """;
+
+        var databaseName = $"SilentScanTest_{Guid.NewGuid():N}";
+        var provisioner = new DatabaseProvisioner(Options);
+        await provisioner.CreateFreshAsync(databaseName);
+        try
+        {
+            await new ScriptDeployer(Options).DeployAsync(deploymentSql, databaseName);
+            var connectionString = Options.BuildConnectionString(databaseName);
+
+            bool realIsNullable;
+            await using (var connection = new SqlConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT is_nullable FROM sys.columns WHERE object_id = OBJECT_ID('dbo.T') AND name = 'Col';";
+                realIsNullable = (bool)(await command.ExecuteScalarAsync())!;
+            }
+
+            var deploymentScriptResult = SqlScriptParser.ParseText("deploy.sql", deploymentSql);
+            Assert.False(deploymentScriptResult.HasErrors);
+
+            var catalog = CatalogBuilder.Build([deploymentScriptResult]);
+            var staticIsNullable = catalog.Find("dbo.T")!.FindColumn("Col")!.IsNullable;
+
+            Assert.Equal(realIsNullable, staticIsNullable);
+        }
+        finally
+        {
+            await provisioner.DropIfExistsAsync(databaseName);
+        }
+    }
+
+    [Fact]
     public async Task Build_AmbientAnsiNullDfltBeforeCreateProcedure_DoesNotLeakIntoProcedureBodyOnLaterExecution()
     {
         const string deploymentSql = """

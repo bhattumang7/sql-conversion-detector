@@ -126,7 +126,7 @@ public static class CatalogBuilder
             if (phase == BuildPhase.CollectTypeAliases)
             {
                 var (schema, name) = SchemaObjectNameHelper.Resolve(node.Name);
-                var (columns, indexesFromColumns) = BuildColumns(node.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, ResolveDefaultNullable(node));
+                var (columns, indexesFromColumns) = BuildColumns(node.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, defaultNullable: true);
                 var indexesFromConstraints = BuildIndexesFromTableConstraints(node.Definition.TableConstraints);
 
                 catalog.AddOrReplace(new CatalogTable(
@@ -562,7 +562,7 @@ public static class CatalogBuilder
             if (phase == BuildPhase.ApplyEverythingElse
                 && returnType is TableValuedFunctionReturnType { DeclareTableVariableBody: { VariableName: { } variableName, Definition: { } definition } body })
             {
-                var (columns, indexesFromColumns) = BuildColumns(definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, ResolveDefaultNullable(node));
+                var (columns, indexesFromColumns) = BuildColumns(definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, defaultNullable: true);
                 var indexesFromConstraints = BuildIndexesFromTableConstraints(definition.TableConstraints);
 
                 var returnTable = new CatalogTable(
@@ -918,7 +918,7 @@ public static class CatalogBuilder
                 return;
             }
 
-            var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, ResolveDefaultNullable(alterTable));
+            var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, defaultNullable: true);
             var newIndexes = BuildIndexesFromTableConstraints(alterTable.Definition.TableConstraints);
             var mergedColumns = (List<CatalogColumn>)[.. existing.Columns, .. newColumns];
             var mergedIndexes = (List<CatalogIndex>)[.. existing.Indexes, .. indexesFromColumns, .. newIndexes];
@@ -1102,7 +1102,7 @@ public static class CatalogBuilder
                 return;
             }
 
-            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.EffectiveTempdbCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, ResolveDefaultNullable(declareTableVar));
+            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.EffectiveTempdbCollation, catalog.TypeAliases, catalog.Skipped, sourcePath, catalog, defaultNullable: true);
             var indexesFromConstraints = BuildIndexesFromTableConstraints(body.Definition.TableConstraints);
 
             var table = new CatalogTable(

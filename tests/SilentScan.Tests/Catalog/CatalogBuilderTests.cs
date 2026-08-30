@@ -1075,6 +1075,51 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_AlterTableAddColumnWithNoExplicitNullability_IgnoresAnsiNullDfltAndDefaultsToNullable()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("SET ANSI_NULL_DFLT_OFF ON; CREATE TABLE dbo.T (A INT NOT NULL); ALTER TABLE dbo.T ADD Col INT;")]);
+
+        Assert.True(catalog.Find("dbo.T")!.FindColumn("Col")!.IsNullable);
+    }
+
+    [Fact]
+    public void Build_TableVariableColumnWithNoExplicitNullability_IgnoresAnsiNullDfltAndDefaultsToNullable()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("SET ANSI_NULL_DFLT_OFF ON; DECLARE @t TABLE (Col INT);")]);
+
+        Assert.True(catalog.Find("@t")!.FindColumn("Col")!.IsNullable);
+    }
+
+    [Fact]
+    public void Build_CreateTypeAsTableColumnWithNoExplicitNullability_IgnoresAnsiNullDfltAndDefaultsToNullable()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("SET ANSI_NULL_DFLT_OFF ON; CREATE TYPE dbo.T AS TABLE (Col INT);")]);
+
+        Assert.True(catalog.Find("dbo.T")!.FindColumn("Col")!.IsNullable);
+    }
+
+    [Fact]
+    public void Build_MultiStatementTvfReturnColumnWithNoExplicitNullability_IgnoresAnsiNullDfltAndDefaultsToNullable()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                SET ANSI_NULL_DFLT_OFF ON;
+                GO
+                CREATE FUNCTION dbo.fn_GetCodes()
+                RETURNS @t TABLE (Col INT)
+                AS
+                BEGIN
+                    RETURN;
+                END
+                """)]);
+
+        Assert.True(catalog.Find("@t", "dbo.fn_GetCodes")!.FindColumn("Col")!.IsNullable);
+    }
+
+    [Fact]
     public void Build_SpatialColumn_TypeIsNullAndLedgered()
     {
 
