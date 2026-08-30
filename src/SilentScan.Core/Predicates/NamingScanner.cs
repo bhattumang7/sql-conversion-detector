@@ -38,12 +38,13 @@ public static class NamingScanner
 
     public static IReadOnlyList<NamingFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath, catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
 
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
@@ -53,26 +54,15 @@ public static class NamingScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Visitor : ScopedRelationWalker
+    private sealed class Rule(string sourcePath, StringComparer identifierComparer) : IModuleRule
     {
-        private readonly string sourcePath;
-
-        private readonly StringComparer identifierComparer;
-
         private string? _currentViewModule;
-
-        public Visitor(string sourcePath, StringComparer identifierComparer)
-            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-        {
-            this.sourcePath = sourcePath;
-            this.identifierComparer = identifierComparer;
-        }
 
         public List<NamingFinding> Findings { get; } = [];
 
-        private string CurrentModule => _currentViewModule ?? CurrentProcScope ?? sourcePath;
+        private string CurrentModule(ModuleWalker walker) => _currentViewModule ?? walker.CurrentProcScope ?? sourcePath;
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
         {
             var (name, kindLabel) = node switch
             {
@@ -90,105 +80,96 @@ public static class NamingScanner
                 return;
             }
 
-            CheckRoutineName(name, kindLabel!, checkQualification: true);
-            CheckParameters(node.Parameters);
+            CheckRoutineName(name, kindLabel!, checkQualification: true, walker);
+            CheckParameters(node.Parameters, walker);
         }
 
-        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
-            CheckReservedName(node.Name.BaseIdentifier, "trigger");
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) =>
+            CheckReservedName(node.Name.BaseIdentifier, "trigger", walker);
 
-        public override void ExplicitVisit(CreateViewStatement node)
+        public void OnEnterCreateViewStatement(CreateViewStatement node, ModuleWalker walker)
         {
-            var previous = _currentViewModule;
             _currentViewModule = SchemaObjectNameHelper.Qualify(node.SchemaObjectName);
-            CheckReservedName(node.SchemaObjectName.BaseIdentifier, "view");
-            CheckQualification(node.SchemaObjectName, "view");
-            base.ExplicitVisit(node);
-            _currentViewModule = previous;
+            CheckReservedName(node.SchemaObjectName.BaseIdentifier, "view", walker);
+            CheckQualification(node.SchemaObjectName, "view", walker);
         }
 
-        public override void ExplicitVisit(AlterViewStatement node)
+        public void OnLeaveCreateViewStatement(CreateViewStatement node, ModuleWalker walker) => _currentViewModule = null;
+
+        public void OnEnterAlterViewStatement(AlterViewStatement node, ModuleWalker walker)
         {
-            var previous = _currentViewModule;
             _currentViewModule = SchemaObjectNameHelper.Qualify(node.SchemaObjectName);
-            CheckReservedName(node.SchemaObjectName.BaseIdentifier, "view");
-            CheckQualification(node.SchemaObjectName, "view");
-            base.ExplicitVisit(node);
-            _currentViewModule = previous;
+            CheckReservedName(node.SchemaObjectName.BaseIdentifier, "view", walker);
+            CheckQualification(node.SchemaObjectName, "view", walker);
         }
 
-        public override void ExplicitVisit(CreateTableStatement node)
+        public void OnLeaveAlterViewStatement(AlterViewStatement node, ModuleWalker walker) => _currentViewModule = null;
+
+        public void OnEnterCreateTableStatement(CreateTableStatement node, ModuleWalker walker)
         {
             if (node.Definition is not null)
             {
-                CheckReservedName(node.SchemaObjectName.BaseIdentifier, "table");
+                CheckReservedName(node.SchemaObjectName.BaseIdentifier, "table", walker);
                 foreach (var column in node.Definition.ColumnDefinitions)
                 {
                     if (column.ColumnIdentifier is { } columnName)
                     {
-                        CheckReservedName(columnName, "column");
+                        CheckReservedName(columnName, "column", walker);
                     }
 
-                    CheckTypeQualifier(column.DataType);
+                    CheckTypeQualifier(column.DataType, walker);
                 }
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(CreateIndexStatement node)
-        {
-            CheckReservedName(node.Name, "index");
-            base.ExplicitVisit(node);
-        }
+        public void OnEnterCreateIndexStatement(CreateIndexStatement node, ModuleWalker walker) =>
+            CheckReservedName(node.Name, "index", walker);
 
-        public override void ExplicitVisit(DeclareVariableStatement node)
+        public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)
         {
             foreach (var element in node.Declarations)
             {
-                CheckTypeQualifier(element.DataType);
+                CheckTypeQualifier(element.DataType, walker);
             }
-
-            base.ExplicitVisit(node);
         }
 
-        private void CheckParameters(IList<ProcedureParameter> parameters)
+        private void CheckParameters(IList<ProcedureParameter> parameters, ModuleWalker walker)
         {
             foreach (var parameter in parameters)
             {
-                CheckTypeQualifier(parameter.DataType);
+                CheckTypeQualifier(parameter.DataType, walker);
             }
         }
 
-        private void CheckRoutineName(SchemaObjectName name, string kindLabel, bool checkQualification)
+        private void CheckRoutineName(SchemaObjectName name, string kindLabel, bool checkQualification, ModuleWalker walker)
         {
-            CheckReservedName(name.BaseIdentifier, kindLabel);
+            CheckReservedName(name.BaseIdentifier, kindLabel, walker);
             if (checkQualification)
             {
-                CheckQualification(name, kindLabel);
+                CheckQualification(name, kindLabel, walker);
             }
 
             if (name.BaseIdentifier.Value.StartsWith("sp_", StringComparison.OrdinalIgnoreCase))
             {
                 Findings.Add(new NamingFinding(
-                    NamingFindingKind.SpPrefixOnUserRoutine, CurrentModule, sourcePath,
+                    NamingFindingKind.SpPrefixOnUserRoutine, CurrentModule(walker), sourcePath,
                     name.BaseIdentifier.StartLine, name.BaseIdentifier.StartColumn,
                     $"User-defined {kindLabel} \"{name.BaseIdentifier.Value}\" uses the \"sp_\" prefix reserved for system-shipped procedures."));
             }
         }
 
-        private void CheckQualification(SchemaObjectName name, string kindLabel)
+        private void CheckQualification(SchemaObjectName name, string kindLabel, ModuleWalker walker)
         {
             if (name.SchemaIdentifier is null)
             {
                 Findings.Add(new NamingFinding(
-                    NamingFindingKind.UnqualifiedCreate, CurrentModule, sourcePath,
+                    NamingFindingKind.UnqualifiedCreate, CurrentModule(walker), sourcePath,
                     name.BaseIdentifier.StartLine, name.BaseIdentifier.StartColumn,
                     $"{char.ToUpperInvariant(kindLabel[0])}{kindLabel[1..]} \"{name.BaseIdentifier.Value}\" is created with no explicit schema qualifier - its real owning schema depends on the connecting principal's own default schema."));
             }
         }
 
-        private void CheckReservedName(Identifier? identifier, string kindLabel)
+        private void CheckReservedName(Identifier? identifier, string kindLabel, ModuleWalker walker)
         {
 
             if (identifier is not { } id || !ReservedKeywords.Contains(id.Value))
@@ -197,12 +178,12 @@ public static class NamingScanner
             }
 
             Findings.Add(new NamingFinding(
-                NamingFindingKind.ReservedKeywordAsIdentifier, CurrentModule, sourcePath,
+                NamingFindingKind.ReservedKeywordAsIdentifier, CurrentModule(walker), sourcePath,
                 id.StartLine, id.StartColumn,
                 $"{char.ToUpperInvariant(kindLabel[0])}{kindLabel[1..]} name \"{id.Value}\" is a reserved T-SQL keyword."));
         }
 
-        private void CheckTypeQualifier(DataTypeReference? dataType)
+        private void CheckTypeQualifier(DataTypeReference? dataType, ModuleWalker walker)
         {
             if (dataType is not UserDataTypeReference { Name.SchemaIdentifier: { } schema } userType)
             {
@@ -215,7 +196,7 @@ public static class NamingScanner
             }
 
             Findings.Add(new NamingFinding(
-                NamingFindingKind.RedundantTypeQualifier, CurrentModule, sourcePath,
+                NamingFindingKind.RedundantTypeQualifier, CurrentModule(walker), sourcePath,
                 userType.StartLine, userType.StartColumn,
                 $"Type reference \"{schema.Value}.{userType.Name.BaseIdentifier.Value}\" carries a redundant schema qualifier."));
         }

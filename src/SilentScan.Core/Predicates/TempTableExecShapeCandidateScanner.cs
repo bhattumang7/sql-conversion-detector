@@ -10,21 +10,19 @@ public static class TempTableExecShapeCandidateScanner
 {
     public static IReadOnlyList<TempTableExecShapeCandidate> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
-        parseResult.Fragment.Accept(visitor);
-        return visitor.Candidates;
+        var rule = new Rule(parseResult.SourcePath, catalog);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
+        return rule.Candidates;
     }
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
-        : ScopedRelationWalker(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<TempTableExecShapeCandidate> Candidates { get; } = [];
 
-        public override void ExplicitVisit(InsertStatement node)
+        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker)
         {
             if (node.InsertSpecification is
                 {
@@ -40,19 +38,17 @@ public static class TempTableExecShapeCandidateScanner
                 && targetName.StartsWith('#'))
             {
                 var tempQualifiedName = SchemaObjectNameHelper.Qualify(targetSchemaObject);
-                var temp = catalog.Find(tempQualifiedName, CurrentProcScope);
+                var temp = catalog.Find(tempQualifiedName, walker.CurrentProcScope);
 
                 Candidates.Add(new TempTableExecShapeCandidate(
                     TempTableQualifiedName: tempQualifiedName,
                     TempTableColumns: temp?.Columns,
                     ExecutedProcQualifiedName: catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(procedureName)),
-                    CallerScopeQualifiedName: CurrentProcScope,
+                    CallerScopeQualifiedName: walker.CurrentProcScope,
                     SourcePath: sourcePath,
                     Line: node.StartLine,
                     Column: node.StartColumn));
             }
-
-            base.ExplicitVisit(node);
         }
     }
 }

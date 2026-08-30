@@ -10,15 +10,16 @@ public static class UnindexedTempTableUsageScanner
 {
     public static IReadOnlyList<UnindexedTempTableUsageFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(catalog);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
 
         var tempIdentifierComparer = TypeInference.Collation.IdentifierComparer(catalog.EffectiveTempdbCollation);
         var findings = new List<UnindexedTempTableUsageFinding>();
 
-        foreach (var declaration in visitor.Declarations)
+        foreach (var declaration in rule.Declarations)
         {
-            var usage = visitor.Usages.FirstOrDefault(u =>
+            var usage = rule.Usages.FirstOrDefault(u =>
                 u.Scope == declaration.Scope
                 && tempIdentifierComparer.Equals(u.TempTableName, declaration.TempTableName));
 
@@ -56,51 +57,43 @@ public static class UnindexedTempTableUsageScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-#pragma warning disable CS9107
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
-        : ScopedRelationWalker(sourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-#pragma warning restore CS9107
+    private sealed class Rule(DatabaseCatalog catalog) : IModuleRule
     {
         public List<Declaration> Declarations { get; } = [];
 
         public List<Usage> Usages { get; } = [];
 
-        public override void ExplicitVisit(SelectStatement node)
+        public void OnEnterSelectStatementScope(SelectStatement node, ModuleWalker walker)
         {
             if (node.Into is { BaseIdentifier.Value: var tempName } into && tempName.StartsWith('#'))
             {
-                var qualified = catalog.Find(SchemaObjectNameHelper.Qualify(into), CurrentProcScope)?.QualifiedName
+                var qualified = catalog.Find(SchemaObjectNameHelper.Qualify(into), walker.CurrentProcScope)?.QualifiedName
                     ?? SchemaObjectNameHelper.Qualify(into);
-                Declarations.Add(new Declaration(tempName, qualified, CurrentProcScope, node.StartLine));
+                Declarations.Add(new Declaration(tempName, qualified, walker.CurrentProcScope, node.StartLine));
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(QualifiedJoin node)
+        public void OnEnterJoinSearchCondition(QualifiedJoin node, ModuleWalker walker)
         {
-            TryRecordJoinOperand(node.FirstTableReference, node);
-            TryRecordJoinOperand(node.SecondTableReference, node);
-            base.ExplicitVisit(node);
+            TryRecordJoinOperand(node.FirstTableReference, node, walker);
+            TryRecordJoinOperand(node.SecondTableReference, node, walker);
         }
 
-        public override void ExplicitVisit(QuerySpecification node)
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker)
         {
             if (node.WhereClause is { } where
                 && node.FromClause?.TableReferences is [NamedTableReference { SchemaObject.BaseIdentifier.Value: var name }]
                 && name.StartsWith('#'))
             {
-                Usages.Add(new Usage(name, CurrentProcScope, UnindexedTempTableUsageKind.FilteredInWhere, where.StartLine, where.StartColumn));
+                Usages.Add(new Usage(name, walker.CurrentProcScope, UnindexedTempTableUsageKind.FilteredInWhere, where.StartLine, where.StartColumn));
             }
-
-            base.ExplicitVisit(node);
         }
 
-        private void TryRecordJoinOperand(TableReference side, TSqlFragment joinNode)
+        private void TryRecordJoinOperand(TableReference side, TSqlFragment joinNode, ModuleWalker walker)
         {
             if (side is NamedTableReference { SchemaObject.BaseIdentifier.Value: var name } && name.StartsWith('#'))
             {
-                Usages.Add(new Usage(name, CurrentProcScope, UnindexedTempTableUsageKind.JoinOperand, joinNode.StartLine, joinNode.StartColumn));
+                Usages.Add(new Usage(name, walker.CurrentProcScope, UnindexedTempTableUsageKind.JoinOperand, joinNode.StartLine, joinNode.StartColumn));
             }
         }
     }

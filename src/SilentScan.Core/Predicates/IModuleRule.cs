@@ -207,4 +207,32 @@ internal interface IModuleRule
     void OnEnterBinaryQueryExpression(BinaryQueryExpression node, ModuleWalker walker)
     {
     }
+
+    void OnEnterPredicateSetStatement(PredicateSetStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterCreateViewStatement(CreateViewStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveCreateViewStatement(CreateViewStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterAlterViewStatement(AlterViewStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveAlterViewStatement(AlterViewStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterCreateTableStatement(CreateTableStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterCreateIndexStatement(CreateIndexStatement node, ModuleWalker walker)
+    {
+    }
 }

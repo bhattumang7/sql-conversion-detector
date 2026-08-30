@@ -9,11 +9,12 @@ public static class TransactionHygieneScanner
 {
     public static IReadOnlyList<TransactionHygieneFinding> Scan(SqlParseResult parseResult)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.BeginTransactionLine)
                 .ThenBy(f => f.BeginTransactionColumn)
@@ -30,17 +31,11 @@ public static class TransactionHygieneScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Visitor : ScopedRelationWalker
+    private sealed class Rule(string sourcePath) : IModuleRule
     {
-        private readonly string sourcePath;
-
-        public Visitor(string sourcePath)
-            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null) =>
-            this.sourcePath = sourcePath;
-
         public List<TransactionHygieneFinding> Findings { get; } = [];
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
         {
             if (node is ProcedureStatementBody)
             {
@@ -48,7 +43,7 @@ public static class TransactionHygieneScanner
             }
         }
 
-        protected override void OnEnterTriggerBody(TriggerStatementBody node) => AnalyzeScope(node.StatementList);
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) => AnalyzeScope(node.StatementList);
 
         private void AnalyzeScope(StatementList? statementList)
         {

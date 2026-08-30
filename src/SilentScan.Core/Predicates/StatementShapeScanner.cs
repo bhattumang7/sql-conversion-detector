@@ -10,12 +10,13 @@ public static class StatementShapeScanner
 {
     public static IReadOnlyList<StatementShapeFinding> Scan(SqlParseResult parseResult)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
-        parseResult.Fragment.Accept(visitor);
+        var rule = new Rule(parseResult.SourcePath);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        parseResult.Fragment.Accept(walker);
 
         return
         [
-            .. visitor.Findings
+            .. rule.Findings
                 .OrderBy(f => f.Kind)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
@@ -61,33 +62,26 @@ public static class StatementShapeScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private sealed class Visitor : ScopedRelationWalker
+    private sealed class Rule(string sourcePath) : IModuleRule
     {
-        private readonly string sourcePath;
         private bool? _currentRoutineHasSetNocountOn;
         private int _currentRoutineLine;
         private int _currentRoutineColumn;
         private string? _currentRoutineModule;
 
-        public Visitor(string sourcePath)
-            : base(sourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null)
-        {
-            this.sourcePath = sourcePath;
-        }
-
         public List<StatementShapeFinding> Findings { get; } = [];
 
-        private string CurrentModule => CurrentProcScope ?? sourcePath;
+        private string CurrentModule(ModuleWalker walker) => walker.CurrentProcScope ?? sourcePath;
 
-        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
         {
             if (node is ProcedureStatementBody)
             {
-                EnterRoutine(node.StartLine, node.StartColumn);
+                EnterRoutine(node.StartLine, node.StartColumn, walker);
             }
         }
 
-        protected override void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        public void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
         {
             if (node is ProcedureStatementBody)
             {
@@ -95,12 +89,12 @@ public static class StatementShapeScanner
             }
         }
 
-        protected override void OnEnterTriggerBody(TriggerStatementBody node) =>
-            EnterRoutine(node.StartLine, node.StartColumn);
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) =>
+            EnterRoutine(node.StartLine, node.StartColumn, walker);
 
-        protected override void OnLeaveTriggerBody(TriggerStatementBody node) => ExitRoutine();
+        public void OnLeaveTriggerBody(TriggerStatementBody node, ModuleWalker walker) => ExitRoutine();
 
-        public override void ExplicitVisit(PredicateSetStatement node)
+        public void OnEnterPredicateSetStatement(PredicateSetStatement node, ModuleWalker walker)
         {
             if (_currentRoutineHasSetNocountOn == false
                 && node.Options.HasFlag(SetOptions.NoCount)
@@ -108,35 +102,31 @@ public static class StatementShapeScanner
             {
                 _currentRoutineHasSetNocountOn = true;
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(InsertStatement node)
+        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker)
         {
             var spec = node.InsertSpecification;
             if (spec is { Columns.Count: 0 })
             {
                 Findings.Add(new StatementShapeFinding(
                     StatementShapeFindingKind.InsertWithoutColumnList,
-                    CurrentModule,
+                    CurrentModule(walker),
                     sourcePath,
                     node.StartLine,
                     node.StartColumn,
                     "INSERT with no explicit column list - silently breaks if the target table's column order/count ever changes."));
             }
-
-            base.ExplicitVisit(node);
         }
 
-        public override void ExplicitVisit(QuerySpecification node)
+        public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker)
         {
             if (node.OrderByClause is { OrderByElements.Count: > 0 } orderBy
                 && orderBy.OrderByElements.FirstOrDefault(e => e.Expression is IntegerLiteral) is { } ordinalElement)
             {
                 Findings.Add(new StatementShapeFinding(
                     StatementShapeFindingKind.OrdinalOrderBy,
-                    CurrentModule,
+                    CurrentModule(walker),
                     sourcePath,
                     ordinalElement.StartLine,
                     ordinalElement.StartColumn,
@@ -147,20 +137,18 @@ public static class StatementShapeScanner
             {
                 Findings.Add(new StatementShapeFinding(
                     StatementShapeFindingKind.BareSelectStar,
-                    CurrentModule,
+                    CurrentModule(walker),
                     sourcePath,
                     node.StartLine,
                     node.StartColumn,
                     "SELECT * - couples this query to the target's current column set.",
                     FindingConfidence.Low));
             }
-
-            base.ExplicitVisit(node);
         }
 
-        private void EnterRoutine(int line, int column)
+        private void EnterRoutine(int line, int column, ModuleWalker walker)
         {
-            _currentRoutineModule = CurrentModule;
+            _currentRoutineModule = CurrentModule(walker);
             _currentRoutineHasSetNocountOn = false;
             _currentRoutineLine = line;
             _currentRoutineColumn = column;
