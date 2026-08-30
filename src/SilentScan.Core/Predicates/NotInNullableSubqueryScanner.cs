@@ -32,23 +32,19 @@ public static class NotInNullableSubqueryScanner
 
         protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            InspectSearchCondition(node.WhereClause?.SearchCondition);
-            InspectSearchCondition(node.HavingClause?.SearchCondition);
-            InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain, (condition, _) => InspectSearchCondition(condition));
+            InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
             continueDescent();
         }
 
         protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            InspectSearchCondition(node.UpdateSpecification.WhereClause?.SearchCondition);
-            InspectJoinOnClauses(node.UpdateSpecification.FromClause?.TableReferences, scopeChain, (condition, _) => InspectSearchCondition(condition));
+            InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
             continueDescent();
         }
 
         protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            InspectSearchCondition(node.DeleteSpecification.WhereClause?.SearchCondition);
-            InspectJoinOnClauses(node.DeleteSpecification.FromClause?.TableReferences, scopeChain, (condition, _) => InspectSearchCondition(condition));
+            InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
             continueDescent();
         }
 

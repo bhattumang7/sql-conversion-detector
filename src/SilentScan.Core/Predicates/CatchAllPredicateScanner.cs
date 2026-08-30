@@ -70,9 +70,7 @@ public static class CatchAllPredicateScanner
         {
             if (!HasActiveRecompileGuard)
             {
-                InspectSearchCondition(node.WhereClause?.SearchCondition);
-                InspectSearchCondition(node.HavingClause?.SearchCondition);
-                InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain, (condition, _) => InspectSearchCondition(condition));
+                InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
             }
 
             continueDescent();
@@ -83,8 +81,7 @@ public static class CatchAllPredicateScanner
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
             if (!HasActiveRecompileGuard)
             {
-                InspectSearchCondition(node.UpdateSpecification.WhereClause?.SearchCondition);
-                InspectJoinOnClauses(node.UpdateSpecification.FromClause?.TableReferences, scopeChain, (condition, _) => InspectSearchCondition(condition));
+                InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
             }
 
             continueDescent();
@@ -96,8 +93,7 @@ public static class CatchAllPredicateScanner
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
             if (!HasActiveRecompileGuard)
             {
-                InspectSearchCondition(node.DeleteSpecification.WhereClause?.SearchCondition);
-                InspectJoinOnClauses(node.DeleteSpecification.FromClause?.TableReferences, scopeChain, (condition, _) => InspectSearchCondition(condition));
+                InspectAllPredicateLocations(node, scopeChain, (condition, _) => InspectSearchCondition(condition));
             }
 
             continueDescent();

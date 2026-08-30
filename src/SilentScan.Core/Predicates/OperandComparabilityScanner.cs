@@ -32,17 +32,7 @@ public static class OperandComparabilityScanner
 
         protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            if (node.WhereClause?.SearchCondition is { } whereCondition)
-            {
-                InspectSearchCondition(whereCondition, scopeChain);
-            }
-
-            if (node.HavingClause?.SearchCondition is { } havingCondition)
-            {
-                InspectSearchCondition(havingCondition, scopeChain);
-            }
-
-            InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain, InspectSearchCondition);
+            InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
 
             if (node.GroupByClause is { } groupBy)
             {
@@ -75,25 +65,13 @@ public static class OperandComparabilityScanner
 
         protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            var spec = node.UpdateSpecification;
-            if (spec.WhereClause?.SearchCondition is { } whereCondition)
-            {
-                InspectSearchCondition(whereCondition, scopeChain);
-            }
-
-            InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, InspectSearchCondition);
+            InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
             continueDescent();
         }
 
         protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            var spec = node.DeleteSpecification;
-            if (spec.WhereClause?.SearchCondition is { } whereCondition)
-            {
-                InspectSearchCondition(whereCondition, scopeChain);
-            }
-
-            InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, InspectSearchCondition);
+            InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
             continueDescent();
         }
 

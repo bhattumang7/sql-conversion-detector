@@ -85,6 +85,52 @@ internal abstract class ScopedSqlVisitorBase(
         }
     }
 
+    protected static void InspectAllPredicateLocations(
+        QuerySpecification node,
+        ScopeChain scopeChain,
+        Action<BooleanExpression, ScopeChain> inspect)
+    {
+        if (node.WhereClause?.SearchCondition is { } whereCondition)
+        {
+            inspect(whereCondition, scopeChain);
+        }
+
+        if (node.HavingClause?.SearchCondition is { } havingCondition)
+        {
+            inspect(havingCondition, scopeChain);
+        }
+
+        InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain, inspect);
+    }
+
+    protected static void InspectAllPredicateLocations(
+        UpdateStatement node,
+        ScopeChain scopeChain,
+        Action<BooleanExpression, ScopeChain> inspect)
+    {
+        var spec = node.UpdateSpecification;
+        if (spec.WhereClause?.SearchCondition is { } whereCondition)
+        {
+            inspect(whereCondition, scopeChain);
+        }
+
+        InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, inspect);
+    }
+
+    protected static void InspectAllPredicateLocations(
+        DeleteStatement node,
+        ScopeChain scopeChain,
+        Action<BooleanExpression, ScopeChain> inspect)
+    {
+        var spec = node.DeleteSpecification;
+        if (spec.WhereClause?.SearchCondition is { } whereCondition)
+        {
+            inspect(whereCondition, scopeChain);
+        }
+
+        InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, inspect);
+    }
+
     public sealed override void ExplicitVisit(SelectStatement node) =>
         WithCteScope(node.WithCtesAndXmlNamespaces, () =>
             OnSelectStatementScope(node, () => base.ExplicitVisit(node)));

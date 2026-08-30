@@ -32,41 +32,19 @@ public static class FloatEqualityPredicateScanner
 
         protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            if (node.WhereClause?.SearchCondition is { } whereCondition)
-            {
-                Inspect(whereCondition, scopeChain);
-            }
-
-            if (node.HavingClause?.SearchCondition is { } havingCondition)
-            {
-                Inspect(havingCondition, scopeChain);
-            }
-
-            InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain, Inspect);
+            InspectAllPredicateLocations(node, scopeChain, Inspect);
             continueDescent();
         }
 
         protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            var spec = node.UpdateSpecification;
-            if (spec.WhereClause?.SearchCondition is { } whereCondition)
-            {
-                Inspect(whereCondition, scopeChain);
-            }
-
-            InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, Inspect);
+            InspectAllPredicateLocations(node, scopeChain, Inspect);
             continueDescent();
         }
 
         protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            var spec = node.DeleteSpecification;
-            if (spec.WhereClause?.SearchCondition is { } whereCondition)
-            {
-                Inspect(whereCondition, scopeChain);
-            }
-
-            InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, Inspect);
+            InspectAllPredicateLocations(node, scopeChain, Inspect);
             continueDescent();
         }
 

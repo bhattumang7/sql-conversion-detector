@@ -96,23 +96,19 @@ public static class TryCastComputedColumnPredicateScanner
 
         protected override void OnQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, Action continueDescent)
         {
-            InspectSearchCondition(node.WhereClause?.SearchCondition, scopeChain);
-            InspectSearchCondition(node.HavingClause?.SearchCondition, scopeChain);
-            InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain, InspectSearchCondition);
+            InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
             continueDescent();
         }
 
         protected override void OnUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            InspectSearchCondition(node.UpdateSpecification.WhereClause?.SearchCondition, scopeChain);
-            InspectJoinOnClauses(node.UpdateSpecification.FromClause?.TableReferences, scopeChain, InspectSearchCondition);
+            InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
             continueDescent();
         }
 
         protected override void OnDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, Action continueDescent)
         {
-            InspectSearchCondition(node.DeleteSpecification.WhereClause?.SearchCondition, scopeChain);
-            InspectJoinOnClauses(node.DeleteSpecification.FromClause?.TableReferences, scopeChain, InspectSearchCondition);
+            InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
             continueDescent();
         }
 
