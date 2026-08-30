@@ -353,15 +353,47 @@ worse than not reporting it at all.
   cursors → no-parallel cursor), including the negative cases
   (`@@ROWCOUNT`, `SCOPE_IDENTITY()`, `LOCAL STATIC FORWARD_ONLY READ_ONLY`,
   a no-option cursor, a `DYNAMIC` cursor) correctly never firing.
+- `IndexHintScanner` — existing oracle tests already confirm Msg 308
+  (nonexistent hinted index) and the seek→scan degradation for an unbound
+  hinted-index leading column; independently confirmed the
+  "referenced anywhere" column collector correctly resolves correlated
+  references inside a subquery, so a leading-key column bound only in a
+  correlated subquery doesn't cause a false positive.
+- `MaxTypedColumnScanner` — live-verified the two differentiated claims:
+  `VARCHAR(MAX)` is allowed as an INCLUDE column but rejected as a key
+  column (Msg 1919), while legacy `TEXT`/`NTEXT`/`IMAGE` is rejected even
+  as an INCLUDE column (Msg 1999) — matches the rule's two separate
+  messages exactly.
+- `MemoryOptimizedForeignKeyScanner` — cross-storage FK (Msg 10778) and
+  non-`NO ACTION` referential actions between two memory-optimized tables
+  (Msg 10794) match existing oracle coverage; additionally live-verified
+  `ON DELETE SET NULL` (not just CASCADE) also fails the same way,
+  confirming the scanner's blanket action check is correct. FK catalog data
+  is read live from `sys.foreign_keys`, engine-authoritative by
+  construction.
+- `MemoryOptimizedUnsupportedColumnTypeScanner` — live-verified all six
+  listed types (`xml`, `sql_variant`, `text`, `ntext`, `image`, `timestamp`)
+  each fail with Msg 10794 on a memory-optimized table, matching the rule's
+  claim verbatim; the rule text doesn't claim exhaustiveness, so absent
+  spatial/CLR-UDT coverage is a scope gap, not a divergence.
+- `MemoryOptimizedUnsupportedIndexOptionScanner` — the columnstore
+  early-exit can't hide a real gap (nonclustered columnstore is flatly
+  rejected on memory-optimized tables regardless of filter/include, and
+  clustered columnstore syntactically can't carry INCLUDE/WHERE at all);
+  clustered/included-column/filtered-index checks already oracle-tested
+  (Msg 12317/10664/10794).
+- `MissingStatisticsScanner` — auto-create-stats gate and
+  leading-vs-non-leading statistic-column coverage logic both already
+  oracle-tested end-to-end against a live catalog; the underlying catalog
+  facts (`is_auto_create_stats_on`, `sys.stats`/`sys.stats_columns`) are
+  read live, engine-authoritative by construction.
 
 ---
 
 ## Not yet audited
 
 CatchAllPredicate, CodeMetric, Duplication,
-Formatting, IndexHint, MaxTypedColumn,
-MemoryOptimizedForeignKey, MemoryOptimizedUnsupportedColumnType,
-MemoryOptimizedUnsupportedIndexOption, MissingStatistics,
+Formatting,
 ModuleCompileFlag, MultiReferencedCte, Naming, NestedViewDepth,
 NonPersistedComputedColumn, NonSargablePredicate, NonUniqueUpdateSource,
 NotInNullableSubquery, OperandComparability, OutputParameter,
