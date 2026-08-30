@@ -26,27 +26,27 @@ public sealed class SarifReportWriterTests
 
         Assert.Equal("2.1.0", document.RootElement.GetProperty("version").GetString());
         var results = document.RootElement.GetProperty("runs")[0].GetProperty("results");
-        var expectedCount = report.Tier1Findings.Count + report.TypedFindings.Count + report.DynamicSqlFindings.Count + report.ExpressionDerivedFindings.Count + report.CollationConflictFindings.Count + report.WriteLossFindings.Count
-            + report.TvfFenceFindings.Count + report.ScalarUdfFindings.Count + report.ColumnCollationDriftFindings.Count + report.CrossTableTypeDriftFindings.Count + report.ProcCallArgumentMismatchFindings.Count + report.TemporalBoundaryFindings.Count
-            + report.MaxTypedColumnFindings.Count + report.ColumnstoreUnsupportedColumnTypeFindings.Count + report.OversizedParameterFindings.Count + report.UnderLengthParameterFindings.Count + report.AnsiPaddingMismatchFindings.Count + report.PartialCompositeForeignKeyJoinFindings.Count + report.SetOptionFindings.Count
-            + report.CatchAllPredicateFindings.Count + report.LocalVariablePredicateFindings.Count + report.NotInNullableSubqueryFindings.Count + report.NonUniqueUpdateSourceFindings.Count + report.ForcedSerialFindings.Count
-            + report.UntrustedConstraintFindings.Count + report.CascadingForeignKeyFindings.Count + report.MultiReferencedCteFindings.Count
-            + report.NestedViewDepthFindings.Count + report.PostExpansionJoinWidthFindings.Count + report.SelectStarViewFindings.Count
-            + report.OutputParameterFindings.Count
-            + report.CodeMetricFindings.Count + report.FormattingFindings.Count
-            + report.NamingFindings.Count + report.DeadCodeFindings.Count + report.DuplicationFindings.Count + report.DeprecatedSyntaxFindings.Count
-            + report.StatementShapeFindings.Count
-            + report.ControlFlowRiskFindings.Count
-            + report.SecurityFindings.Count
-            + report.CheckConstraintFindings.Count
-            + report.DefaultNullableConstraintFindings.Count
-            + report.TryCastComputedColumnPredicateFindings.Count
-            + report.StaleSelectStarViewFindings.Count
-            + report.BareTopNoOrderByFindings.Count
-            + report.StringConcatNullFindings.Count
-            + report.AggregateDivisionColumnstoreFindings.Count
+        var expectedCount = report.Find<SargabilityFinding>("NonSargablePredicateScanner").Count + report.Find<TypedPredicateFinding>("TypedPredicateExtractor").Count + report.Find<DynamicSqlFinding>("DynamicSqlScanner").Count + report.Find<ExpressionDerivedFinding>("TypedPredicateExtractor").Count + report.Find<CollationConflictFinding>("TypedPredicateExtractor").Count + report.Find<WriteLossFinding>("TypedPredicateExtractor").Count
+            + report.Find<TvfFenceFinding>("TvfFenceScanner").Count + report.Find<ScalarUdfFinding>("ScalarUdfScanner").Count + report.Find<ColumnCollationDriftFinding>("ColumnCollationDriftScanner").Count + report.Find<CrossTableTypeDriftFinding>("CrossTableTypeDriftScanner").Count + report.Find<ProcCallArgumentMismatchFinding>("ProcCallArgumentMismatchScanner").Count + report.Find<TemporalBoundaryPrecisionFinding>("NonSargablePredicateScanner").Count
+            + report.Find<MaxTypedColumnFinding>("MaxTypedColumnScanner").Count + report.Find<ColumnstoreUnsupportedColumnTypeFinding>("ColumnstoreUnsupportedColumnTypeScanner").Count + report.Find<OversizedParameterFinding>("TypedPredicateExtractor").Count + report.Find<UnderLengthParameterFinding>("TypedPredicateExtractor").Count + report.Find<AnsiPaddingMismatchFinding>("TypedPredicateExtractor").Count + report.Find<PartialCompositeForeignKeyJoinFinding>("PartialCompositeForeignKeyJoinScanner").Count + report.Find<SetOptionFinding>("SetOptionScanner").Count
+            + report.Find<CatchAllPredicateFinding>("CatchAllPredicateScanner").Count + report.Find<LocalVariablePredicateFinding>("TypedPredicateExtractor").Count + report.Find<NotInNullableSubqueryFinding>("NotInNullableSubqueryScanner").Count + report.Find<NonUniqueUpdateSourceFinding>("NonUniqueUpdateSourceScanner").Count + report.Find<ForcedSerialFinding>("ForcedSerialScanner").Count
+            + report.Find<UntrustedConstraintFinding>("UntrustedConstraintScanner").Count + report.Find<CascadingForeignKeyFinding>("CascadingForeignKeyScanner").Count + report.Find<MultiReferencedCteFinding>("MultiReferencedCteScanner").Count
+            + report.Find<NestedViewDepthFinding>("NestedViewDepthScanner").Count + report.Find<PostExpansionJoinWidthFinding>("PostExpansionJoinWidthScanner").Count + report.Find<SelectStarViewFinding>("SelectStarViewScanner").Count
+            + report.Find<OutputParameterFinding>("OutputParameterScanner").Count
+            + report.Find<CodeMetricFinding>("CodeMetricScanner").Count + report.Find<FormattingFinding>("FormattingScanner").Count
+            + report.Find<NamingFinding>("NamingScanner").Count + report.Find<DeadCodeFinding>("DeadCodeScanner").Count + report.Find<DuplicationFinding>("DuplicationScanner").Count + report.Find<DeprecatedSyntaxFinding>("DeprecatedSyntaxScanner").Count
+            + report.Find<StatementShapeFinding>("StatementShapeScanner").Count
+            + report.Find<ControlFlowRiskFinding>("ControlFlowRiskScanner").Count
+            + report.Find<SecurityFinding>("SecurityScanner").Count
+            + report.Find<CheckConstraintFinding>("CheckConstraintScanner").Count
+            + report.Find<DefaultNullableConstraintFinding>("DefaultNullableConstraintScanner").Count
+            + report.Find<TryCastComputedColumnPredicateFinding>("TryCastComputedColumnPredicateScanner").Count
+            + report.Find<StaleSelectStarViewFinding>("StaleSelectStarViewScanner").Count
+            + report.Find<BareTopNoOrderByFinding>("BareTopNoOrderByScanner").Count
+            + report.Find<StringConcatNullFinding>("StringConcatNullScanner").Count
+            + report.Find<AggregateDivisionColumnstoreFinding>("AggregateDivisionColumnstoreScanner").Count
 
-            + report.DatabaseConfigurationFindings.Count;
+            + report.Find<DatabaseConfigurationFinding>("DatabaseConfigurationScanner").Count;
         Assert.Equal(expectedCount, results.GetArrayLength());
         Assert.True(expectedCount > 0);
     }

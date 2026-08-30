@@ -1,4 +1,5 @@
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Reporting;
 
@@ -20,9 +21,9 @@ public sealed class ScanReportBuilderTier1OrderingTests
     {
         var report = await EngineAuthoritativeScan.ScanAsync(Sql);
 
-        Assert.True(report.Tier1Findings.Count >= 2);
-        var firstIndexedPosition = report.Tier1Findings.ToList().FindIndex(f => f.Indexed == true);
-        var firstUnindexedPosition = report.Tier1Findings.ToList().FindIndex(f => f.Indexed == false);
+        Assert.True(report.Find<SargabilityFinding>("NonSargablePredicateScanner").Count >= 2);
+        var firstIndexedPosition = report.Find<SargabilityFinding>("NonSargablePredicateScanner").ToList().FindIndex(f => f.Indexed == true);
+        var firstUnindexedPosition = report.Find<SargabilityFinding>("NonSargablePredicateScanner").ToList().FindIndex(f => f.Indexed == false);
 
         Assert.True(firstIndexedPosition >= 0 && firstUnindexedPosition >= 0);
         Assert.True(firstIndexedPosition < firstUnindexedPosition,

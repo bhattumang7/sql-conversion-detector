@@ -2,6 +2,7 @@ using SilentScan.Live;
 using SilentScan.Live.Catalog;
 using SilentScan.Tests.Support;
 using SilentScan.Verify.Deployment;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Integration;
 
@@ -32,7 +33,7 @@ public sealed class LivePlanCacheWorkloadFindingTests : OracleTestFixture
 
         var result = await LiveScanRunner.RunAsync(Options.BuildConnectionString(DatabaseName), includePlanCacheEvidence: true);
 
-        Assert.DoesNotContain(result.Report.TypedFindings, f => f.Column.ColumnName == "Code");
+        Assert.DoesNotContain(result.Report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code");
 
         var workloadFinding = Assert.Single(result.WorkloadFindings, f => f.ColumnName == "Code");
         Assert.Equal("dbo.Accounts", workloadFinding.TableQualifiedName);

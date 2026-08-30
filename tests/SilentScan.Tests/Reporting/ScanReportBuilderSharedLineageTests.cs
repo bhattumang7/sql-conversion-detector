@@ -37,7 +37,7 @@ public sealed class ScanReportBuilderSharedLineageTests
             END
             """);
 
-        Assert.NotEmpty(withOwn.TypedFindings);
+        Assert.NotEmpty(withOwn.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
         AssertReportsEquivalent(withOwn, withShared);
     }
 
@@ -81,7 +81,7 @@ public sealed class ScanReportBuilderSharedLineageTests
             END
             """);
 
-        Assert.NotEmpty(withOwn.Tier1Findings);
+        Assert.NotEmpty(withOwn.Find<SargabilityFinding>("NonSargablePredicateScanner"));
         AssertReportsEquivalent(withOwn, withShared);
     }
 

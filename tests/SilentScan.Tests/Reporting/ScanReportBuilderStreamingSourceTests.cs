@@ -5,6 +5,7 @@ using SilentScan.Tests.Support;
 using SilentScan.Verify;
 using SilentScan.Verify.Catalog;
 using SilentScan.Verify.Deployment;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Reporting;
 
@@ -34,7 +35,7 @@ public sealed class ScanReportBuilderStreamingSourceTests
 
         Assert.Equal(1, countingSource.EnumerationCount);
 
-        var finding = Assert.Single(report.TypedFindings);
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
         Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
     }
 

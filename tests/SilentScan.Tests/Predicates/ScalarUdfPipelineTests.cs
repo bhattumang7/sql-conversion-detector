@@ -3,6 +3,7 @@ using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -33,7 +34,7 @@ public sealed class ScalarUdfPipelineTests : OracleTestFixture
     {
         var report = await EngineAuthoritativeScan.ScanAsync(NvarcharReturningSql, "SQL_Latin1_General_CP1_CI_AS");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
 
@@ -58,7 +59,7 @@ public sealed class ScalarUdfPipelineTests : OracleTestFixture
         var catalog = CatalogBuilder.Build([parseResult], "SQL_Latin1_General_CP1_CI_AS");
         var report = ScanReportBuilder.BuildFromParseResults([parseResult], catalog);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
     }
@@ -76,7 +77,7 @@ public sealed class ScalarUdfPipelineTests : OracleTestFixture
                 SELECT Code FROM dbo.Accounts WHERE Code = dbo.fn_DefaultVarcharCode();
             """, "SQL_Latin1_General_CP1_CI_AS");
 
-        Assert.Empty(report.TypedFindings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
         Assert.Equal(1, report.TypedPredicateSummary.SeekPreservedCount);
     }
 
@@ -86,7 +87,7 @@ public sealed class ScalarUdfPipelineTests : OracleTestFixture
 
         var report = await EngineAuthoritativeScan.ScanAsync(MissingFunctionSql, "SQL_Latin1_General_CP1_CI_AS");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.Unknown, finding.Verdict);
     }
 }

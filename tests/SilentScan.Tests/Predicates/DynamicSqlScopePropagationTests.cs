@@ -34,9 +34,9 @@ public sealed class DynamicSqlScopePropagationTests
             END;
             """);
 
-        Assert.Contains(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral);
+        Assert.Contains(report.Find<DynamicSqlFinding>("DynamicSqlScanner"), f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral);
 
-        var scanForcedFindings = report.TypedFindings.Where(f => f.Verdict == Verdict.ScanForced).ToList();
+        var scanForcedFindings = report.Find<TypedPredicateFinding>("TypedPredicateExtractor").Where(f => f.Verdict == Verdict.ScanForced).ToList();
         Assert.Equal(2, scanForcedFindings.Count);
         Assert.All(scanForcedFindings, f => Assert.True(f.Column.Indexed));
 
@@ -58,7 +58,7 @@ public sealed class DynamicSqlScopePropagationTests
             END;
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Verdict == Verdict.ScanForced);
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Verdict == Verdict.ScanForced);
         Assert.True(finding.Column.Indexed);
         Assert.NotNull(finding.DynamicSqlCallSite);
     }
@@ -78,7 +78,7 @@ public sealed class DynamicSqlScopePropagationTests
             END;
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Verdict == Verdict.ScanForced);
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Verdict == Verdict.ScanForced);
         Assert.True(finding.Column.Indexed);
     }
 
@@ -95,7 +95,7 @@ public sealed class DynamicSqlScopePropagationTests
             END;
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Verdict == Verdict.ScanForced);
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Verdict == Verdict.ScanForced);
         Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
 
         Assert.False(finding.Column.Indexed);

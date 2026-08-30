@@ -4,6 +4,7 @@ using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
 using SilentScan.Core.Common;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Catalog;
 
@@ -32,7 +33,7 @@ public sealed class SynonymResolutionTests
             SELECT 1 FROM dbo.Stock WHERE Sku = N'S1';
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Sku");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Sku");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal("dbo.Inventory", finding.Column.TableQualifiedName);
         Assert.True(finding.Column.Indexed);
@@ -52,7 +53,7 @@ public sealed class SynonymResolutionTests
             SELECT 1 FROM dbo.StockView WHERE Sku = N'S1';
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Sku");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Sku");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal("dbo.Inventory", finding.Column.TableQualifiedName);
         Assert.Equal(1, finding.Column.Depth);
@@ -74,7 +75,7 @@ public sealed class SynonymResolutionTests
             SELECT 1 FROM dbo.vOuter WHERE Sku = N'S1';
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Sku");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Sku");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal("dbo.Inventory", finding.Column.TableQualifiedName);
     }
@@ -92,7 +93,7 @@ public sealed class SynonymResolutionTests
             SELECT 1 FROM dbo.Stock WHERE Sku = N'S1';
             """);
 
-        Assert.Empty(report.TypedFindings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
         Assert.Contains(report.SkippedConstructs, s => s.Reason.Contains("dbo.Stock", StringComparison.Ordinal) && s.Reason.Contains("has no known DDL", StringComparison.Ordinal));
     }
 
@@ -116,7 +117,7 @@ public sealed class SynonymResolutionTests
             SELECT 1 FROM dbo.A WHERE Sku = N'S1';
             """);
 
-        Assert.Empty(report.TypedFindings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
         Assert.Contains(report.SkippedConstructs, s => s.Reason.Contains("dbo.A", StringComparison.Ordinal));
     }
 
@@ -130,7 +131,7 @@ public sealed class SynonymResolutionTests
             SELECT 1 FROM dbo.RemoteStock WHERE Sku = N'S1';
             """);
 
-        Assert.Empty(report.TypedFindings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
         Assert.Contains(report.SkippedConstructs, s => s.ConstructKind == "CREATE SYNONYM" && s.Reason.Contains("linked server", StringComparison.Ordinal));
     }
 }

@@ -1,6 +1,7 @@
 using SilentScan.Core.Rules;
 using SilentScan.Live;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Integration;
 
@@ -40,7 +41,7 @@ public sealed class LiveCatalogParityExtrasTests : OracleTestFixture
     {
         var liveResult = await LiveScanRunner.RunAsync(Options.BuildConnectionString(DatabaseName));
 
-        var liveVerdicts = VerdictsByColumn(liveResult.Report.TypedFindings);
+        var liveVerdicts = VerdictsByColumn(liveResult.Report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
 
         var key = ("dbo.Orders", "OrderCode");
         Assert.True(liveVerdicts.ContainsKey(key), "Live mode should resolve the synonym+UDF predicate - the whole point of this fix.");
@@ -52,7 +53,7 @@ public sealed class LiveCatalogParityExtrasTests : OracleTestFixture
     {
         var liveResult = await LiveScanRunner.RunAsync(Options.BuildConnectionString(DatabaseName));
 
-        var liveVerdicts = VerdictsByColumn(liveResult.Report.TypedFindings);
+        var liveVerdicts = VerdictsByColumn(liveResult.Report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
 
         var key = ("dbo.Accounts", "Code");
         Assert.True(liveVerdicts.ContainsKey(key), "Live mode should resolve the table-variable join predicate.");

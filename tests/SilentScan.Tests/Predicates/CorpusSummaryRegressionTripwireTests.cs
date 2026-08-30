@@ -1,6 +1,7 @@
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -43,12 +44,12 @@ public sealed class CorpusSummaryRegressionTripwireTests
         Assert.Equal(1, Assert.Contains("no column operand", skipped.CountsByConstructKind));
         Assert.Equal(5, Assert.Contains("procedure call graph edge", skipped.CountsByConstructKind));
 
-        Assert.Single(report.Tier1Findings);
-        Assert.Equal(6, report.TypedFindings.Count);
-        Assert.Empty(report.ExpressionDerivedFindings);
-        Assert.Empty(report.CollationConflictFindings);
-        Assert.Empty(report.WriteLossFindings);
-        Assert.Equal(5, report.DynamicSqlFindings.Count);
+        Assert.Single(report.Find<SargabilityFinding>("NonSargablePredicateScanner"));
+        Assert.Equal(6, report.Find<TypedPredicateFinding>("TypedPredicateExtractor").Count);
+        Assert.Empty(report.Find<ExpressionDerivedFinding>("TypedPredicateExtractor"));
+        Assert.Empty(report.Find<CollationConflictFinding>("TypedPredicateExtractor"));
+        Assert.Empty(report.Find<WriteLossFinding>("TypedPredicateExtractor"));
+        Assert.Equal(5, report.Find<DynamicSqlFinding>("DynamicSqlScanner").Count);
         Assert.Equal(6, report.SkippedConstructs.Count);
     }
 }

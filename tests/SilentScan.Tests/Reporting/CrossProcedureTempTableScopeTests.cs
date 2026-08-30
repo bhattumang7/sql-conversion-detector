@@ -1,6 +1,7 @@
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Reporting;
 
@@ -34,7 +35,7 @@ public sealed class CrossProcedureTempTableScopeTests
             END
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Col");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Col");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal("#Results", finding.Column.TableQualifiedName);
     }
@@ -62,7 +63,7 @@ public sealed class CrossProcedureTempTableScopeTests
             END
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Col");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Col");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal("#Results", finding.Column.TableQualifiedName);
 
@@ -92,7 +93,7 @@ public sealed class CrossProcedureTempTableScopeTests
             END
             """);
 
-        Assert.DoesNotContain(report.TypedFindings, f => f.Column.ColumnName == "Col" && f.Column.TableQualifiedName == "#Results");
+        Assert.DoesNotContain(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Col" && f.Column.TableQualifiedName == "#Results");
         Assert.Contains(report.SkippedConstructs, s => s.ConstructKind == "FROM table reference" && s.Reason.Contains("#Results", StringComparison.Ordinal));
     }
 
@@ -114,7 +115,7 @@ public sealed class CrossProcedureTempTableScopeTests
             END
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Col");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Col");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal("#Results", finding.Column.TableQualifiedName);
     }

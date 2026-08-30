@@ -1,6 +1,7 @@
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -26,7 +27,7 @@ public sealed class DisabledIndexPipelineTests : OracleTestFixture
     {
         var report = await EngineAuthoritativeScan.ScanAsync(DisabledIndexSql, "SQL_Latin1_General_CP1_CI_AS");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "SerialNo");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "SerialNo");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.False(finding.Column.Indexed);
 
@@ -52,7 +53,7 @@ public sealed class DisabledIndexPipelineTests : OracleTestFixture
 
         var report = await EngineAuthoritativeScan.ScanAsync(rebuiltIndexSql, "SQL_Latin1_General_CP1_CI_AS");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "SerialNo");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "SerialNo");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
 

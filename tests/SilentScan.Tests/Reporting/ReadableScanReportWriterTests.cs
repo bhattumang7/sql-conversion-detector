@@ -276,102 +276,7 @@ public sealed class ReadableScanReportWriterTests
         return count;
     }
 
-    private static ScanReport Blank() => new(
-        ParseHealth: new ParseHealthReport([]),
-        Tier1Findings: [],
-        TypedFindings: [],
-        DynamicSqlFindings: [],
-        ExpressionDerivedFindings: [],
-        CollationConflictFindings: [],
-        WriteLossFindings: [],
-        TvfFenceFindings: [],
-        ScalarUdfFindings: [],
-        ColumnCollationDriftFindings: [],
-        CrossTableTypeDriftFindings: [],
-        ProcCallArgumentMismatchFindings: [],
-        TemporalBoundaryFindings: [],
-        MaxTypedColumnFindings: [],
-        OversizedParameterFindings: [],
-        UnderLengthParameterFindings: [],
-        AnsiPaddingMismatchFindings: [],
-        PartialCompositeForeignKeyJoinFindings: [],
-        SetOptionFindings: [],
-        CatchAllPredicateFindings: [],
-        LocalVariablePredicateFindings: [],
-        FilteredIndexParameterMismatchFindings: [],
-        NotInNullableSubqueryFindings: [],
-        NonUniqueUpdateSourceFindings: [],
-        ForcedSerialFindings: [],
-        UntrustedConstraintFindings: [],
-        CascadingForeignKeyFindings: [],
-        MultiReferencedCteFindings: [],
-        NestedViewDepthFindings: [],
-        PostExpansionJoinWidthFindings: [],
-        SelectStarViewFindings: [],
-        UnparameterizedDynamicSqlFindings: [],
-        NonPersistedComputedColumnFindings: [],
-        TempTableExecShapeFindings: [],
-        SelfReferencingDmlFindings: [],
-        TemporalTableHistoryIndexGapFindings: [],
-        ModuleCompileFlagFindings: [],
-        WindowFrameFindings: [],
-        WaitForFindings: [],
-        ViewOrderingFindings: [],
-        TransactionHygieneFindings: [],
-        CompositeIndexLeadingColumnFindings: [],
-        IndexHintFindings: [],
-        SessionDateSettingFindings: [],
-        CartesianJoinFindings: [],
-        TruncateSwallowedFindings: [],
-        UnindexedTempTableUsageFindings: [],
-        OutputParameterFindings: [],
-        DatabaseConfigurationFindings: [],
-        ParameterReassignmentPredicateFindings: [],
-        CodeMetricFindings: [],
-        FormattingFindings: [],
-        NamingFindings: [],
-        DeadCodeFindings: [],
-        DuplicationFindings: [],
-        DeprecatedSyntaxFindings: [],
-        StatementShapeFindings: [],
-        ControlFlowRiskFindings: [],
-        SecurityFindings: [],
-        IndexDesignFindings: [],
-        IdentityRangeFindings: [],
-        FloatEqualityFindings: [],
-        QueryAntiPatternFindings: [],
-        IndexCoverageFindings: [],
-        TriggerCorrectnessFindings: [],
-        CrossModuleLockOrderFindings: [],
-        TriggerRecursionCycleFindings: [],
-        CheckConstraintFindings: [],
-        DefaultNullableConstraintFindings: [],
-        TryCastComputedColumnPredicateFindings: [],
-        StaleSelectStarViewFindings: [],
-        BareTopNoOrderByFindings: [],
-        StringConcatNullFindings: [],
-        AggregateDivisionColumnstoreFindings: [],
-        SecurityPredicateIndexFindings: [],
-        DanglingObjectReferenceFindings: [],
-        ForcedParameterizationFindings: [],
-        ColumnstoreUnsupportedColumnTypeFindings: [],
-        AlwaysEncryptedOrderByFindings: [],
-        TriggerOrderFindings: [],
-        MissingStatisticsFindings: [],
-        OperandComparabilityFindings: [],
-        MemoryOptimizedUnsupportedColumnTypeFindings: [],
-        MemoryOptimizedUnsupportedIndexOptionFindings: [],
-        MemoryOptimizedForeignKeyFindings: [],
-        WindowFunctionArgumentFindings: [],
-        SelectiveXmlIndexValueColumnFindings: [],
-        FloatOrderDependentAggregateFindings: [],
-        AlwaysEncryptedKeyColumnFindings: [],
-        AlterColumnSafetyFindings: [],
-        SpExecuteSqlParameterMismatchFindings: [],
-        SkippedConstructs: [],
-        SkippedConstructSummary: SkippedConstructSummary.From([]),
-        TypedPredicateSummary: TypedPredicateSummary.From([]),
-        DynamicSqlSummary: DynamicSqlSummary.From([]));
+    private static ScanReport Blank() => Support.TestScanReports.Build();
 
     private static IReadOnlyList<ReadableBlock> BuildBlocks(ScanReport report, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Full) =>
         ReadableScanReportWriter.BuildSections(report, 2, pathBase, verbosity);
@@ -501,13 +406,10 @@ public sealed class ReadableScanReportWriterTests
     [Fact]
     public void Summary_OnlyOneNonZeroFindingKind_TableHasExactlyOneRowWithDashDistinct()
     {
-        var report = Blank() with
-        {
-            DanglingObjectReferenceFindings =
+        var report = Blank().WithFindings("DanglingObjectReferenceScanner",
             [
                 new DanglingObjectReferenceFinding("dbo.usp_X", "procedure", "GoneTable", null, "a.sql", 5, 1),
-            ],
-        };
+            ]);
 
         var table = TableAfterHeading(BuildBlocks(report), "Summary");
 
@@ -544,7 +446,7 @@ public sealed class ReadableScanReportWriterTests
             new TypedPredicateFinding(Verdict.Unknown, column, new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int)), "=", "a.sql", 1, 1),
             new TypedPredicateFinding(Verdict.Unknown, column, new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int)), "=", "a.sql", 2, 1),
         };
-        var report = Blank() with { TypedFindings = findings };
+        var report = Blank().WithFindings("TypedPredicateExtractor", findings);
 
         var blocks = BuildBlocks(report, verbosity: ReadableVerbosity.Brief);
 
@@ -563,7 +465,7 @@ public sealed class ReadableScanReportWriterTests
         {
             new TypedPredicateFinding(Verdict.ScanForced, column, new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int)), "=", "a.sql", 1, 1),
         };
-        var report = Blank() with { TypedFindings = findings };
+        var report = Blank().WithFindings("TypedPredicateExtractor", findings);
 
         var blocks = BuildBlocks(report, verbosity: ReadableVerbosity.Brief);
 
@@ -586,7 +488,7 @@ public sealed class ReadableScanReportWriterTests
             new TypedPredicateFinding(Verdict.Unknown, notIndexed, plainValue, "=", "a.sql", 2, 1),
             new TypedPredicateFinding(Verdict.Unknown, unresolved, plainValue, "=", "a.sql", 3, 1),
         };
-        var report = Blank() with { TypedFindings = findings };
+        var report = Blank().WithFindings("TypedPredicateExtractor", findings);
 
         var table = TableAfterHeading(BuildBlocks(report), "Comparisons that could not be classified");
 
@@ -607,7 +509,7 @@ public sealed class ReadableScanReportWriterTests
         {
             new TypedPredicateFinding(Verdict.Unknown, column, variableOperand, "=", "a.sql", 1, 1),
         };
-        var report = Blank() with { TypedFindings = findings };
+        var report = Blank().WithFindings("TypedPredicateExtractor", findings);
 
         var table = TableAfterHeading(BuildBlocks(report), "Comparisons that could not be classified");
 
@@ -621,7 +523,7 @@ public sealed class ReadableScanReportWriterTests
             "dbo.T", "Col", WriteLossKind.NumericScaleNarrowing,
             new SqlType(SqlTypeCategory.Decimal), new SqlType(SqlTypeCategory.Decimal),
             "a.sql", 10, 1);
-        var report = Blank() with { WriteLossFindings = [finding] };
+        var report = Blank().WithFindings("TypedPredicateExtractor", [finding]);
 
         var table = TableAfterHeading(BuildBlocks(report), "Numeric scale narrowing");
 
@@ -635,7 +537,7 @@ public sealed class ReadableScanReportWriterTests
             "dbo.T", "Col", WriteLossKind.NumericScaleNarrowing,
             new SqlType(SqlTypeCategory.Decimal), new SqlType(SqlTypeCategory.Decimal),
             "a.sql", 10, 1, Confidence: FindingConfidence.Low);
-        var report = Blank() with { WriteLossFindings = [finding] };
+        var report = Blank().WithFindings("TypedPredicateExtractor", [finding]);
 
         var table = TableAfterHeading(BuildBlocks(report), "Numeric scale narrowing");
 
@@ -649,7 +551,7 @@ public sealed class ReadableScanReportWriterTests
             "dbo.T", "Col", WriteLossKind.NumericScaleNarrowing,
             new SqlType(SqlTypeCategory.Decimal), new SqlType(SqlTypeCategory.Decimal),
             "inner.sql", 3, 1, DynamicSqlCallSite: new SourceSpan("caller.sql", 40, 1));
-        var report = Blank() with { WriteLossFindings = [throughDynamicSql] };
+        var report = Blank().WithFindings("TypedPredicateExtractor", [throughDynamicSql]);
 
         var table = TableAfterHeading(BuildBlocks(report), "Numeric scale narrowing");
 
@@ -665,7 +567,7 @@ public sealed class ReadableScanReportWriterTests
             new SargabilityFinding(SargabilityFindingKind.FunctionWrappedColumn, "Early", null, "a.sql", 1, 1, TableQualifiedName: "dbo.T", Indexed: true),
             new SargabilityFinding(SargabilityFindingKind.CastOrConvertOnColumn, "Cast1", null, "a.sql", 1, 1, TableQualifiedName: "dbo.T", Indexed: false),
         };
-        var report = Blank() with { Tier1Findings = findings };
+        var report = Blank().WithFindings("NonSargablePredicateScanner", findings);
 
         var blocks = BuildBlocks(report);
 
@@ -686,7 +588,7 @@ public sealed class ReadableScanReportWriterTests
             new CatchAllPredicateFinding("dbo.T", "Unindexed", false, "@p1", "a.sql", 1, 1),
             new CatchAllPredicateFinding("dbo.T", "Indexed", true, "@p2", "z.sql", 1, 1),
         };
-        var report = Blank() with { CatchAllPredicateFindings = findings };
+        var report = Blank().WithFindings("CatchAllPredicateScanner", findings);
 
         var table = TableAfterHeading(BuildBlocks(report), "Catch-all / kitchen-sink predicates");
 
@@ -703,7 +605,7 @@ public sealed class ReadableScanReportWriterTests
             new LocalVariablePredicateFinding("dbo.T", "B", false, 0, "@v2", "=", "a.sql", 2, 1),
             new LocalVariablePredicateFinding("dbo.T", "C", null, 0, "@v3", "=", "a.sql", 3, 1),
         };
-        var report = Blank() with { LocalVariablePredicateFindings = findings };
+        var report = Blank().WithFindings("TypedPredicateExtractor", findings);
 
         var table = TableAfterHeading(BuildBlocks(report), "Predicates against a local variable");
         var byColumn = table.Rows.ToDictionary(r => r[1]);
@@ -722,7 +624,7 @@ public sealed class ReadableScanReportWriterTests
             new UnderLengthParameterFinding("dbo.T", "PatternShape", 10, 3, false, "LIKE", true, "a.sql", 2, 1),
             new UnderLengthParameterFinding("dbo.T", "PlainTruncation", 10, 3, false, "=", false, "a.sql", 3, 1),
         };
-        var report = Blank() with { UnderLengthParameterFindings = findings };
+        var report = Blank().WithFindings("TypedPredicateExtractor", findings);
 
         var table = TableAfterHeading(BuildBlocks(report), "under-length parameter");
         var byColumn = table.Rows.ToDictionary(r => r[1]);
@@ -740,7 +642,7 @@ public sealed class ReadableScanReportWriterTests
             new MaxTypedColumnFinding("dbo.T", "BigVarchar", "VarChar(max)", "a.sql", 1, NonIndexableColumnFindingKind.MaxLength),
             new MaxTypedColumnFinding("dbo.T", "OldText", "Text", "a.sql", 2, NonIndexableColumnFindingKind.LegacyLargeObject),
         };
-        var report = Blank() with { MaxTypedColumnFindings = findings };
+        var report = Blank().WithFindings("MaxTypedColumnScanner", findings);
 
         var blocks = BuildBlocks(report);
         var maxLengthTable = TableAfterHeading(blocks, "MAX-typed columns");
@@ -757,7 +659,7 @@ public sealed class ReadableScanReportWriterTests
             TvfFenceFindingKind.CorrelatedApply, null, "dbo.fn_X", null, "a.sql", 1, 1,
             Depth: 1, OriginSourcePath: "origin.sql", OriginLine: 9,
             CorrelatedOuterColumns: ["a", "b"], ReferenceFragmentText: "ignored fragment");
-        var report = Blank() with { TvfFenceFindings = [correlated] };
+        var report = Blank().WithFindings("TvfFenceScanner", [correlated]);
 
         var table = TableAfterHeading(BuildBlocks(report), "Correlated CROSS/OUTER APPLY");
 
@@ -772,7 +674,7 @@ public sealed class ReadableScanReportWriterTests
         var standalone = new TvfFenceFinding(
             TvfFenceFindingKind.Standalone, null, "dbo.fn_Y", null, "a.sql", 1, 1,
             ReferenceFragmentText: "SELECT * FROM dbo.fn_Y()");
-        var report = Blank() with { TvfFenceFindings = [standalone] };
+        var report = Blank().WithFindings("TvfFenceScanner", [standalone]);
 
         var table = TableAfterHeading(BuildBlocks(report), "Standalone reference");
 
@@ -789,7 +691,7 @@ public sealed class ReadableScanReportWriterTests
             ScalarUdfInlineability.NotInlineable, "uses TRY_CATCH", false,
             true, true, ScalarUdfContext.Where, null,
             "a.sql", 1, 1);
-        var report = Blank() with { ScalarUdfFindings = [finding] };
+        var report = Blank().WithFindings("ScalarUdfScanner", [finding]);
 
         var table = TableAfterHeading(BuildBlocks(report), "Called in a predicate");
 
@@ -806,7 +708,7 @@ public sealed class ReadableScanReportWriterTests
             ScalarUdfInlineability.Inlineable, null, true,
             false, null, ScalarUdfContext.SelectList, null,
             "a.sql", 1, 1, ReferenceFragmentText: "dbo.fn_Plain(Col)");
-        var report = Blank() with { ScalarUdfFindings = [finding] };
+        var report = Blank().WithFindings("ScalarUdfScanner", [finding]);
 
         var table = TableAfterHeading(BuildBlocks(report), "Called outside a predicate");
 
@@ -825,7 +727,7 @@ public sealed class ReadableScanReportWriterTests
             new WriteLossFinding("dbo.T", "C", WriteLossKind.NumericScaleNarrowing, new SqlType(SqlTypeCategory.Decimal), new SqlType(SqlTypeCategory.Decimal), "a.sql", 3, 1),
             new WriteLossFinding("dbo.T", "D", WriteLossKind.TemporalPrecisionLoss, new SqlType(SqlTypeCategory.Date), new SqlType(SqlTypeCategory.DateTime2), "a.sql", 4, 1),
         };
-        var report = Blank() with { WriteLossFindings = findings };
+        var report = Blank().WithFindings("TypedPredicateExtractor", findings);
 
         var byColumn = TablesUnderHeading(BuildBlocks(report), "Assignments risking silent data loss")
             .SelectMany(t => t.Rows)
@@ -845,7 +747,7 @@ public sealed class ReadableScanReportWriterTests
             new IndexDesignFinding(IndexDesignFindingKind.UnindexedForeignKey, "dbo.T", null, "detail", "a.sql", 1),
             new IndexDesignFinding(IndexDesignFindingKind.DuplicateIndex, "dbo.T", null, "detail", "a.sql", 2),
         };
-        var report = Blank() with { IndexDesignFindings = findings };
+        var report = Blank().WithFindings("IndexDesignScanner", findings);
 
         var blocks = BuildBlocks(report);
         var unindexedForeignKeyTable = TableAfterHeading(blocks, "Unindexed foreign key");
@@ -861,7 +763,7 @@ public sealed class ReadableScanReportWriterTests
         var finding = new DatabaseConfigurationFinding(
             DatabaseConfigurationFindingKind.SpatialPersistedComputedColumnDisabledOnCompatibilityLevelChange,
             "TestDb", AffectedObjectName: "dbo.T.GeoCol", Dependency: "geography", TargetCompatibilityLevel: 160);
-        var report = Blank() with { DatabaseConfigurationFindings = [finding] };
+        var report = Blank().WithFindings("DatabaseConfigurationScanner", [finding]);
 
         var table = TableAfterHeading(BuildBlocks(report), "Spatial persisted computed column disabled on compatibility level change");
 
@@ -895,7 +797,7 @@ public sealed class ReadableScanReportWriterTests
             new DynamicSqlFinding("a.sql", 3, 1, DynamicSqlOutcome.PartiallyAnalyzed, null),
             new DynamicSqlFinding("a.sql", 4, 1, DynamicSqlOutcome.InnerParseFailed, null),
         };
-        var report = Blank() with { DynamicSqlFindings = findings, DynamicSqlSummary = DynamicSqlSummary.From(findings) };
+        var report = Blank().WithFindings("DynamicSqlScanner", findings) with { DynamicSqlSummary = DynamicSqlSummary.From(findings) };
 
         var blocks = BuildBlocks(report);
         var heading = blocks.OfType<ReadableBlock.Heading>().First(h => h.Text.Contains("Dynamic SQL not fully analyzed", StringComparison.Ordinal));
@@ -914,7 +816,7 @@ public sealed class ReadableScanReportWriterTests
     public void DynamicSql_Brief_OmitsTableShowsPointer()
     {
         var findings = new[] { new DynamicSqlFinding("a.sql", 2, 1, DynamicSqlOutcome.Unanalyzable, "runtime value") };
-        var report = Blank() with { DynamicSqlFindings = findings, DynamicSqlSummary = DynamicSqlSummary.From(findings) };
+        var report = Blank().WithFindings("DynamicSqlScanner", findings) with { DynamicSqlSummary = DynamicSqlSummary.From(findings) };
 
         var blocks = BuildBlocks(report, verbosity: ReadableVerbosity.Brief);
 

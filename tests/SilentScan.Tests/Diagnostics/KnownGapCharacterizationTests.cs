@@ -31,7 +31,7 @@ public sealed class KnownGapCharacterizationTests
             SELECT 1 FROM ArchiveDb.dbo.Shipments WHERE TrackingNo = N'T1';
             """);
 
-        Assert.Empty(report.TypedFindings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
         Assert.Contains(report.SkippedConstructs, s => s.Reason.Contains("ArchiveDb.dbo.Shipments", StringComparison.Ordinal));
     }
 

@@ -28,7 +28,7 @@ public sealed class ExpressionTypeInferencerPipelineTests : OracleTestFixture
 
         var report = await EngineAuthoritativeScan.ScanAsync(CoalesceSql, "SQL_Latin1_General_CP1_CI_AS");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
 

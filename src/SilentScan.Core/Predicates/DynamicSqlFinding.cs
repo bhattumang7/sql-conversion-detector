@@ -12,8 +12,12 @@ public enum DynamicSqlOutcome
     PartiallyAnalyzed,
 }
 
-public sealed record DynamicSqlFinding(string SourcePath, int Line, int Column, DynamicSqlOutcome Outcome, string? Reason)
+public sealed record DynamicSqlFinding(string SourcePath, int Line, int Column, DynamicSqlOutcome Outcome, string? Reason) : IFinding
 {
     public string RuleId { get; } = FindingRuleIds.DynamicSqlRuleId(Outcome);
+
+    public SourceSpan Location => new(SourcePath, Line, Column);
+
+    public FindingConfidence Confidence => FindingConfidence.High;
 }
 

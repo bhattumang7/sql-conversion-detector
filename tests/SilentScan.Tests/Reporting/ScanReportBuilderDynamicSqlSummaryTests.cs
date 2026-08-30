@@ -29,8 +29,8 @@ public sealed class ScanReportBuilderDynamicSqlSummaryTests
         Assert.Equal(2, report.DynamicSqlSummary.TotalCallSites);
         Assert.Equal(1, report.DynamicSqlSummary.AnalyzedCount);
         Assert.Equal(1, report.DynamicSqlSummary.UnanalyzableCount);
-        Assert.Contains(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral);
-        Assert.Contains(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+        Assert.Contains(report.Find<DynamicSqlFinding>("DynamicSqlScanner"), f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral);
+        Assert.Contains(report.Find<DynamicSqlFinding>("DynamicSqlScanner"), f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
     }
 
     [Fact]

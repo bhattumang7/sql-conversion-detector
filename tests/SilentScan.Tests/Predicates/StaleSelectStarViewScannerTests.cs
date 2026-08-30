@@ -122,7 +122,7 @@ public sealed class StaleSelectStarViewScannerTests
             ALTER TABLE dbo.StaleViewBase ADD B INT NULL;
             """);
 
-        var finding = Assert.Single(report.StaleSelectStarViewFindings);
+        var finding = Assert.Single(report.Find<StaleSelectStarViewFinding>("StaleSelectStarViewScanner"));
         Assert.Equal("dbo.StaleViewOverBase", finding.ViewQualifiedName);
         Assert.Equal("dbo.StaleViewBase", finding.BaseTableQualifiedName);
         Assert.Equal(["Id", "A"], finding.ViewCompiledColumns);
@@ -139,6 +139,6 @@ public sealed class StaleSelectStarViewScannerTests
             CREATE VIEW dbo.StaleViewCleanOverBase AS SELECT * FROM dbo.StaleViewCleanBase;
             """);
 
-        Assert.Empty(report.StaleSelectStarViewFindings);
+        Assert.Empty(report.Find<StaleSelectStarViewFinding>("StaleSelectStarViewScanner"));
     }
 }

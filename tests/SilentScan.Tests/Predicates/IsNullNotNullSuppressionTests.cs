@@ -37,7 +37,7 @@ public sealed class IsNullNotNullSuppressionTests : OracleTestFixture
     {
         var report = await EngineAuthoritativeScan.ScanAsync(Ddl);
 
-        Assert.Empty(report.Tier1Findings);
+        Assert.Empty(report.Find<SargabilityFinding>("NonSargablePredicateScanner"));
     }
 
     [Fact]

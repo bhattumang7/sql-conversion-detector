@@ -1,6 +1,7 @@
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Lineage;
 
@@ -33,7 +34,7 @@ public sealed class SelectIntoLineagePassTests
             END;
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Badge");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Badge");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal("#snap", finding.Column.TableQualifiedName);
 
@@ -57,7 +58,7 @@ public sealed class SelectIntoLineagePassTests
             SELECT 1 FROM #allOrders WHERE OrderCode = N'X1';
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "OrderCode");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "OrderCode");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
 
@@ -78,7 +79,7 @@ public sealed class SelectIntoLineagePassTests
             END;
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Badge");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Badge");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
 
@@ -99,7 +100,7 @@ public sealed class SelectIntoLineagePassTests
             END;
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Badge");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Badge");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
     }
@@ -116,7 +117,7 @@ public sealed class SelectIntoLineagePassTests
             SELECT 1 FROM #snap WHERE Badge = N'B1';
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Badge");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Badge");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
 }

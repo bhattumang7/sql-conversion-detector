@@ -37,7 +37,7 @@ public sealed class DateFunctionColumnPipelineTests : OracleTestFixture
     {
         var report = await EngineAuthoritativeScan.ScanAsync(Ddl);
 
-        Assert.DoesNotContain(report.Tier1Findings, f => f.ColumnName == "OrderDate");
+        Assert.DoesNotContain(report.Find<SargabilityFinding>("NonSargablePredicateScanner"), f => f.ColumnName == "OrderDate");
     }
 
     [Fact]

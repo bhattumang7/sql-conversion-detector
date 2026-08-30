@@ -20,7 +20,7 @@ public sealed class SecondSweepGLiveOracleTests
             """,
             minimumConfidence: FindingConfidence.Low);
 
-        var finding = Assert.Single(report.BareTopNoOrderByFindings);
+        var finding = Assert.Single(report.Find<BareTopNoOrderByFinding>("BareTopNoOrderByScanner"));
         Assert.Equal(FindingConfidence.Medium, finding.Confidence);
     }
 
@@ -38,7 +38,7 @@ public sealed class SecondSweepGLiveOracleTests
             """,
             minimumConfidence: FindingConfidence.Low);
 
-        Assert.Empty(report.BareTopNoOrderByFindings);
+        Assert.Empty(report.Find<BareTopNoOrderByFinding>("BareTopNoOrderByScanner"));
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public sealed class SecondSweepGLiveOracleTests
             END
             """);
 
-        var finding = Assert.Single(report.StringConcatNullFindings);
+        var finding = Assert.Single(report.Find<StringConcatNullFinding>("StringConcatNullScanner"));
         Assert.Equal("dbo.ConcatTarget", finding.TableQualifiedName);
         Assert.Equal("MiddleName", finding.ColumnName);
     }
@@ -72,7 +72,7 @@ public sealed class SecondSweepGLiveOracleTests
             END
             """);
 
-        Assert.Empty(report.StringConcatNullFindings);
+        Assert.Empty(report.Find<StringConcatNullFinding>("StringConcatNullScanner"));
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public sealed class SecondSweepGLiveOracleTests
             """,
             minimumConfidence: FindingConfidence.Low);
 
-        var finding = Assert.Single(report.AggregateDivisionColumnstoreFindings);
+        var finding = Assert.Single(report.Find<AggregateDivisionColumnstoreFinding>("AggregateDivisionColumnstoreScanner"));
         Assert.Equal("dbo.RatioTarget", finding.TableQualifiedName);
         Assert.Equal(FindingConfidence.Low, finding.Confidence);
     }
@@ -110,6 +110,6 @@ public sealed class SecondSweepGLiveOracleTests
             """,
             minimumConfidence: FindingConfidence.Low);
 
-        Assert.Empty(report.AggregateDivisionColumnstoreFindings);
+        Assert.Empty(report.Find<AggregateDivisionColumnstoreFinding>("AggregateDivisionColumnstoreScanner"));
     }
 }

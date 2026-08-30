@@ -188,7 +188,7 @@ public sealed class SecurityPredicateIndexScannerTests
             GO
             """);
 
-        var finding = Assert.Single(report.SecurityPredicateIndexFindings);
+        var finding = Assert.Single(report.Find<SecurityPredicateIndexFinding>("SecurityPredicateIndexScanner"));
         Assert.Equal("dbo.RlsUnindexedTarget", finding.TableQualifiedName);
         Assert.Equal("RlsSec.UnindexedTenantFilter", finding.PolicyQualifiedName);
         Assert.Equal("RlsSec.fn_UnindexedTenantPredicate", finding.PredicateFunctionQualifiedName);
@@ -218,7 +218,7 @@ public sealed class SecurityPredicateIndexScannerTests
             """);
 
         Assert.DoesNotContain(
-            report.SecurityPredicateIndexFindings,
+            report.Find<SecurityPredicateIndexFinding>("SecurityPredicateIndexScanner"),
             f => f.TableQualifiedName == "dbo.RlsIndexedTarget");
     }
 
@@ -244,7 +244,7 @@ public sealed class SecurityPredicateIndexScannerTests
             """);
 
         Assert.DoesNotContain(
-            report.SecurityPredicateIndexFindings,
+            report.Find<SecurityPredicateIndexFinding>("SecurityPredicateIndexScanner"),
             f => f.TableQualifiedName == "dbo.RlsDisabledTarget");
     }
 }

@@ -173,7 +173,7 @@ public sealed class CheckConstraintScannerTests
         var report = await EngineAuthoritativeScan.ScanAsync(
             "CREATE TABLE dbo.CheckNullTarget (Id INT NOT NULL PRIMARY KEY, Price DECIMAL(10,2) NULL, CONSTRAINT CK_CheckNullTarget_Price CHECK (Price > 0));");
 
-        var finding = Assert.Single(report.CheckConstraintFindings, f => f.Kind == CheckConstraintFindingKind.NullNotHandled);
+        var finding = Assert.Single(report.Find<CheckConstraintFinding>("CheckConstraintScanner"), f => f.Kind == CheckConstraintFindingKind.NullNotHandled);
         Assert.Equal("CK_CheckNullTarget_Price", finding.ConstraintName);
         Assert.Equal("Price", finding.ColumnName);
     }
@@ -184,7 +184,7 @@ public sealed class CheckConstraintScannerTests
         var report = await EngineAuthoritativeScan.ScanAsync(
             "CREATE TABLE dbo.CheckNullGuarded (Id INT NOT NULL PRIMARY KEY, Price DECIMAL(10,2) NULL, CONSTRAINT CK_CheckNullGuarded_Price CHECK (Price IS NULL OR Price > 0));");
 
-        Assert.DoesNotContain(report.CheckConstraintFindings, f => f.Kind == CheckConstraintFindingKind.NullNotHandled);
+        Assert.DoesNotContain(report.Find<CheckConstraintFinding>("CheckConstraintScanner"), f => f.Kind == CheckConstraintFindingKind.NullNotHandled);
     }
 
     [Fact]
@@ -193,7 +193,7 @@ public sealed class CheckConstraintScannerTests
         var report = await EngineAuthoritativeScan.ScanAsync(
             "CREATE TABLE dbo.CheckIdentityTarget (Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY, CONSTRAINT CK_CheckIdentityTarget_Id CHECK (Id > 5), Name VARCHAR(20) NULL);");
 
-        var finding = Assert.Single(report.CheckConstraintFindings, f => f.Kind == CheckConstraintFindingKind.ConstraintOnIdentityColumn);
+        var finding = Assert.Single(report.Find<CheckConstraintFinding>("CheckConstraintScanner"), f => f.Kind == CheckConstraintFindingKind.ConstraintOnIdentityColumn);
         Assert.Equal("CK_CheckIdentityTarget_Id", finding.ConstraintName);
         Assert.Equal("Id", finding.ColumnName);
     }

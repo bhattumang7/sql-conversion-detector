@@ -79,7 +79,7 @@ public sealed class DefaultNullableConstraintScannerTests
         var report = await EngineAuthoritativeScan.ScanAsync(
             "CREATE TABLE dbo.DefaultNullableTarget (Id INT NOT NULL PRIMARY KEY, Status VARCHAR(20) NULL CONSTRAINT DF_DefaultNullableTarget_Status DEFAULT ('Active'));");
 
-        var finding = Assert.Single(report.DefaultNullableConstraintFindings);
+        var finding = Assert.Single(report.Find<DefaultNullableConstraintFinding>("DefaultNullableConstraintScanner"));
         Assert.Equal("dbo.DefaultNullableTarget", finding.TableQualifiedName);
         Assert.Equal("Status", finding.ColumnName);
     }
@@ -90,6 +90,6 @@ public sealed class DefaultNullableConstraintScannerTests
         var report = await EngineAuthoritativeScan.ScanAsync(
             "CREATE TABLE dbo.DefaultNotNullTarget (Id INT NOT NULL PRIMARY KEY, Status VARCHAR(20) NOT NULL CONSTRAINT DF_DefaultNotNullTarget_Status DEFAULT ('Active'));");
 
-        Assert.Empty(report.DefaultNullableConstraintFindings);
+        Assert.Empty(report.Find<DefaultNullableConstraintFinding>("DefaultNullableConstraintScanner"));
     }
 }

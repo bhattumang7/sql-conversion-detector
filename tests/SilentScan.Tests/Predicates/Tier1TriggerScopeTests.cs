@@ -1,5 +1,6 @@
 using SilentScan.Core.Reporting;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -29,7 +30,7 @@ public sealed class Tier1TriggerScopeTests
             END;
             """);
 
-        var finding = Assert.Single(report.Tier1Findings);
+        var finding = Assert.Single(report.Find<SargabilityFinding>("NonSargablePredicateScanner"));
         Assert.Equal("dbo.Orders", finding.TableQualifiedName);
         Assert.Equal("Code", finding.ColumnName);
 
@@ -50,7 +51,7 @@ public sealed class Tier1TriggerScopeTests
             END;
             """);
 
-        var finding = Assert.Single(report.Tier1Findings);
+        var finding = Assert.Single(report.Find<SargabilityFinding>("NonSargablePredicateScanner"));
         Assert.Equal("Code", finding.ColumnName);
         Assert.True(finding.Indexed);
     }

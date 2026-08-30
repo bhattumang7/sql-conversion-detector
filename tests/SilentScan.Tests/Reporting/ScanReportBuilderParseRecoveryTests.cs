@@ -4,6 +4,7 @@ using SilentScan.Core.Reporting;
 using SilentScan.Verify.Catalog;
 using SilentScan.Verify;
 using SilentScan.Verify.Deployment;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Reporting;
 
@@ -48,7 +49,7 @@ public sealed class ScanReportBuilderParseRecoveryTests
         Assert.NotEmpty(health.Errors);
         Assert.Equal(2, health.BatchCount);
 
-        var finding = Assert.Single(report.TypedFindings);
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
         Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
     }
 
@@ -65,8 +66,8 @@ public sealed class ScanReportBuilderParseRecoveryTests
         var health = Assert.Single(report.ParseHealth.Files);
         Assert.NotEmpty(health.Errors);
         Assert.Equal(0, health.BatchCount);
-        Assert.Empty(report.TypedFindings);
-        Assert.Empty(report.Tier1Findings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
+        Assert.Empty(report.Find<SargabilityFinding>("NonSargablePredicateScanner"));
     }
 
     private static async Task<DatabaseCatalog> DeployAndReadCatalogAsync(string sql, CancellationToken cancellationToken = default)

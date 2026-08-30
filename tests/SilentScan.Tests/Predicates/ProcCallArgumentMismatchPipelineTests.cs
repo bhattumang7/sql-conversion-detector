@@ -30,7 +30,7 @@ public sealed class ProcCallArgumentMismatchPipelineTests : OracleTestFixture
     {
         var report = await EngineAuthoritativeScan.ScanAsync(Sql);
 
-        var finding = Assert.Single(report.ProcCallArgumentMismatchFindings);
+        var finding = Assert.Single(report.Find<ProcCallArgumentMismatchFinding>("ProcCallArgumentMismatchScanner"));
         Assert.Equal("dbo.usp_Caller", finding.CallerScopeQualifiedName);
         Assert.Equal("dbo.usp_Callee", finding.CalleeQualifiedName);
         Assert.Equal("@Code", finding.FormalParameterName);

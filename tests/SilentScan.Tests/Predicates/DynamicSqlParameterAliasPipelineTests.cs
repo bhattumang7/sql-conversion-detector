@@ -1,6 +1,7 @@
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -32,7 +33,7 @@ public sealed class DynamicSqlParameterAliasPipelineTests
             END;
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "VendorCode");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "VendorCode");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
         Assert.NotNull(finding.DynamicSqlCallSite);

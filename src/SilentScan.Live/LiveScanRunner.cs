@@ -111,7 +111,7 @@ public static class LiveScanRunner
                 .ToList();
             tempTableExecShape = await new TempTableExecShapeChecker(connectionString).CheckAsync(candidates, cancellationToken);
             var filteredTempTableFindings = tempTableExecShape.Findings.Where(f => f.Confidence <= minimumConfidence).ToList();
-            report = report with { TempTableExecShapeFindings = filteredTempTableFindings };
+            report = report.WithFindings("TempTableExecShapeScanner", filteredTempTableFindings);
             tempTableStage.Complete($"{filteredTempTableFindings.Count:N0} findings, {tempTableExecShape.Unanalyzed.Count:N0} unanalyzed");
         }
         PhaseMemory.ReleaseBetweenPhases();
@@ -120,7 +120,7 @@ public static class LiveScanRunner
         {
             var databaseConfigFindings = (await new DatabaseConfigurationReader(connectionString).ReadAsync(cancellationToken))
                 .Where(f => f.Confidence <= minimumConfidence).ToList();
-            report = report with { DatabaseConfigurationFindings = databaseConfigFindings };
+            report = report.WithFindings("DatabaseConfigurationScanner", databaseConfigFindings);
             databaseConfigStage.Complete($"{databaseConfigFindings.Count:N0} findings");
         }
 
@@ -131,7 +131,7 @@ public static class LiveScanRunner
             var forcedParameterizationFindings = isParameterizationForced
                 ? ForcedParameterizationScanner.Scan(parseResultSource()).Where(f => f.Confidence <= minimumConfidence).ToList()
                 : [];
-            report = report with { ForcedParameterizationFindings = forcedParameterizationFindings };
+            report = report.WithFindings("ForcedParameterizationScanner", forcedParameterizationFindings);
             forcedParamStage.Complete($"{forcedParameterizationFindings.Count:N0} findings");
         }
 
@@ -139,7 +139,7 @@ public static class LiveScanRunner
         {
             var danglingObjectReferenceFindings = (await new DanglingObjectReferenceChecker(connectionString).CheckAsync(cancellationToken))
                 .Where(f => f.Confidence <= minimumConfidence).ToList();
-            report = report with { DanglingObjectReferenceFindings = danglingObjectReferenceFindings };
+            report = report.WithFindings("DanglingObjectReferenceScanner", danglingObjectReferenceFindings);
             danglingReferenceStage.Complete($"{danglingObjectReferenceFindings.Count:N0} findings");
         }
 
@@ -148,14 +148,14 @@ public static class LiveScanRunner
 
             var dmlTargetTables = DmlTargetTableScanner.Scan(parseResultSource(), catalog);
             var indexDesignFindings = IndexDesignScanner.Scan(catalog, dmlTargetTables).Where(f => f.Confidence <= minimumConfidence).ToList();
-            report = report with { IndexDesignFindings = indexDesignFindings };
+            report = report.WithFindings("IndexDesignScanner", indexDesignFindings);
             indexDesignStage.Complete($"{indexDesignFindings.Count:N0} findings");
         }
 
         using (var identityRangeStage = progress.Begin("checking identity/sequence range"))
         {
             var identityRangeFindings = IdentityRangeScanner.Scan(catalog).Where(f => f.Confidence <= minimumConfidence).ToList();
-            report = report with { IdentityRangeFindings = identityRangeFindings };
+            report = report.WithFindings("IdentityRangeScanner", identityRangeFindings);
             identityRangeStage.Complete($"{identityRangeFindings.Count:N0} findings");
         }
 
@@ -163,7 +163,7 @@ public static class LiveScanRunner
         {
             var (views, _) = ViewDefinitionExtractor.Extract(parseResultSource(), catalog.DefaultCollation, catalog.TypeAliases, ledger: null);
             var staleSelectStarViewFindings = StaleSelectStarViewScanner.Scan(views, catalog).Where(f => f.Confidence <= minimumConfidence).ToList();
-            report = report with { StaleSelectStarViewFindings = staleSelectStarViewFindings };
+            report = report.WithFindings("StaleSelectStarViewScanner", staleSelectStarViewFindings);
             staleSelectStarViewStage.Complete($"{staleSelectStarViewFindings.Count:N0} findings");
         }
 
@@ -174,9 +174,10 @@ public static class LiveScanRunner
         {
             var planCacheReader = new LivePlanCacheReader(connectionString);
             planCacheEvidence = await planCacheReader.ReadObservedConversionsAsync(cancellationToken: cancellationToken);
-            rankedFindings = RankByPlanCacheEvidence(report.TypedFindings, planCacheEvidence);
+            var typedFindings = report.Find<TypedPredicateFinding>("TypedPredicateExtractor");
+            rankedFindings = RankByPlanCacheEvidence(typedFindings, planCacheEvidence);
 
-            var alreadyCovered = report.TypedFindings
+            var alreadyCovered = typedFindings
                 .Select(f => (f.Column.TableQualifiedName, f.Column.ColumnName))
                 .ToHashSet(TupleOrdinalIgnoreCaseComparer.Instance);
             workloadFindings = await planCacheReader.ReadWorkloadFindingsAsync(catalog, alreadyCovered, cancellationToken: cancellationToken);

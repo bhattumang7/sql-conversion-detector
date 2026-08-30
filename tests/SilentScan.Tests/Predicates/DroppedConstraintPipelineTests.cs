@@ -1,6 +1,7 @@
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -50,7 +51,7 @@ public sealed class DroppedConstraintPipelineTests : OracleTestFixture
     {
         var report = await EngineAuthoritativeScan.ScanAsync(DroppedPkSql, "SQL_Latin1_General_CP1_CI_AS");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "PartCode");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "PartCode");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.False(finding.Column.Indexed);
 
@@ -63,7 +64,7 @@ public sealed class DroppedConstraintPipelineTests : OracleTestFixture
     {
         var report = await EngineAuthoritativeScan.ScanAsync(DroppedUniqueSql, "SQL_Latin1_General_CP1_CI_AS");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Email");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Email");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.False(finding.Column.Indexed);
 
@@ -77,7 +78,7 @@ public sealed class DroppedConstraintPipelineTests : OracleTestFixture
 
         var report = await EngineAuthoritativeScan.ScanAsync(DroppedOneOfTwoSql, "SQL_Latin1_General_CP1_CI_AS");
 
-        var orderCodeFinding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "OrderCode");
+        var orderCodeFinding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "OrderCode");
         Assert.True(orderCodeFinding.Column.Indexed);
     }
 }

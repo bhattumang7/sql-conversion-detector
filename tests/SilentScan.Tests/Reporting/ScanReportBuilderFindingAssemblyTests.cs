@@ -24,13 +24,13 @@ public sealed class ScanReportBuilderFindingAssemblyTests
 
         var defaultReport = ScanReportBuilder.BuildFromParseResults([result], catalog);
 
-        Assert.DoesNotContain(defaultReport.DeprecatedSyntaxFindings, f => f.Kind == DeprecatedSyntaxFindingKind.TaskCommentTodo);
-        Assert.Contains(defaultReport.DeprecatedSyntaxFindings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+        Assert.DoesNotContain(defaultReport.Find<DeprecatedSyntaxFinding>("DeprecatedSyntaxScanner"), f => f.Kind == DeprecatedSyntaxFindingKind.TaskCommentTodo);
+        Assert.Contains(defaultReport.Find<DeprecatedSyntaxFinding>("DeprecatedSyntaxScanner"), f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
 
         var lowConfidenceReport = ScanReportBuilder.BuildFromParseResults([result], catalog, FindingConfidence.Low);
 
-        Assert.Contains(lowConfidenceReport.DeprecatedSyntaxFindings, f => f.Kind == DeprecatedSyntaxFindingKind.TaskCommentTodo);
-        Assert.Contains(lowConfidenceReport.DeprecatedSyntaxFindings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+        Assert.Contains(lowConfidenceReport.Find<DeprecatedSyntaxFinding>("DeprecatedSyntaxScanner"), f => f.Kind == DeprecatedSyntaxFindingKind.TaskCommentTodo);
+        Assert.Contains(lowConfidenceReport.Find<DeprecatedSyntaxFinding>("DeprecatedSyntaxScanner"), f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
     }
 
     [Fact]
@@ -58,10 +58,10 @@ public sealed class ScanReportBuilderFindingAssemblyTests
 
         var report = ScanReportBuilder.BuildFromParseResults([result], catalog);
 
-        Assert.DoesNotContain(report.TypedFindings, f => f.Verdict == Verdict.SeekPreserved);
+        Assert.DoesNotContain(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Verdict == Verdict.SeekPreserved);
         Assert.Equal(1, report.TypedPredicateSummary.SeekPreservedCount);
 
-        var typedFindings = report.TypedFindings.ToList();
+        var typedFindings = report.Find<TypedPredicateFinding>("TypedPredicateExtractor").ToList();
         var scanForcedIndex = typedFindings.FindIndex(f => f.Verdict == Verdict.ScanForced);
         var unknownIndex = typedFindings.FindIndex(f => f.Verdict == Verdict.Unknown);
 
@@ -78,9 +78,9 @@ public sealed class ScanReportBuilderFindingAssemblyTests
         var report = ScanReportBuilder.BuildFromParseResults([], new DatabaseCatalog());
 
         Assert.Empty(report.ParseHealth.Files);
-        Assert.Empty(report.Tier1Findings);
-        Assert.Empty(report.TypedFindings);
-        Assert.Empty(report.DynamicSqlFindings);
+        Assert.Empty(report.Find<SargabilityFinding>("NonSargablePredicateScanner"));
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
+        Assert.Empty(report.Find<DynamicSqlFinding>("DynamicSqlScanner"));
         Assert.Empty(report.SkippedConstructs);
         Assert.Equal(0, report.TypedPredicateSummary.TotalClassified);
         Assert.Equal(0, report.DynamicSqlSummary.TotalCallSites);

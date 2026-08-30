@@ -146,74 +146,6 @@ public static class ScanReportBuilder
             schemaDependencyStage.Complete($"{schemaDependencyFindings.Count:N0} findings");
         }
 
-        var columnCollationDriftFindings = ruleResults.For<ColumnCollationDriftFinding>("ColumnCollationDriftScanner");
-        var crossTableTypeDriftFindings = ruleResults.For<CrossTableTypeDriftFinding>("CrossTableTypeDriftScanner");
-        var triggerOrderFindings = ruleResults.For<TriggerOrderFinding>("TriggerOrderScanner");
-        var procCallArgumentMismatchFindings = ruleResults.For<ProcCallArgumentMismatchFinding>("ProcCallArgumentMismatchScanner");
-        var spExecuteSqlParameterMismatchFindings = ruleResults.For<SpExecuteSqlParameterMismatchFinding>("SpExecuteSqlParameterMismatchScanner");
-        var maxTypedColumnFindings = ruleResults.For<MaxTypedColumnFinding>("MaxTypedColumnScanner");
-        var columnstoreBatchModeDisqualifyingTypeFindings = ruleResults.For<ColumnstoreUnsupportedColumnTypeFinding>("ColumnstoreUnsupportedColumnTypeScanner");
-        var selectiveXmlIndexValueColumnFindings = ruleResults.For<SelectiveXmlIndexValueColumnFinding>("SelectiveXmlIndexValueColumnScanner");
-        var memoryOptimizedUnsupportedColumnTypeFindings = ruleResults.For<MemoryOptimizedUnsupportedColumnTypeFinding>("MemoryOptimizedUnsupportedColumnTypeScanner");
-        var memoryOptimizedUnsupportedIndexOptionFindings = ruleResults.For<MemoryOptimizedUnsupportedIndexOptionFinding>("MemoryOptimizedUnsupportedIndexOptionScanner");
-        var alwaysEncryptedKeyColumnFindings = ruleResults.For<AlwaysEncryptedKeyColumnFinding>("AlwaysEncryptedKeyColumnScanner");
-        var alterColumnSafetyFindings = ruleResults.For<AlterColumnSafetyFinding>("AlterColumnSafetyScanner");
-        var memoryOptimizedForeignKeyFindings = ruleResults.For<MemoryOptimizedForeignKeyFinding>("MemoryOptimizedForeignKeyScanner");
-        var nonPersistedComputedColumnFindings = ruleResults.For<NonPersistedComputedColumnFinding>("NonPersistedComputedColumnScanner");
-        var untrustedConstraintFindings = ruleResults.For<UntrustedConstraintFinding>("UntrustedConstraintScanner");
-        var checkConstraintFindings = ruleResults.For<CheckConstraintFinding>("CheckConstraintScanner");
-        var securityPredicateIndexFindings = ruleResults.For<SecurityPredicateIndexFinding>("SecurityPredicateIndexScanner");
-        var defaultNullableConstraintFindings = ruleResults.For<DefaultNullableConstraintFinding>("DefaultNullableConstraintScanner");
-        var cascadingForeignKeyFindings = ruleResults.For<CascadingForeignKeyFinding>("CascadingForeignKeyScanner");
-        var temporalTableHistoryIndexGapFindings = ruleResults.For<TemporalTableHistoryIndexGapFinding>("TemporalTableHistoryIndexGapScanner");
-        var partialCompositeForeignKeyJoinFindings = ruleResults.For<PartialCompositeForeignKeyJoinFinding>("PartialCompositeForeignKeyJoinScanner");
-        var setOptionFindings = ruleResults.For<SetOptionFinding>("SetOptionScanner");
-        var moduleCompileFlagFindings = ruleResults.For<ModuleCompileFlagFinding>("ModuleCompileFlagScanner");
-        var windowFrameFindings = ruleResults.For<WindowFrameFinding>("WindowFrameScanner");
-        var windowFunctionArgumentFindings = ruleResults.For<WindowFunctionArgumentFinding>("WindowFunctionArgumentScanner");
-        var waitForFindings = ruleResults.For<WaitForFinding>("WaitForScanner");
-        var viewOrderingFindings = ruleResults.For<ViewOrderingFinding>("ViewOrderingScanner");
-        var transactionHygieneFindings = ruleResults.For<TransactionHygieneFinding>("TransactionHygieneScanner");
-        var compositeIndexLeadingColumnFindings = ruleResults.For<CompositeIndexLeadingColumnFinding>("CompositeIndexLeadingColumnScanner");
-        var missingStatisticsFindings = ruleResults.For<MissingStatisticsFinding>("MissingStatisticsScanner");
-        var indexHintFindings = ruleResults.For<IndexHintFinding>("IndexHintScanner");
-        var sessionDateSettingFindings = ruleResults.For<SessionDateSettingFinding>("SessionDateSettingScanner");
-        var cartesianJoinFindings = ruleResults.For<CartesianJoinFinding>("CartesianJoinScanner");
-        var truncateSwallowedFindings = ruleResults.For<TruncateSwallowedFinding>("TruncateSwallowedScanner");
-        var unindexedTempTableUsageFindings = ruleResults.For<UnindexedTempTableUsageFinding>("UnindexedTempTableUsageScanner");
-        var outputParameterFindings = ruleResults.For<OutputParameterFinding>("OutputParameterScanner");
-        var catchAllPredicateFindings = ruleResults.For<CatchAllPredicateFinding>("CatchAllPredicateScanner");
-        var tryCastComputedColumnPredicateFindings = ruleResults.For<TryCastComputedColumnPredicateFinding>("TryCastComputedColumnPredicateScanner");
-        var bareTopNoOrderByFindings = ruleResults.For<BareTopNoOrderByFinding>("BareTopNoOrderByScanner");
-        var stringConcatNullFindings = ruleResults.For<StringConcatNullFinding>("StringConcatNullScanner");
-        var aggregateDivisionColumnstoreFindings = ruleResults.For<AggregateDivisionColumnstoreFinding>("AggregateDivisionColumnstoreScanner");
-        var parameterReassignmentPredicateFindings = ruleResults.For<ParameterReassignmentPredicateFinding>("ParameterReassignmentPredicateScanner");
-        var codeMetricFindings = ruleResults.For<CodeMetricFinding>("CodeMetricScanner");
-        var formattingFindings = ruleResults.For<FormattingFinding>("FormattingScanner");
-        var namingFindings = ruleResults.For<NamingFinding>("NamingScanner");
-        var deadCodeFindings = ruleResults.For<DeadCodeFinding>("DeadCodeScanner");
-        var duplicationFindings = ruleResults.For<DuplicationFinding>("DuplicationScanner");
-        var deprecatedSyntaxFindings = ruleResults.For<DeprecatedSyntaxFinding>("DeprecatedSyntaxScanner");
-        var statementShapeFindings = ruleResults.For<StatementShapeFinding>("StatementShapeScanner");
-        var controlFlowRiskFindings = ruleResults.For<ControlFlowRiskFinding>("ControlFlowRiskScanner");
-        var notInNullableSubqueryFindings = ruleResults.For<NotInNullableSubqueryFinding>("NotInNullableSubqueryScanner");
-        var nonUniqueUpdateSourceFindings = ruleResults.For<NonUniqueUpdateSourceFinding>("NonUniqueUpdateSourceScanner");
-        var floatEqualityFindings = ruleResults.For<FloatEqualityFinding>("FloatEqualityPredicateScanner");
-        var floatOrderDependentAggregateFindings = ruleResults.For<FloatOrderDependentAggregateFinding>("FloatOrderDependentAggregateScanner");
-        var alwaysEncryptedOrderByFindings = ruleResults.For<AlwaysEncryptedOrderByFinding>("AlwaysEncryptedOrderByScanner");
-        var operandComparabilityFindings = ruleResults.For<OperandComparabilityFinding>("OperandComparabilityScanner");
-        var queryAntiPatternFindings = ruleResults.For<QueryAntiPatternFinding>("QueryAntiPatternScanner");
-        var indexCoverageFindings = ruleResults.For<IndexCoverageFinding>("IndexCoverageScanner");
-        var triggerCorrectnessFindings = ruleResults.For<TriggerCorrectnessFinding>("TriggerCorrectnessScanner");
-        var crossModuleLockOrderFindings = ruleResults.For<CrossModuleLockOrderFinding>("CrossModuleLockOrderScanner");
-        var triggerRecursionCycleFindings = ruleResults.For<TriggerRecursionCycleFinding>("TriggerRecursionCycleScanner");
-        var forcedSerialFindings = ruleResults.For<ForcedSerialFinding>("ForcedSerialScanner");
-        var multiReferencedCteFindings = ruleResults.For<MultiReferencedCteFinding>("MultiReferencedCteScanner");
-        var nestedViewDepthFindings = ruleResults.For<NestedViewDepthFinding>("NestedViewDepthScanner");
-        var postExpansionJoinWidthFindings = ruleResults.For<PostExpansionJoinWidthFinding>("PostExpansionJoinWidthScanner");
-        var selfReferencingDmlFindings = ruleResults.For<SelfReferencingDmlFinding>("SelfReferencingDmlScanner");
-        var selectStarViewFindings = ruleResults.For<SelectStarViewFinding>("SelectStarViewScanner");
-
         List<SecurityFinding> securityFindings;
         using (var securityStage = progress.Begin("scanning security risks", usableCount))
         {
@@ -354,72 +286,22 @@ public static class ScanReportBuilder
         filteredIndexParameterMismatchFindings = [.. filteredIndexParameterMismatchFindings.Where(f => f.Confidence <= minimumConfidence)];
         securityFindings = [.. securityFindings.Where(f => f.Confidence <= minimumConfidence)];
 
+        var findingsByRuleId = new Dictionary<string, IReadOnlyList<IFinding>>(ruleResults.AllFindings, StringComparer.Ordinal)
+        {
+            ["NonSargablePredicateScanner"] = [.. tier1Findings, .. temporalBoundaryFindings],
+            ["TypedPredicateExtractor"] = [
+                .. typedFindings, .. expressionDerivedFindings, .. collationConflictFindings, .. writeLossFindings,
+                .. oversizedParameterFindings, .. underLengthParameterFindings, .. ansiPaddingMismatchFindings,
+                .. localVariablePredicateFindings, .. filteredIndexParameterMismatchFindings,
+            ],
+            ["DynamicSqlScanner"] = [.. dynamicSqlFindings, .. unparameterizedDynamicSqlFindings],
+            ["TvfFenceScanner"] = tvfFenceFindings,
+            ["ScalarUdfScanner"] = scalarUdfFindings,
+            ["SecurityScanner"] = securityFindings,
+        };
+
         return new ScanReport(
-            new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
-            tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings, temporalBoundaryFindings,
-            maxTypedColumnFindings, oversizedParameterFindings, underLengthParameterFindings, ansiPaddingMismatchFindings, partialCompositeForeignKeyJoinFindings, setOptionFindings,
-            catchAllPredicateFindings, localVariablePredicateFindings, filteredIndexParameterMismatchFindings, notInNullableSubqueryFindings, nonUniqueUpdateSourceFindings, forcedSerialFindings,
-            untrustedConstraintFindings, cascadingForeignKeyFindings, multiReferencedCteFindings,
-            nestedViewDepthFindings, postExpansionJoinWidthFindings, selectStarViewFindings, unparameterizedDynamicSqlFindings,
-            nonPersistedComputedColumnFindings,
-
-            [],
-            selfReferencingDmlFindings,
-            temporalTableHistoryIndexGapFindings,
-            moduleCompileFlagFindings,
-            windowFrameFindings, waitForFindings, viewOrderingFindings, transactionHygieneFindings,
-            compositeIndexLeadingColumnFindings, indexHintFindings,
-            sessionDateSettingFindings, cartesianJoinFindings, truncateSwallowedFindings, unindexedTempTableUsageFindings,
-            outputParameterFindings,
-
-            [],
-            parameterReassignmentPredicateFindings,
-            codeMetricFindings,
-            formattingFindings,
-            namingFindings,
-            deadCodeFindings,
-            duplicationFindings,
-            deprecatedSyntaxFindings,
-            statementShapeFindings,
-            controlFlowRiskFindings,
-            securityFindings,
-
-            [],
-
-            [],
-            floatEqualityFindings,
-            queryAntiPatternFindings,
-            indexCoverageFindings,
-            triggerCorrectnessFindings,
-            crossModuleLockOrderFindings,
-            triggerRecursionCycleFindings,
-            checkConstraintFindings,
-            defaultNullableConstraintFindings,
-            tryCastComputedColumnPredicateFindings,
-
-            [],
-            bareTopNoOrderByFindings,
-            stringConcatNullFindings,
-            aggregateDivisionColumnstoreFindings,
-            securityPredicateIndexFindings,
-
-            [],
-
-            [],
-            columnstoreBatchModeDisqualifyingTypeFindings,
-            alwaysEncryptedOrderByFindings,
-            triggerOrderFindings,
-            missingStatisticsFindings,
-            operandComparabilityFindings,
-            memoryOptimizedUnsupportedColumnTypeFindings,
-            memoryOptimizedUnsupportedIndexOptionFindings,
-            memoryOptimizedForeignKeyFindings,
-            windowFunctionArgumentFindings,
-            selectiveXmlIndexValueColumnFindings,
-            floatOrderDependentAggregateFindings,
-            alwaysEncryptedKeyColumnFindings,
-            alterColumnSafetyFindings,
-            spExecuteSqlParameterMismatchFindings,
+            new ParseHealthReport(fileHealth), findingsByRuleId,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

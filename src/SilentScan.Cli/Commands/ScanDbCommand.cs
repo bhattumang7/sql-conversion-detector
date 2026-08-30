@@ -15,7 +15,7 @@ public static class ScanDbCommand
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() },
+        Converters = { new JsonStringEnumConverter(), new SilentScan.Core.Reporting.FindingJsonConverter() },
     };
 
     public static Command Create()

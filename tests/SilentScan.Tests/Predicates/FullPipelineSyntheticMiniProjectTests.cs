@@ -35,7 +35,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     [Fact]
     public async Task DirectTableScanForced_IsPlantedAndFound_OracleConfirmed()
     {
-        var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "DisplayName" && f.Column.TableQualifiedName == "dbo.Users");
+        var finding = Assert.Single(_report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "DisplayName" && f.Column.TableQualifiedName == "dbo.Users");
 
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal(0, finding.Column.Depth);
@@ -49,7 +49,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     [Fact]
     public async Task WindowsCollationRangeSeek_IsPlantedAndFound_OracleConfirmed()
     {
-        var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "Region");
+        var finding = Assert.Single(_report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Region");
 
         Assert.Equal(Verdict.RangeSeek, finding.Verdict);
         Assert.False(finding.Column.Indexed);
@@ -61,7 +61,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     [Fact]
     public async Task DepthTwoThroughViewChain_IsPlantedAndFound_OracleConfirmed()
     {
-        var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "OrderCode");
+        var finding = Assert.Single(_report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "OrderCode");
 
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal(2, finding.Column.Depth);
@@ -75,7 +75,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     public void CleanTwin_SameParamFamilyAndCollation_ProducesNoActionableFinding()
     {
 
-        Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "DisplayName");
+        Assert.Single(_report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "DisplayName");
     }
 
     [Fact]
@@ -88,13 +88,13 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
         Assert.Equal(
             summary.SeekPreservedCount + summary.RangeSeekCount + summary.ScanForcedCount + summary.UnknownCount,
             summary.TotalClassified);
-        Assert.Equal(summary.RangeSeekCount + summary.ScanForcedCount + summary.UnknownCount, _report.TypedFindings.Count);
+        Assert.Equal(summary.RangeSeekCount + summary.ScanForcedCount + summary.UnknownCount, _report.Find<TypedPredicateFinding>("TypedPredicateExtractor").Count);
     }
 
     [Fact]
     public void Tier1FunctionWrappedColumn_IsPlantedAndFound()
     {
-        var finding = Assert.Single(_report.Tier1Findings);
+        var finding = Assert.Single(_report.Find<SargabilityFinding>("NonSargablePredicateScanner"));
 
         Assert.Equal(SargabilityFindingKind.DateFunctionOnColumn, finding.Kind);
         Assert.Equal("CreatedAt", finding.ColumnName);
@@ -108,14 +108,14 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     public void Tier1CleanTwin_SargableDateRange_ProducesNoFinding()
     {
 
-        Assert.Single(_report.Tier1Findings);
+        Assert.Single(_report.Find<SargabilityFinding>("NonSargablePredicateScanner"));
     }
 
     [Fact]
     public void DynamicSqlUnanalyzable_IsPlantedAndFound()
     {
 
-        var finding = Assert.Single(_report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+        var finding = Assert.Single(_report.Find<DynamicSqlFinding>("DynamicSqlScanner"), f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
 
         Assert.Equal("symbolic-value-not-positionable:whole-statement", finding.Reason);
     }
@@ -124,7 +124,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     public void DynamicSqlLiteralOnly_NoInnerFinding_IsAnalyzedWithNoFurtherFindings()
     {
 
-        var analyzed = _report.DynamicSqlFindings.Where(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral).ToList();
+        var analyzed = _report.Find<DynamicSqlFinding>("DynamicSqlScanner").Where(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral).ToList();
 
         Assert.Equal(4, analyzed.Count);
     }
@@ -133,14 +133,14 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     public void DynamicSqlCleanTwin_OrdinaryProcCall_ProducesNoFinding()
     {
 
-        Assert.Equal(5, _report.DynamicSqlFindings.Count);
+        Assert.Equal(5, _report.Find<DynamicSqlFinding>("DynamicSqlScanner").Count);
     }
 
     [Fact]
     public async Task DynamicSqlTierCAccumulated_IsPlantedAndFound_OracleConfirmed()
     {
 
-        var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "AccountCode");
+        var finding = Assert.Single(_report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "AccountCode");
 
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
@@ -157,7 +157,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     public async Task DynamicSqlSpExecuteSqlDeclaredParam_TierB_IsPlantedAndFound_OracleConfirmed()
     {
 
-        var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "Phone");
+        var finding = Assert.Single(_report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Phone");
 
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
@@ -172,7 +172,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     public async Task DynamicSqlLiteral_InnerPredicateIsReparsedAndRemappedToSourceLine_OracleConfirmed()
     {
 
-        var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "Email");
+        var finding = Assert.Single(_report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Email");
 
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);

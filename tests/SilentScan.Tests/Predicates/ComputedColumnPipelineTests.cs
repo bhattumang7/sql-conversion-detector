@@ -4,6 +4,7 @@ using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
 using SilentScan.Core.TypeInference;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -47,7 +48,7 @@ public sealed class ComputedColumnPipelineTests : OracleTestFixture
     {
         var report = await EngineAuthoritativeScan.ScanAsync(ConcatSql, "SQL_Latin1_General_CP1_CI_AS");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "FullName");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "FullName");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
 
         var probe = "SELECT 1 FROM dbo.People WHERE FullName = N'John Smith';";
@@ -65,7 +66,7 @@ public sealed class ComputedColumnPipelineTests : OracleTestFixture
 
         var report = await EngineAuthoritativeScan.ScanAsync(BuiltinFunctionSql, "SQL_Latin1_General_CP1_CI_AS");
 
-        Assert.Empty(report.TypedFindings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
         Assert.Equal(1, report.TypedPredicateSummary.SeekPreservedCount);
     }
 
@@ -75,7 +76,7 @@ public sealed class ComputedColumnPipelineTests : OracleTestFixture
 
         var report = await EngineAuthoritativeScan.ScanAsync(IsNullParitySql, "SQL_Latin1_General_CP1_CI_AS");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
 
         var parseResult = SqlScriptParser.ParseText("isnull_parity.sql", IsNullParitySql);

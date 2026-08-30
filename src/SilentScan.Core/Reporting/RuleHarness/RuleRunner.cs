@@ -43,10 +43,12 @@ public sealed class RuleRunResult(
 {
     public IReadOnlyList<SkippedConstruct> Crashes { get; } = crashes;
 
+    public IReadOnlyDictionary<string, IReadOnlyList<IFinding>> AllFindings => findingsByRuleId;
+
     public IReadOnlyList<TFinding> For<TFinding>(string ruleId)
         where TFinding : IFinding =>
         findingsByRuleId.TryGetValue(ruleId, out var findings)
-            ? [.. findings.Cast<TFinding>()]
+            ? [.. findings.OfType<TFinding>()]
             : [];
 }
 

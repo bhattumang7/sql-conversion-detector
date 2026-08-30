@@ -1,6 +1,7 @@
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Lineage;
 
@@ -36,7 +37,7 @@ public sealed class RecursiveCteAnchorTypeTests
             SELECT 1 FROM Tree WHERE CategoryCode = N'X';
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "CategoryCode" && f.Column.TableQualifiedName == "Tree");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "CategoryCode" && f.Column.TableQualifiedName == "Tree");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
 
         Assert.False(finding.Column.Indexed);
@@ -86,7 +87,7 @@ public sealed class RecursiveCteAnchorTypeTests
             SELECT 1 FROM Tree WHERE CategoryCode = N'X';
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "ParentCode");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "ParentCode");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
 }

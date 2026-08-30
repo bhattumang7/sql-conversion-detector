@@ -3,6 +3,7 @@ using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -62,12 +63,12 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     {
         var report = await Scan(DifferingCollateColumnSql);
 
-        var finding = Assert.Single(report.ExpressionDerivedFindings);
+        var finding = Assert.Single(report.Find<ExpressionDerivedFinding>("TypedPredicateExtractor"));
         Assert.Equal("Code", finding.ColumnName);
         var underlying = Assert.Single(finding.UnderlyingBaseColumns);
         Assert.Equal("dbo.Customers", underlying.TableQualifiedName);
         Assert.True(underlying.Indexed);
-        Assert.Empty(report.TypedFindings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
 
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(
             DatabaseName, "SELECT 1 FROM dbo.Customers WHERE Code COLLATE Latin1_General_CI_AS = 'x';");
@@ -85,10 +86,10 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
         const string probe = "SELECT 1 FROM dbo.CustomersMatchingCollate WHERE Code COLLATE SQL_Latin1_General_CP1_CI_AS = 'x';";
         var report = await Scan(MatchingCollateColumnSql);
 
-        Assert.Empty(report.ExpressionDerivedFindings);
+        Assert.Empty(report.Find<ExpressionDerivedFinding>("TypedPredicateExtractor"));
         var summary = report.TypedPredicateSummary;
         Assert.Equal(1, summary.SeekPreservedCount);
-        Assert.Empty(report.TypedFindings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
 
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
         var conversions = SilentScan.Verify.Oracle.ConvertImplicitDetector.FindColumnConversions(planXml);
@@ -100,7 +101,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     {
         var report = await Scan(DifferingCollateLiteralSql);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
 
@@ -114,7 +115,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
         const string probe = "SELECT 1 FROM dbo.CustomersLiteralMatchingCollate WHERE Code = 'x' COLLATE SQL_Latin1_General_CP1_CI_AS;";
         var report = await Scan(MatchingCollateLiteralSql);
 
-        Assert.Empty(report.TypedFindings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
         Assert.Equal(1, report.TypedPredicateSummary.SeekPreservedCount);
 
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
@@ -147,8 +148,8 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
             INNER JOIN dbo.VendorCustomers v ON l.Email = v.Email;
             """);
 
-        Assert.Empty(report.TypedFindings);
-        var conflict = Assert.Single(report.CollationConflictFindings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
+        var conflict = Assert.Single(report.Find<CollationConflictFinding>("TypedPredicateExtractor"));
         Assert.Equal("dbo.LocalCustomers", conflict.FirstTableQualifiedName);
         Assert.Equal("Email", conflict.FirstColumnName);
         Assert.Equal("SQL_Latin1_General_CP1_CI_AS", conflict.FirstCollationName);
@@ -169,7 +170,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
             SELECT 1 FROM dbo.T, dbo.Raw WHERE Code = CONVERT(nvarchar(20), Value);
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.OperandClash, finding.Verdict);
     }
 
@@ -185,8 +186,8 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
             SELECT 1 FROM dbo.CharSide c INNER JOIN dbo.VarCharSide v ON c.Code = v.Code;
             """);
 
-        Assert.Empty(report.TypedFindings);
-        var conflict = Assert.Single(report.CollationConflictFindings);
+        Assert.Empty(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"));
+        var conflict = Assert.Single(report.Find<CollationConflictFinding>("TypedPredicateExtractor"));
         Assert.Equal("dbo.CharSide", conflict.FirstTableQualifiedName);
         Assert.Equal("SQL_Latin1_General_CP1_CI_AS", conflict.FirstCollationName);
         Assert.Equal("dbo.VarCharSide", conflict.SecondTableQualifiedName);

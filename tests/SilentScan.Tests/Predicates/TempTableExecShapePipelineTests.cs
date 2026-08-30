@@ -24,7 +24,7 @@ public sealed class TempTableExecShapePipelineTests
 
         var report = await EngineAuthoritativeScan.ScanAsync(sql);
 
-        var finding = Assert.Single(report.TempTableExecShapeFindings);
+        var finding = Assert.Single(report.Find<TempTableExecShapeFinding>("TempTableExecShapeScanner"));
         Assert.Equal(TempTableExecShapeFindingKind.ColumnCountMismatch, finding.Kind);
         Assert.Equal("#Results", finding.TempTableQualifiedName);
         Assert.Equal("dbo.usp_Callee", finding.ExecutedProcQualifiedName);
@@ -50,7 +50,7 @@ public sealed class TempTableExecShapePipelineTests
 
         var report = await EngineAuthoritativeScan.ScanAsync(sql);
 
-        var finding = Assert.Single(report.TempTableExecShapeFindings);
+        var finding = Assert.Single(report.Find<TempTableExecShapeFinding>("TempTableExecShapeScanner"));
         Assert.Equal(TempTableExecShapeFindingKind.ColumnTypeMismatch, finding.Kind);
         Assert.Equal(1, finding.ColumnPosition);
         Assert.Equal("Name", finding.ColumnName);
@@ -75,7 +75,7 @@ public sealed class TempTableExecShapePipelineTests
 
         var report = await EngineAuthoritativeScan.ScanAsync(sql);
 
-        Assert.Empty(report.TempTableExecShapeFindings);
+        Assert.Empty(report.Find<TempTableExecShapeFinding>("TempTableExecShapeScanner"));
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public sealed class TempTableExecShapePipelineTests
 
         var result = await EngineAuthoritativeScan.RunAsync(sql);
 
-        Assert.Empty(result.Report.TempTableExecShapeFindings);
+        Assert.Empty(result.Report.Find<TempTableExecShapeFinding>("TempTableExecShapeScanner"));
         var unanalyzed = Assert.Single(result.TempTableExecShape.Unanalyzed);
         Assert.Equal("dbo.usp_DoesNotExist", unanalyzed.ExecutedProcQualifiedName);
     }
@@ -115,7 +115,7 @@ public sealed class TempTableExecShapePipelineTests
 
         var result = await EngineAuthoritativeScan.RunAsync(sql);
 
-        Assert.Empty(result.Report.TempTableExecShapeFindings);
+        Assert.Empty(result.Report.Find<TempTableExecShapeFinding>("TempTableExecShapeScanner"));
         var unanalyzed = Assert.Single(result.TempTableExecShape.Unanalyzed);
         Assert.Contains("OUTPUT", unanalyzed.Reason, StringComparison.Ordinal);
     }

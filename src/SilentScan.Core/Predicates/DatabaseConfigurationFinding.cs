@@ -30,8 +30,10 @@ public sealed record DatabaseConfigurationFinding(
     FindingConfidence Confidence = FindingConfidence.High,
     string? AffectedObjectName = null,
     string? Dependency = null,
-    int? TargetCompatibilityLevel = null)
+    int? TargetCompatibilityLevel = null) : IFinding
 {
     public string RuleId { get; } = FindingRuleIds.DatabaseConfigurationRuleId(Kind);
+
+    public SourceSpan Location => new(DatabaseName, 0, 0);
 }
 

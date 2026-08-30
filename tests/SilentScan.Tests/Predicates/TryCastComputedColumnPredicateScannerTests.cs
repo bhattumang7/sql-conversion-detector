@@ -177,7 +177,7 @@ public sealed class TryCastComputedColumnPredicateScannerTests
             END
             """);
 
-        var finding = Assert.Single(report.TryCastComputedColumnPredicateFindings);
+        var finding = Assert.Single(report.Find<TryCastComputedColumnPredicateFinding>("TryCastComputedColumnPredicateScanner"));
         Assert.Equal("dbo.TryCastPredicateTarget", finding.TableQualifiedName);
         Assert.Equal("ParsedDate", finding.ColumnName);
     }
@@ -197,6 +197,6 @@ public sealed class TryCastComputedColumnPredicateScannerTests
             END
             """);
 
-        Assert.Empty(report.TryCastComputedColumnPredicateFindings);
+        Assert.Empty(report.Find<TryCastComputedColumnPredicateFinding>("TryCastComputedColumnPredicateScanner"));
     }
 }

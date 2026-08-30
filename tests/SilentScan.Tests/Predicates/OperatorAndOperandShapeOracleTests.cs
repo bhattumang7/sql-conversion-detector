@@ -1,6 +1,7 @@
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -40,7 +41,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
             END
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
 
@@ -54,7 +55,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
 
         var report = await Scan("SELECT Code FROM dbo.VarCharWin WHERE Code LIKE N'abc%';");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
         Assert.Equal(Verdict.RangeSeek, finding.Verdict);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
@@ -71,7 +72,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
 
         var report = await Scan($"DECLARE @p NVARCHAR(20); SELECT Code FROM dbo.VarCharWin WHERE Code {op} @p;");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
         Assert.Equal(Verdict.RangeSeek, finding.Verdict);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
@@ -88,7 +89,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
             JOIN dbo.NVarCharWin b ON a.Code = b.Code;
             """);
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
         Assert.Equal(Verdict.RangeSeek, finding.Verdict);
         Assert.True(finding.Column.Indexed);
 
@@ -102,7 +103,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
 
         var report = await Scan("SELECT Code FROM dbo.VarCharWin WHERE Code = OtherCode;");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
         Assert.Equal(Verdict.RangeSeek, finding.Verdict);
         Assert.True(finding.Column.Indexed);
 
@@ -119,7 +120,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
             longNarrowDdl + "\nGO\nDECLARE @p NVARCHAR(MAX); SELECT Code FROM dbo.LongNarrow WHERE Code = @p;",
             "Latin1_General_CI_AS");
 
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
+        var finding = Assert.Single(report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
 

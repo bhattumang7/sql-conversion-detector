@@ -16,7 +16,7 @@ public sealed class ModuleCompileFlagPipelineTests
             END
             """);
 
-        var finding = Assert.Single(report.ModuleCompileFlagFindings, f => f.Kind == ModuleCompileFlagFindingKind.RecompilesEveryCall);
+        var finding = Assert.Single(report.Find<ModuleCompileFlagFinding>("ModuleCompileFlagScanner"), f => f.Kind == ModuleCompileFlagFindingKind.RecompilesEveryCall);
         Assert.Equal("dbo.usp_Recompiled", finding.ModuleQualifiedName);
     }
 
@@ -30,7 +30,7 @@ public sealed class ModuleCompileFlagPipelineTests
             END
             """);
 
-        Assert.DoesNotContain(report.ModuleCompileFlagFindings, f => f.Kind == ModuleCompileFlagFindingKind.RecompilesEveryCall);
+        Assert.DoesNotContain(report.Find<ModuleCompileFlagFinding>("ModuleCompileFlagScanner"), f => f.Kind == ModuleCompileFlagFindingKind.RecompilesEveryCall);
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public sealed class ModuleCompileFlagPipelineTests
             END
             """);
 
-        var finding = Assert.Single(report.ModuleCompileFlagFindings, f => f.Kind == ModuleCompileFlagFindingKind.TableValuedFunctionReturnUsesDatabaseCollation);
+        var finding = Assert.Single(report.Find<ModuleCompileFlagFinding>("ModuleCompileFlagScanner"), f => f.Kind == ModuleCompileFlagFindingKind.TableValuedFunctionReturnUsesDatabaseCollation);
         Assert.Equal("dbo.fn_Names", finding.ModuleQualifiedName);
     }
 
@@ -63,7 +63,7 @@ public sealed class ModuleCompileFlagPipelineTests
             END
             """);
 
-        Assert.DoesNotContain(report.ModuleCompileFlagFindings, f => f.Kind == ModuleCompileFlagFindingKind.TableValuedFunctionReturnUsesDatabaseCollation);
+        Assert.DoesNotContain(report.Find<ModuleCompileFlagFinding>("ModuleCompileFlagScanner"), f => f.Kind == ModuleCompileFlagFindingKind.TableValuedFunctionReturnUsesDatabaseCollation);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class ModuleCompileFlagPipelineTests
             END
             """);
 
-        Assert.DoesNotContain(report.ModuleCompileFlagFindings, f => f.Kind == ModuleCompileFlagFindingKind.TableValuedFunctionReturnUsesDatabaseCollation);
+        Assert.DoesNotContain(report.Find<ModuleCompileFlagFinding>("ModuleCompileFlagScanner"), f => f.Kind == ModuleCompileFlagFindingKind.TableValuedFunctionReturnUsesDatabaseCollation);
     }
 
     [Fact]
@@ -96,6 +96,6 @@ public sealed class ModuleCompileFlagPipelineTests
             END
             """);
 
-        Assert.DoesNotContain(report.ModuleCompileFlagFindings, f => f.Kind == ModuleCompileFlagFindingKind.TableValuedFunctionReturnUsesDatabaseCollation);
+        Assert.DoesNotContain(report.Find<ModuleCompileFlagFinding>("ModuleCompileFlagScanner"), f => f.Kind == ModuleCompileFlagFindingKind.TableValuedFunctionReturnUsesDatabaseCollation);
     }
 }

@@ -109,98 +109,110 @@ public static class TestScanReports
         DynamicSqlSummary? DynamicSqlSummary = null,
         int SchemaVersion = ScanReport.CurrentSchemaVersion)
     {
+        var findingsByRuleId = new Dictionary<string, IReadOnlyList<IFinding>>(StringComparer.Ordinal);
+        void Set<TFinding>(string ruleId, IReadOnlyList<TFinding>? findings)
+            where TFinding : IFinding
+        {
+            if (findings is { Count: > 0 })
+            {
+                findingsByRuleId[ruleId] = [.. findingsByRuleId.TryGetValue(ruleId, out var existing) ? existing : [], .. findings.Cast<IFinding>()];
+            }
+        }
+
+        Set("NonSargablePredicateScanner", Tier1Findings);
+        Set("NonSargablePredicateScanner", TemporalBoundaryFindings);
+        Set("TypedPredicateExtractor", TypedFindings);
+        Set("TypedPredicateExtractor", ExpressionDerivedFindings);
+        Set("TypedPredicateExtractor", CollationConflictFindings);
+        Set("TypedPredicateExtractor", WriteLossFindings);
+        Set("TypedPredicateExtractor", OversizedParameterFindings);
+        Set("TypedPredicateExtractor", UnderLengthParameterFindings);
+        Set("TypedPredicateExtractor", AnsiPaddingMismatchFindings);
+        Set("TypedPredicateExtractor", LocalVariablePredicateFindings);
+        Set("TypedPredicateExtractor", FilteredIndexParameterMismatchFindings);
+        Set("DynamicSqlScanner", DynamicSqlFindings);
+        Set("DynamicSqlScanner", UnparameterizedDynamicSqlFindings);
+        Set("TvfFenceScanner", TvfFenceFindings);
+        Set("ScalarUdfScanner", ScalarUdfFindings);
+        Set("SecurityScanner", SecurityFindings);
+        Set("ColumnCollationDriftScanner", ColumnCollationDriftFindings);
+        Set("CrossTableTypeDriftScanner", CrossTableTypeDriftFindings);
+        Set("ProcCallArgumentMismatchScanner", ProcCallArgumentMismatchFindings);
+        Set("MaxTypedColumnScanner", MaxTypedColumnFindings);
+        Set("PartialCompositeForeignKeyJoinScanner", PartialCompositeForeignKeyJoinFindings);
+        Set("SetOptionScanner", SetOptionFindings);
+        Set("CatchAllPredicateScanner", CatchAllPredicateFindings);
+        Set("NotInNullableSubqueryScanner", NotInNullableSubqueryFindings);
+        Set("NonUniqueUpdateSourceScanner", NonUniqueUpdateSourceFindings);
+        Set("ForcedSerialScanner", ForcedSerialFindings);
+        Set("UntrustedConstraintScanner", UntrustedConstraintFindings);
+        Set("CascadingForeignKeyScanner", CascadingForeignKeyFindings);
+        Set("MultiReferencedCteScanner", MultiReferencedCteFindings);
+        Set("NestedViewDepthScanner", NestedViewDepthFindings);
+        Set("PostExpansionJoinWidthScanner", PostExpansionJoinWidthFindings);
+        Set("SelectStarViewScanner", SelectStarViewFindings);
+        Set("NonPersistedComputedColumnScanner", NonPersistedComputedColumnFindings);
+        Set("TempTableExecShapeScanner", TempTableExecShapeFindings);
+        Set("SelfReferencingDmlScanner", SelfReferencingDmlFindings);
+        Set("TemporalTableHistoryIndexGapScanner", TemporalTableHistoryIndexGapFindings);
+        Set("ModuleCompileFlagScanner", ModuleCompileFlagFindings);
+        Set("WindowFrameScanner", WindowFrameFindings);
+        Set("WaitForScanner", WaitForFindings);
+        Set("ViewOrderingScanner", ViewOrderingFindings);
+        Set("TransactionHygieneScanner", TransactionHygieneFindings);
+        Set("CompositeIndexLeadingColumnScanner", CompositeIndexLeadingColumnFindings);
+        Set("IndexHintScanner", IndexHintFindings);
+        Set("SessionDateSettingScanner", SessionDateSettingFindings);
+        Set("CartesianJoinScanner", CartesianJoinFindings);
+        Set("TruncateSwallowedScanner", TruncateSwallowedFindings);
+        Set("UnindexedTempTableUsageScanner", UnindexedTempTableUsageFindings);
+        Set("OutputParameterScanner", OutputParameterFindings);
+        Set("DatabaseConfigurationScanner", DatabaseConfigurationFindings);
+        Set("ParameterReassignmentPredicateScanner", ParameterReassignmentPredicateFindings);
+        Set("CodeMetricScanner", CodeMetricFindings);
+        Set("FormattingScanner", FormattingFindings);
+        Set("NamingScanner", NamingFindings);
+        Set("DeadCodeScanner", DeadCodeFindings);
+        Set("DuplicationScanner", DuplicationFindings);
+        Set("DeprecatedSyntaxScanner", DeprecatedSyntaxFindings);
+        Set("StatementShapeScanner", StatementShapeFindings);
+        Set("ControlFlowRiskScanner", ControlFlowRiskFindings);
+        Set("IndexDesignScanner", IndexDesignFindings);
+        Set("IdentityRangeScanner", IdentityRangeFindings);
+        Set("FloatEqualityPredicateScanner", FloatEqualityFindings);
+        Set("QueryAntiPatternScanner", QueryAntiPatternFindings);
+        Set("IndexCoverageScanner", IndexCoverageFindings);
+        Set("TriggerCorrectnessScanner", TriggerCorrectnessFindings);
+        Set("CrossModuleLockOrderScanner", CrossModuleLockOrderFindings);
+        Set("TriggerRecursionCycleScanner", TriggerRecursionCycleFindings);
+        Set("CheckConstraintScanner", CheckConstraintFindings);
+        Set("DefaultNullableConstraintScanner", DefaultNullableConstraintFindings);
+        Set("TryCastComputedColumnPredicateScanner", TryCastComputedColumnPredicateFindings);
+        Set("StaleSelectStarViewScanner", StaleSelectStarViewFindings);
+        Set("BareTopNoOrderByScanner", BareTopNoOrderByFindings);
+        Set("StringConcatNullScanner", StringConcatNullFindings);
+        Set("AggregateDivisionColumnstoreScanner", AggregateDivisionColumnstoreFindings);
+        Set("SecurityPredicateIndexScanner", SecurityPredicateIndexFindings);
+        Set("DanglingObjectReferenceScanner", DanglingObjectReferenceFindings);
+        Set("ForcedParameterizationScanner", ForcedParameterizationFindings);
+        Set("ColumnstoreUnsupportedColumnTypeScanner", ColumnstoreUnsupportedColumnTypeFindings);
+        Set("AlwaysEncryptedOrderByScanner", AlwaysEncryptedOrderByFindings);
+        Set("TriggerOrderScanner", TriggerOrderFindings);
+        Set("MissingStatisticsScanner", MissingStatisticsFindings);
+        Set("OperandComparabilityScanner", OperandComparabilityFindings);
+        Set("MemoryOptimizedUnsupportedColumnTypeScanner", MemoryOptimizedUnsupportedColumnTypeFindings);
+        Set("MemoryOptimizedUnsupportedIndexOptionScanner", MemoryOptimizedUnsupportedIndexOptionFindings);
+        Set("MemoryOptimizedForeignKeyScanner", MemoryOptimizedForeignKeyFindings);
+        Set("WindowFunctionArgumentScanner", WindowFunctionArgumentFindings);
+        Set("SelectiveXmlIndexValueColumnScanner", SelectiveXmlIndexValueColumnFindings);
+        Set("FloatOrderDependentAggregateScanner", FloatOrderDependentAggregateFindings);
+        Set("AlwaysEncryptedKeyColumnScanner", AlwaysEncryptedKeyColumnFindings);
+        Set("AlterColumnSafetyScanner", AlterColumnSafetyFindings);
+        Set("SpExecuteSqlParameterMismatchScanner", SpExecuteSqlParameterMismatchFindings);
+
         return new ScanReport(
             ParseHealth ?? new ParseHealthReport([]),
-            Tier1Findings ?? [],
-            TypedFindings ?? [],
-            DynamicSqlFindings ?? [],
-            ExpressionDerivedFindings ?? [],
-            CollationConflictFindings ?? [],
-            WriteLossFindings ?? [],
-            TvfFenceFindings ?? [],
-            ScalarUdfFindings ?? [],
-            ColumnCollationDriftFindings ?? [],
-            CrossTableTypeDriftFindings ?? [],
-            ProcCallArgumentMismatchFindings ?? [],
-            TemporalBoundaryFindings ?? [],
-            MaxTypedColumnFindings ?? [],
-            OversizedParameterFindings ?? [],
-            UnderLengthParameterFindings ?? [],
-            AnsiPaddingMismatchFindings ?? [],
-            PartialCompositeForeignKeyJoinFindings ?? [],
-            SetOptionFindings ?? [],
-            CatchAllPredicateFindings ?? [],
-            LocalVariablePredicateFindings ?? [],
-            FilteredIndexParameterMismatchFindings ?? [],
-            NotInNullableSubqueryFindings ?? [],
-            NonUniqueUpdateSourceFindings ?? [],
-            ForcedSerialFindings ?? [],
-            UntrustedConstraintFindings ?? [],
-            CascadingForeignKeyFindings ?? [],
-            MultiReferencedCteFindings ?? [],
-            NestedViewDepthFindings ?? [],
-            PostExpansionJoinWidthFindings ?? [],
-            SelectStarViewFindings ?? [],
-            UnparameterizedDynamicSqlFindings ?? [],
-            NonPersistedComputedColumnFindings ?? [],
-            TempTableExecShapeFindings ?? [],
-            SelfReferencingDmlFindings ?? [],
-            TemporalTableHistoryIndexGapFindings ?? [],
-            ModuleCompileFlagFindings ?? [],
-            WindowFrameFindings ?? [],
-            WaitForFindings ?? [],
-            ViewOrderingFindings ?? [],
-            TransactionHygieneFindings ?? [],
-            CompositeIndexLeadingColumnFindings ?? [],
-            IndexHintFindings ?? [],
-            SessionDateSettingFindings ?? [],
-            CartesianJoinFindings ?? [],
-            TruncateSwallowedFindings ?? [],
-            UnindexedTempTableUsageFindings ?? [],
-            OutputParameterFindings ?? [],
-            DatabaseConfigurationFindings ?? [],
-            ParameterReassignmentPredicateFindings ?? [],
-            CodeMetricFindings ?? [],
-            FormattingFindings ?? [],
-            NamingFindings ?? [],
-            DeadCodeFindings ?? [],
-            DuplicationFindings ?? [],
-            DeprecatedSyntaxFindings ?? [],
-            StatementShapeFindings ?? [],
-            ControlFlowRiskFindings ?? [],
-            SecurityFindings ?? [],
-            IndexDesignFindings ?? [],
-            IdentityRangeFindings ?? [],
-            FloatEqualityFindings ?? [],
-            QueryAntiPatternFindings ?? [],
-            IndexCoverageFindings ?? [],
-            TriggerCorrectnessFindings ?? [],
-            CrossModuleLockOrderFindings ?? [],
-            TriggerRecursionCycleFindings ?? [],
-            CheckConstraintFindings ?? [],
-            DefaultNullableConstraintFindings ?? [],
-            TryCastComputedColumnPredicateFindings ?? [],
-            StaleSelectStarViewFindings ?? [],
-            BareTopNoOrderByFindings ?? [],
-            StringConcatNullFindings ?? [],
-            AggregateDivisionColumnstoreFindings ?? [],
-            SecurityPredicateIndexFindings ?? [],
-            DanglingObjectReferenceFindings ?? [],
-            ForcedParameterizationFindings ?? [],
-            ColumnstoreUnsupportedColumnTypeFindings ?? [],
-            AlwaysEncryptedOrderByFindings ?? [],
-            TriggerOrderFindings ?? [],
-            MissingStatisticsFindings ?? [],
-            OperandComparabilityFindings ?? [],
-            MemoryOptimizedUnsupportedColumnTypeFindings ?? [],
-            MemoryOptimizedUnsupportedIndexOptionFindings ?? [],
-            MemoryOptimizedForeignKeyFindings ?? [],
-            WindowFunctionArgumentFindings ?? [],
-            SelectiveXmlIndexValueColumnFindings ?? [],
-            FloatOrderDependentAggregateFindings ?? [],
-            AlwaysEncryptedKeyColumnFindings ?? [],
-            AlterColumnSafetyFindings ?? [],
-            SpExecuteSqlParameterMismatchFindings ?? [],
+            findingsByRuleId,
             SkippedConstructs ?? [],
             SkippedConstructSummary ?? SkippedConstructSummary.From([]),
             TypedPredicateSummary ?? TypedPredicateSummary.From([]),

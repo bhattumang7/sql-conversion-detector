@@ -2,6 +2,7 @@ using SilentScan.Core.Rules;
 using SilentScan.Live;
 using SilentScan.Verify.Catalog;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Integration;
 
@@ -33,7 +34,7 @@ public sealed class LiveScanRunnerTests : OracleTestFixture
         Assert.Equal(2, result.ModulesAnalyzed);
         Assert.Empty(result.LineageParity.Mismatches);
 
-        var finding = Assert.Single(result.Report.TypedFindings, f => f.Column.ColumnName == "OrderCode");
+        var finding = Assert.Single(result.Report.Find<TypedPredicateFinding>("TypedPredicateExtractor"), f => f.Column.ColumnName == "OrderCode");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
         Assert.True(finding.Column.Indexed);
