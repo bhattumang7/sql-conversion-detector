@@ -15,30 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 20 remain open below.
+correctness bugs found; 19 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`NamingScanner`'s `SpPrefixOnUserRoutine` reverses the real
-      name-resolution order — it claims `master` is checked before the
-      caller's own database, but the engine checks the current database
-      first and only falls back to `master` when no local match exists.**
-      (`src/SilentScan.Core/Predicates/NamingScanner.cs:156-162`; claim text
-      in `RuleCatalog.cs:208` and
-      `Reporting/RuleDocs/Naming/SpPrefixOnUserRoutine.cs:12-23` — "SQL
-      Server searches the master database first for any unqualified
-      call.") Oracle-confirmed (SQL Server 2025 and 2022, both directions,
-      creation-order swapped to rule out cache/creation-order artifacts): a
-      user database's own `sp_`-prefixed routine always wins over a
-      same-named `master` procedure when both exist — an unqualified call
-      resolves to the local copy, not `master`. `master` only gets used
-      when the local routine is absent. The described danger direction is
-      backwards: the real risk is a local `sp_`-prefixed routine silently
-      shadowing a same-named system procedure (or falling through to
-      `master` only when the local one is missing), not `master` winning
-      outright.
 
 - [ ] **`NamingScanner`'s `RedundantTypeQualifier` claims a `dbo.` schema
       qualifier on a user-defined type "adds nothing" unconditionally, but

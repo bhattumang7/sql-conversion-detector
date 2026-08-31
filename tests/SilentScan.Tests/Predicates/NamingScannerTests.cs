@@ -1,5 +1,8 @@
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.Reporting;
+using SilentScan.Core.Reporting.RuleDocs;
+using SilentScan.Core.Reporting.Sarif;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -333,5 +336,29 @@ public sealed class NamingScannerTests
         Assert.Equal(
             "Procedure \"DoSomething\" is created with no explicit schema qualifier - its real owning schema depends on the connecting principal's own default schema.",
             finding.DetailText);
+    }
+
+    [Fact]
+    public void SpPrefixRuleRationale_StatesLocalDatabaseWinsOverMaster_NotMasterFirst()
+    {
+        var rule = Assert.Single(
+            RuleCatalog.BaseRules,
+            r => r.Id == SarifRuleCatalog.NamingSpPrefixOnUserRoutineRuleId);
+
+        Assert.DoesNotContain("master database first", rule.Rationale, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("searches the master", rule.Rationale, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("shadow", rule.Rationale, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("master", rule.Rationale, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SpPrefixRuleDoc_StatesLocalDatabaseWinsOverMaster_NotMasterFirst()
+    {
+        var whyItMatters = RuleDocCatalog.ByRuleId[SarifRuleCatalog.NamingSpPrefixOnUserRoutineRuleId].WhyItMatters;
+
+        Assert.DoesNotContain("looked up in the `master` database FIRST", whyItMatters, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("resolved against the caller's own database FIRST", whyItMatters, StringComparison.Ordinal);
+        Assert.Contains("shadow", whyItMatters, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("falls through to", whyItMatters, StringComparison.OrdinalIgnoreCase);
     }
 }
