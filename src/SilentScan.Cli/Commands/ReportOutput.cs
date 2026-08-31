@@ -30,6 +30,12 @@ internal static class ReportOutput
     internal const string StrictOptionDescription =
         "Fail the command (non-zero exit code) when the scan could not fully look at the code: parse errors, dropped/unanalyzed batches, skipped constructs, unanalyzable dynamic SQL, or predicates that could not be classified. Off by default - the same coverage gaps are always reported (stderr warnings, SARIF notifications), this flag only changes whether they also affect the exit code.";
 
+    internal const string PlanCacheEvidenceOptionDescription =
+        "Also read the live plan cache and rank findings by whether they are actually observed converting in a real cached plan, with execution counts. Requires VIEW SERVER STATE; off by default.";
+
+    internal const string FetchSqlFromTablesOptionDescription =
+        "Also fetch the real value(s) of dynamic SQL text stored in a table (e.g. SELECT @sql = Definition FROM dbo.Templates WHERE Name = 'X') instead of leaving it unanalyzable - narrowed by whatever literal WHERE conditions can be pushed down, every distinct value analyzed as its own candidate when more than one matches. Reads real row content, not just catalog metadata - off by default.";
+
     internal static bool HasCoverageGaps(ScanReport report) =>
         report.ParseHealth.Files.Any(f => f.Errors.Count > 0 || f.UnanalyzedBatches.Count > 0)
         || report.SkippedConstructSummary.TotalCount > 0

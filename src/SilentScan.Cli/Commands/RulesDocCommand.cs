@@ -7,19 +7,26 @@ public static class RulesDocCommand
 {
     public static Command Create()
     {
+        const string outputOptionDescription = "Path to write the generated rules index page to.";
+        const string rulesDirOptionDescription = "Directory to write one page per rule into.";
+
         var outputOption = new Option<string>("--output")
         {
-            Description = "Path to write the generated rules index page to.",
+            Description = outputOptionDescription,
             DefaultValueFactory = _ => "docs/rules.html",
         };
 
         var rulesDirOption = new Option<string>("--rules-dir")
         {
-            Description = "Directory to write one page per rule into.",
+            Description = rulesDirOptionDescription,
             DefaultValueFactory = _ => "docs/rules",
         };
 
-        var command = new Command("rules-doc", "Regenerate docs/rules.html and docs/rules/*.html from RuleCatalog.")
+        var description = "Regenerate docs/rules.html and docs/rules/*.html from RuleCatalog.\n\nOptions:\n"
+            + $"  --output <output> (default: docs/rules.html) - {outputOptionDescription}\n"
+            + $"  --rules-dir <rules-dir> (default: docs/rules) - {rulesDirOptionDescription}";
+
+        var command = new Command("rules-doc", description)
         {
             outputOption,
             rulesDirOption,

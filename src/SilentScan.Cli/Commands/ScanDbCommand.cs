@@ -38,7 +38,7 @@ public static class ScanDbCommand
 
         var planCacheEvidenceOption = new Option<bool>("--plan-cache-evidence")
         {
-            Description = "Also read the live plan cache and rank findings by whether they are actually observed converting in a real cached plan, with execution counts. Requires VIEW SERVER STATE; off by default.",
+            Description = ReportOutput.PlanCacheEvidenceOptionDescription,
             DefaultValueFactory = _ => false,
         };
 
@@ -50,7 +50,7 @@ public static class ScanDbCommand
 
         var fetchSqlFromTablesOption = new Option<bool>("--fetch-sql-from-tables")
         {
-            Description = "Also fetch the real value(s) of dynamic SQL text stored in a table (e.g. SELECT @sql = Definition FROM dbo.Templates WHERE Name = 'X') instead of leaving it unanalyzable - narrowed by whatever literal WHERE conditions can be pushed down, every distinct value analyzed as its own candidate when more than one matches. Reads real row content, not just catalog metadata - off by default.",
+            Description = ReportOutput.FetchSqlFromTablesOptionDescription,
             DefaultValueFactory = _ => false,
         };
 
@@ -66,7 +66,16 @@ public static class ScanDbCommand
             DefaultValueFactory = _ => false,
         };
 
-        var command = new Command("scan-db", "Connect to a live SQL Server database, read its catalog from engine metadata, and scan every readable module for implicit-conversion, MSTVF-as-fence, and scalar-UDF findings.")
+        var description = "Connect to a live SQL Server database, read its catalog from engine metadata, and scan every readable module across all 234 rules in 11 families: conversions and silent write loss, sargability, lineage metrics, catalog and constraint state, plan shape, control flow and transactions, dynamic SQL, code quality and security, index design, query anti-patterns, triggers and cross-module correctness.\n\nOptions:\n"
+            + $"  --format <format> (default: text) - {ReportOutput.FormatOptionDescription}\n"
+            + $"  --confidence <confidence> (default: high) - {ReportOutput.ConfidenceOptionDescription}\n"
+            + $"  --plan-cache-evidence (default: off) - {ReportOutput.PlanCacheEvidenceOptionDescription}\n"
+            + $"  --fetch-sql-from-tables (default: off) - {ReportOutput.FetchSqlFromTablesOptionDescription}\n"
+            + $"  --verbosity <verbosity> (default: brief) - {ReportOutput.VerbosityOptionDescription}\n"
+            + $"  --strict (default: off) - {ReportOutput.StrictOptionDescription}\n"
+            + $"  --output <output> - {ReportOutput.OutputOptionDescription}";
+
+        var command = new Command("scan-db", description)
         {
             connectionStringArgument,
             formatOption,
