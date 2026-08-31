@@ -16,6 +16,7 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
         CREATE TABLE dbo.Customers (
             CustomerId INT NOT NULL PRIMARY KEY,
             Email varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+            Payload XML NULL,
             DisplayName AS (Email + '!'),
             INDEX IX_Email (Email));
         GO
@@ -97,6 +98,20 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
         Assert.Equal(100, email.Type.Length);
         Assert.Equal("SQL_Latin1_General_CP1_CI_AS", email.Type.Collation?.Name);
         Assert.False(email.IsNullable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_XmlColumn_TypeResolvesToXmlCategoryWithoutSkipping()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var table = Assert.Single(catalog.Tables, t => t.Name == "Customers");
+        var payload = table.FindColumn("Payload");
+        Assert.NotNull(payload);
+        Assert.NotNull(payload!.Type);
+        Assert.Equal(SqlTypeCategory.Xml, payload.Type!.Category);
+
+        Assert.DoesNotContain(catalog.Skipped.Entries, e => e.Reason.Contains("Payload", StringComparison.Ordinal));
     }
 
     [Fact]

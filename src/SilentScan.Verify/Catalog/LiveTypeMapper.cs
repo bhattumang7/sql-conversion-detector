@@ -1,4 +1,3 @@
-using SilentScan.Core.Catalog;
 using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Verify.Catalog;
@@ -37,6 +36,7 @@ public static class LiveTypeMapper
         "TIME" => SqlTypeCategory.Time,
         "DATETIME2" => SqlTypeCategory.DateTime2,
         "DATETIMEOFFSET" => SqlTypeCategory.DateTimeOffset,
+        "XML" => SqlTypeCategory.Xml,
 
         _ => null,
     };
