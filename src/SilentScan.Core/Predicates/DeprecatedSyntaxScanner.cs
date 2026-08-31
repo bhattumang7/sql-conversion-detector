@@ -14,7 +14,7 @@ public static class DeprecatedSyntaxScanner
         "sysaltfiles", "syscacheobjects", "syscharsets", "syscolumns", "syscomments", "sysconfigures",
         "sysconstraints", "syscurconfigs", "sysdatabases", "sysdepends", "sysdevices", "sysfilegroups",
         "sysfiles", "sysforeignkeys", "sysfulltextcatalogs", "sysindexes", "sysindexkeys", "syslanguages",
-        "syslockinfo", "syslocks", "syslogins", "sysmembers", "sysmessages", "sysobjects", "sysoledbusers",
+        "syslockinfo", "syslogins", "sysmembers", "sysmessages", "sysobjects", "sysoledbusers",
         "sysopentapes", "sysperfinfo", "syspermissions", "sysprocesses", "sysprotects", "sysreferences",
         "sysremotelogins", "sysservers", "systypes", "sysusers",
     };

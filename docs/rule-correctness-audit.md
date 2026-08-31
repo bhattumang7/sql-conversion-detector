@@ -21,21 +21,6 @@ correctness bugs found; 30 remain open below.
 
 ## Confirmed bugs (open)
 
-- [ ] **`DeprecatedSyntaxScanner`'s legacy-compatibility-view name list
-      includes `syslocks`, which is not and never was a real SQL Server
-      compatibility view.**
-      (`src/SilentScan.Core/Predicates/DeprecatedSyntaxScanner.cs:12-20`,
-      `LegacyCompatibilityViewNames`.) Oracle-confirmed (SQL Server 2025):
-      `SELECT OBJECT_ID('sys.syslocks')` returns `NULL` and `SELECT * FROM
-      sys.syslocks` raises `Msg 208, Invalid object name 'sys.syslocks'` —
-      the real backward-compatibility view for lock info is `syslockinfo`,
-      already separately and correctly present in the same list. Every one
-      of the other 34 names in the list was cross-checked against
-      `sys.all_objects` and does exist as a real `is_ms_shipped` compatibility
-      view; `syslocks` is the only one that doesn't. If a scanned codebase
-      has an ordinary object literally named `syslocks`, the scanner falsely
-      claims it "is a pre-SQL-Server-2005 system compatibility view."
-
 - [ ] **`FloatEqualityPredicateScanner`'s published rule doc claims `<>`
       coverage the scanner never implements.**
       (`src/SilentScan.Core/Predicates/FloatEqualityPredicateScanner.cs:81-89`

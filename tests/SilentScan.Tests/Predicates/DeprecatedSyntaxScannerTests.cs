@@ -313,6 +313,22 @@ public sealed class DeprecatedSyntaxScannerTests
     }
 
     [Fact]
+    public void Syslocks_NeverFires()
+    {
+        var findings = Scan("SELECT * FROM syslocks;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == DeprecatedSyntaxFindingKind.LegacySystemCompatibilityView);
+    }
+
+    [Fact]
+    public void Syslockinfo_Fires()
+    {
+        var findings = Scan("SELECT * FROM syslockinfo;");
+
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.LegacySystemCompatibilityView);
+    }
+
+    [Fact]
     public void TableHintWithoutWith_Fires()
     {
         var findings = Scan("SELECT * FROM dbo.T (NOLOCK);");
