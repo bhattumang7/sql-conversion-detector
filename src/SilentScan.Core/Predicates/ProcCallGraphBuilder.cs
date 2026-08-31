@@ -19,7 +19,7 @@ public static class ProcCallGraphBuilder
         {
             stage?.Advance(currentItem: result.SourcePath);
             var rule = new Rule(catalog, ledger, result.SourcePath);
-            var walker = new ModuleWalker(result.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+            var walker = new ModuleWalker(result.SourcePath, catalog, EmptyResolvedViews, rules: [rule]);
             result.Fragment.Accept(walker);
             edges.AddRange(rule.Edges);
             spExecuteSqlCallSites.AddRange(rule.SpExecuteSqlCallSites);
@@ -317,20 +317,20 @@ public static class ProcCallGraphBuilder
             return _dynamicSqlScopeCache.Captures.TryGetValue(callSite, out var state) ? state : emptyState;
         }
 
-        private static bool IsDynamicSqlFoldTarget(ExecuteStatement node) => node.ExecuteSpecification.ExecutableEntity switch
-        {
-            ExecutableProcedureReference
-            {
-                ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: var name,
-                Parameters: [{ ParameterValue: { } }, ..],
-            } when string.Equals(name, SpExecuteSqlName, StringComparison.OrdinalIgnoreCase) => true,
-            ExecutableStringList { Strings.Count: > 0 } => true,
-            _ => false,
-        };
-
         private sealed class DynamicSqlCallSiteCollector : TSqlFragmentVisitor
         {
             public HashSet<ExecuteStatement> CallSites { get; } = [];
+
+            private static bool IsDynamicSqlFoldTarget(ExecuteStatement node) => node.ExecuteSpecification.ExecutableEntity switch
+            {
+                ExecutableProcedureReference
+                {
+                    ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: var name,
+                    Parameters: [{ ParameterValue: { } }, ..],
+                } when string.Equals(name, SpExecuteSqlName, StringComparison.OrdinalIgnoreCase) => true,
+                ExecutableStringList { Strings.Count: > 0 } => true,
+                _ => false,
+            };
 
             public override void ExplicitVisit(ExecuteStatement node)
             {
@@ -344,10 +344,12 @@ public static class ProcCallGraphBuilder
 
             public override void ExplicitVisit(ProcedureStatementBodyBase node)
             {
+                _ = node;
             }
 
             public override void ExplicitVisit(TriggerStatementBody node)
             {
+                _ = node;
             }
         }
 

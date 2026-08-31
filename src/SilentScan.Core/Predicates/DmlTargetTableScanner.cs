@@ -15,7 +15,7 @@ public static class DmlTargetTableScanner
         foreach (var parseResult in parseResults)
         {
             stage?.Advance(currentItem: parseResult.SourcePath);
-            var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+            var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, rules: [rule]);
             parseResult.Fragment.Accept(walker);
         }
 

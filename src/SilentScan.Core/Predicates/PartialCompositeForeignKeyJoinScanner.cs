@@ -35,7 +35,7 @@ public static class PartialCompositeForeignKeyJoinScanner
         }
 
         var rule = CreateRule(parseResult.SourcePath, catalog, compositeForeignKeys);
-        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, rules: [rule]);
         parseResult.Fragment.Accept(walker);
         return Harvest(rule);
     }

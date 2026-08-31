@@ -29,7 +29,7 @@ public static class ExpressionEvaluator
         ["@@FETCH_STATUS"] = new SqlType(SqlTypeCategory.Int),
     };
 
-    private static readonly ConditionalWeakTable<ScalarExpression, object> ConditionalGuardIds = new();
+    private static readonly ConditionalWeakTable<ScalarExpression, object> ConditionalGuardIds = [];
 
     private static int ConditionalGuardId(ScalarExpression expression) =>
         (int)ConditionalGuardIds.GetValue(expression, static _ => SqlTextValue.NewGuardId());

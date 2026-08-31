@@ -19,7 +19,8 @@ public static class TypedPredicateExtractor
         var ledger = new SkipLedger();
         var rule = new Rule(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, callerScopeByCalleeScope);
         var walker = new ModuleWalker(
-            parseResult.SourcePath, catalog, resolvedViews, ledger, enclosingScope?.ProcScope, callerScopeByCalleeScope, rules: [rule]);
+            parseResult.SourcePath, catalog, resolvedViews, rules: [rule],
+            callerContext: new ModuleWalkerCallerContext(ledger, enclosingScope?.ProcScope, callerScopeByCalleeScope));
 
         if (enclosingScope?.TriggerTarget is { } target)
         {

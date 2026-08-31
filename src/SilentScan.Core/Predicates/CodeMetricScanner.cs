@@ -23,7 +23,7 @@ public static class CodeMetricScanner
     public static IReadOnlyList<CodeMetricFinding> Scan(SqlParseResult parseResult, CodeMetricThresholds? thresholds = null)
     {
         var rule = CreateRule(parseResult.SourcePath, thresholds ?? CodeMetricThresholds.Default);
-        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, rules: [rule]);
         parseResult.Fragment.Accept(walker);
         return Harvest(parseResult, thresholds ?? CodeMetricThresholds.Default, rule);
     }

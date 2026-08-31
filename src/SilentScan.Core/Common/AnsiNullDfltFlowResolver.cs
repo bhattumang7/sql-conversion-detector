@@ -22,17 +22,17 @@ internal static class AnsiNullDfltFlowResolver
         return map;
     }
 
-    private static StatementList? GetScopedStatementList(TSqlStatement statement) => statement switch
-    {
-        ProcedureStatementBodyBase p => p.StatementList,
-        TriggerStatementBody t => t.StatementList,
-        _ => null,
-    };
-
     private readonly record struct FlowState(bool? Override, bool? RestoreOverride, int Depth);
 
     private sealed class Policy(Dictionary<TSqlStatement, bool?> map) : IStatementFlowPolicy<FlowState>
     {
+        private static StatementList? GetScopedStatementList(TSqlStatement statement) => statement switch
+        {
+            ProcedureStatementBodyBase p => p.StatementList,
+            TriggerStatementBody t => t.StatementList,
+            _ => null,
+        };
+
         public bool IsDeclined(FlowState state) => false;
 
         public bool IsDone(FlowState state) => false;

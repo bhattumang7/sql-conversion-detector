@@ -12,7 +12,7 @@ public static class IndexCoverageScanner
     public static IReadOnlyList<IndexCoverageFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         var visitor = CreateRule(parseResult.SourcePath, catalog);
-        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [visitor]);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, rules: [visitor]);
         parseResult.Fragment.Accept(walker);
     return Harvest(visitor);
     }

@@ -72,7 +72,7 @@ public static class TryCastComputedColumnPredicateScanner
 
         var rule = CreateRule(parseResult.SourcePath, catalog, candidates);
         var emptyResolvedViews = new Dictionary<string, ResolvedRelation>();
-        var walker = new ModuleWalker(parseResult.SourcePath, catalog, emptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, emptyResolvedViews, rules: [rule]);
         parseResult.Fragment.Accept(walker);
         return Harvest(rule);
     }

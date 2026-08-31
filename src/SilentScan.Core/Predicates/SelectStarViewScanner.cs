@@ -58,7 +58,7 @@ public static class SelectStarViewScanner
         }
 
         var rule = CreateRule(parseResult.SourcePath, catalog, lineage, candidates);
-        var walker = new ModuleWalker(parseResult.SourcePath, catalog, lineage.AllRelations, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, lineage.AllRelations, rules: [rule]);
         parseResult.Fragment.Accept(walker);
         return Harvest(rule);
     }

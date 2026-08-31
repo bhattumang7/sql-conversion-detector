@@ -10,7 +10,7 @@ public static class BareTopNoOrderByScanner
     public static IReadOnlyList<BareTopNoOrderByFinding> Scan(SqlParseResult parseResult)
     {
         var rule = CreateRule(parseResult.SourcePath);
-        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, rules: [rule]);
         parseResult.Fragment.Accept(walker);
     return Harvest(rule);
     }

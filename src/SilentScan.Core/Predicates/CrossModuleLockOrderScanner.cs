@@ -15,15 +15,7 @@ public static class CrossModuleLockOrderScanner
 
     public static IReadOnlyList<CrossModuleLockOrderFinding> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog)
     {
-        var rules = new List<Rule>();
-        foreach (var result in parseResults)
-        {
-            var rule = CreateRule(result.SourcePath, catalog);
-            var walker = new ModuleWalker(result.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
-            result.Fragment.Accept(walker);
-            rules.Add(rule);
-        }
-
+        var rules = ModuleWalkerRuleRunner.Run(parseResults, catalog, EmptyResolvedViews, CreateRule);
         return Harvest(catalog, rules);
     }
 

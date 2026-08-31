@@ -30,11 +30,11 @@ public static class SarifReportWriter
     {
         var results = new List<SarifResult>();
         results.AddRange(report.Find<SargabilityFinding>("NonSargablePredicateScanner").Select(ToResult));
-        results.AddRange(report.Find<TypedPredicateFinding>("TypedPredicateExtractor").Select(ToResult));
+        results.AddRange(report.Find<TypedPredicateFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
         results.AddRange(report.Find<DynamicSqlFinding>("DynamicSqlScanner").Select(ToResult));
-        results.AddRange(report.Find<ExpressionDerivedFinding>("TypedPredicateExtractor").Select(ToResult));
-        results.AddRange(report.Find<CollationConflictFinding>("TypedPredicateExtractor").Select(ToResult));
-        results.AddRange(report.Find<WriteLossFinding>("TypedPredicateExtractor").Select(ToResult));
+        results.AddRange(report.Find<ExpressionDerivedFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
+        results.AddRange(report.Find<CollationConflictFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
+        results.AddRange(report.Find<WriteLossFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
         results.AddRange(report.Find<TvfFenceFinding>("TvfFenceScanner").Select(ToResult));
         results.AddRange(report.Find<ScalarUdfFinding>("ScalarUdfScanner").Select(ToResult));
         results.AddRange(report.Find<ColumnCollationDriftFinding>("ColumnCollationDriftScanner").Select(ToResult));
@@ -45,12 +45,12 @@ public static class SarifReportWriter
         results.AddRange(report.Find<MaxTypedColumnFinding>("MaxTypedColumnScanner").Select(ToResult));
         results.AddRange(report.Find<ColumnstoreUnsupportedColumnTypeFinding>("ColumnstoreUnsupportedColumnTypeScanner").Select(ToResult));
         results.AddRange(report.Find<SelectiveXmlIndexValueColumnFinding>("SelectiveXmlIndexValueColumnScanner").Select(ToResult));
-        results.AddRange(report.Find<OversizedParameterFinding>("TypedPredicateExtractor").Select(ToResult));
-        results.AddRange(report.Find<UnderLengthParameterFinding>("TypedPredicateExtractor").Select(ToResult));
-        results.AddRange(report.Find<AnsiPaddingMismatchFinding>("TypedPredicateExtractor").Select(ToResult));
+        results.AddRange(report.Find<OversizedParameterFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
+        results.AddRange(report.Find<UnderLengthParameterFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
+        results.AddRange(report.Find<AnsiPaddingMismatchFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
         results.AddRange(report.Find<CatchAllPredicateFinding>("CatchAllPredicateScanner").Select(ToResult));
-        results.AddRange(report.Find<LocalVariablePredicateFinding>("TypedPredicateExtractor").Select(ToResult));
-        results.AddRange(report.Find<FilteredIndexParameterMismatchFinding>("TypedPredicateExtractor").Select(ToResult));
+        results.AddRange(report.Find<LocalVariablePredicateFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
+        results.AddRange(report.Find<FilteredIndexParameterMismatchFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
         results.AddRange(report.Find<NotInNullableSubqueryFinding>("NotInNullableSubqueryScanner").Select(ToResult));
         results.AddRange(report.Find<NonUniqueUpdateSourceFinding>("NonUniqueUpdateSourceScanner").Select(ToResult));
         results.AddRange(report.Find<ForcedSerialFinding>("ForcedSerialScanner").Select(ToResult));

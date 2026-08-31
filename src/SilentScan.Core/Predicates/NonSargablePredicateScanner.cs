@@ -31,7 +31,8 @@ public static class NonSargablePredicateScanner
     {
         var rule = new Rule(parseResult.SourcePath, catalog);
         var walker = new ModuleWalker(
-            parseResult.SourcePath, catalog, lineage.AllRelations, ledger, enclosingScope?.ProcScope, callerScopeByCalleeScope, rules: [rule]);
+            parseResult.SourcePath, catalog, lineage.AllRelations, rules: [rule],
+            callerContext: new ModuleWalkerCallerContext(ledger, enclosingScope?.ProcScope, callerScopeByCalleeScope));
 
         if (enclosingScope?.TriggerTarget is { } target)
         {

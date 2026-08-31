@@ -15,7 +15,7 @@ public static class ForcedParameterizationScanner
         {
             stage?.Advance(currentItem: parseResult.SourcePath);
             var rule = new Rule(parseResult.SourcePath);
-            var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+            var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, rules: [rule]);
             parseResult.Fragment.Accept(walker);
             findings.AddRange(rule.Findings);
         }

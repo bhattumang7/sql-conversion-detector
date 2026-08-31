@@ -221,8 +221,7 @@ public static class RuleRunner
         }
 
         var walker = new ModuleWalker(
-            parseResult.SourcePath, context.Catalog, EmptyResolvedViews, ledger: null,
-            currentProcScope: null, callerScopeByCalleeScope: null, rules: moduleRules);
+            parseResult.SourcePath, context.Catalog, EmptyResolvedViews, rules: moduleRules);
         parseResult.Fragment.Accept(walker);
 
         foreach (var moduleRule in moduleRules)
@@ -354,8 +353,7 @@ public static class RuleRunner
         }
 
         var walker = new ModuleWalker(
-            parseResult.SourcePath, context.Catalog, EmptyResolvedViews, ledger: null,
-            currentProcScope: null, callerScopeByCalleeScope: null, rules: moduleRules);
+            parseResult.SourcePath, context.Catalog, EmptyResolvedViews, rules: moduleRules);
         parseResult.Fragment.Accept(walker);
 
         foreach (var moduleRule in moduleRules)

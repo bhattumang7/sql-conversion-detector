@@ -61,7 +61,7 @@ public static partial class SecurityScanner
     public static IReadOnlyList<SecurityFinding> Scan(SqlParseResult parseResult)
     {
         var rule = CreateRule(parseResult.SourcePath);
-        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
+        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, rules: [rule]);
         parseResult.Fragment.Accept(walker);
         return Harvest(rule);
     }
@@ -100,12 +100,9 @@ public static partial class SecurityScanner
 
         public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)
         {
-            foreach (var element in node.Declarations)
+            foreach (var name in node.Declarations.Where(e => e.Value is StringLiteral && IsCredentialSuggestiveName(e.VariableName.Value)).Select(e => e.VariableName))
             {
-                if (element.Value is StringLiteral && IsCredentialSuggestiveName(element.VariableName.Value))
-                {
-                    AddCredential(element.VariableName.Value, element.VariableName);
-                }
+                AddCredential(name.Value, name);
             }
         }
 

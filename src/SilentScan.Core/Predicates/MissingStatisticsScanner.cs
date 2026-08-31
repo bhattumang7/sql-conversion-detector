@@ -16,7 +16,7 @@ public static class MissingStatisticsScanner
         }
 
         var visitor = CreateRule(parseResult.SourcePath, catalog);
-        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [visitor]);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, rules: [visitor]);
         parseResult.Fragment.Accept(walker);
     return Harvest(visitor);
     }

@@ -15,8 +15,8 @@ public static class SelectIntoLineagePass
         {
             var rule = new Rule(catalog, lineage.AllRelations, result.SourcePath);
             var walker = new ModuleWalker(
-                result.SourcePath, catalog, lineage.AllRelations, catalog.Skipped, currentProcScope: null, callerScopeByCalleeScope: null,
-                rules: [rule], triggerScopeAnalysisPass: AnalysisPass.Lineage);
+                result.SourcePath, catalog, lineage.AllRelations,
+                rules: [rule], callerContext: new ModuleWalkerCallerContext(catalog.Skipped, null, null), triggerScopeAnalysisPass: AnalysisPass.Lineage);
             result.Fragment.Accept(walker);
         }
     }

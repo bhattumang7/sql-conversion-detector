@@ -94,11 +94,21 @@ public sealed class TextWriterScanProgress : IScanProgress
     private static string Format(TimeSpan elapsed) =>
         elapsed.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + "s";
 
-    private static string Truncate(string text, int maxLength) =>
-        text.Length <= maxLength ? text : "..." + text[^(maxLength - 3)..];
-
     private sealed class Stage : IScanStage
     {
+        private static string Truncate(string text, int maxLength) =>
+            text.Length <= maxLength ? text : "..." + text[^(maxLength - 3)..];
+
+        private static string BuildTickProgressText(int advanced, int? total, TimeSpan elapsed)
+        {
+            if (total is { } t)
+            {
+                return $"{advanced:N0}/{t:N0}";
+            }
+
+            return advanced > 0 ? $"{advanced:N0}" : Format(elapsed);
+        }
+
         private readonly TextWriterScanProgress _owner;
         private readonly string _name;
         private readonly int? _total;
@@ -149,11 +159,7 @@ public sealed class TextWriterScanProgress : IScanProgress
 
             var advanced = Volatile.Read(ref _advanced);
             var currentItem = Volatile.Read(ref _currentItem);
-            var progressText = _total is { } total
-                ? $"{advanced:N0}/{total:N0}"
-                : advanced > 0
-                    ? $"{advanced:N0}"
-                    : Format(_stopwatch.Elapsed);
+            var progressText = BuildTickProgressText(advanced, _total, _stopwatch.Elapsed);
             var text = currentItem is null ? $"{progressText} " : $"{progressText} ({currentItem}) ";
 
             lock (_owner._gate)

@@ -35,24 +35,23 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
     private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
     private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
     private readonly Stack<IReadOnlySet<TSqlFragment>> _deadPredicateStack = new();
-    private readonly Dictionary<IModuleRule, Exception> _crashed = new();
+    private readonly Dictionary<IModuleRule, Exception> _crashed = [];
 
     public ModuleWalker(
         string sourcePath,
         DatabaseCatalog catalog,
         IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
-        SkipLedger? ledger,
-        string? currentProcScope,
-        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope,
         IReadOnlyList<IModuleRule> rules,
+        ModuleWalkerCallerContext? callerContext = null,
         AnalysisPass triggerScopeAnalysisPass = AnalysisPass.Predicates)
     {
+        var caller = callerContext ?? ModuleWalkerCallerContext.None;
         _sourcePath = sourcePath;
         _catalog = catalog;
         _resolvedViews = resolvedViews;
-        _ledger = ledger;
-        CurrentProcScope = currentProcScope;
-        _callerScopeByCalleeScope = callerScopeByCalleeScope;
+        _ledger = caller.Ledger;
+        CurrentProcScope = caller.CurrentProcScope;
+        _callerScopeByCalleeScope = caller.CallerScopeByCalleeScope;
         _rules = rules;
         _triggerScopeAnalysisPass = triggerScopeAnalysisPass;
     }
@@ -460,41 +459,6 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
         node.Action?.Accept(this);
     }
 
-    public override void Visit(BooleanComparisonExpression node)
-    {
-        Dispatch(rule => rule.OnBooleanComparisonExpression(node, this));
-
-        base.Visit(node);
-    }
-
-    public override void Visit(BooleanTernaryExpression node)
-    {
-        Dispatch(rule => rule.OnBooleanTernaryExpression(node, this));
-
-        base.Visit(node);
-    }
-
-    public override void Visit(LikePredicate node)
-    {
-        Dispatch(rule => rule.OnLikePredicate(node, this));
-
-        base.Visit(node);
-    }
-
-    public override void Visit(InPredicate node)
-    {
-        Dispatch(rule => rule.OnInPredicate(node, this));
-
-        base.Visit(node);
-    }
-
-    public override void Visit(SubqueryComparisonPredicate node)
-    {
-        Dispatch(rule => rule.OnSubqueryComparisonPredicate(node, this));
-
-        base.Visit(node);
-    }
-
     public sealed override void ExplicitVisit(SelectSetVariable node)
     {
         Dispatch(rule => rule.OnEnterSelectSetVariable(node, this));
@@ -843,6 +807,41 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
         base.ExplicitVisit(node);
 
         Dispatch(rule => rule.OnLeaveBooleanComparisonExpressionScope(node, this));
+    }
+
+    public override void Visit(BooleanComparisonExpression node)
+    {
+        Dispatch(rule => rule.OnBooleanComparisonExpression(node, this));
+
+        base.Visit(node);
+    }
+
+    public override void Visit(BooleanTernaryExpression node)
+    {
+        Dispatch(rule => rule.OnBooleanTernaryExpression(node, this));
+
+        base.Visit(node);
+    }
+
+    public override void Visit(LikePredicate node)
+    {
+        Dispatch(rule => rule.OnLikePredicate(node, this));
+
+        base.Visit(node);
+    }
+
+    public override void Visit(InPredicate node)
+    {
+        Dispatch(rule => rule.OnInPredicate(node, this));
+
+        base.Visit(node);
+    }
+
+    public override void Visit(SubqueryComparisonPredicate node)
+    {
+        Dispatch(rule => rule.OnSubqueryComparisonPredicate(node, this));
+
+        base.Visit(node);
     }
 
     private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)

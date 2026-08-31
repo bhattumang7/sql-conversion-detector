@@ -269,31 +269,11 @@ public sealed class DynamicSqlCfg
 
         for (var round = 0; round < MaxFixpointRounds; round++)
         {
-            var changed = false;
             var nextDirty = new bool[_blocks.Count];
+            var changed = false;
             for (var i = 0; i < _blocks.Count; i++)
             {
-                if (!dirty[i])
-                {
-                    continue;
-                }
-
-                var working = ComputeBlockOutput(i, entryBlock, initialSeed, predecessors, outStates, emit: false);
-                if (working is null)
-                {
-                    continue;
-                }
-
-                if (outStates[i] is null || !StatesEqual(outStates[i]!, working))
-                {
-                    changed = true;
-                    foreach (var successor in _blocks[i].Successors)
-                    {
-                        nextDirty[successor] = true;
-                    }
-                }
-
-                outStates[i] = working;
+                changed |= ProcessBlockForFixpoint(i, dirty, entryBlock, initialSeed, predecessors, outStates, nextDirty);
             }
 
             if (!changed && round > 0)
@@ -303,6 +283,34 @@ public sealed class DynamicSqlCfg
 
             dirty = nextDirty;
         }
+    }
+
+    private bool ProcessBlockForFixpoint(
+        int blockIndex, bool[] dirty, int entryBlock, Dictionary<string, SqlTextValue> initialSeed, List<int>[] predecessors,
+        Dictionary<string, SqlTextValue>?[] outStates, bool[] nextDirty)
+    {
+        if (!dirty[blockIndex])
+        {
+            return false;
+        }
+
+        var working = ComputeBlockOutput(blockIndex, entryBlock, initialSeed, predecessors, outStates, emit: false);
+        if (working is null)
+        {
+            return false;
+        }
+
+        var changed = outStates[blockIndex] is null || !StatesEqual(outStates[blockIndex]!, working);
+        if (changed)
+        {
+            foreach (var successor in _blocks[blockIndex].Successors)
+            {
+                nextDirty[successor] = true;
+            }
+        }
+
+        outStates[blockIndex] = working;
+        return changed;
     }
 
     private void RunFinalPass(int entryBlock, Dictionary<string, SqlTextValue> initialSeed, List<int>[] predecessors, Dictionary<string, SqlTextValue>?[] outStates, bool emit)
