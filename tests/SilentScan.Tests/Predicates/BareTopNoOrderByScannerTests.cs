@@ -63,6 +63,30 @@ public sealed class BareTopNoOrderByScannerTests
     }
 
     [Fact]
+    public void TopHundredPointZeroPercent_NoOrderBy_NeverFires()
+    {
+        var findings = Scan("SELECT TOP (100.0) PERCENT * FROM dbo.T;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void TopHundredPointZeroZeroPercent_NoOrderBy_NeverFires()
+    {
+        var findings = Scan("SELECT TOP 100.00 PERCENT * FROM dbo.T;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void TopNinetyNinePointFivePercent_NoOrderBy_Fires()
+    {
+        var findings = Scan("SELECT TOP (99.5) PERCENT * FROM dbo.T;");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
     public void TopWithTies_AlwaysCarriesOrderBy_NeverFires()
     {
 

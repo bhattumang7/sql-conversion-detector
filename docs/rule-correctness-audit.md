@@ -15,31 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 32 remain open below.
+correctness bugs found; 30 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`BareTopNoOrderByScanner`'s "100 percent" carve-out only matches an
-      integer literal, likely missing the decimal form of the same
-      value.** (`src/SilentScan.Core/Predicates/BareTopNoOrderByScanner.cs:42-43`,
-      `IsHundredPercent` matches only `IntegerLiteral { Value: "100" }`.)
-      Oracle-confirmed (SQL Server 2025): `TOP 100.0 PERCENT` is valid T-SQL
-      and returns every row, the same semantically-100%-equivalent case the
-      rule's own doc explicitly carves out for the plain `100` form. A
-      decimal literal like `100.0`/`100.00` tokenizes to a `NumericLiteral`,
-      not an `IntegerLiteral`, in ScriptDom's standard literal
-      classification (digits containing a decimal point are never an
-      integer literal) — the same literal-type distinction this codebase
-      already relies on elsewhere (e.g. `WriteLossClassifier.IsWithinScaleLiteral`).
-      That would make `IsHundredPercent` return `false` for `TOP 100.0
-      PERCENT`, producing a false positive on a query that is not actually
-      unstable-order-risk. Flagged with slightly lower confidence than the
-      others above: the engine-equivalence half is live-oracle-confirmed,
-      but the ScriptDom literal-type half was reasoned from the parser's
-      well-established tokenization rules and this codebase's own existing
-      usage, not from re-running the built scanner against the input.
 
 - [ ] **`CheckConstraintScanner`'s identity-column finding overclaims
       "failures silently stop forever" for any CHECK on an identity column,

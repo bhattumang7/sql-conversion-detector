@@ -24,6 +24,17 @@ public sealed class ViewOrderingScannerTests
     }
 
     [Fact]
+    public void View_TopHundredPointZeroPercentOrderBy_FiresAsNeverLimits()
+    {
+        var findings = Scan("CREATE VIEW dbo.v1 AS SELECT TOP (100.0) PERCENT Id, Amt FROM dbo.T ORDER BY Amt DESC;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(ViewOrderingFindingKind.TopPercentOrderByNeverLimits, finding.Kind);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Equal("dbo.v1", finding.ObjectQualifiedName);
+    }
+
+    [Fact]
     public void View_TopNOrderBy_FiresAsNotGuaranteed()
     {
         var findings = Scan("CREATE VIEW dbo.v1 AS SELECT TOP (10) Id, Amt FROM dbo.T ORDER BY Amt DESC;");

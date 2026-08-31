@@ -42,6 +42,40 @@ public sealed class SecondSweepGLiveOracleTests
     }
 
     [Fact]
+    public async Task LiveDeployment_BareTopHundredPointZeroPercent_NeverFires()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            CREATE TABLE dbo.BareTopDecimalHundred (Id INT NOT NULL PRIMARY KEY, Name VARCHAR(50) NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.usp_BareTopDecimalHundred_Find AS
+            BEGIN
+                SELECT TOP (100.0) PERCENT Id, Name FROM dbo.BareTopDecimalHundred;
+            END
+            """,
+            minimumConfidence: FindingConfidence.Low);
+
+        Assert.Empty(report.Find<BareTopNoOrderByFinding>("BareTopNoOrderByScanner"));
+    }
+
+    [Fact]
+    public async Task LiveDeployment_ViewTopHundredPointZeroPercentOrderBy_FiresAsNeverLimits()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            CREATE TABLE dbo.ViewOrderingDecimalHundred (Id INT NOT NULL PRIMARY KEY, Amt INT NOT NULL);
+            GO
+            CREATE VIEW dbo.v_ViewOrderingDecimalHundred AS
+            SELECT TOP (100.0) PERCENT Id, Amt FROM dbo.ViewOrderingDecimalHundred ORDER BY Amt DESC;
+            """,
+            minimumConfidence: FindingConfidence.Low);
+
+        var finding = Assert.Single(report.Find<ViewOrderingFinding>("ViewOrderingScanner"));
+        Assert.Equal(ViewOrderingFindingKind.TopPercentOrderByNeverLimits, finding.Kind);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
     public async Task LiveDeployment_StringConcatNull_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(
