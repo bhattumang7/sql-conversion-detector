@@ -80,7 +80,9 @@ public static class FloatEqualityPredicateScanner
 
             public override void ExplicitVisit(BooleanComparisonExpression node)
             {
-                if (node.ComparisonType == BooleanComparisonType.Equals)
+                if (node.ComparisonType is BooleanComparisonType.Equals
+                    or BooleanComparisonType.NotEqualToBrackets
+                    or BooleanComparisonType.NotEqualToExclamation)
                 {
                     Comparisons.Add(node);
                 }

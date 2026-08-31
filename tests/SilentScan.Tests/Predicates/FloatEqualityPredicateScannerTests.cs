@@ -139,6 +139,32 @@ public sealed class FloatEqualityPredicateScannerTests
     }
 
     [Fact]
+    public void NotEqualToBracketsAgainstFloatColumn_Fires()
+    {
+        var findings = Scan("SELECT * FROM dbo.Prices WHERE Amount <> 1.5;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Amount", finding.ColumnName);
+    }
+
+    [Fact]
+    public void NotEqualToExclamationAgainstRealColumn_Fires()
+    {
+        var findings = Scan("SELECT * FROM dbo.Prices WHERE Rate != 1.5;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Rate", finding.ColumnName);
+    }
+
+    [Fact]
+    public void NotEqualToAgainstNonFloatColumn_NeverFires()
+    {
+        var findings = Scan("SELECT * FROM dbo.Prices WHERE Id <> 1;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void EqualityAgainstFloatColumn_InsideSubquery_ResolvesWithSubqueryOwnScope()
     {
         var findings = Scan(

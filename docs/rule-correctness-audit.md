@@ -15,25 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 25 remain open below.
+correctness bugs found; 24 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`FloatEqualityPredicateScanner`'s published rule doc claims `<>`
-      coverage the scanner never implements.**
-      (`src/SilentScan.Core/Predicates/FloatEqualityPredicateScanner.cs:81-89`
-      only matches `BooleanComparisonType.Equals`, never
-      `NotEqualToBrackets`/`NotEqualToExclamation`; but
-      `src/SilentScan.Core/Reporting/RuleDocs/Predicates/FloatEquality.cs:22`
-      says "A WHERE or ON predicate using `=` (or `<>`) against a
-      FLOAT/REAL value...". `RuleCatalog.cs:61`'s own SARIF message correctly
-      says only "(=)" — so the RuleCatalog and the RuleDoc disagree with each
-      other, and the shipped code matches RuleCatalog, not the published
-      doc.) A `WHERE FloatCol <> 0.3` predicate against a float/real column
-      is silently never flagged despite the published doc explicitly
-      claiming it would be.
 
 - [ ] **`ForcedParameterizationScanner` has two finding kinds that falsely
       claim their literal argument stays unparameterized under
