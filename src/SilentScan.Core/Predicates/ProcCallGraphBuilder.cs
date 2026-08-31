@@ -299,12 +299,70 @@ public static class ProcCallGraphBuilder
             return matched;
         }
 
+        private (IList<TSqlStatement>? Statements, Dictionary<ExecuteStatement, Dictionary<string, SqlTextValue>> Captures) _dynamicSqlScopeCache;
+
         private Dictionary<string, SqlTextValue> ResolveVariableStateAtCallSite(ExecuteStatement callSite, ModuleWalker walker)
         {
             var emptyState = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
             if (_currentScopeStatements is null)
             {
                 return emptyState;
+            }
+
+            if (!ReferenceEquals(_dynamicSqlScopeCache.Statements, _currentScopeStatements))
+            {
+                _dynamicSqlScopeCache = (_currentScopeStatements, ComputeDynamicSqlCallSiteStates(walker));
+            }
+
+            return _dynamicSqlScopeCache.Captures.TryGetValue(callSite, out var state) ? state : emptyState;
+        }
+
+        private static bool IsDynamicSqlFoldTarget(ExecuteStatement node) => node.ExecuteSpecification.ExecutableEntity switch
+        {
+            ExecutableProcedureReference
+            {
+                ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: var name,
+                Parameters: [{ ParameterValue: { } }, ..],
+            } when string.Equals(name, SpExecuteSqlName, StringComparison.OrdinalIgnoreCase) => true,
+            ExecutableStringList { Strings.Count: > 0 } => true,
+            _ => false,
+        };
+
+        private sealed class DynamicSqlCallSiteCollector : TSqlFragmentVisitor
+        {
+            public HashSet<ExecuteStatement> CallSites { get; } = [];
+
+            public override void ExplicitVisit(ExecuteStatement node)
+            {
+                if (IsDynamicSqlFoldTarget(node))
+                {
+                    CallSites.Add(node);
+                }
+
+                base.ExplicitVisit(node);
+            }
+
+            public override void ExplicitVisit(ProcedureStatementBodyBase node)
+            {
+            }
+
+            public override void ExplicitVisit(TriggerStatementBody node)
+            {
+            }
+        }
+
+        private Dictionary<ExecuteStatement, Dictionary<string, SqlTextValue>> ComputeDynamicSqlCallSiteStates(ModuleWalker walker)
+        {
+            var collector = new DynamicSqlCallSiteCollector();
+            foreach (var statement in _currentScopeStatements!)
+            {
+                statement.Accept(collector);
+            }
+
+            var results = new Dictionary<ExecuteStatement, Dictionary<string, SqlTextValue>>();
+            if (collector.CallSites.Count == 0)
+            {
+                return results;
             }
 
             var declaredTypes = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase);
@@ -320,28 +378,30 @@ public static class ProcCallGraphBuilder
                 declaredTypes, sourcePath, DynamicSqlFoldCap, new DynamicSqlScope(walker.CurrentProcScope, TriggerTarget: null),
                 Findings: [], Scripts: [], OutputSummaries: [], CallGraph: null, OutputSummaryIndex: null, Catalog: catalog);
 
-            Dictionary<string, SqlTextValue>? capturedState = null;
-            Action<Dictionary<string, SqlTextValue>, bool> CompileLeafCapturing(TSqlStatement statement, IReadOnlyList<int> activeGuards)
+            Action<Dictionary<string, SqlTextValue>, bool> CompileLeafCapturingAll(TSqlStatement statement, IReadOnlyList<int> activeGuards)
             {
-                if (ReferenceEquals(statement, callSite))
+                var compiled = DynamicSqlTransfer.CompileLeaf(statement, activeGuards, context);
+                if (statement is not ExecuteStatement exec || !collector.CallSites.Contains(exec))
                 {
-                    return (state, emit) =>
-                    {
-                        if (emit)
-                        {
-                            capturedState = new Dictionary<string, SqlTextValue>(state, StringComparer.OrdinalIgnoreCase);
-                        }
-                    };
+                    return compiled;
                 }
 
-                return DynamicSqlTransfer.CompileLeaf(statement, activeGuards, context);
+                return (state, emit) =>
+                {
+                    if (emit)
+                    {
+                        results[exec] = new Dictionary<string, SqlTextValue>(state, StringComparer.OrdinalIgnoreCase);
+                    }
+
+                    compiled(state, emit);
+                };
             }
 
             var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
             DynamicSqlTransfer.SeedBatchDeclaredVariables(_currentScopeStatements, context, seed);
-            new DynamicSqlCfg(sourcePath, DynamicSqlFoldCap, CompileLeafCapturing).Solve(_currentScopeStatements, seed);
+            new DynamicSqlCfg(sourcePath, DynamicSqlFoldCap, CompileLeafCapturingAll).Solve(_currentScopeStatements, seed);
 
-            return capturedState ?? emptyState;
+            return results;
         }
 
         private void RecordUnresolvableCall(ExecuteStatement node, string reason) =>
