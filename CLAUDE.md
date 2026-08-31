@@ -33,6 +33,7 @@ scripts/dotnet-safe.sh build
 scripts/dotnet-safe.sh test
 scripts/dotnet-safe.sh test --filter "FullyQualifiedName~DynamicSql"
 ```
+The docker container named `silentscan-mssql-fts` is the full text search SQL server. 
 
 ## Published SQL rules
 * `docs/rules.html` (index) and `docs/rules/*.html` (one page per rule).
