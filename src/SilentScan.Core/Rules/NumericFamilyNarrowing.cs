@@ -29,7 +29,7 @@ public static class NumericFamilyNarrowing
             [SqlTypeCategory.Money] = (Family.Exact, _ => 4),
             [SqlTypeCategory.Decimal] = (Family.Exact, type => type.Scale ?? 0),
             [SqlTypeCategory.Real] = (Family.Approximate, _ => 24),
-            [SqlTypeCategory.Float] = (Family.Approximate, _ => 53),
+            [SqlTypeCategory.Float] = (Family.Approximate, type => type.Precision is { } p && p <= 24 ? 24 : 53),
         };
 
     private const int DefaultDecimalPrecision = 18;

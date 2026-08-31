@@ -15,25 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found and recorded below, none fixed yet.
+correctness bugs found; 34 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`AlterColumnSafetyScanner` never detects `FLOAT(n)` precision
-      narrowing — the declared bit-precision is dropped during type
-      resolution, before the scanner ever sees it.**
-      (`src/SilentScan.Core/Parsing/SqlTypeReferenceResolver.cs:45` builds
-      `Float`/`Real` types via the catch-all `_ => new SqlType(category.Value)`,
-      discarding the declared parameter; `Rules/NumericFamilyNarrowing.cs:32`
-      then hardcodes the approximate-family rank to `53` regardless of the
-      actual declared value, so `FLOAT(53)` and `FLOAT(24)` are
-      indistinguishable to the classifier). Oracle-confirmed (SQL Server
-      2025): `ALTER TABLE ... ALTER COLUMN V FLOAT(24)` on a column holding
-      `1.23456789012345` silently rounds it to `1.2345679` with no error —
-      exactly the silent precision loss `AlterColumnSafetyScanner` exists to
-      catch — but it never fires for any `FLOAT(n<=24)` narrowing target.
 
 - [ ] **`AlterColumnSafetyScanner` misses combined `DECIMAL`/`NUMERIC`
       precision+scale narrowing when both facets nominally widen but the

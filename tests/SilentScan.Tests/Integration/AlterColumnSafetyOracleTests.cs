@@ -1,4 +1,7 @@
 using Microsoft.Data.SqlClient;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates;
 using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Integration;
@@ -31,6 +34,9 @@ public sealed class AlterColumnSafetyOracleTests : OracleTestFixture
 
         CREATE TABLE dbo.Appointment (AppointmentId INT NOT NULL PRIMARY KEY, ScheduledAt DATETIMEOFFSET NOT NULL);
         INSERT INTO dbo.Appointment (AppointmentId, ScheduledAt) VALUES (1, '2020-01-01 12:00:00 +05:00');
+
+        CREATE TABLE dbo.SensorReading (SensorReadingId INT NOT NULL PRIMARY KEY, Reading FLOAT NOT NULL);
+        INSERT INTO dbo.SensorReading (SensorReadingId, Reading) VALUES (1, 1.23456789012345e0);
         """;
 
     [Fact]
@@ -103,6 +109,52 @@ public sealed class AlterColumnSafetyOracleTests : OracleTestFixture
 
         var value = await ReadScalarAsync("SELECT ScheduledAt FROM dbo.Appointment WHERE AppointmentId = 1;");
         Assert.Equal(new DateTime(2020, 1, 1, 12, 0, 0), value);
+    }
+
+    [Fact]
+    public async Task NarrowingFloatPrecisionTo24_SilentlyRoundsAndScannerFires()
+    {
+        var exception = await Record.ExceptionAsync(() =>
+            ExecuteAsync("ALTER TABLE dbo.SensorReading ALTER COLUMN Reading FLOAT(24);"));
+
+        Assert.Null(exception);
+
+        var value = await ReadScalarAsync("SELECT Reading FROM dbo.SensorReading WHERE SensorReadingId = 1;");
+        Assert.Equal(1.2345678806304932, Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture), precision: 10);
+
+        var parseResult = SqlScriptParser.ParseText("test.sql", """
+            CREATE TABLE dbo.SensorReading (Reading FLOAT NOT NULL);
+            ALTER TABLE dbo.SensorReading ALTER COLUMN Reading FLOAT(24);
+            """);
+        Assert.False(parseResult.HasErrors);
+
+        var catalog = CatalogBuilder.Build([parseResult]);
+        var findings = AlterColumnSafetyScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(AlterColumnSafetyKind.PrecisionOrScaleNarrowing, finding.Kind);
+    }
+
+    [Fact]
+    public async Task WideningFloatPrecisionFrom24To53_NegativeControl_DoesNotFire()
+    {
+        await ExecuteAsync("ALTER TABLE dbo.SensorReading ALTER COLUMN Reading FLOAT(24);");
+
+        var exception = await Record.ExceptionAsync(() =>
+            ExecuteAsync("ALTER TABLE dbo.SensorReading ALTER COLUMN Reading FLOAT(53);"));
+
+        Assert.Null(exception);
+
+        var parseResult = SqlScriptParser.ParseText("test.sql", """
+            CREATE TABLE dbo.SensorReading (Reading FLOAT(24) NOT NULL);
+            ALTER TABLE dbo.SensorReading ALTER COLUMN Reading FLOAT(53);
+            """);
+        Assert.False(parseResult.HasErrors);
+
+        var catalog = CatalogBuilder.Build([parseResult]);
+        var findings = AlterColumnSafetyScanner.Scan(catalog);
+
+        Assert.Empty(findings);
     }
 
     private async Task<object> ReadScalarAsync(string sql)
