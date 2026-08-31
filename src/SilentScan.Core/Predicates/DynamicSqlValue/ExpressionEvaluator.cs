@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
@@ -27,6 +28,11 @@ public static class ExpressionEvaluator
         ["@@SPID"] = new SqlType(SqlTypeCategory.SmallInt),
         ["@@FETCH_STATUS"] = new SqlType(SqlTypeCategory.Int),
     };
+
+    private static readonly ConditionalWeakTable<ScalarExpression, object> ConditionalGuardIds = new();
+
+    private static int ConditionalGuardId(ScalarExpression expression) =>
+        (int)ConditionalGuardIds.GetValue(expression, static _ => SqlTextValue.NewGuardId());
 
     public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog = null)
     {
@@ -206,7 +212,7 @@ public static class ExpressionEvaluator
         }
 
         SqlTextValue? union = null;
-        var guardId = SqlTextValue.NewGuardId();
+        var guardId = ConditionalGuardId(expression);
         foreach (var branch in remainingBranches.Append(elseExpression))
         {
             var folded = Fold(branch, state, sourcePath, cap, catalog);
