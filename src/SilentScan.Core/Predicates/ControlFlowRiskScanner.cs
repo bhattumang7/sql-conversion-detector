@@ -9,14 +9,14 @@ namespace SilentScan.Core.Predicates;
 
 public static class ControlFlowRiskScanner
 {
-    public static IReadOnlyList<ControlFlowRiskFinding> Scan(SqlParseResult parseResult)
+    public static IReadOnlyList<ControlFlowRiskFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var rule = CreateRule(parseResult.SourcePath);
-        var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, rules: [rule]);
+        var rule = CreateRule(parseResult.SourcePath, catalog);
+        var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, rules: [rule]);
         parseResult.Fragment.Accept(walker);
     return Harvest(rule);
     }
-    internal static Rule CreateRule(string sourcePath) => new(sourcePath);
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog) => new(sourcePath, catalog);
 
     internal static IReadOnlyList<ControlFlowRiskFinding> Harvest(Rule rule) =>
             [
@@ -30,7 +30,7 @@ public static class ControlFlowRiskScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    internal sealed class Rule(string sourcePath) : IModuleRule
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         public List<ControlFlowRiskFinding> Findings { get; } = [];
 
@@ -112,10 +112,14 @@ public static class ControlFlowRiskScanner
         {
             if (_inTrigger && !IsAssignmentOnlySelect(node) && !_cursorDefiningSelects.Contains(node))
             {
+                var message = catalog.IsDisallowResultsFromTriggersEnabled == true
+                    ? "A SELECT with a real result set inside a trigger raises Msg 524 and rolls back the triggering DML entirely, because this server has 'disallow results from triggers' enabled - it never reaches the connection that fired the DML."
+                    : "A SELECT with a real result set inside a trigger sends output back to whatever connection fired the DML, not the application that issued it.";
+
                 Findings.Add(new ControlFlowRiskFinding(
                     ControlFlowRiskFindingKind.TriggerEmitsOutput,
                     CurrentModule(walker), sourcePath, node.StartLine, node.StartColumn,
-                    "A SELECT with a real result set inside a trigger sends output back to whatever connection fired the DML, not the application that issued it.",
+                    message,
                     FindingConfidence.Medium));
             }
         }

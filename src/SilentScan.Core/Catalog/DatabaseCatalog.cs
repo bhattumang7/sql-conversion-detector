@@ -375,6 +375,8 @@ public sealed class DatabaseCatalog
 
     public bool? IsNestedTriggersEnabled { get; set; }
 
+    public bool? IsDisallowResultsFromTriggersEnabled { get; set; }
+
     public bool? IsAutoCreateStatsOn { get; set; }
 
     public bool? IsAnsiNullDefaultOn { get; set; }

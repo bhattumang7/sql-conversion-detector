@@ -18,6 +18,13 @@ internal static class TriggerEmitsOutput
             expect an extra, unrequested result set from a plain INSERT/UPDATE/DELETE) or actively
             confuses whatever tool happens to be connected and reading results in order.
 
+            If the server has the `disallow results from triggers` option enabled (`sp_configure`),
+            a real SELECT result set inside a trigger does not reach the firing connection at all -
+            it raises Msg 524 and rolls back the triggering DML entirely instead. A `PRINT` inside
+            the same trigger is unaffected by this setting either way and still reaches the firing
+            connection. This tool reads the live setting from the target server and reports whichever
+            of these two outcomes actually applies.
+
             A `SELECT @x = expr` or `SELECT ... INTO` assignment-only form sends no client-visible
             result set at all and correctly never fires - only a real, row-returning SELECT or a
             PRINT counts. This rule only inspects a trigger's own top-level body; a statement inside

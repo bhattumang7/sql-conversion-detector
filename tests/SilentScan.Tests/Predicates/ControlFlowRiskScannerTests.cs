@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 
@@ -5,11 +6,11 @@ namespace SilentScan.Tests.Predicates;
 
 public sealed class ControlFlowRiskScannerTests
 {
-    private static IReadOnlyList<ControlFlowRiskFinding> Scan(string sql)
+    private static IReadOnlyList<ControlFlowRiskFinding> Scan(string sql, DatabaseCatalog? catalog = null)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
-        return ControlFlowRiskScanner.Scan(result);
+        return ControlFlowRiskScanner.Scan(result, catalog ?? new DatabaseCatalog());
     }
 
     [Fact]

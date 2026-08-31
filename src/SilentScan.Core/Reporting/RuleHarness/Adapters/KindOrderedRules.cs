@@ -118,9 +118,9 @@ internal sealed class DeprecatedSyntaxRule : IPerFileRule
 internal sealed class ControlFlowRiskRule : IPerFileRule
 {
     public string Id => "ControlFlowRiskScanner";
-    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => ControlFlowRiskScanner.Scan(parseResult);
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => ControlFlowRiskScanner.Scan(parseResult, context.Catalog);
     public IComparer<IFinding>? Comparer => new KindThenLocationComparer<ControlFlowRiskFinding>(f => f.Kind);
-    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => ControlFlowRiskScanner.CreateRule(parseResult.SourcePath);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => ControlFlowRiskScanner.CreateRule(parseResult.SourcePath, context.Catalog);
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => ControlFlowRiskScanner.Harvest((ControlFlowRiskScanner.Rule)moduleRule);
 }
 

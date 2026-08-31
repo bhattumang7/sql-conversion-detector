@@ -21,26 +21,6 @@ correctness bugs found; 30 remain open below.
 
 ## Confirmed bugs (open)
 
-- [ ] **`ControlFlowRiskScanner`'s `TriggerEmitsOutputRuleId` unconditionally
-      claims a trigger's SELECT/PRINT "sends output back to whatever
-      connection fired the DML," but under the server-level `disallow
-      results from triggers` setting a trigger SELECT hard-fails the
-      triggering DML instead of silently forwarding anything.**
-      (`src/SilentScan.Core/Predicates/ControlFlowRiskScanner.cs:111-133`
-      fires unconditionally for a real SELECT/PRINT in a trigger body;
-      `RuleCatalog.cs:251` and
-      `Reporting/RuleDocs/ControlFlow/TriggerEmitsOutput.cs:11-19` state the
-      "sends output back" framing with no caveat.) Oracle-confirmed (SQL
-      Server 2025): with `sp_configure 'disallow results from triggers'` set
-      to `1` (a real, documented, off-by-default server option), a trigger
-      body's `SELECT 1 AS x` against a fired `INSERT` raises `Msg 524, A
-      trigger returned a resultset and the server option 'disallow results
-      from triggers' is true` instead of returning anything to the caller —
-      a genuine server-setting-dependent behavior split the rule's message
-      doesn't acknowledge. (Whether the same setting affects `PRINT` the
-      same way as `SELECT` was not directly tested — Msg 524's own wording
-      says "resultset" specifically, so this is noted but not asserted.)
-
 - [ ] **`CrossModuleLockOrderScanner` records a procedure's write order
       across its whole body instead of per explicit transaction, so two
       writes that were never lock-held concurrently can be reported as a

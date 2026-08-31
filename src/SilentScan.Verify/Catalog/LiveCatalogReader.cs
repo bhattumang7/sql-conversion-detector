@@ -29,6 +29,7 @@ public sealed class LiveCatalogReader
         catalog.CompatibilityLevel = await ReadCompatibilityLevelAsync(connection, cancellationToken);
         catalog.IsRecursiveTriggersEnabled = await ReadIsRecursiveTriggersEnabledAsync(connection, cancellationToken);
         catalog.IsNestedTriggersEnabled = await ReadIsNestedTriggersEnabledAsync(connection, cancellationToken);
+        catalog.IsDisallowResultsFromTriggersEnabled = await ReadIsDisallowResultsFromTriggersEnabledAsync(connection, cancellationToken);
         catalog.IsAutoCreateStatsOn = await ReadIsAutoCreateStatsOnAsync(connection, cancellationToken);
         catalog.IsAnsiNullDefaultOn = await ReadIsAnsiNullDefaultOnAsync(connection, cancellationToken);
 
@@ -639,6 +640,19 @@ public sealed class LiveCatalogReader
     {
         await using var command = connection.CreateReadOnlyCommand(
             "SELECT value_in_use FROM sys.configurations WHERE name = 'nested triggers';");
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result switch
+        {
+            int intValue => intValue != 0,
+            bool boolValue => boolValue,
+            _ => null,
+        };
+    }
+
+    private static async Task<bool?> ReadIsDisallowResultsFromTriggersEnabledAsync(SqlConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateReadOnlyCommand(
+            "SELECT value_in_use FROM sys.configurations WHERE name = 'disallow results from triggers';");
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result switch
         {

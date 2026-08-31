@@ -36,7 +36,7 @@ public sealed class ModuleIdentityQualificationTests
             """);
 
         var finding = Assert.Single(
-            ControlFlowRiskScanner.Scan(result), f => f.Kind == ControlFlowRiskFindingKind.CursorFetchColumnCountMismatch);
+            ControlFlowRiskScanner.Scan(result, new DatabaseCatalog()), f => f.Kind == ControlFlowRiskFindingKind.CursorFetchColumnCountMismatch);
         Assert.Equal("dbo.UnqualifiedProc", finding.ModuleQualifiedName);
     }
 
