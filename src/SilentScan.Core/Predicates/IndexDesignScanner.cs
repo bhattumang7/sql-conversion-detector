@@ -495,25 +495,41 @@ public static class IndexDesignScanner
     {
         var limit = index.IsClustered ? ClusteredKeyLimitBytes : NonclusteredKeyLimitBytes;
 
+        var hasVariableLengthColumn = false;
+        var fixedLengthBytes = 0;
+        var totalBytes = 0;
+
         foreach (var columnName in index.KeyColumns)
         {
             var column = table.FindColumn(columnName, identifierComparer);
-            if (column?.Type is not { IsMax: false } type
-                || type.Category is not (SqlTypeCategory.VarChar or SqlTypeCategory.NVarChar or SqlTypeCategory.VarBinary)
-                || EstimateColumnKeyBytes(type) is not { } declaredBytes
-                || declaredBytes <= limit)
+            if (column?.Type is not { } type || EstimateColumnKeyBytes(type) is not { } declaredBytes)
             {
-                continue;
+                return;
             }
 
-            findings.Add(new IndexDesignFinding(
-                IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit,
-                table.QualifiedName,
-                index.Name,
-                $"'{table.QualifiedName}' index '{index.Name ?? UnnamedIndexPlaceholder}' key column '{columnName}' is declared {type} - a {declaredBytes}-byte maximum width, over the engine's {limit}-byte {(index.IsClustered ? "clustered" : "nonclustered")} key limit. CREATE INDEX only warns, it does not fail - the first INSERT/UPDATE that actually stores a value long enough to exceed {limit} bytes fails at that moment instead, silently until then.",
-                table.SourcePath,
-                table.SourceLine));
+            totalBytes += declaredBytes;
+            if (type.Category is SqlTypeCategory.VarChar or SqlTypeCategory.NVarChar or SqlTypeCategory.VarBinary)
+            {
+                hasVariableLengthColumn = true;
+            }
+            else
+            {
+                fixedLengthBytes += declaredBytes;
+            }
         }
+
+        if (!hasVariableLengthColumn || totalBytes <= limit || fixedLengthBytes > limit)
+        {
+            return;
+        }
+
+        findings.Add(new IndexDesignFinding(
+            IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit,
+            table.QualifiedName,
+            index.Name,
+            $"'{table.QualifiedName}' index '{index.Name ?? UnnamedIndexPlaceholder}' key ({string.Join(", ", index.KeyColumns)}) has a combined declared max width of {totalBytes} bytes, over the engine's {limit}-byte {(index.IsClustered ? "clustered" : "nonclustered")} key limit. CREATE INDEX only warns, it does not fail - the first INSERT/UPDATE that actually stores values long enough to exceed {limit} bytes combined fails at that moment instead, silently until then.",
+            table.SourcePath,
+            table.SourceLine));
     }
 
     private static void ScanMergeableIncludeOnlyIndexes(CatalogTable table, StringComparer identifierComparer, List<IndexDesignFinding> findings)

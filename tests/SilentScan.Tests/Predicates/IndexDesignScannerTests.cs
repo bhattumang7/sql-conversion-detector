@@ -692,6 +692,70 @@ public sealed class IndexDesignScannerTests
     }
 
     [Fact]
+    public void ClusteredKeyColumns_TwoVarcharsNeitherAloneOverLimit_CompositeSumFires()
+    {
+
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("PK_Docs", CatalogIndexKind.PrimaryKey, IsUnique: true, ["CodeA", "CodeB"], [], IsClustered: true);
+        catalog.AddOrReplace(Table(
+            "dbo", "Docs",
+            [Column("CodeA", new SqlType(SqlTypeCategory.VarChar, Length: 500)), Column("CodeB", new SqlType(SqlTypeCategory.VarChar, Length: 500))],
+            [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit);
+    }
+
+    [Fact]
+    public void ClusteredKeyColumns_FixedPlusVarcharComposesOverLimit_Fires()
+    {
+
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("PK_Docs", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Id", "Code"], [], IsClustered: true);
+        catalog.AddOrReplace(Table(
+            "dbo", "Docs",
+            [Column("Id", IntType), Column("Code", new SqlType(SqlTypeCategory.VarChar, Length: 898))],
+            [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit);
+    }
+
+    [Fact]
+    public void ClusteredKeyColumns_CompositeSumUnderLimit_NeverFires()
+    {
+
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("PK_Docs", CatalogIndexKind.PrimaryKey, IsUnique: true, ["CodeA", "CodeB"], [], IsClustered: true);
+        catalog.AddOrReplace(Table(
+            "dbo", "Docs",
+            [Column("CodeA", new SqlType(SqlTypeCategory.VarChar, Length: 400)), Column("CodeB", new SqlType(SqlTypeCategory.VarChar, Length: 400))],
+            [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit);
+    }
+
+    [Fact]
+    public void ClusteredKeyColumns_FixedLengthPortionAloneAlreadyOverLimit_NeverFires()
+    {
+
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("PK_Docs", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Code", "Notes"], [], IsClustered: true);
+        catalog.AddOrReplace(Table(
+            "dbo", "Docs",
+            [Column("Code", new SqlType(SqlTypeCategory.Char, Length: 901)), Column("Notes", new SqlType(SqlTypeCategory.VarChar, Length: 10))],
+            [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit);
+    }
+
+    [Fact]
     public void TwoIndexes_SameKeySortDirection_NonOverlappingInclude_Fires()
     {
         var catalog = new DatabaseCatalog();
