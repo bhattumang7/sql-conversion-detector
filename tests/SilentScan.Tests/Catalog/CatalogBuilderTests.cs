@@ -1340,6 +1340,41 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_DropTable_OnSelectIntoTempTableFromEarlierInSameProcedure_RemovesItWithoutSkip()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (Id INT NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.usp_Snapshot
+            AS
+            BEGIN
+                SELECT Id INTO #snapshot FROM dbo.Orders;
+                DROP TABLE #snapshot;
+            END
+            """);
+
+        Assert.Null(catalog.Find("#snapshot", "dbo.usp_Snapshot"));
+        Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "DROP TABLE" && e.Reason.Contains("#snapshot", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_DropTable_GuardingItsOwnLaterCreateTableInSameProcedure_StillRecordsUnresolvedSkip()
+    {
+        var catalog = BuildFrom("""
+            CREATE PROCEDURE dbo.usp_Rebuild
+            AS
+            BEGIN
+                IF OBJECT_ID('tempdb..#work') IS NOT NULL
+                    DROP TABLE #work;
+                CREATE TABLE #work (Id INT NOT NULL);
+            END
+            """);
+
+        Assert.NotNull(catalog.Find("#work", "dbo.usp_Rebuild"));
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "DROP TABLE" && e.Reason.Contains("#work", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Build_DropIndex_TableColumnNoLongerCountsAsIndexed()
     {
         var catalog = BuildFrom("""

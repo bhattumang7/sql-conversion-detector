@@ -23,26 +23,53 @@ public static class CatalogBuilder
             : null;
         catalog.IsAnsiNullDefaultOn = manifestAnsiNullDefaultOn;
 
+        var pendingDrops = new List<PendingDrop>();
+
         foreach (var result in results)
         {
             stage?.Advance(currentItem: result.SourcePath);
-            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTypeAliases, result.Fragment));
+            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTypeAliases, result.Fragment, pendingDrops));
         }
 
         foreach (var result in results)
         {
             stage?.Advance(currentItem: result.SourcePath);
-            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTables, result.Fragment));
+            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTables, result.Fragment, pendingDrops));
         }
+
+        var stillPending = new List<PendingDrop>();
+        foreach (var pending in pendingDrops)
+        {
+            if (catalog.Find(pending.QualifiedName, pending.Scope) is not null)
+            {
+
+                RecordUnresolvedDrop(catalog, pending);
+            }
+            else
+            {
+                stillPending.Add(pending);
+            }
+        }
+
+        var pendingByNode = stillPending
+            .GroupBy(p => p.Node)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<PendingDrop>)g.ToList());
 
         foreach (var result in results)
         {
             stage?.Advance(currentItem: result.SourcePath);
-            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.ApplyEverythingElse, result.Fragment));
+            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.ApplyEverythingElse, result.Fragment, pendingDrops, pendingByNode));
         }
 
         return catalog;
     }
+
+    private readonly record struct PendingDrop(DropTableStatement Node, string QualifiedName, string? Scope, string SourcePath);
+
+    private static void RecordUnresolvedDrop(DatabaseCatalog catalog, PendingDrop pending) =>
+        catalog.Skipped.Record(
+            AnalysisPass.Catalog, pending.SourcePath, pending.Node.StartLine, pending.Node.StartColumn,
+            "DROP TABLE", $"target table '{pending.QualifiedName}' not found in catalog (cross-file/cross-database reference, or failed base CREATE TABLE)");
 
     private static void Walk(SqlParseResult result, Visitor visitor)
     {
@@ -105,7 +132,9 @@ public static class CatalogBuilder
         ApplyEverythingElse,
     }
 
-    private sealed class Visitor(DatabaseCatalog catalog, string sourcePath, BuildPhase phase, TSqlFragment fragment) : TSqlFragmentVisitor
+    private sealed class Visitor(
+        DatabaseCatalog catalog, string sourcePath, BuildPhase phase, TSqlFragment fragment,
+        List<PendingDrop> pendingDrops, IReadOnlyDictionary<DropTableStatement, IReadOnlyList<PendingDrop>>? pendingDropsByNode = null) : TSqlFragmentVisitor
     {
         private readonly Dictionary<TSqlStatement, bool?> _ansiNullDfltByStatement = AnsiNullDfltFlowResolver.Resolve(fragment);
 
@@ -335,7 +364,11 @@ public static class CatalogBuilder
         {
             if (phase == BuildPhase.CollectTables)
             {
-                VisitDropTable(node);
+                VisitDropTable(node, isFinalAttempt: false);
+            }
+            else if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                VisitDropTable(node, isFinalAttempt: true);
             }
 
             node.AcceptChildren(this);
@@ -663,15 +696,35 @@ public static class CatalogBuilder
             catalog.AddOrReplace(existing with { Indexes = updatedIndexes }, writeScope);
         }
 
-        private void VisitDropTable(DropTableStatement dropTable)
+        private void VisitDropTable(DropTableStatement dropTable, bool isFinalAttempt)
         {
+            if (isFinalAttempt)
+            {
+                if (pendingDropsByNode is null || !pendingDropsByNode.TryGetValue(dropTable, out var pending))
+                {
+                    return;
+                }
+
+                foreach (var entry in pending)
+                {
+                    if (catalog.Find(entry.QualifiedName, entry.Scope) is null)
+                    {
+                        RecordUnresolvedTarget("DROP TABLE", entry.QualifiedName, dropTable);
+                        continue;
+                    }
+
+                    catalog.Remove(entry.QualifiedName, entry.Scope);
+                }
+
+                return;
+            }
+
             foreach (var target in dropTable.Objects)
             {
                 var qualifiedName = SchemaObjectNameHelper.Qualify(target);
                 if (catalog.Find(qualifiedName, _currentScope) is null)
                 {
-
-                    RecordUnresolvedTarget("DROP TABLE", qualifiedName, dropTable);
+                    pendingDrops.Add(new PendingDrop(dropTable, qualifiedName, _currentScope, sourcePath));
                     continue;
                 }
 
