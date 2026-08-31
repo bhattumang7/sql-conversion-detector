@@ -13,6 +13,7 @@ TestResults/
 .sonar-scan.lock
 project references.txt
 scan-report.txt
+scan-report.json
 
 # Local dev secrets (SA password override for docker-compose)
 .env

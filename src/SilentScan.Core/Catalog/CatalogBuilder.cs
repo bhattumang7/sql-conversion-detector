@@ -12,7 +12,7 @@ public static class CatalogBuilder
 
     public static DatabaseCatalog Build(
         IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null,
-        bool? manifestAnsiNullDefaultOn = null)
+        bool? manifestAnsiNullDefaultOn = null, IScanStage? stage = null)
     {
         var catalog = new DatabaseCatalog();
         var results = parseResults as IReadOnlyList<SqlParseResult> ?? parseResults.ToList();
@@ -25,16 +25,19 @@ public static class CatalogBuilder
 
         foreach (var result in results)
         {
+            stage?.Advance(currentItem: result.SourcePath);
             Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTypeAliases, result.Fragment));
         }
 
         foreach (var result in results)
         {
+            stage?.Advance(currentItem: result.SourcePath);
             Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTables, result.Fragment));
         }
 
         foreach (var result in results)
         {
+            stage?.Advance(currentItem: result.SourcePath);
             Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.ApplyEverythingElse, result.Fragment));
         }
 

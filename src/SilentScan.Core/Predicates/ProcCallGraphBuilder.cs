@@ -11,12 +11,13 @@ namespace SilentScan.Core.Predicates;
 
 public static class ProcCallGraphBuilder
 {
-    public static ProcCallGraph Build(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog, SkipLedger ledger)
+    public static ProcCallGraph Build(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog, SkipLedger ledger, IScanStage? stage = null)
     {
         var edges = new List<ProcCallEdge>();
         var spExecuteSqlCallSites = new List<SpExecuteSqlCallSite>();
         foreach (var result in parseResults)
         {
+            stage?.Advance(currentItem: result.SourcePath);
             var rule = new Rule(catalog, ledger, result.SourcePath);
             var walker = new ModuleWalker(result.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
             result.Fragment.Accept(walker);

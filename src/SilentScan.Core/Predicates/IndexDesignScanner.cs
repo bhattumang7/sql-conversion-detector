@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.TypeInference;
 
@@ -9,7 +10,7 @@ public static class IndexDesignScanner
 {
     private const string UnnamedIndexPlaceholder = "<unnamed>";
 
-    public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IReadOnlySet<string>? dmlTargetTables = null)
+    public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IReadOnlySet<string>? dmlTargetTables = null, IScanStage? stage = null)
     {
         var defaultTextByColumn = new Dictionary<string, string>(catalog.IdentifierComparer);
         foreach (var expression in catalog.SchemaExpressions)
@@ -27,6 +28,7 @@ public static class IndexDesignScanner
 
         foreach (var table in catalog.Tables)
         {
+            stage?.Advance(currentItem: table.QualifiedName);
 
             if (table.Kind != CatalogTableKind.Table)
             {

@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using SilentScan.Core.Diagnostics;
 
 namespace SilentScan.Verify.Catalog;
 
@@ -11,12 +12,12 @@ public sealed class LiveModuleReader
         _connectionString = connectionString;
     }
 
-    public async Task<LiveModuleReadResult> ReadAsync(CancellationToken cancellationToken = default)
+    public async Task<LiveModuleReadResult> ReadAsync(IScanStage? stage = null, CancellationToken cancellationToken = default)
     {
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var modules = await ReadReadableModulesAsync(connection, cancellationToken);
+        var modules = await ReadReadableModulesAsync(connection, stage, cancellationToken);
         var encrypted = await ReadEncryptedModulesAsync(connection, cancellationToken);
         var clr = await ReadClrModulesAsync(connection, cancellationToken);
         var nonStandard = await ReadNonStandardModuleTypesAsync(connection, cancellationToken);
@@ -25,7 +26,7 @@ public sealed class LiveModuleReader
         return new LiveModuleReadResult(modules, [.. encrypted, .. clr, .. nonStandard, .. numberedProcedureBodies]);
     }
 
-    private static async Task<List<LiveModule>> ReadReadableModulesAsync(SqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<List<LiveModule>> ReadReadableModulesAsync(SqlConnection connection, IScanStage? stage, CancellationToken cancellationToken)
     {
         const string sql = """
             SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type, m.definition, m.uses_quoted_identifier, m.uses_ansi_nulls,
@@ -45,9 +46,12 @@ public sealed class LiveModuleReader
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
+            var schemaName = reader.GetString(0);
+            var objectName = reader.GetString(1);
+            stage?.Advance(currentItem: $"{schemaName}.{objectName}");
             modules.Add(new LiveModule(
-                SchemaName: reader.GetString(0),
-                ObjectName: reader.GetString(1),
+                SchemaName: schemaName,
+                ObjectName: objectName,
                 ObjectTypeCode: reader.GetString(2).Trim(),
                 Definition: reader.GetString(3),
 

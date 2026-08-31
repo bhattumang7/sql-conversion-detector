@@ -1,4 +1,5 @@
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
@@ -7,12 +8,14 @@ public static class IdentityRangeScanner
 {
     public const decimal NearExhaustionRemainingFraction = 0.9m;
 
-    public static IReadOnlyList<IdentityRangeFinding> Scan(DatabaseCatalog catalog)
+    public static IReadOnlyList<IdentityRangeFinding> Scan(DatabaseCatalog catalog, IScanStage? stage = null)
     {
         var findings = new List<IdentityRangeFinding>();
 
         foreach (var table in catalog.Tables)
         {
+            stage?.Advance(currentItem: table.QualifiedName);
+
             if (table.Kind != CatalogTableKind.Table)
             {
                 continue;

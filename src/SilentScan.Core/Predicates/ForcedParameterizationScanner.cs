@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
@@ -7,11 +8,12 @@ namespace SilentScan.Core.Predicates;
 
 public static class ForcedParameterizationScanner
 {
-    public static IReadOnlyList<ForcedParameterizationFinding> Scan(IEnumerable<SqlParseResult> parseResults)
+    public static IReadOnlyList<ForcedParameterizationFinding> Scan(IEnumerable<SqlParseResult> parseResults, IScanStage? stage = null)
     {
         var findings = new List<ForcedParameterizationFinding>();
         foreach (var parseResult in parseResults)
         {
+            stage?.Advance(currentItem: parseResult.SourcePath);
             var rule = new Rule(parseResult.SourcePath);
             var walker = new ModuleWalker(parseResult.SourcePath, new DatabaseCatalog(), EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
             parseResult.Fragment.Accept(walker);

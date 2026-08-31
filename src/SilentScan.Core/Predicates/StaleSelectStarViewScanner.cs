@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Common;
 
@@ -7,12 +8,14 @@ namespace SilentScan.Core.Predicates;
 
 public static class StaleSelectStarViewScanner
 {
-    public static IReadOnlyList<StaleSelectStarViewFinding> Scan(IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
+    public static IReadOnlyList<StaleSelectStarViewFinding> Scan(IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog, IScanStage? stage = null)
     {
         var findings = new List<StaleSelectStarViewFinding>();
 
         foreach (var view in views)
         {
+            stage?.Advance(currentItem: view.QualifiedName);
+
             if (FindOutermostStarLine(view.SelectStatement.QueryExpression) is null)
             {
                 continue;

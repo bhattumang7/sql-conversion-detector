@@ -7,16 +7,17 @@ namespace SilentScan.Core.Lineage;
 
 public static class LineageResolver
 {
-    public static LineageCatalog Resolve(DatabaseCatalog catalog, IEnumerable<SqlParseResult> parseResults)
+    public static LineageCatalog Resolve(DatabaseCatalog catalog, IEnumerable<SqlParseResult> parseResults, IScanStage? stage = null)
     {
         var ledger = new SkipLedger();
-        var (views, tvfs) = ViewDefinitionExtractor.Extract(parseResults, catalog.DefaultCollation, catalog.TypeAliases, ledger);
+        var (views, tvfs) = ViewDefinitionExtractor.Extract(parseResults, catalog.DefaultCollation, catalog.TypeAliases, ledger, stage);
         var (order, cyclicViews) = ViewDependencyGraph.TopologicalSort(views, catalog);
 
         var resolved = new Dictionary<string, ResolvedRelation>(catalog.IdentifierComparer);
 
         foreach (var tvf in tvfs)
         {
+            stage?.Advance(currentItem: tvf.QualifiedName);
             resolved[tvf.QualifiedName] = new ResolvedRelation(
                 tvf.QualifiedName,
                 [.. tvf.Columns.Select(c => new ResolvedColumn(
@@ -28,6 +29,8 @@ public static class LineageResolver
 
         foreach (var view in order)
         {
+            stage?.Advance(currentItem: view.QualifiedName);
+
             if (cyclicViews.Contains(view.QualifiedName))
             {
                 ledger.Record(AnalysisPass.Lineage, view.SourcePath, view.SourceLine, 0, "view dependency", $"'{view.QualifiedName}' participates in a cyclic view dependency");

@@ -33,7 +33,7 @@ public static class LiveScanRunner
         LiveModuleReadResult moduleResult;
         using (var moduleStage = progress.Begin("reading modules"))
         {
-            moduleResult = await new LiveModuleReader(connectionString).ReadAsync(cancellationToken);
+            moduleResult = await new LiveModuleReader(connectionString).ReadAsync(moduleStage, cancellationToken);
             moduleStage.Complete($"{moduleResult.Modules.Count:N0} modules");
         }
 
@@ -50,21 +50,25 @@ public static class LiveScanRunner
             catalog.AddModuleUsesDatabaseCollation(module.QualifiedName, module.UsesDatabaseCollation);
         }
 
-        IEnumerable<SqlParseResult> parseResultSource() =>
+        IEnumerable<SqlParseResult> parseResultSource(IScanStage? parseStage = null) =>
             modules.AsParallel().AsOrdered()
-                .Select(m => SqlScriptParser.ParseText(m.QualifiedName, m.Definition, m.UsesQuotedIdentifier, catalog.CompatibilityLevel));
+                .Select(m =>
+                {
+                    parseStage?.Advance(currentItem: m.QualifiedName);
+                    return SqlScriptParser.ParseText(m.QualifiedName, m.Definition, m.UsesQuotedIdentifier, catalog.CompatibilityLevel);
+                });
 
-        using (var extrasStage = progress.Begin("merging module-body catalog extras"))
+        using (var extrasStage = progress.Begin("merging module-body catalog extras", moduleCount * 4))
         {
-            catalog.MergeFileModeExtras(CatalogBuilder.Build(parseResultSource(), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name, catalog.IsAnsiNullDefaultOn));
+            catalog.MergeFileModeExtras(CatalogBuilder.Build(parseResultSource(extrasStage), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name, catalog.IsAnsiNullDefaultOn, extrasStage));
             extrasStage.Complete($"{catalog.Tables.Count:N0} tables");
         }
         PhaseMemory.ReleaseBetweenPhases();
 
-        using (var dynamicExtrasStage = progress.Begin("discovering dynamic-SQL temp tables"))
+        using (var dynamicExtrasStage = progress.Begin("discovering dynamic-SQL temp tables", moduleCount * 2))
         {
             var discovered = DynamicSqlTempTableDiscovery.Discover(
-                parseResultSource(), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name, catalog.CompatibilityLevel, catalog);
+                parseResultSource(dynamicExtrasStage), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name, catalog.CompatibilityLevel, catalog, dynamicExtrasStage);
             catalog.MergeFileModeExtras(discovered);
             dynamicExtrasStage.Complete($"{catalog.Tables.Count:N0} tables");
         }
@@ -73,7 +77,7 @@ public static class LiveScanRunner
         LineageCatalog lineage;
         using (var lineageStage = progress.Begin("resolving lineage"))
         {
-            lineage = LineageResolver.Resolve(catalog, parseResultSource());
+            lineage = LineageResolver.Resolve(catalog, parseResultSource(lineageStage), lineageStage);
             lineageStage.Complete($"{lineage.AllRelations.Count:N0} relations");
         }
         PhaseMemory.ReleaseBetweenPhases();
@@ -81,10 +85,17 @@ public static class LiveScanRunner
         LiveLineageParityReport parity;
         using (var parityStage = progress.Begin("checking live parity"))
         {
-            parity = await new LiveLineageParityChecker(connectionString).CheckAsync(lineage, cancellationToken);
+            parity = await new LiveLineageParityChecker(connectionString).CheckAsync(lineage, parityStage, cancellationToken);
             parityStage.Complete(
                 $"{parity.Mismatches.Count:N0} mismatches, {parity.UncompilableObjects.Count:N0} uncompilable, " +
                 $"{parity.StaleCachedMetadata.Count:N0} stale, {parity.Unverified.Count:N0} unverified");
+        }
+
+        List<SqlParseResult> parsedForPredicateScan;
+        using (var parseStage = progress.Begin("parsing modules for predicate scan", moduleCount))
+        {
+            parsedForPredicateScan = parseResultSource(parseStage).ToList();
+            parseStage.Complete($"{parsedForPredicateScan.Count:N0} modules");
         }
 
         ScanReport report;
@@ -94,22 +105,26 @@ public static class LiveScanRunner
             await fetchConnection.OpenAsync(cancellationToken);
             var rowValueFetcher = new LiveTableRowValueFetcher(fetchConnection);
             report = ScanReportBuilder.BuildFromParseResults(
-                parseResultSource(), catalog: catalog, minimumConfidence: minimumConfidence, resolvedLineage: lineage, progress: progress,
+                parsedForPredicateScan, catalog: catalog, minimumConfidence: minimumConfidence, resolvedLineage: lineage, progress: progress,
                 rowValueFetcher: rowValueFetcher);
         }
         else
         {
             report = ScanReportBuilder.BuildFromParseResults(
-                parseResultSource(), catalog: catalog, minimumConfidence: minimumConfidence, resolvedLineage: lineage, progress: progress);
+                parsedForPredicateScan, catalog: catalog, minimumConfidence: minimumConfidence, resolvedLineage: lineage, progress: progress);
         }
 
         TempTableExecShapeReport tempTableExecShape;
         using (var tempTableStage = progress.Begin("checking INSERT...EXEC temp-table shapes"))
         {
-            var candidates = parseResultSource()
-                .SelectMany(r => TempTableExecShapeCandidateScanner.Scan(r, catalog))
+            var candidates = parseResultSource(tempTableStage)
+                .SelectMany(r =>
+                {
+                    tempTableStage.Advance(currentItem: r.SourcePath);
+                    return TempTableExecShapeCandidateScanner.Scan(r, catalog);
+                })
                 .ToList();
-            tempTableExecShape = await new TempTableExecShapeChecker(connectionString).CheckAsync(candidates, cancellationToken);
+            tempTableExecShape = await new TempTableExecShapeChecker(connectionString).CheckAsync(candidates, tempTableStage, cancellationToken);
             var filteredTempTableFindings = tempTableExecShape.Findings.Where(f => f.Confidence <= minimumConfidence).ToList();
             report = report.WithFindings("TempTableExecShapeScanner", filteredTempTableFindings);
             tempTableStage.Complete($"{filteredTempTableFindings.Count:N0} findings, {tempTableExecShape.Unanalyzed.Count:N0} unanalyzed");
@@ -124,12 +139,12 @@ public static class LiveScanRunner
             databaseConfigStage.Complete($"{databaseConfigFindings.Count:N0} findings");
         }
 
-        using (var forcedParamStage = progress.Begin("checking forced-parameterization-defeating query shapes"))
+        using (var forcedParamStage = progress.Begin("checking forced-parameterization-defeating query shapes", moduleCount * 2))
         {
             var isParameterizationForced = await new DatabaseConfigurationReader(connectionString)
                 .ReadIsParameterizationForcedAsync(cancellationToken);
             var forcedParameterizationFindings = isParameterizationForced
-                ? ForcedParameterizationScanner.Scan(parseResultSource()).Where(f => f.Confidence <= minimumConfidence).ToList()
+                ? ForcedParameterizationScanner.Scan(parseResultSource(forcedParamStage), forcedParamStage).Where(f => f.Confidence <= minimumConfidence).ToList()
                 : [];
             report = report.WithFindings("ForcedParameterizationScanner", forcedParameterizationFindings);
             forcedParamStage.Complete($"{forcedParameterizationFindings.Count:N0} findings");
@@ -137,7 +152,7 @@ public static class LiveScanRunner
 
         using (var danglingReferenceStage = progress.Begin("checking for references to nonexistent objects"))
         {
-            var danglingObjectReferenceFindings = (await new DanglingObjectReferenceChecker(connectionString).CheckAsync(cancellationToken))
+            var danglingObjectReferenceFindings = (await new DanglingObjectReferenceChecker(connectionString).CheckAsync(danglingReferenceStage, cancellationToken))
                 .Where(f => f.Confidence <= minimumConfidence).ToList();
             report = report.WithFindings("DanglingObjectReferenceScanner", danglingObjectReferenceFindings);
             danglingReferenceStage.Complete($"{danglingObjectReferenceFindings.Count:N0} findings");
@@ -146,23 +161,23 @@ public static class LiveScanRunner
         using (var indexDesignStage = progress.Begin("checking clustered/heap index design"))
         {
 
-            var dmlTargetTables = DmlTargetTableScanner.Scan(parseResultSource(), catalog);
-            var indexDesignFindings = IndexDesignScanner.Scan(catalog, dmlTargetTables).Where(f => f.Confidence <= minimumConfidence).ToList();
+            var dmlTargetTables = DmlTargetTableScanner.Scan(parseResultSource(indexDesignStage), catalog, indexDesignStage);
+            var indexDesignFindings = IndexDesignScanner.Scan(catalog, dmlTargetTables, indexDesignStage).Where(f => f.Confidence <= minimumConfidence).ToList();
             report = report.WithFindings("IndexDesignScanner", indexDesignFindings);
             indexDesignStage.Complete($"{indexDesignFindings.Count:N0} findings");
         }
 
-        using (var identityRangeStage = progress.Begin("checking identity/sequence range"))
+        using (var identityRangeStage = progress.Begin("checking identity/sequence range", catalog.Tables.Count))
         {
-            var identityRangeFindings = IdentityRangeScanner.Scan(catalog).Where(f => f.Confidence <= minimumConfidence).ToList();
+            var identityRangeFindings = IdentityRangeScanner.Scan(catalog, identityRangeStage).Where(f => f.Confidence <= minimumConfidence).ToList();
             report = report.WithFindings("IdentityRangeScanner", identityRangeFindings);
             identityRangeStage.Complete($"{identityRangeFindings.Count:N0} findings");
         }
 
         using (var staleSelectStarViewStage = progress.Begin("checking SELECT * view staleness against base tables"))
         {
-            var (views, _) = ViewDefinitionExtractor.Extract(parseResultSource(), catalog.DefaultCollation, catalog.TypeAliases, ledger: null);
-            var staleSelectStarViewFindings = StaleSelectStarViewScanner.Scan(views, catalog).Where(f => f.Confidence <= minimumConfidence).ToList();
+            var (views, _) = ViewDefinitionExtractor.Extract(parseResultSource(staleSelectStarViewStage), catalog.DefaultCollation, catalog.TypeAliases, ledger: null, staleSelectStarViewStage);
+            var staleSelectStarViewFindings = StaleSelectStarViewScanner.Scan(views, catalog, staleSelectStarViewStage).Where(f => f.Confidence <= minimumConfidence).ToList();
             report = report.WithFindings("StaleSelectStarViewScanner", staleSelectStarViewFindings);
             staleSelectStarViewStage.Complete($"{staleSelectStarViewFindings.Count:N0} findings");
         }

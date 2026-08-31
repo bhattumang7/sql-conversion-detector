@@ -82,6 +82,76 @@ public sealed class ScanProgressTests
     }
 
     [Fact]
+    public async Task Advance_WithCurrentItem_ShowsTheMostRecentItemInTheHeartbeat()
+    {
+        var writer = new StringWriter();
+        var progress = new TextWriterScanProgress(writer);
+
+        using var stage = progress.Begin("building call graph", total: 500);
+        stage.Advance(currentItem: "dbo.FirstProcedure");
+        stage.Advance(currentItem: "dbo.SecondProcedure");
+        await Task.Delay(TimeSpan.FromSeconds(11));
+
+        Assert.Matches(@"^building call graph\.\.\. 2/500 \(dbo\.SecondProcedure\) $", writer.ToString());
+    }
+
+    [Fact]
+    public async Task StageWithoutTotal_HeartbeatsElapsedTimeWhileStillRunning()
+    {
+        var writer = new StringWriter();
+        var progress = new TextWriterScanProgress(writer);
+
+        using var stage = progress.Begin("checking live parity");
+        await Task.Delay(TimeSpan.FromSeconds(11));
+
+        Assert.Matches(@"^checking live parity\.\.\. \d+\.\ds $", writer.ToString());
+    }
+
+    [Fact]
+    public void InteractiveStage_DrawsABarImmediatelyOnBeginUsingCarriageReturn()
+    {
+        var writer = new StringWriter();
+        var progress = new TextWriterScanProgress(writer, isInteractive: true);
+
+        using var stage = progress.Begin("reading modules", total: 100);
+
+        Assert.Matches(@"^\rreading modules\.\.\. \[-{24}\] 0/100 \(0%\) \(\d+\.\ds\)$", writer.ToString());
+    }
+
+    [Fact]
+    public async Task InteractiveStage_RedrawsTheBarInPlaceAsItAdvances()
+    {
+        var writer = new StringWriter();
+        var progress = new TextWriterScanProgress(writer, isInteractive: true);
+
+        using (var stage = progress.Begin("reading modules", total: 4))
+        {
+            stage.Advance(2, currentItem: "dbo.SomeProc");
+            await Task.Delay(TimeSpan.FromSeconds(1.5));
+        }
+
+        var output = writer.ToString();
+        Assert.True(output.Count(c => c == '\r') >= 2, "expected multiple carriage-return redraws");
+        Assert.Contains("[############------------] 2/4 (50%)", output, StringComparison.Ordinal);
+        Assert.Contains("dbo.SomeProc", output, StringComparison.Ordinal);
+        Assert.EndsWith(Environment.NewLine, output);
+    }
+
+    [Fact]
+    public void NonInteractiveStage_NeverEmitsACarriageReturn()
+    {
+        var writer = new StringWriter();
+        var progress = new TextWriterScanProgress(writer, isInteractive: false);
+
+        using (var stage = progress.Begin("reading modules", total: 4))
+        {
+            stage.Advance(4);
+        }
+
+        Assert.DoesNotContain('\r', writer.ToString());
+    }
+
+    [Fact]
     public void Dispose_IsIdempotentAndEmitsExactlyOneLine()
     {
         var writer = new StringWriter();

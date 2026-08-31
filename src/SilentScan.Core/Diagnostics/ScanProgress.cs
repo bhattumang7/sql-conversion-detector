@@ -12,7 +12,7 @@ public interface IScanProgress
 
 public interface IScanStage : IDisposable
 {
-    void Advance(int count = 1);
+    void Advance(int count = 1, string? currentItem = null);
 
     void Complete(string detail);
 }
@@ -35,7 +35,7 @@ public sealed class NullScanProgress : IScanProgress
     {
         internal static readonly NullScanStage Shared = new();
 
-        public void Advance(int count = 1)
+        public void Advance(int count = 1, string? currentItem = null)
         {
         }
 
@@ -51,25 +51,35 @@ public sealed class NullScanProgress : IScanProgress
 
 public sealed class TextWriterScanProgress : IScanProgress
 {
+    private const int BarWidth = 24;
+    private const int MaxCurrentItemLength = 60;
+
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan InteractiveRedrawInterval = TimeSpan.FromMilliseconds(100);
 
     private readonly TextWriter _writer;
+    private readonly bool _isInteractive;
     private readonly Lock _gate = new();
 
-    public TextWriterScanProgress(TextWriter writer)
+    public TextWriterScanProgress(TextWriter writer, bool isInteractive = false)
     {
         _writer = writer;
+        _isInteractive = isInteractive;
     }
 
     public IScanStage Begin(string name, int? total = null)
     {
-        lock (_gate)
+        var stage = new Stage(this, name, total, _isInteractive);
+        if (!_isInteractive)
         {
-            _writer.Write($"{name}... ");
-            _writer.Flush();
+            lock (_gate)
+            {
+                _writer.Write($"{name}... ");
+                _writer.Flush();
+            }
         }
 
-        return new Stage(this, total);
+        return stage;
     }
 
     public void Done(TimeSpan elapsed)
@@ -84,42 +94,127 @@ public sealed class TextWriterScanProgress : IScanProgress
     private static string Format(TimeSpan elapsed) =>
         elapsed.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + "s";
 
+    private static string Truncate(string text, int maxLength) =>
+        text.Length <= maxLength ? text : "..." + text[^(maxLength - 3)..];
+
     private sealed class Stage : IScanStage
     {
         private readonly TextWriterScanProgress _owner;
+        private readonly string _name;
         private readonly int? _total;
+        private readonly bool _isInteractive;
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
+        private readonly Timer _heartbeat;
         private int _advanced;
-        private long _lastHeartbeatTicks;
         private string? _detail;
+        private string? _currentItem;
+        private int _lastLineLength;
         private bool _disposed;
 
-        internal Stage(TextWriterScanProgress owner, int? total)
+        internal Stage(TextWriterScanProgress owner, string name, int? total, bool isInteractive)
         {
             _owner = owner;
+            _name = name;
             _total = total;
+            _isInteractive = isInteractive;
+            var interval = isInteractive ? InteractiveRedrawInterval : HeartbeatInterval;
+            _heartbeat = new Timer(_ => Tick(), null, interval, interval);
+            if (isInteractive)
+            {
+                Redraw();
+            }
         }
 
-        public void Advance(int count = 1)
+        public void Advance(int count = 1, string? currentItem = null)
         {
+            Interlocked.Add(ref _advanced, count);
+            if (currentItem is not null)
+            {
+                Volatile.Write(ref _currentItem, currentItem);
+            }
+        }
 
-            var done = Interlocked.Add(ref _advanced, count);
-            if (_total is null || _stopwatch.Elapsed < HeartbeatInterval)
+        private void Tick()
+        {
+            if (_disposed)
             {
                 return;
             }
 
-            var elapsedTicks = _stopwatch.Elapsed.Ticks;
-            var previous = Interlocked.Read(ref _lastHeartbeatTicks);
-            if (elapsedTicks - previous < HeartbeatInterval.Ticks
-                || Interlocked.CompareExchange(ref _lastHeartbeatTicks, elapsedTicks, previous) != previous)
+            if (_isInteractive)
             {
+                Redraw();
                 return;
             }
+
+            var advanced = Volatile.Read(ref _advanced);
+            var currentItem = Volatile.Read(ref _currentItem);
+            var progressText = _total is { } total
+                ? $"{advanced:N0}/{total:N0}"
+                : advanced > 0
+                    ? $"{advanced:N0}"
+                    : Format(_stopwatch.Elapsed);
+            var text = currentItem is null ? $"{progressText} " : $"{progressText} ({currentItem}) ";
 
             lock (_owner._gate)
             {
-                _owner._writer.Write($"{done:N0}/{_total.Value:N0} ");
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _owner._writer.Write(text);
+                _owner._writer.Flush();
+            }
+        }
+
+        private string BuildBarLine()
+        {
+            var advanced = Volatile.Read(ref _advanced);
+            var currentItem = Volatile.Read(ref _currentItem);
+
+            string progress;
+            if (_total is { } total and > 0)
+            {
+                var fraction = Math.Clamp((double)advanced / total, 0, 1);
+                var filled = (int)(fraction * BarWidth);
+                var bar = new string('#', filled) + new string('-', BarWidth - filled);
+                var percent = (int)Math.Round(fraction * 100, MidpointRounding.AwayFromZero);
+                progress = $"[{bar}] {advanced:N0}/{total:N0} ({percent}%)";
+            }
+            else if (advanced > 0)
+            {
+                progress = $"{advanced:N0} processed";
+            }
+            else
+            {
+                progress = "starting";
+            }
+
+            var item = currentItem is null ? string.Empty : $" - {Truncate(currentItem, MaxCurrentItemLength)}";
+            return $"{_name}... {progress} ({Format(_stopwatch.Elapsed)}){item}";
+        }
+
+        private void Redraw()
+        {
+            var line = BuildBarLine();
+
+            lock (_owner._gate)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _owner._writer.Write('\r');
+                _owner._writer.Write(line);
+                var pad = _lastLineLength - line.Length;
+                if (pad > 0)
+                {
+                    _owner._writer.Write(new string(' ', pad));
+                }
+
+                _lastLineLength = line.Length;
                 _owner._writer.Flush();
             }
         }
@@ -134,6 +229,7 @@ public sealed class TextWriterScanProgress : IScanProgress
             }
 
             _disposed = true;
+            _heartbeat.Dispose();
             _stopwatch.Stop();
 
             var advanced = Volatile.Read(ref _advanced);
@@ -151,7 +247,24 @@ public sealed class TextWriterScanProgress : IScanProgress
 
             lock (_owner._gate)
             {
-                _owner._writer.WriteLine($"{suffix}({Format(_stopwatch.Elapsed)})");
+                if (_isInteractive)
+                {
+                    var finalLine = $"{_name}... {suffix}({Format(_stopwatch.Elapsed)})";
+                    _owner._writer.Write('\r');
+                    _owner._writer.Write(finalLine);
+                    var pad = _lastLineLength - finalLine.Length;
+                    if (pad > 0)
+                    {
+                        _owner._writer.Write(new string(' ', pad));
+                    }
+
+                    _owner._writer.WriteLine();
+                }
+                else
+                {
+                    _owner._writer.WriteLine($"{suffix}({Format(_stopwatch.Elapsed)})");
+                }
+
                 _owner._writer.Flush();
             }
         }

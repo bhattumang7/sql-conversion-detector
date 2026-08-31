@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates.DynamicSqlValue;
 using SilentScan.Core.Common;
@@ -11,11 +12,13 @@ public static class DynamicSqlTempTableDiscovery
 
     public static DatabaseCatalog Discover(
         IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null, int? compatibilityLevel = null,
-        DatabaseCatalog? enclosingCatalog = null)
+        DatabaseCatalog? enclosingCatalog = null, IScanStage? stage = null)
     {
         var wrapped = new List<SqlParseResult>();
         foreach (var result in parseResults)
         {
+            stage?.Advance(currentItem: result.SourcePath);
+
             if (result.HasErrors)
             {
                 continue;

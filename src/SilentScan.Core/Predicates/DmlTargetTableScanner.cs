@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
@@ -7,12 +8,13 @@ namespace SilentScan.Core.Predicates;
 
 public static class DmlTargetTableScanner
 {
-    public static IReadOnlySet<string> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog)
+    public static IReadOnlySet<string> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog, IScanStage? stage = null)
     {
         var targets = new HashSet<string>(catalog.IdentifierComparer);
         var rule = new Rule(catalog, targets);
         foreach (var parseResult in parseResults)
         {
+            stage?.Advance(currentItem: parseResult.SourcePath);
             var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, ledger: null, currentProcScope: null, callerScopeByCalleeScope: null, rules: [rule]);
             parseResult.Fragment.Accept(walker);
         }

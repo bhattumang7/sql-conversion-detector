@@ -139,7 +139,8 @@ public static class ScanDbCommand
             return 1;
         }
 
-        var progress = new TextWriterScanProgress(stderr);
+        var isInteractive = ReferenceEquals(stderr, Console.Error) && !Console.IsErrorRedirected;
+        var progress = new TextWriterScanProgress(stderr, isInteractive);
         var overall = Stopwatch.StartNew();
 
         LiveScanResult result;

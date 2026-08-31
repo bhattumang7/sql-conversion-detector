@@ -36,7 +36,7 @@ public static class ScanReportBuilder
         else
         {
             using var lineageStage = progress.Begin("resolving lineage");
-            lineage = LineageResolver.Resolve(catalog, usableParseResults);
+            lineage = LineageResolver.Resolve(catalog, usableParseResults, lineageStage);
             lineageStage.Complete($"{lineage.AllRelations.Count:N0} relations");
         }
 
@@ -45,9 +45,9 @@ public static class ScanReportBuilder
         IReadOnlyDictionary<string, Lineage.ViewExpansionOrigin> viewExpansionMap;
         IReadOnlyDictionary<string, SelectStarViewCandidate> selectStarViewCandidates;
         List<Lineage.ViewDefinition> viewDefinitions;
-        using (var fenceMapStage = progress.Begin("mapping TVF fences and scalar UDFs"))
+        using (var fenceMapStage = progress.Begin("mapping TVF fences and scalar UDFs", usableCount))
         {
-            (viewDefinitions, _) = Lineage.ViewDefinitionExtractor.Extract(usableParseResults, catalog.DefaultCollation, catalog.TypeAliases, ledger: null);
+            (viewDefinitions, _) = Lineage.ViewDefinitionExtractor.Extract(usableParseResults, catalog.DefaultCollation, catalog.TypeAliases, ledger: null, fenceMapStage);
             tvfFenceMap = Lineage.TvfFenceMap.Build(viewDefinitions, catalog);
             scalarUdfMap = Lineage.ScalarUdfMap.Build(viewDefinitions, catalog);
             viewExpansionMap = Lineage.ViewExpansionMap.Build(viewDefinitions, catalog);
@@ -57,9 +57,9 @@ public static class ScanReportBuilder
 
         var callGraphLedger = new SkipLedger();
         ProcCallGraph procCallGraph;
-        using (var callGraphStage = progress.Begin("building call graph"))
+        using (var callGraphStage = progress.Begin("building call graph", usableCount))
         {
-            procCallGraph = ProcCallGraphBuilder.Build(usableParseResults, catalog, callGraphLedger);
+            procCallGraph = ProcCallGraphBuilder.Build(usableParseResults, catalog, callGraphLedger, callGraphStage);
             callGraphStage.Complete($"{procCallGraph.Edges.Count:N0} edges");
         }
         PhaseMemory.ReleaseBetweenPhases();
@@ -95,9 +95,9 @@ public static class ScanReportBuilder
                 .AsParallel()
                 .Select(r =>
                 {
+                    tier1Stage.Advance(currentItem: r.SourcePath);
                     var fileLedger = new SkipLedger();
                     var (findings, temporalBoundaryFindings) = NonSargablePredicateScanner.ScanFull(r, catalog, lineage, ledger: fileLedger, callerScopeByCalleeScope: callerScopeByCalleeScope);
-                    tier1Stage.Advance();
                     return (Findings: findings.ToList(), TemporalBoundaryFindings: temporalBoundaryFindings.ToList(), Skipped: fileLedger.Entries);
                 })
                 .ToList();
@@ -112,9 +112,9 @@ public static class ScanReportBuilder
         var tvfFenceFindings = ruleResults.For<TvfFenceFinding>("TvfFenceScanner").ToList();
 
         var scalarUdfFindings = ruleResults.For<ScalarUdfFinding>("ScalarUdfScanner").ToList();
-        using (var schemaDependencyStage = progress.Begin("scanning schema-level scalar UDF dependencies"))
+        using (var schemaDependencyStage = progress.Begin("scanning schema-level scalar UDF dependencies", catalog.SchemaExpressions.Count))
         {
-            var schemaDependencyFindings = SchemaDependencyScanner.Scan(catalog);
+            var schemaDependencyFindings = SchemaDependencyScanner.Scan(catalog, schemaDependencyStage);
             scalarUdfFindings.AddRange(schemaDependencyFindings);
             schemaDependencyStage.Complete($"{schemaDependencyFindings.Count:N0} findings");
         }
@@ -128,9 +128,8 @@ public static class ScanReportBuilder
             extractionResults = usableParseResults.AsParallel()
                 .Select(r =>
                 {
-                    var extracted = TypedPredicateExtractor.Extract(r, catalog, lineage, callerScopeByCalleeScope: callerScopeByCalleeScope);
-                    typedStage.Advance();
-                    return extracted;
+                    typedStage.Advance(currentItem: r.SourcePath);
+                    return TypedPredicateExtractor.Extract(r, catalog, lineage, callerScopeByCalleeScope: callerScopeByCalleeScope);
                 })
                 .ToList();
         }
@@ -310,9 +309,8 @@ public static class ScanReportBuilder
                     .AsOrdered()
                     .Select(r =>
                     {
-                        var scanned = DynamicSqlScannerV2.Scan(r, callGraph: procCallGraph, outputSummaryIndex: outputSummaryIndex, catalog: catalog, rowValueFetcher: rowValueFetcher);
-                        dynamicStage.Advance();
-                        return scanned;
+                        dynamicStage.Advance(currentItem: r.SourcePath);
+                        return DynamicSqlScannerV2.Scan(r, callGraph: procCallGraph, outputSummaryIndex: outputSummaryIndex, catalog: catalog, rowValueFetcher: rowValueFetcher);
                     })
                     .ToList();
 

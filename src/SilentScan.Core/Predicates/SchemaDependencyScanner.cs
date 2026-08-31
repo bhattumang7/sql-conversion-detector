@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
@@ -8,12 +9,14 @@ namespace SilentScan.Core.Predicates;
 
 public static class SchemaDependencyScanner
 {
-    public static IReadOnlyList<ScalarUdfFinding> Scan(DatabaseCatalog catalog)
+    public static IReadOnlyList<ScalarUdfFinding> Scan(DatabaseCatalog catalog, IScanStage? stage = null)
     {
         var findings = new List<ScalarUdfFinding>();
 
         foreach (var reference in catalog.SchemaExpressions)
         {
+            stage?.Advance(currentItem: reference.TableQualifiedName);
+
             var fragment = TryParse(reference, catalog.CompatibilityLevel);
             if (fragment is null)
             {

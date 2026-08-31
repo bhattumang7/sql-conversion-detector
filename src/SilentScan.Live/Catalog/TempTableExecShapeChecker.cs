@@ -1,5 +1,6 @@
 using Microsoft.Data.SqlClient;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
 using SilentScan.Verify.Catalog;
@@ -16,7 +17,7 @@ public sealed class TempTableExecShapeChecker
     }
 
     public async Task<TempTableExecShapeReport> CheckAsync(
-        IReadOnlyList<TempTableExecShapeCandidate> candidates, CancellationToken cancellationToken = default)
+        IReadOnlyList<TempTableExecShapeCandidate> candidates, IScanStage? stage = null, CancellationToken cancellationToken = default)
     {
         if (candidates.Count == 0)
         {
@@ -33,6 +34,8 @@ public sealed class TempTableExecShapeChecker
 
         foreach (var candidate in candidates)
         {
+            stage?.Advance(currentItem: candidate.TempTableQualifiedName);
+
             if (candidate.TempTableColumns is not { } tempColumns)
             {
                 unanalyzed.Add(new UnanalyzedTempTableExecSite(

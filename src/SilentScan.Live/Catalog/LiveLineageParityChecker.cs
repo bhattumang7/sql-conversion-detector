@@ -1,5 +1,6 @@
 using Microsoft.Data.SqlClient;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Verify.Catalog;
 using SilentScan.Core.TypeInference;
@@ -17,7 +18,7 @@ public sealed class LiveLineageParityChecker
     }
 
     public async Task<LiveLineageParityReport> CheckAsync(
-        LineageCatalog lineage, CancellationToken cancellationToken = default)
+        LineageCatalog lineage, IScanStage? stage = null, CancellationToken cancellationToken = default)
     {
 
         var wanted = lineage.AllRelations.Keys
@@ -31,14 +32,14 @@ public sealed class LiveLineageParityChecker
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var actualByObject = await ReadAllColumnsAsync(connection, wanted, cancellationToken);
-        var (described, unrenderable) = await DescribeProbeableObjectsAsync(connection, wanted, actualByObject, cancellationToken);
+        var actualByObject = await ReadAllColumnsAsync(connection, wanted, stage, cancellationToken);
+        var (described, unrenderable) = await DescribeProbeableObjectsAsync(connection, wanted, actualByObject, stage, cancellationToken);
 
-        return Classify(lineage, actualByObject, described, unrenderable);
+        return Classify(lineage, actualByObject, described, unrenderable, stage);
     }
 
     private static async Task<(Dictionary<string, DescribedObject> Described, Dictionary<string, string> Unrenderable)> DescribeProbeableObjectsAsync(
-        SqlConnection connection, HashSet<string> wanted, Dictionary<string, ActualObject> actualByObject, CancellationToken cancellationToken)
+        SqlConnection connection, HashSet<string> wanted, Dictionary<string, ActualObject> actualByObject, IScanStage? stage, CancellationToken cancellationToken)
     {
         var described = new Dictionary<string, DescribedObject>(StringComparer.OrdinalIgnoreCase);
         var unrenderable = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -50,6 +51,7 @@ public sealed class LiveLineageParityChecker
             {
                 if (probeableViews.Contains(name))
                 {
+                    stage?.Advance(currentItem: name);
                     described[name] = result;
                 }
             }
@@ -61,6 +63,8 @@ public sealed class LiveLineageParityChecker
             var parametersByObject = await LiveDescribedColumnReader.ReadFunctionParametersAsync(connection, cancellationToken);
             foreach (var name in probeableFunctions.OrderBy(n => n, StringComparer.Ordinal))
             {
+                stage?.Advance(currentItem: name);
+
                 var parameters = parametersByObject.TryGetValue(name, out var p) ? p : [];
                 var (probe, reason) = LiveDescribeProbeBuilder.BuildFunctionProbe(name, parameters);
                 if (probe is null)
@@ -78,7 +82,7 @@ public sealed class LiveLineageParityChecker
 
     private static LiveLineageParityReport Classify(
         LineageCatalog lineage, Dictionary<string, ActualObject> actualByObject,
-        Dictionary<string, DescribedObject> described, Dictionary<string, string> unrenderable)
+        Dictionary<string, DescribedObject> described, Dictionary<string, string> unrenderable, IScanStage? stage = null)
     {
         var buckets = new ParityBuckets();
 
@@ -89,6 +93,8 @@ public sealed class LiveLineageParityChecker
 
                 continue;
             }
+
+            stage?.Advance(currentItem: qualifiedName);
 
             foreach (var column in relation.Columns.OrderBy(c => c.Name, StringComparer.Ordinal))
             {
@@ -185,7 +191,7 @@ public sealed class LiveLineageParityChecker
     }
 
     private static async Task<Dictionary<string, ActualObject>> ReadAllColumnsAsync(
-        SqlConnection connection, HashSet<string> wanted, CancellationToken cancellationToken)
+        SqlConnection connection, HashSet<string> wanted, IScanStage? stage, CancellationToken cancellationToken)
     {
         const string sql = """
             SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type,
@@ -209,6 +215,8 @@ public sealed class LiveLineageParityChecker
             {
                 continue;
             }
+
+            stage?.Advance(currentItem: qualifiedName);
 
             if (!byObject.TryGetValue(qualifiedName, out var actualObject))
             {

@@ -12,7 +12,8 @@ public static class ViewDefinitionExtractor
     private readonly record struct TvfContext(Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger);
 
     public static (List<ViewDefinition> Views, List<MultiStatementTvfDefinition> MultiStatementTvfs) Extract(
-        IEnumerable<SqlParseResult> parseResults, Collation? defaultCollation = null, IReadOnlyDictionary<string, SqlType>? typeAliases = null, SkipLedger? ledger = null)
+        IEnumerable<SqlParseResult> parseResults, Collation? defaultCollation = null, IReadOnlyDictionary<string, SqlType>? typeAliases = null, SkipLedger? ledger = null,
+        IScanStage? stage = null)
     {
 
         var identifierComparer = Collation.IdentifierComparer(defaultCollation);
@@ -22,6 +23,8 @@ public static class ViewDefinitionExtractor
 
         foreach (var result in parseResults)
         {
+            stage?.Advance(currentItem: result.SourcePath);
+
             if (result.Fragment is not TSqlScript script)
             {
                 continue;

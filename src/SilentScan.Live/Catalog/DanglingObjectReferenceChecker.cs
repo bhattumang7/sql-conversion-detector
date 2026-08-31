@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Predicates;
 using SilentScan.Verify.Catalog;
 
@@ -13,7 +14,7 @@ public sealed class DanglingObjectReferenceChecker
         _connectionString = connectionString;
     }
 
-    public async Task<IReadOnlyList<DanglingObjectReferenceFinding>> CheckAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<DanglingObjectReferenceFinding>> CheckAsync(IScanStage? stage = null, CancellationToken cancellationToken = default)
     {
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -27,6 +28,8 @@ public sealed class DanglingObjectReferenceChecker
         var findings = new List<DanglingObjectReferenceFinding>();
         foreach (var candidate in candidates.OrderBy(c => c.ModuleQualifiedName, StringComparer.Ordinal).ThenBy(c => c.ReferencedEntityName, StringComparer.Ordinal))
         {
+            stage?.Advance(currentItem: candidate.ModuleQualifiedName);
+
             if (await IsStillUnresolvedLiveAsync(connection, candidate, cancellationToken))
             {
                 findings.Add(new DanglingObjectReferenceFinding(

@@ -180,6 +180,8 @@ public static class RuleRunner
 
         foreach (var rule in rules)
         {
+            stages[rule].Advance(currentItem: parseResult.SourcePath);
+
             IModuleRule? moduleRule;
             try
             {
@@ -188,7 +190,6 @@ public static class RuleRunner
             catch (Exception ex)
             {
                 RecordCrash(crashes, rule.Id, parseResult.SourcePath, ex);
-                stages[rule].Advance();
                 results.Add((rule.Id, []));
                 continue;
             }
@@ -206,7 +207,6 @@ public static class RuleRunner
                     legacyFindings = [];
                 }
 
-                stages[rule].Advance();
                 results.Add((rule.Id, legacyFindings));
                 continue;
             }
@@ -228,11 +228,11 @@ public static class RuleRunner
         foreach (var moduleRule in moduleRules)
         {
             var rule = moduleRuleOwner[moduleRule];
+            stages[rule].Advance(currentItem: parseResult.SourcePath);
 
             if (walker.CrashedRules.TryGetValue(moduleRule, out var crashException))
             {
                 RecordCrash(crashes, rule.Id, parseResult.SourcePath, crashException);
-                stages[rule].Advance();
                 results.Add((rule.Id, []));
                 continue;
             }
@@ -248,7 +248,6 @@ public static class RuleRunner
                 harvested = [];
             }
 
-            stages[rule].Advance();
             results.Add((rule.Id, harvested));
         }
 
