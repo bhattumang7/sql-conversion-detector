@@ -9,6 +9,14 @@ public static class SqlTypeReferenceResolver
 {
     private const string SysnameTypeName = "sysname";
 
+    private static readonly Dictionary<string, SqlTypeCategory> BuiltInClrTypeNames =
+        new Dictionary<string, SqlTypeCategory>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["hierarchyid"] = SqlTypeCategory.HierarchyId,
+            ["geometry"] = SqlTypeCategory.Geometry,
+            ["geography"] = SqlTypeCategory.Geography,
+        };
+
     public static SqlType? Resolve(
         DataTypeReference dataType, Identifier? columnCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null,
         int? unsizedStringOrBinaryDefaultLength = null)
@@ -65,6 +73,11 @@ public static class SqlTypeReferenceResolver
         if (string.Equals(userType.Name.BaseIdentifier.Value, SysnameTypeName, StringComparison.OrdinalIgnoreCase))
         {
             return ApplyColumnCollation(new SqlType(SqlTypeCategory.NVarChar, Length: 128), columnCollation);
+        }
+
+        if (BuiltInClrTypeNames.TryGetValue(userType.Name.BaseIdentifier.Value, out var clrCategory))
+        {
+            return new SqlType(clrCategory);
         }
 
         if (typeAliases is null)

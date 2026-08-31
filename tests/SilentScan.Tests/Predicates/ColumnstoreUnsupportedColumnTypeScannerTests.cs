@@ -80,6 +80,70 @@ public sealed class ColumnstoreUnsupportedColumnTypeScannerTests
         Assert.Empty(findings);
     }
 
+    [Theory]
+    [InlineData("XML")]
+    [InlineData("HIERARCHYID")]
+    [InlineData("GEOMETRY")]
+    [InlineData("GEOGRAPHY")]
+    [InlineData("NTEXT")]
+    [InlineData("TEXT")]
+    [InlineData("IMAGE")]
+    [InlineData("ROWVERSION")]
+    public void UnsupportedTypeColumnOnClusteredColumnstoreTable_Fires(string typeName)
+    {
+        var findings = Scan(
+            $"""
+            CREATE TABLE dbo.Sales (SaleId INT NOT NULL, Payload {typeName} NULL);
+            CREATE CLUSTERED COLUMNSTORE INDEX CCI_Sales ON dbo.Sales;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Payload", finding.ColumnName);
+    }
+
+    [Theory]
+    [InlineData("VARCHAR(MAX)")]
+    [InlineData("NVARCHAR(MAX)")]
+    [InlineData("VARBINARY(MAX)")]
+    public void MaxTypedColumnOnClusteredColumnstoreTable_NeverFires(string typeName)
+    {
+        var findings = Scan(
+            $"""
+            CREATE TABLE dbo.Sales (SaleId INT NOT NULL, Payload {typeName} NULL);
+            CREATE CLUSTERED COLUMNSTORE INDEX CCI_Sales ON dbo.Sales;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Theory]
+    [InlineData("VARCHAR(MAX)")]
+    [InlineData("NVARCHAR(MAX)")]
+    [InlineData("VARBINARY(MAX)")]
+    public void MaxTypedColumnNamedInNonclusteredColumnstoreList_Fires(string typeName)
+    {
+        var findings = Scan(
+            $"""
+            CREATE TABLE dbo.Sales (SaleId INT NOT NULL, Amount INT NOT NULL, Payload {typeName} NULL);
+            CREATE NONCLUSTERED COLUMNSTORE INDEX NCCI_Sales ON dbo.Sales (Amount, Payload);
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Payload", finding.ColumnName);
+    }
+
+    [Fact]
+    public void MaxTypedColumnOmittedFromNonclusteredColumnstoreList_NeverFires()
+    {
+        var findings = Scan(
+            """
+            CREATE TABLE dbo.Sales (SaleId INT NOT NULL, Amount INT NOT NULL, Payload VARCHAR(MAX) NULL);
+            CREATE NONCLUSTERED COLUMNSTORE INDEX NCCI_Sales ON dbo.Sales (SaleId, Amount);
+            """);
+
+        Assert.Empty(findings);
+    }
+
     [Fact]
     public void MultipleOffendingColumns_OrderedByTableThenColumn()
     {

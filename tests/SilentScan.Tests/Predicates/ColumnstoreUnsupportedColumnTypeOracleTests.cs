@@ -75,4 +75,73 @@ public sealed class ColumnstoreUnsupportedColumnTypeOracleTests : OracleTestFixt
             CREATE NONCLUSTERED COLUMNSTORE INDEX NCCI_Payments ON dbo.Payments (PaymentId, Amount);
             """);
     }
+
+    [Theory]
+    [InlineData("XML")]
+    [InlineData("HIERARCHYID")]
+    [InlineData("GEOMETRY")]
+    [InlineData("GEOGRAPHY")]
+    [InlineData("NTEXT")]
+    [InlineData("TEXT")]
+    [InlineData("IMAGE")]
+    public async Task ClusteredColumnstoreIndex_OnTableWithColumnOfUnsupportedType_FailsToDeploy(string typeName)
+    {
+        var exception = await AssertDeployFailsAsync(
+            $"""
+            CREATE TABLE dbo.T1 (Id INT NOT NULL, Payload {typeName} NULL);
+            CREATE CLUSTERED COLUMNSTORE INDEX CCI_T1 ON dbo.T1;
+            """);
+
+        Assert.Equal(35343, exception.Number);
+    }
+
+    [Fact]
+    public async Task ClusteredColumnstoreIndex_OnTableWithRowversionColumn_FailsToDeploy()
+    {
+        var exception = await AssertDeployFailsAsync(
+            """
+            CREATE TABLE dbo.T1 (Id INT NOT NULL, Payload ROWVERSION NOT NULL);
+            CREATE CLUSTERED COLUMNSTORE INDEX CCI_T1 ON dbo.T1;
+            """);
+
+        Assert.Equal(35343, exception.Number);
+    }
+
+    [Theory]
+    [InlineData("VARCHAR(MAX)")]
+    [InlineData("NVARCHAR(MAX)")]
+    [InlineData("VARBINARY(MAX)")]
+    public async Task ClusteredColumnstoreIndex_OnTableWithMaxTypedColumn_DeploysCleanly(string typeName)
+    {
+        await AssertDeploySucceedsAsync(
+            $"""
+            CREATE TABLE dbo.T1 (Id INT NOT NULL, Payload {typeName} NULL);
+            CREATE CLUSTERED COLUMNSTORE INDEX CCI_T1 ON dbo.T1;
+            """);
+    }
+
+    [Theory]
+    [InlineData("VARCHAR(MAX)")]
+    [InlineData("NVARCHAR(MAX)")]
+    [InlineData("VARBINARY(MAX)")]
+    public async Task NonclusteredColumnstoreIndex_NamingMaxTypedColumnInItsOwnList_FailsToDeploy(string typeName)
+    {
+        var exception = await AssertDeployFailsAsync(
+            $"""
+            CREATE TABLE dbo.T1 (Id INT NOT NULL, Amount INT NOT NULL, Payload {typeName} NULL);
+            CREATE NONCLUSTERED COLUMNSTORE INDEX NCCI_T1 ON dbo.T1 (Amount, Payload);
+            """);
+
+        Assert.Equal(35343, exception.Number);
+    }
+
+    [Fact]
+    public async Task NonclusteredColumnstoreIndex_OmittingMaxTypedColumnFromItsOwnList_DeploysCleanly()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE TABLE dbo.T1 (Id INT NOT NULL, Amount INT NOT NULL, Payload VARCHAR(MAX) NULL);
+            CREATE NONCLUSTERED COLUMNSTORE INDEX NCCI_T1 ON dbo.T1 (Id, Amount);
+            """);
+    }
 }

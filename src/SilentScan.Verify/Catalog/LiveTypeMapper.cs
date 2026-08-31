@@ -37,6 +37,9 @@ public static class LiveTypeMapper
         "DATETIME2" => SqlTypeCategory.DateTime2,
         "DATETIMEOFFSET" => SqlTypeCategory.DateTimeOffset,
         "XML" => SqlTypeCategory.Xml,
+        "HIERARCHYID" => SqlTypeCategory.HierarchyId,
+        "GEOMETRY" => SqlTypeCategory.Geometry,
+        "GEOGRAPHY" => SqlTypeCategory.Geography,
 
         _ => null,
     };

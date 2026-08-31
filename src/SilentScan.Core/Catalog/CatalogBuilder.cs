@@ -1169,7 +1169,8 @@ public static class CatalogBuilder
                 IsUnique: false,
                 [.. createIndex.Columns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)],
                 IncludedColumns: [],
-                IsColumnstore: true);
+                IsColumnstore: true,
+                IsClustered: createIndex.Clustered == true);
 
             catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] }, writeScope);
         }
@@ -1423,7 +1424,8 @@ public static class CatalogBuilder
         inlineIndex.Columns.Count > 0 ? [.. inlineIndex.Columns.Select(ColumnName)] : [columnName],
         [.. inlineIndex.IncludeColumns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)],
         IsFiltered: inlineIndex.FilterPredicate is not null,
-        IsColumnstore: IsColumnstoreIndexType(inlineIndex.IndexType));
+        IsColumnstore: IsColumnstoreIndexType(inlineIndex.IndexType),
+        IsClustered: inlineIndex.IndexType?.IndexTypeKind == IndexTypeKind.ClusteredColumnStore);
 
     private static string ColumnName(ColumnWithSortOrder columnWithSortOrder) =>
         columnWithSortOrder.Column.MultiPartIdentifier.Identifiers[^1].Value;

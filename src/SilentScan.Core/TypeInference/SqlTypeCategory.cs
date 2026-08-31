@@ -35,5 +35,8 @@ public enum SqlTypeCategory
     UserDefined,
 
     Json,
+    HierarchyId,
+    Geometry,
+    Geography,
 }
 #pragma warning restore CA1720

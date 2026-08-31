@@ -21,27 +21,6 @@ correctness bugs found; 30 remain open below.
 
 ## Confirmed bugs (open)
 
-- [ ] **`ColumnstoreUnsupportedColumnTypeScanner` only ever flags
-      `SQL_VARIANT`; the real columnstore column-type gate is materially
-      broader and, for MAX-length string/binary types, depends on clustered
-      vs. nonclustered — a distinction the scanner already has available but
-      doesn't use for type-gating.**
-      (`src/SilentScan.Core/Predicates/ColumnstoreUnsupportedColumnTypeScanner.cs:14-16`
-      — the only type check is `Category: SqlTypeCategory.SqlVariant`.)
-      Oracle-confirmed (SQL Server 2025), same Msg 35343 ("has a data type
-      that cannot participate in a columnstore index") the shipped rule is
-      built around: `xml`, `hierarchyid`, `geometry`, `geography`, `ntext`,
-      `text`, `image`, and `rowversion` columns are all rejected on both
-      clustered and nonclustered columnstore indexes, the same as
-      `sql_variant`. Separately, `varchar(max)`/`nvarchar(max)`/
-      `varbinary(max)` are rejected on a NONCLUSTERED columnstore index but
-      explicitly *allowed* on a CLUSTERED columnstore index on the same
-      table/column — a real clustered/nonclustered split in the engine's own
-      gate that a single unconditional type check can't express. (Already
-      flagged in general terms by `docs/detection-tasklist.md`; this entry
-      adds the concrete confirmed type list and the clustered/nonclustered
-      MAX-type split.)
-
 - [ ] **`ControlFlowRiskScanner`'s `TriggerEmitsOutputRuleId` unconditionally
       claims a trigger's SELECT/PRINT "sends output back to whatever
       connection fired the DML," but under the server-level `disallow

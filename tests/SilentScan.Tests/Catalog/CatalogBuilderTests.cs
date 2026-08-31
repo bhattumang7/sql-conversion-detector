@@ -1163,13 +1163,12 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
-    public void Build_SpatialColumn_TypeIsNullAndLedgered()
+    public void Build_SpatialColumn_TypeIsGeography()
     {
 
         var catalog = BuildFrom("CREATE TABLE dbo.Cities (Id INT NOT NULL, Location GEOGRAPHY NULL);");
 
-        Assert.Null(catalog.Find("dbo.Cities")!.FindColumn("Location")!.Type);
-        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "column type" && e.Reason.Contains("Location", StringComparison.Ordinal));
+        Assert.Equal(SqlTypeCategory.Geography, catalog.Find("dbo.Cities")!.FindColumn("Location")!.Type!.Category);
     }
 
     [Fact]
