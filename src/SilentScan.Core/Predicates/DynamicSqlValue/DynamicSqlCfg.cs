@@ -264,11 +264,20 @@ public sealed class DynamicSqlCfg
 
     private void RunFixpoint(int entryBlock, Dictionary<string, SqlTextValue> initialSeed, List<int>[] predecessors, Dictionary<string, SqlTextValue>?[] outStates)
     {
+        var dirty = new bool[_blocks.Count];
+        Array.Fill(dirty, true);
+
         for (var round = 0; round < MaxFixpointRounds; round++)
         {
             var changed = false;
+            var nextDirty = new bool[_blocks.Count];
             for (var i = 0; i < _blocks.Count; i++)
             {
+                if (!dirty[i])
+                {
+                    continue;
+                }
+
                 var working = ComputeBlockOutput(i, entryBlock, initialSeed, predecessors, outStates, emit: false);
                 if (working is null)
                 {
@@ -278,6 +287,10 @@ public sealed class DynamicSqlCfg
                 if (outStates[i] is null || !StatesEqual(outStates[i]!, working))
                 {
                     changed = true;
+                    foreach (var successor in _blocks[i].Successors)
+                    {
+                        nextDirty[successor] = true;
+                    }
                 }
 
                 outStates[i] = working;
@@ -287,6 +300,8 @@ public sealed class DynamicSqlCfg
             {
                 break;
             }
+
+            dirty = nextDirty;
         }
     }
 
