@@ -58,9 +58,11 @@ public static class LiveScanRunner
                     return SqlScriptParser.ParseText(m.QualifiedName, m.Definition, m.UsesQuotedIdentifier, catalog.CompatibilityLevel);
                 });
 
+        var knownPermanentTables = catalog.Tables.Where(t => t.Kind == CatalogTableKind.Table).ToList();
         using (var extrasStage = progress.Begin("merging module-body catalog extras", moduleCount * 4))
         {
-            catalog.MergeFileModeExtras(CatalogBuilder.Build(parseResultSource(extrasStage), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name, catalog.IsAnsiNullDefaultOn, extrasStage));
+            catalog.MergeFileModeExtras(CatalogBuilder.Build(
+                parseResultSource(extrasStage), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name, catalog.IsAnsiNullDefaultOn, extrasStage, knownPermanentTables));
             extrasStage.Complete($"{catalog.Tables.Count:N0} tables");
         }
         PhaseMemory.ReleaseBetweenPhases();

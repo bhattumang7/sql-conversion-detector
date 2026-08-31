@@ -34,9 +34,8 @@ public static class SelectIntoLineagePass
         private void ResolveSelectIntoTarget(SelectStatement select, ModuleWalker walker)
         {
             var targetName = select.Into!;
-            var (schema, _) = SchemaObjectNameHelper.Resolve(targetName);
-            var isTemp = schema is null;
             var qualifiedName = SchemaObjectNameHelper.Qualify(targetName);
+            var isTemp = SchemaObjectNameHelper.IsLocalTempName(qualifiedName);
 
             var existing = catalog.Find(qualifiedName, isTemp ? walker.CurrentProcScope : null);
             if (existing is null)

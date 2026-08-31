@@ -18,6 +18,8 @@ public static class SchemaObjectNameHelper
         return (schema, name.BaseIdentifier.Value);
     }
 
+    public static bool IsLocalTempName(string name) => name.StartsWith('#') && !name.StartsWith("##", StringComparison.Ordinal);
+
     public static string Qualify(SchemaObjectName name)
     {
         var (schema, tableName) = Resolve(name);

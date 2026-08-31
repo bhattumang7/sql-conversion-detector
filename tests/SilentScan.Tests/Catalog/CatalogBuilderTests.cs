@@ -615,6 +615,49 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_GlobalTempTable_CreatedInOneProcedure_IsVisibleUnscopedToAnotherProcedure()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE PROCEDURE dbo.usp_Producer
+                AS
+                BEGIN
+                    CREATE TABLE ##shared (Col INT NOT NULL);
+                END
+                GO
+                CREATE PROCEDURE dbo.usp_Consumer
+                AS
+                BEGIN
+                    CREATE INDEX IX_shared ON ##shared (Col);
+                END
+                """)]);
+
+        Assert.NotNull(catalog.Find("##shared"));
+        Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "CREATE INDEX");
+    }
+
+    [Fact]
+    public void Build_GlobalTempTable_ViaSelectInto_IsVisibleUnscopedToAnotherProcedure()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE PROCEDURE dbo.usp_Producer
+                AS
+                BEGIN
+                    SELECT 1 AS Col INTO ##shared;
+                END
+                GO
+                CREATE PROCEDURE dbo.usp_Consumer
+                AS
+                BEGIN
+                    DROP TABLE ##shared;
+                END
+                """)]);
+
+        Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "DROP TABLE");
+    }
+
+    [Fact]
     public void Build_CreateOrAlterTriggerBody_TempTableScopedToTrigger()
     {
 
@@ -1537,6 +1580,77 @@ public sealed class CatalogBuilderTests
         var catalog = BuildFrom("EXEC sp_rename 'dbo.NeverSeen.IX_Old', 'IX_New', 'INDEX';");
 
         Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "sp_rename (INDEX)" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_SpRename_ColumnForm_ThreePartTableName_RecordsThreePartSkippedEntry_NotUnresolvedTable()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            EXEC sp_rename 'somedb.dbo.Orders.OrderCode', 'OrderNumber', 'COLUMN';
+            """);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "sp_rename (COLUMN)" && e.Reason.Contains("three-part", StringComparison.Ordinal));
+        Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "sp_rename (COLUMN)" && e.Reason.Contains("not found in catalog", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_SpRename_IndexForm_ThreePartTableName_RecordsThreePartSkippedEntry_NotUnresolvedTable()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            EXEC sp_rename 'somedb.dbo.Orders.IX_Old', 'IX_New', 'INDEX';
+            """);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "sp_rename (INDEX)" && e.Reason.Contains("three-part", StringComparison.Ordinal));
+        Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "sp_rename (INDEX)" && e.Reason.Contains("not found in catalog", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_KnownTables_SeedsPreExistingTableSoCreateIndexInModuleBodyResolves()
+    {
+        var result = SqlScriptParser.ParseText("dbo.spRebuild.sql", "CREATE INDEX IX_Orders_OrderCode ON dbo.Orders (OrderCode);");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var liveOrders = new CatalogTable(
+            "dbo", "Orders", CatalogTableKind.Table,
+            [new CatalogColumn("OrderCode", new SqlType(SqlTypeCategory.VarChar), IsNullable: false, IsIdentity: false, IsComputed: false, IsPersisted: false)],
+            [],
+            "live", 0);
+
+        var catalog = CatalogBuilder.Build([result], knownTables: [liveOrders]);
+
+        Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "CREATE INDEX");
+    }
+
+    [Fact]
+    public void Build_KnownTables_SeedsPreExistingTableSoDropIndexOnItsRealIndexResolves()
+    {
+        var result = SqlScriptParser.ParseText("dbo.spMaint.sql", "DROP INDEX IX_Orders_OrderCode ON dbo.Orders;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var liveOrders = new CatalogTable(
+            "dbo", "Orders", CatalogTableKind.Table,
+            [],
+            [new CatalogIndex("IX_Orders_OrderCode", CatalogIndexKind.Index, IsUnique: false, KeyColumns: ["OrderCode"], IncludedColumns: [])],
+            "live", 0);
+
+        var catalog = CatalogBuilder.Build([result], knownTables: [liveOrders]);
+
+        Assert.Empty(catalog.Skipped.Entries);
+    }
+
+    [Fact]
+    public void Build_KnownTables_DoesNotSuppressGenuinelyUnknownTargetSkip()
+    {
+        var result = SqlScriptParser.ParseText("dbo.spRebuild.sql", "CREATE INDEX IX_Never_Seen ON dbo.NeverSeen (Col);");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var liveOrders = new CatalogTable("dbo", "Orders", CatalogTableKind.Table, [], [], "live", 0);
+
+        var catalog = CatalogBuilder.Build([result], knownTables: [liveOrders]);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CREATE INDEX" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
     }
 
     [Fact]

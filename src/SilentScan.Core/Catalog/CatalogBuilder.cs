@@ -12,7 +12,7 @@ public static class CatalogBuilder
 
     public static DatabaseCatalog Build(
         IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null,
-        bool? manifestAnsiNullDefaultOn = null, IScanStage? stage = null)
+        bool? manifestAnsiNullDefaultOn = null, IScanStage? stage = null, IEnumerable<CatalogTable>? knownTables = null)
     {
         var catalog = new DatabaseCatalog();
         var results = parseResults as IReadOnlyList<SqlParseResult> ?? parseResults.ToList();
@@ -22,6 +22,14 @@ public static class CatalogBuilder
             ? new Collation(manifestTempdbCollation, CollationSource.DatabaseDefaultFromManifest)
             : null;
         catalog.IsAnsiNullDefaultOn = manifestAnsiNullDefaultOn;
+
+        if (knownTables is not null)
+        {
+            foreach (var table in knownTables)
+            {
+                catalog.AddOrReplace(table);
+            }
+        }
 
         var pendingDrops = new List<PendingDrop>();
 
@@ -866,8 +874,16 @@ public static class CatalogBuilder
         {
             var (containerName, oldColumnName) = SplitLastSegment(objName);
             var (schema, tableQualifiedName) = SplitTableTarget(containerName);
+            if (schema is UnresolvableSchema)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "sp_rename (COLUMN)", $"'{containerName}': three-part (database-qualified) rename target is not modeled");
+                return;
+            }
+
             var (existing, writeScope) = catalog.FindForMutation(tableQualifiedName, _currentScope);
-            if (schema is UnresolvableSchema || existing is null)
+            if (existing is null)
             {
                 RecordUnresolvedTarget("sp_rename (COLUMN)", tableQualifiedName, node);
                 return;
@@ -884,8 +900,16 @@ public static class CatalogBuilder
         {
             var (containerName, oldIndexName) = SplitLastSegment(objName);
             var (schema, tableQualifiedName) = SplitTableTarget(containerName);
+            if (schema is UnresolvableSchema)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "sp_rename (INDEX)", $"'{containerName}': three-part (database-qualified) rename target is not modeled");
+                return;
+            }
+
             var (existing, writeScope) = catalog.FindForMutation(tableQualifiedName, _currentScope);
-            if (schema is UnresolvableSchema || existing is null)
+            if (existing is null)
             {
                 RecordUnresolvedTarget("sp_rename (INDEX)", tableQualifiedName, node);
                 return;
@@ -952,7 +976,7 @@ public static class CatalogBuilder
                 createTable.StartLine,
                 IsMemoryOptimized: IsMemoryOptimizedTable(createTable.Options));
 
-            catalog.AddOrReplace(table, isTemp ? _currentScope : null);
+            catalog.AddOrReplace(table, isTemp && SchemaObjectNameHelper.IsLocalTempName(name) ? _currentScope : null);
 
             if (!isTemp)
             {
@@ -1190,7 +1214,7 @@ public static class CatalogBuilder
                 sourcePath,
                 select.StartLine);
 
-            catalog.AddOrReplace(table, isTemp ? _currentScope : null);
+            catalog.AddOrReplace(table, isTemp && SchemaObjectNameHelper.IsLocalTempName(name) ? _currentScope : null);
         }
 
         private void RecordUnresolvedTarget(string constructKind, string qualifiedName, TSqlFragment node) =>
