@@ -110,19 +110,11 @@ public sealed class ForcedParameterizationScannerTests
     }
 
     [Fact]
-    public void DoubleColonStaticCallLiteralArgument_Fires()
+    public void DoubleColonStaticCallLiteralArgument_NeverFires()
     {
         var findings = Scan("SELECT geography::Parse('POINT(1 1)').STAsText();");
 
-        Assert.Contains(findings, f => f.Kind == ForcedParameterizationFindingKind.DoubleColonCallArgumentLiteral);
-    }
-
-    [Fact]
-    public void OrdinaryInstanceMethodCall_NeverFiresDoubleColon()
-    {
-        var findings = Scan("SELECT dbo.Fn(Id) FROM dbo.T;");
-
-        Assert.DoesNotContain(findings, f => f.Kind == ForcedParameterizationFindingKind.DoubleColonCallArgumentLiteral);
+        Assert.Empty(findings);
     }
 
     [Fact]
@@ -174,19 +166,11 @@ public sealed class ForcedParameterizationScannerTests
     }
 
     [Fact]
-    public void CheckSumLiteralArgument_Fires()
+    public void CheckSumLiteralArgument_NeverFires()
     {
         var findings = Scan("SELECT CHECKSUM('Literal');");
 
-        Assert.Contains(findings, f => f.Kind == ForcedParameterizationFindingKind.CheckSumArgumentLiteral);
-    }
-
-    [Fact]
-    public void CheckSumColumnArgument_NeverFires()
-    {
-        var findings = Scan("SELECT CHECKSUM(Id) FROM dbo.T;");
-
-        Assert.DoesNotContain(findings, f => f.Kind == ForcedParameterizationFindingKind.CheckSumArgumentLiteral);
+        Assert.Empty(findings);
     }
 
     [Fact]

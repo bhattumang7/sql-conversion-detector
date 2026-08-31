@@ -228,11 +228,9 @@ public static class RuleDocCatalog
         [ForcedParameterization.SelectListLiteral.RuleId] = ForcedParameterization.SelectListLiteral.Content,
         [ForcedParameterization.HavingLiteral.RuleId] = ForcedParameterization.HavingLiteral.Content,
         [ForcedParameterization.OrderByExpressionLiteral.RuleId] = ForcedParameterization.OrderByExpressionLiteral.Content,
-        [ForcedParameterization.DoubleColonCallArgumentLiteral.RuleId] = ForcedParameterization.DoubleColonCallArgumentLiteral.Content,
         [ForcedParameterization.TableSampleSizeLiteral.RuleId] = ForcedParameterization.TableSampleSizeLiteral.Content,
         [ForcedParameterization.DmlOutputListLiteral.RuleId] = ForcedParameterization.DmlOutputListLiteral.Content,
         [ForcedParameterization.ConvertStyleCodeLiteral.RuleId] = ForcedParameterization.ConvertStyleCodeLiteral.Content,
-        [ForcedParameterization.CheckSumArgumentLiteral.RuleId] = ForcedParameterization.CheckSumArgumentLiteral.Content,
         [ForcedParameterization.ConstantFoldableExpressionLiteral.RuleId] = ForcedParameterization.ConstantFoldableExpressionLiteral.Content,
         [ForcedParameterization.GroupByExpressionLiteral.RuleId] = ForcedParameterization.GroupByExpressionLiteral.Content,
 

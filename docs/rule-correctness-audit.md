@@ -15,30 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 24 remain open below.
+correctness bugs found; 23 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`ForcedParameterizationScanner` has two finding kinds that falsely
-      claim their literal argument stays unparameterized under
-      `PARAMETERIZATION FORCED`, when the real engine parameterizes both.**
-      (`src/SilentScan.Core/Predicates/ForcedParameterizationScanner.cs:119-138`,
-      `CheckSumArgumentLiteral` and `DoubleColonCallArgumentLiteral`;
-      messages at `RuleCatalog.cs:287,291`.) Oracle-confirmed (SQL Server
-      2022 and 2025, `ALTER DATABASE ... SET PARAMETERIZATION FORCED`, cached
-      plan text inspection): `WHERE Val > 22 AND CHECKSUM('LitArgX') = 0`
-      compiles to `... and CHECKSUM ( @1 ) = @2` — the CHECKSUM literal
-      argument is parameterized, not left literal. Likewise `WHERE Val > 55
-      AND geography::Parse('POINT(1 1)').STAsText() = 'x'` compiles to `...
-      and geography :: Parse ( @1 ) . STAsText ( ) = @2` — the static-call
-      literal argument is also parameterized. Both finding kinds are false
-      positives with a factually wrong message claim; all other kinds in
-      this family (LIKE pattern, TOP/OFFSET-FETCH, SELECT-list, HAVING,
-      ORDER BY/GROUP BY expression, TABLESAMPLE size, DML OUTPUT list,
-      CONVERT style code, constant-foldable expression) were independently
-      re-verified correct via matched-pair cached-plan probes.
 
 - [ ] **`IdentityRangeScanner` crashes (unhandled `OverflowException`)
       instead of reporting for `DECIMAL`/`NUMERIC` IDENTITY columns with

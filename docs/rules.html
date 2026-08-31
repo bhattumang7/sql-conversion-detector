@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">279 rules. 192 carry fix guidance; 28 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">277 rules. 190 carry fix guidance; 28 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -259,11 +259,9 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
   <section class="family-section">
     <h2>forced-parameterization</h2>
     <ul class="rule-list">
-      <li><a class="id" href="rules/forced-parameterization-checksum-argument-literal.html">Checksum Argument Literal</a> <code class="rule-key">silentscan/forced-parameterization/checksum-argument-literal</code><span class="snippet">A literal is passed directly as an argument to CHECKSUM(...).</span></li>
       <li><a class="id" href="rules/forced-parameterization-constant-foldable-expression-literal.html">Constant Foldable Expression Literal</a> <code class="rule-key">silentscan/forced-parameterization/constant-foldable-expression-literal</code><span class="snippet">A constant-foldable arithmetic expression against a column parameterizes as two separate parameters instead of one folded value.</span></li>
       <li><a class="id" href="rules/forced-parameterization-convert-style-code-literal.html">Convert Style Code Literal</a> <code class="rule-key">silentscan/forced-parameterization/convert-style-code-literal</code><span class="snippet">A CONVERT(type, expr, style) call&#x27;s style-code argument is a literal.</span></li>
       <li><a class="id" href="rules/forced-parameterization-dml-output-list-literal.html">DML Output List Literal</a> <code class="rule-key">silentscan/forced-parameterization/dml-output-list-literal</code><span class="snippet">A literal sits in a DML statement&#x27;s own OUTPUT clause select list.</span></li>
-      <li><a class="id" href="rules/forced-parameterization-double-colon-call-argument-literal.html">Double Colon Call Argument Literal</a> <code class="rule-key">silentscan/forced-parameterization/double-colon-call-argument-literal</code><span class="snippet">A literal argument to a TypeName::Method(...) static call (CLR UDT/spatial types) stays unparameterized even under PARAMETERIZATION FORCED.</span></li>
       <li><a class="id" href="rules/forced-parameterization-group-by-expression-literal.html">Group By Expression Literal</a> <code class="rule-key">silentscan/forced-parameterization/group-by-expression-literal</code><span class="snippet">A literal appears inside a GROUP BY expression.</span></li>
       <li><a class="id" href="rules/forced-parameterization-having-literal.html">HAVING Literal</a> <code class="rule-key">silentscan/forced-parameterization/having-literal</code><span class="snippet">A literal is a direct comparison operand inside a HAVING clause.</span></li>
       <li><a class="id" href="rules/forced-parameterization-like-pattern-literal.html">LIKE Pattern Literal</a> <code class="rule-key">silentscan/forced-parameterization/like-pattern-literal</code><span class="snippet">A LIKE predicate&#x27;s pattern is a literal, not a variable.</span></li>

@@ -15,15 +15,11 @@ public enum ForcedParameterizationFindingKind
 
     OrderByExpressionLiteral,
 
-    DoubleColonCallArgumentLiteral,
-
     TableSampleSizeLiteral,
 
     DmlOutputListLiteral,
 
     ConvertStyleCodeLiteral,
-
-    CheckSumArgumentLiteral,
 
     ConstantFoldableExpressionLiteral,
 

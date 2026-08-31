@@ -118,28 +118,6 @@ public static class ForcedParameterizationScanner
             }
         }
 
-        public void OnEnterFunctionCall(FunctionCall node, ModuleWalker walker)
-        {
-            if (node.CallTarget is UserDefinedTypeCallTarget)
-            {
-                var literalArg = node.Parameters.OfType<Literal>().FirstOrDefault();
-                if (literalArg is not null)
-                {
-                    Add(ForcedParameterizationFindingKind.DoubleColonCallArgumentLiteral, literalArg,
-                        $"Literal argument '{LiteralText(literalArg)}' to a TypeName::Method(...) static call stays unparameterized even under PARAMETERIZATION FORCED.", walker);
-                }
-            }
-            else if (string.Equals(node.FunctionName?.Value, "CHECKSUM", StringComparison.OrdinalIgnoreCase))
-            {
-                var literalArg = node.Parameters.OfType<Literal>().FirstOrDefault();
-                if (literalArg is not null)
-                {
-                    Add(ForcedParameterizationFindingKind.CheckSumArgumentLiteral, literalArg,
-                        $"CHECKSUM(...) literal argument '{LiteralText(literalArg)}' stays unparameterized even under PARAMETERIZATION FORCED.", walker);
-                }
-            }
-        }
-
         public void OnEnterNamedTableReference(NamedTableReference node, ModuleWalker walker)
         {
             if (node.TableSampleClause?.SampleNumber is Literal literal)
