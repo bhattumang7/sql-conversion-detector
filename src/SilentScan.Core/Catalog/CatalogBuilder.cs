@@ -48,14 +48,18 @@ public static class CatalogBuilder
         var stillPending = new List<PendingDrop>();
         foreach (var pending in pendingDrops)
         {
-            if (catalog.Find(pending.QualifiedName, pending.Scope) is not null)
+            var match = catalog.Find(pending.QualifiedName, pending.Scope);
+            if (match is null)
             {
-
-                RecordUnresolvedDrop(catalog, pending);
+                stillPending.Add(pending);
+            }
+            else if (!string.Equals(match.SourcePath, pending.SourcePath, StringComparison.Ordinal))
+            {
+                catalog.Remove(pending.QualifiedName, pending.Scope);
             }
             else
             {
-                stillPending.Add(pending);
+                RecordUnresolvedDrop(catalog, pending);
             }
         }
 
