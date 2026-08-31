@@ -21,24 +21,6 @@ correctness bugs found and recorded below, none fixed yet.
 
 ## Confirmed bugs (open)
 
-- [ ] **`IndexDesignScanner.VariableLengthKeyColumnExceedsKeyLimit` only
-      checks one variable-length key column at a time, never the composite
-      sum, and ignores fixed-length columns in that sum entirely.**
-      (`src/SilentScan.Core/Predicates/IndexDesignScanner.cs`,
-      `CheckVariableLengthKeyColumnWidth`). Oracle-confirmed (SQL Server
-      2025): the engine's 900/1700-byte key-length ceiling applies to the
-      combined width of every key column in the index, fixed-length columns
-      included — two `VARCHAR(500)` key columns (1000 bytes combined) or an
-      `INT` plus a `VARCHAR(898)` key column (902 bytes combined) both print
-      the engine's deferred-failure warning, even though neither individual
-      column exceeds the limit on its own and the scanner currently reports
-      nothing for either shape. Separately confirmed: whenever the
-      fixed-length-only portion of a key already exceeds the limit by
-      itself (one wide `CHAR`, or several `CHAR` columns summing past it),
-      `CREATE INDEX` fails immediately (Msg 1944) rather than warning — loud,
-      not silent, so that shape should stay out of scope, matching the
-      scanner's existing single-fixed-column exclusion.
-
 - [ ] **`AlterColumnSafetyScanner` never detects `FLOAT(n)` precision
       narrowing — the declared bit-precision is dropped during type
       resolution, before the scanner ever sees it.**
