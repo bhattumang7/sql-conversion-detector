@@ -46,6 +46,15 @@ public sealed class AlwaysEncryptedOrderByOracleTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task OrderByOrdinalPositionOfDeterministicColumn_FailsWithEncryptionSchemeMismatch()
+    {
+        var ex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteAsync("SELECT CustomerId, Ssn FROM dbo.Customer ORDER BY 2;"));
+
+        Assert.Equal(EncryptionSchemeMismatchErrorNumber, ex.Number);
+    }
+
+    [Fact]
     public async Task OrderByPlainColumn_NegativeControl_Succeeds()
     {
         var exception = await Record.ExceptionAsync(() => ExecuteAsync("SELECT CustomerId FROM dbo.Customer ORDER BY PlainName;"));

@@ -81,6 +81,25 @@ public sealed class AlwaysEncryptedOrderByScannerTests
     }
 
     [Fact]
+    public void OrderByOrdinalPositionOfEncryptedColumn_Fires()
+    {
+        var findings = Scan("SELECT CustomerId, Ssn FROM dbo.Customer ORDER BY 2;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Customer", finding.TableQualifiedName);
+        Assert.Equal("Ssn", finding.ColumnName);
+        Assert.Equal("Deterministic", finding.EncryptionTypeDisplay);
+    }
+
+    [Fact]
+    public void OrderByOrdinalPositionOfPlainColumn_NeverFires()
+    {
+        var findings = Scan("SELECT CustomerId, PlainName FROM dbo.Customer ORDER BY 2;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void OrderByPrimaryKeyColumn_NeverFires()
     {
         var findings = Scan("SELECT CustomerId FROM dbo.Customer ORDER BY CustomerId;");

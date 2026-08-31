@@ -15,23 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 33 remain open below.
+correctness bugs found; 32 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`AlwaysEncryptedOrderByScanner` never detects an ordinal-position
-      `ORDER BY` referencing an Always Encrypted column.**
-      (`src/SilentScan.Core/Predicates/AlwaysEncryptedOrderByScanner.cs:47`
-      requires `element.Expression is ColumnReferenceExpression`; `ORDER BY
-      <ordinal>` parses to an integer literal expression, not a column
-      reference, so it's silently skipped before the encryption-type check
-      ever runs.) Oracle-confirmed (SQL Server 2025): `SELECT Id, Ssn FROM
-      dbo.T ORDER BY 2` against a deterministic/randomized-encrypted `Ssn` in
-      the 2nd select-list position raises the same `Msg 33277, Encryption
-      scheme mismatch` the rule is designed to catch — but the scanner
-      produces no finding for the ordinal form, only the by-name form.
 
 - [ ] **`BareTopNoOrderByScanner`'s "100 percent" carve-out only matches an
       integer literal, likely missing the decimal form of the same

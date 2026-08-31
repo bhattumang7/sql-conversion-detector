@@ -37,14 +37,30 @@ public static class AlwaysEncryptedOrderByScanner
             {
                 foreach (var element in orderByClause.OrderByElements)
                 {
-                    Inspect(element, scopeChain);
+                    Inspect(element, scopeChain, node);
                 }
             }
         }
 
-        private void Inspect(ExpressionWithSortOrder element, ScopeChain scopeChain)
+        private static ScalarExpression? ResolveOrdinalSelectExpression(ScalarExpression expression, QuerySpecification node)
         {
-            if (element.Expression is not ColumnReferenceExpression columnRef
+            if (expression is not IntegerLiteral { Value: { } value }
+                || !int.TryParse(value, out var ordinal)
+                || ordinal < 1
+                || ordinal > node.SelectElements.Count
+                || node.SelectElements[ordinal - 1] is not SelectScalarExpression selectScalar)
+            {
+                return null;
+            }
+
+            return selectScalar.Expression;
+        }
+
+        private void Inspect(ExpressionWithSortOrder element, ScopeChain scopeChain, QuerySpecification node)
+        {
+            var expression = ResolveOrdinalSelectExpression(element.Expression, node) ?? element.Expression;
+
+            if (expression is not ColumnReferenceExpression columnRef
                 || BaseColumnResolver.ResolveBaseColumn(columnRef, sourcePath, scopeChain, catalog) is not { } resolved
                 || catalog.Find(resolved.TableQualifiedName)?.FindColumn(resolved.ColumnName, catalog.IdentifierComparer) is not { } catalogColumn
                 || catalogColumn.EncryptionType is not (Catalog.ColumnEncryptionType.Deterministic or Catalog.ColumnEncryptionType.Randomized))
