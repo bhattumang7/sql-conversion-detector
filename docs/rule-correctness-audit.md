@@ -15,7 +15,7 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 30 remain open below.
+correctness bugs found; 25 remain open below.
 
 ---
 
