@@ -497,6 +497,83 @@ worse than not reporting it at all.
       scanner/binder exclusively uses named syntax, so the gap was never
       exercised.
 
+- [ ] **`StatementShapeScanner`'s `TableWithNoPrimaryKey` claims "no
+      engine-enforced row uniqueness" for any table lacking a `PRIMARY KEY`,
+      even when the table carries a `UNIQUE` constraint/index that enforces
+      exactly that.**
+      (`src/SilentScan.Core/Predicates/StatementShapeScanner.cs:43-56` only
+      suppresses the finding when
+      `table.Indexes.Any(i => i.Kind == CatalogIndexKind.PrimaryKey)`,
+      ignoring the separately tracked `CatalogIndexKind.UniqueConstraint`;
+      message: "no engine-enforced row uniqueness"; doc adds "nothing stops
+      two rows from being byte-for-byte identical".) Oracle-confirmed (SQL
+      Server 2025): a table with `Id INT NOT NULL UNIQUE` and no primary
+      key rejects a duplicate `Id` insert with `Violation of UNIQUE KEY
+      constraint` — demonstrably engine-enforced row uniqueness, directly
+      contradicting the message. (The doc's separate, narrower claim that
+      change tracking specifically requires a real `PRIMARY KEY` — not
+      satisfied by `UNIQUE` — was independently oracle-confirmed correct;
+      only the "no engine-enforced row uniqueness" phrasing is false.)
+
+- [ ] **`StringConcatNullScanner` never tracks `SET
+      CONCAT_NULL_YIELDS_NULL`, and the rule's own doc falsely claims
+      NULL-propagating `+` is "the only behavior at all in recent
+      compatibility levels."**
+      (`Reporting/RuleDocs/Predicate/StringConcatNull.cs:12-14`; the
+      scanner's `Rule` class in
+      `src/SilentScan.Core/Predicates/StringConcatNullScanner.cs` has no
+      `SET`-statement handler at all, unlike sibling scanners in this
+      codebase that do track other SET options.) Oracle-confirmed (SQL
+      Server 2025, `compatibility_level = 170`, the newest level): `SET
+      CONCAT_NULL_YIELDS_NULL OFF; SELECT 'a' + NULL` returns `'a'`, not
+      `NULL` — both statements run without error at the newest compat
+      level, so the setting is not forced/locked as the doc claims. A
+      module with this SET active would have every `+`-NULL-propagation
+      finding reported against behavior that doesn't actually occur.
+
+- [ ] **`TriggerCorrectnessScanner`'s `InsteadOfInsertFilteredNoRejectPath`
+      false-positives when an `INSTEAD OF INSERT` trigger routes rows into
+      two or more mutually-exclusive filtered `INSERT`s — no rows are
+      actually dropped, but every one of those statements gets flagged as
+      silently dropping rows.**
+      (`src/SilentScan.Core/Predicates/TriggerCorrectnessScanner.cs:228-265`,
+      line 249: `hasCompanionInsert` only recognizes an *unconditional*
+      extra `INSERT` as a companion/catch-all, never checking whether two or
+      more filtered inserts' predicates jointly cover the input — so a
+      trigger where every `INSERT` is itself filtered always has
+      `hasCompanionInsert = false` regardless of coverage.) Oracle-confirmed
+      (SQL Server 2025): an `INSTEAD OF INSERT` trigger with `INSERT INTO
+      Included ... WHERE Val > 0` and `INSERT INTO Excluded ... WHERE Val <=
+      0` — a common "route rows to different tables by filter" pattern —
+      accounts for every inserted row across the two tables with zero rows
+      lost. Both statements would be flagged, each falsely claiming "rows
+      matching the negated filter are silently dropped, no error, no
+      trace."
+
+- [ ] **`TempTableExecShapeCandidateScanner`'s `ColumnCountMismatch` ignores
+      an explicit column list on `INSERT INTO #temp (<cols>) EXEC proc`,
+      comparing the executed proc's described column count against the temp
+      table's *full* declared column count instead — so a narrower explicit
+      column list produces a false "always raises a hard runtime error"
+      claim.**
+      (`src/SilentScan.Core/Predicates/TempTableExecShapeCandidateScanner.cs:25-52`
+      never reads `InsertSpecification.Columns`, always using the temp
+      table's complete catalog-declared columns;
+      `src/SilentScan.Live/Catalog/TempTableExecShapeChecker.cs:83-92`
+      compares that full count against the proc's described result-set
+      column count with no way to know a partial list was present;
+      `RuleCatalog.cs:180` claims "this always raises a hard runtime error
+      (Msg 213/8164) every time the statement executes.") Oracle-confirmed
+      (SQL Server 2025): `#Results` declared with 3 columns
+      (`Col1`/`Col2`/`Col3 DEFAULT 99`), executed proc's real result set has
+      2 columns — `INSERT INTO #Results (Col1, Col2) EXEC proc` runs with
+      **no error**, `Col3` taking its default. The scanner, comparing 3
+      declared columns against 2 described columns while ignoring the
+      explicit `(Col1, Col2)` list, would report a guaranteed failure that
+      provably does not occur. Not covered by the existing test suite,
+      which has no case with an explicit column list narrower than the temp
+      table's full column set.
+
 ---
 
 ## Audited, no bug found
@@ -734,14 +811,24 @@ statement — is uncontroversial syntax, not a claim needing verification).
   missing/extra column" phrasing is contextual illustration, not
   contradicted by the scanner's own intentionally-broader trigger
   condition.
+- `TemporalTableHistoryIndexGapScanner` — index-kind filtering and
+  `SameKeyColumns`/`IsComparableIndex` logic match the existing test suite
+  and the doc's stated criteria exactly; confirmed live that the engine
+  itself refuses a plain `CREATE UNIQUE NONCLUSTERED INDEX` (not just a
+  constraint) against a temporal history table, consistent with the
+  scanner's uniqueness-agnostic comparison.
+- `TransactionHygieneScanner` — the reachability walk's conditional-open/
+  unconditional-close merge behavior was traced and doesn't produce a false
+  claim under the rule's own stated scope (leaked transactions); Msg 266
+  and `@@TRANCOUNT` behavior already oracle-tested. Three known blind spots
+  are already tracked in `detection-tasklist.md` and excluded from this
+  audit's scope, not re-verified here.
 
 ---
 
 ## Not yet audited
 
-StatementShape, StringConcatNull,
-TemporalTableHistoryIndexGap, TempTableExecShapeCandidate,
-TransactionHygiene, TriggerCorrectness, TriggerOrder,
+TriggerOrder,
 TriggerRecursionCycle, TruncateSwallowed, TryCastComputedColumnPredicate,
 TvfFence, UnindexedTempTableUsage, UntrustedConstraint, ViewOrdering,
 WaitFor, WindowFrame, WindowFunctionArgument
