@@ -10,6 +10,17 @@ public enum CheckConstraintFindingKind
     ConstraintOnIdentityColumn,
 }
 
+public enum IdentityCheckThresholdDirection
+{
+    NotApplicable,
+
+    Increasing,
+
+    Decreasing,
+
+    Other,
+}
+
 public sealed record CheckConstraintFinding(
     CheckConstraintFindingKind Kind,
     string ConstraintName,
@@ -17,7 +28,8 @@ public sealed record CheckConstraintFinding(
     string ColumnName,
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
-    FindingConfidence Confidence = FindingConfidence.High) : IFinding
+    FindingConfidence Confidence = FindingConfidence.High,
+    IdentityCheckThresholdDirection ThresholdDirection = IdentityCheckThresholdDirection.NotApplicable) : IFinding
 {
     public string RuleId { get; } = FindingRuleIds.CheckConstraintRuleId(Kind);
 

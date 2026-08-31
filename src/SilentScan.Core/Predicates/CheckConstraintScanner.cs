@@ -75,9 +75,90 @@ public static class CheckConstraintScanner
             {
                 findings.Add(new CheckConstraintFinding(
                     CheckConstraintFindingKind.ConstraintOnIdentityColumn, check.ConstraintName, check.TableQualifiedName,
-                    catalogColumn.Name, sourcePath, line));
+                    catalogColumn.Name, sourcePath, line,
+                    ThresholdDirection: ClassifyThresholdDirection(searchCondition, columnName, catalog.IdentifierComparer)));
             }
         }
+    }
+
+    private static IdentityCheckThresholdDirection ClassifyThresholdDirection(
+        BooleanExpression condition, string columnName, IEqualityComparer<string> comparer)
+    {
+        if (UnwrapToSingleComparison(condition) is not { } comparison)
+        {
+            return IdentityCheckThresholdDirection.Other;
+        }
+
+        var columnOnLeft = IsColumnReference(comparison.FirstExpression, columnName, comparer);
+        var columnOnRight = IsColumnReference(comparison.SecondExpression, columnName, comparer);
+        if (columnOnLeft == columnOnRight)
+        {
+            return IdentityCheckThresholdDirection.Other;
+        }
+
+        var literalSide = columnOnLeft ? comparison.SecondExpression : comparison.FirstExpression;
+        if (!IsIntegerLiteral(literalSide))
+        {
+            return IdentityCheckThresholdDirection.Other;
+        }
+
+        var type = columnOnLeft ? comparison.ComparisonType : FlipOperands(comparison.ComparisonType);
+
+        return type switch
+        {
+            BooleanComparisonType.GreaterThan or BooleanComparisonType.GreaterThanOrEqualTo
+                or BooleanComparisonType.NotLessThan => IdentityCheckThresholdDirection.Increasing,
+            BooleanComparisonType.LessThan or BooleanComparisonType.LessThanOrEqualTo
+                or BooleanComparisonType.NotGreaterThan => IdentityCheckThresholdDirection.Decreasing,
+            _ => IdentityCheckThresholdDirection.Other,
+        };
+    }
+
+    private static BooleanComparisonType FlipOperands(BooleanComparisonType type) => type switch
+    {
+        BooleanComparisonType.GreaterThan => BooleanComparisonType.LessThan,
+        BooleanComparisonType.LessThan => BooleanComparisonType.GreaterThan,
+        BooleanComparisonType.GreaterThanOrEqualTo => BooleanComparisonType.LessThanOrEqualTo,
+        BooleanComparisonType.LessThanOrEqualTo => BooleanComparisonType.GreaterThanOrEqualTo,
+        BooleanComparisonType.NotGreaterThan => BooleanComparisonType.NotLessThan,
+        BooleanComparisonType.NotLessThan => BooleanComparisonType.NotGreaterThan,
+        _ => type,
+    };
+
+    private static BooleanComparisonExpression? UnwrapToSingleComparison(BooleanExpression condition)
+    {
+        while (condition is BooleanParenthesisExpression parenthesis)
+        {
+            condition = parenthesis.Expression;
+        }
+
+        return condition as BooleanComparisonExpression;
+    }
+
+    private static bool IsColumnReference(ScalarExpression expression, string columnName, IEqualityComparer<string> comparer)
+    {
+        while (expression is ParenthesisExpression parenthesis)
+        {
+            expression = parenthesis.Expression;
+        }
+
+        return expression is ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: > 0 } identifiers }
+            && comparer.Equals(identifiers[^1].Value, columnName);
+    }
+
+    private static bool IsIntegerLiteral(ScalarExpression expression)
+    {
+        while (expression is ParenthesisExpression parenthesis)
+        {
+            expression = parenthesis.Expression;
+        }
+
+        if (expression is UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative or UnaryExpressionType.Positive } unary)
+        {
+            expression = unary.Expression;
+        }
+
+        return expression is IntegerLiteral;
     }
 
     private static BooleanExpression? TryParse(string definitionText, int? compatibilityLevel)

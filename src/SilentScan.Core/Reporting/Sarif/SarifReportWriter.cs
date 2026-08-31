@@ -788,7 +788,7 @@ public static class SarifReportWriter
             CheckConstraintFindingKind.NullNotHandled =>
                 $"'{finding.ConstraintName}' (CHECK on '{finding.TableQualifiedName}.{finding.ColumnName}') has no IS NULL/IS NOT NULL test against '{finding.ColumnName}' anywhere in its predicate, and '{finding.ColumnName}' is nullable - a NULL value silently passes this constraint under SQL Server's three-valued logic, even though the constraint reads as if it forbids bad data.",
             CheckConstraintFindingKind.ConstraintOnIdentityColumn =>
-                $"'{finding.ConstraintName}' (CHECK on '{finding.TableQualifiedName}.{finding.ColumnName}') references the IDENTITY column '{finding.ColumnName}' directly - every insert whose auto-generated identity value doesn't yet satisfy this predicate fails deterministically (Msg 547), consuming the identity counter on each failed attempt, until the counter catches up and failures silently stop forever.",
+                IdentityColumnCheckMessage(finding),
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled CheckConstraintFindingKind."),
         };
 
@@ -1518,6 +1518,21 @@ public static class SarifReportWriter
         var featureKind = finding.TouchedIsIndexedView ? "indexed view" : "filtered index";
         var indexSuffix = finding.TouchedIndexName is { } idx ? $".{idx}" : string.Empty;
         return $" - touches {featureKind} '{touched}'{indexSuffix}";
+    }
+
+    private static string IdentityColumnCheckMessage(CheckConstraintFinding finding)
+    {
+        var prefix = $"'{finding.ConstraintName}' (CHECK on '{finding.TableQualifiedName}.{finding.ColumnName}') references the IDENTITY column '{finding.ColumnName}' directly - the identity counter advances even on a failed insert (Msg 547), so the value it reserves for a rejected row is never reused.";
+
+        return finding.ThresholdDirection switch
+        {
+            IdentityCheckThresholdDirection.Increasing =>
+                $"{prefix} Every insert whose auto-generated identity value doesn't yet satisfy this predicate fails deterministically, consuming the identity counter on each failed attempt, until the counter catches up and failures silently stop forever.",
+            IdentityCheckThresholdDirection.Decreasing =>
+                $"{prefix} Inserts succeed only while the identity counter is still below this threshold; once the counter passes it, every subsequent insert fails deterministically and permanently, with no code change and no way for that direction to ever pass again.",
+            _ =>
+                $"{prefix} Because the counter keeps consuming values on both successful and failed inserts, whether and when this predicate ends up permanently satisfied, permanently failing, or neither depends entirely on the predicate's own shape - it is not guaranteed to eventually stop mattering.",
+        };
     }
 
     private static string FloorLevelForConfidence(string level, FindingConfidence confidence) =>

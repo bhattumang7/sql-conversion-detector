@@ -21,26 +21,6 @@ correctness bugs found; 30 remain open below.
 
 ## Confirmed bugs (open)
 
-- [ ] **`CheckConstraintScanner`'s identity-column finding overclaims
-      "failures silently stop forever" for any CHECK on an identity column,
-      but that's only true for a monotonic one-sided threshold.**
-      (`src/SilentScan.Core/Predicates/CheckConstraintScanner.cs:74` fires
-      for any CHECK constraint referencing an identity column, regardless of
-      predicate shape; the shipped message —
-      `RuleCatalog.cs:129`/`Sarif/SarifReportWriter.cs:790-791` — says every
-      failing insert "fails deterministically (Msg 547)... until the counter
-      catches up and failures silently stop forever" for every case it
-      fires on.) Oracle-confirmed (SQL Server 2025): a periodic predicate
-      like `CHECK (Id % 2 = 0)` on an identity column alternates
-      succeed/fail forever and never "stops" — inserting 4 rows in sequence
-      against `IDENTITY(1,1)` fails on odd values (Msg 547) and succeeds on
-      even ones, indefinitely. A reverse-direction threshold like `CHECK (Id
-      < 1000)` is the mirror-image divergence: satisfied at first, then
-      *permanently* failing once the counter passes 1000 — the opposite of
-      "stops mattering." The message's narrative only actually holds for a
-      one-sided `col > N`/`col >= N` shape, which the scanner's trigger
-      condition doesn't require.
-
 - [ ] **`ColumnstoreUnsupportedColumnTypeScanner` only ever flags
       `SQL_VARIANT`; the real columnstore column-type gate is materially
       broader and, for MAX-length string/binary types, depends on clustered

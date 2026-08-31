@@ -30,16 +30,28 @@ internal static class CheckConstraintOnIdentityColumn
             increases), so it silently stops doing anything at all, forever, with no code change
             and no error after the fact - only the trail of 1000 rejected inserts and a counter that
             jumped straight to 1001 hints at what happened.
+
+            The same counter-drift problem applies to every predicate shape referencing the
+            IDENTITY column directly, just not always in this direction. A reversed one-sided
+            threshold like CHECK (Id < 1000) is the mirror image: it accepts inserts while the
+            counter is still low and then permanently, silently starts rejecting every insert once
+            the counter passes 1000 - the opposite failure mode from "stops mattering." A predicate
+            that isn't a one-sided threshold at all, like CHECK (Id % 2 = 0), doesn't settle in
+            either direction - it keeps alternating pass/fail forever as the counter advances,
+            burning half of every subsequent identity value on a rejected insert indefinitely.
             """,
         HowToFixIt: """
             Do not enforce a numeric-threshold CHECK constraint directly against an IDENTITY
             column - the counter advances on failed inserts as much as successful ones, so the
-            constraint either rejects a burst of inserts while the counter climbs toward the
-            threshold and then becomes permanently, silently satisfied, or (for a threshold the
-            counter starts above) never does anything at all. If the actual intent is a business
-            rule about the row's identity/sequence, express it against a value the application
-            controls and can validate before submission, not the engine-generated IDENTITY value
-            itself.
+            constraint's effect drifts as the counter climbs instead of staying fixed: a one-sided
+            "greater than" threshold rejects a burst of inserts while the counter climbs toward it
+            and then becomes permanently, silently satisfied; a one-sided "less than" threshold
+            does the reverse, accepting inserts only until the counter passes it and then
+            permanently rejecting everything after; and any other predicate shape (equality,
+            modulo, a range) isn't guaranteed to ever settle into either state. If the actual
+            intent is a business rule about the row's identity/sequence, express it against a value
+            the application controls and can validate before submission, not the engine-generated
+            IDENTITY value itself.
             """,
         Examples:
         [

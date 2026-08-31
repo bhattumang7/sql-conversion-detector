@@ -1,5 +1,7 @@
+using System.Text.Json;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.Reporting.Sarif;
 using SilentScan.Tests.Support;
 using SilentScan.Core.TypeInference;
 
@@ -196,5 +198,64 @@ public sealed class CheckConstraintScannerTests
         var finding = Assert.Single(report.Find<CheckConstraintFinding>("CheckConstraintScanner"), f => f.Kind == CheckConstraintFindingKind.ConstraintOnIdentityColumn);
         Assert.Equal("CK_CheckIdentityTarget_Id", finding.ConstraintName);
         Assert.Equal("Id", finding.ColumnName);
+    }
+
+    private static string SarifMessageFor(SilentScan.Core.Reporting.ScanReport report, string constraintName)
+    {
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+        var results = document.RootElement.GetProperty("runs")[0].GetProperty("results");
+        foreach (var result in results.EnumerateArray())
+        {
+            var text = result.GetProperty("message").GetProperty("text").GetString()!;
+            if (text.Contains($"'{constraintName}'", StringComparison.Ordinal))
+            {
+                return text;
+            }
+        }
+
+        throw new InvalidOperationException($"No SARIF result found for constraint '{constraintName}'.");
+    }
+
+    [Fact]
+    public async Task LiveDeployment_IncreasingThresholdIdentityCheck_MessageClaimsPermanentSilentSatisfaction()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            "CREATE TABLE dbo.CheckIdentityIncreasing (Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY, CONSTRAINT CK_CheckIdentityIncreasing_Id CHECK (Id > 5), Name VARCHAR(20) NULL);");
+
+        var finding = Assert.Single(report.Find<CheckConstraintFinding>("CheckConstraintScanner"), f => f.Kind == CheckConstraintFindingKind.ConstraintOnIdentityColumn);
+        Assert.Equal(IdentityCheckThresholdDirection.Increasing, finding.ThresholdDirection);
+
+        var message = SarifMessageFor(report, "CK_CheckIdentityIncreasing_Id");
+        Assert.Contains("catches up and failures silently stop forever", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LiveDeployment_DecreasingThresholdIdentityCheck_MessageDoesNotClaimStopsMatteringForever()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            "CREATE TABLE dbo.CheckIdentityDecreasing (Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY, CONSTRAINT CK_CheckIdentityDecreasing_Id CHECK (Id < 5), Name VARCHAR(20) NULL);");
+
+        var finding = Assert.Single(report.Find<CheckConstraintFinding>("CheckConstraintScanner"), f => f.Kind == CheckConstraintFindingKind.ConstraintOnIdentityColumn);
+        Assert.Equal(IdentityCheckThresholdDirection.Decreasing, finding.ThresholdDirection);
+
+        var message = SarifMessageFor(report, "CK_CheckIdentityDecreasing_Id");
+        Assert.DoesNotContain("stop forever", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("catches up and failures silently stop forever", message, StringComparison.Ordinal);
+        Assert.Contains("permanently", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LiveDeployment_PeriodicPredicateIdentityCheck_MessageDoesNotClaimDeterministicSettlement()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            "CREATE TABLE dbo.CheckIdentityPeriodic (Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY, CONSTRAINT CK_CheckIdentityPeriodic_Id CHECK (Id % 2 = 0), Name VARCHAR(20) NULL);");
+
+        var finding = Assert.Single(report.Find<CheckConstraintFinding>("CheckConstraintScanner"), f => f.Kind == CheckConstraintFindingKind.ConstraintOnIdentityColumn);
+        Assert.Equal(IdentityCheckThresholdDirection.Other, finding.ThresholdDirection);
+
+        var message = SarifMessageFor(report, "CK_CheckIdentityPeriodic_Id");
+        Assert.DoesNotContain("stop forever", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("catches up", message, StringComparison.Ordinal);
     }
 }
