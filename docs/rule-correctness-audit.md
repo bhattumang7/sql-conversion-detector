@@ -15,26 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 23 remain open below.
+correctness bugs found; 22 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`IdentityRangeScanner` crashes (unhandled `OverflowException`)
-      instead of reporting for `DECIMAL`/`NUMERIC` IDENTITY columns with
-      precision 29-38, a legal and reachable range.**
-      (`src/SilentScan.Core/Predicates/IdentityRangeScanner.cs:86-95`,
-      `DecimalMax` computes `10^precision - 1` by repeated `decimal`
-      multiplication; `decimal.MaxValue` has 29 significant digits and C#
-      `decimal` arithmetic is always overflow-checked, so precision ≥ 29
-      throws instead of returning a value.) Oracle-confirmed (SQL Server
-      2025): `CREATE TABLE ... (Id DECIMAL(38,0) IDENTITY(1,1) ...)` —
-      `IDENTITY` on `DECIMAL(38,0)`, the maximum legal precision, is valid
-      and commonly reachable, and the scanner's own `TypeBound` switch
-      already claims to handle `SqlTypeCategory.Decimal` — so this is a
-      real crash on a legal schema across roughly a quarter of the type's
-      legal precision range, not a theoretical input.
 
 - [ ] **`IndexCoverageScanner`'s clustering-key fallback picks any
       `PRIMARY KEY`-kind index without checking it's actually the table's

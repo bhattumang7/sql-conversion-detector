@@ -1,3 +1,4 @@
+using System.Numerics;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.TypeInference;
@@ -7,6 +8,16 @@ namespace SilentScan.Core.Predicates;
 public static class IdentityRangeScanner
 {
     public const decimal NearExhaustionRemainingFraction = 0.9m;
+
+    private static readonly BigInteger ThresholdDenominator = ScaleFactor(NearExhaustionRemainingFraction);
+    private static readonly BigInteger ThresholdNumerator = new(NearExhaustionRemainingFraction * (decimal)ScaleFactor(NearExhaustionRemainingFraction));
+
+    private static BigInteger ScaleFactor(decimal value)
+    {
+        var bits = decimal.GetBits(value);
+        var scale = (bits[3] >> 16) & 0xFF;
+        return BigInteger.Pow(10, scale);
+    }
 
     public static IReadOnlyList<IdentityRangeFinding> Scan(DatabaseCatalog catalog, IScanStage? stage = null)
     {
@@ -52,18 +63,22 @@ public static class IdentityRangeScanner
             return;
         }
 
-        var totalRange = Math.Abs(bound - seed);
-        if (totalRange == 0)
+        var seedInteger = new BigInteger(seed);
+        var currentInteger = new BigInteger(current);
+
+        var totalRange = BigInteger.Abs(bound - seedInteger);
+        if (totalRange.IsZero)
         {
             return;
         }
 
-        var consumed = Math.Abs(current - seed);
-        var fractionConsumed = consumed / totalRange;
-        if (fractionConsumed < NearExhaustionRemainingFraction)
+        var consumed = BigInteger.Abs(currentInteger - seedInteger);
+        if (consumed * ThresholdDenominator < totalRange * ThresholdNumerator)
         {
             return;
         }
+
+        var fractionConsumed = (double)consumed / (double)totalRange;
 
         findings.Add(new IdentityRangeFinding(
             IdentityRangeFindingKind.IdentityRangeNearExhaustion,
@@ -74,26 +89,17 @@ public static class IdentityRangeScanner
             table.SourceLine));
     }
 
-    private static decimal? TypeBound(SqlType type, bool ascending) => type.Category switch
+    private static BigInteger? TypeBound(SqlType type, bool ascending) => type.Category switch
     {
-        SqlTypeCategory.TinyInt => ascending ? 255m : 0m,
-        SqlTypeCategory.SmallInt => ascending ? 32_767m : -32_768m,
-        SqlTypeCategory.Int => ascending ? 2_147_483_647m : -2_147_483_648m,
-        SqlTypeCategory.BigInt => ascending ? 9_223_372_036_854_775_807m : -9_223_372_036_854_775_808m,
+        SqlTypeCategory.TinyInt => ascending ? 255 : 0,
+        SqlTypeCategory.SmallInt => ascending ? 32_767 : -32_768,
+        SqlTypeCategory.Int => ascending ? 2_147_483_647 : -2_147_483_648,
+        SqlTypeCategory.BigInt => ascending ? 9_223_372_036_854_775_807 : -9_223_372_036_854_775_808,
 
-        SqlTypeCategory.Decimal when type is { Precision: { } precision, Scale: 0 } =>
+        SqlTypeCategory.Decimal when type is { Precision: >= 1 and <= 38 and { } precision, Scale: 0 } =>
             ascending ? DecimalMax(precision) : -DecimalMax(precision),
         _ => null,
     };
 
-    private static decimal DecimalMax(int precision)
-    {
-        var max = 1m;
-        for (var i = 0; i < precision; i++)
-        {
-            max *= 10m;
-        }
-
-        return max - 1m;
-    }
+    private static BigInteger DecimalMax(int precision) => BigInteger.Pow(10, precision) - BigInteger.One;
 }
