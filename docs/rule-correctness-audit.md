@@ -21,27 +21,6 @@ correctness bugs found; 30 remain open below.
 
 ## Confirmed bugs (open)
 
-- [ ] **`CrossModuleLockOrderScanner` records a procedure's write order
-      across its whole body instead of per explicit transaction, so two
-      writes that were never lock-held concurrently can be reported as a
-      lock-order disagreement.**
-      (`src/SilentScan.Core/Predicates/CrossModuleLockOrderScanner.cs:169-203`
-      — `_writes` is reset only in `EnterProcedure`, never at `BEGIN
-      TRANSACTION`, so `RecordWrite`'s dedup-by-first-occurrence spans
-      transactions that already committed and released their locks before a
-      later, separate transaction re-touches the same table.) Oracle-confirmed
-      (SQL Server 2025, via `sys.dm_tran_locks`): a lock on a table is
-      released at `COMMIT` and not re-acquired until that table is next
-      touched. For a procedure shaped `BEGIN TRAN; UPDATE T1; COMMIT; BEGIN
-      TRAN; UPDATE T2; UPDATE T1; COMMIT;`, the scanner records the
-      procedure's order as `[T1, T2]` (from T1's first, already-committed
-      appearance) even though the only transaction that ever holds both
-      locks simultaneously acquires them `T2` then `T1` — the opposite of
-      what the scanner reports, and identical to a sibling procedure that
-      does `BEGIN TRAN; UPDATE T2; UPDATE T1; COMMIT;`. The scanner flags
-      these two procedures as disagreeing on lock order (deadlock risk) when
-      no deadlock cycle can actually form between them. False positive.
-
 - [ ] **`DeprecatedSyntaxScanner`'s legacy-compatibility-view name list
       includes `syslocks`, which is not and never was a real SQL Server
       compatibility view.**

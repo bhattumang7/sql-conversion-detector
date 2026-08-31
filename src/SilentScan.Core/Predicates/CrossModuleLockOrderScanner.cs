@@ -102,48 +102,81 @@ public static class CrossModuleLockOrderScanner
     {
         public List<ProcedureWriteOrder> Orderings { get; } = [];
 
+        private string? _procedureQualifiedName;
+        private int _procedureLine;
         private int _openTransactionDepth;
-        private List<(string TableQualifiedName, int Line)>? _writes;
+        private List<(string TableQualifiedName, int Line)>? _currentTransactionWrites;
+        private Dictionary<string, int>? _savepointMarks;
 
         public void OnEnterCreateProcedureStatement(CreateProcedureStatement node, ModuleWalker walker) =>
-            EnterProcedure();
+            EnterProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine);
 
         public void OnLeaveCreateProcedureStatement(CreateProcedureStatement node, ModuleWalker walker) =>
-            LeaveProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine);
+            LeaveProcedure();
 
         public void OnEnterAlterProcedureStatement(AlterProcedureStatement node, ModuleWalker walker) =>
-            EnterProcedure();
+            EnterProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine);
 
         public void OnLeaveAlterProcedureStatement(AlterProcedureStatement node, ModuleWalker walker) =>
-            LeaveProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine);
+            LeaveProcedure();
 
         public void OnEnterCreateOrAlterProcedureStatement(CreateOrAlterProcedureStatement node, ModuleWalker walker) =>
-            EnterProcedure();
+            EnterProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine);
 
         public void OnLeaveCreateOrAlterProcedureStatement(CreateOrAlterProcedureStatement node, ModuleWalker walker) =>
-            LeaveProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine);
+            LeaveProcedure();
 
-        public void OnEnterBeginTransactionStatement(BeginTransactionStatement node, ModuleWalker walker) =>
+        public void OnEnterBeginTransactionStatement(BeginTransactionStatement node, ModuleWalker walker)
+        {
+            if (_openTransactionDepth == 0)
+            {
+                _currentTransactionWrites = [];
+                _savepointMarks = null;
+            }
+
             _openTransactionDepth++;
+        }
+
+        public void OnEnterSaveTransactionStatement(SaveTransactionStatement node, ModuleWalker walker)
+        {
+            if (_currentTransactionWrites is not { } writes || node.Name?.Identifier is not { } identifier)
+            {
+                return;
+            }
+
+            _savepointMarks ??= new Dictionary<string, int>(catalog.IdentifierComparer);
+            _savepointMarks[identifier.Value] = writes.Count;
+        }
 
         public void OnEnterCommitTransactionStatement(CommitTransactionStatement node, ModuleWalker walker)
         {
-#pragma warning disable S2583
-            if (_openTransactionDepth > 0)
+            if (_openTransactionDepth == 0)
             {
-                _openTransactionDepth--;
+                return;
             }
-#pragma warning restore S2583
+
+            _openTransactionDepth--;
+            if (_openTransactionDepth == 0)
+            {
+                FinalizeCurrentTransaction();
+            }
         }
 
         public void OnEnterRollbackTransactionStatement(RollbackTransactionStatement node, ModuleWalker walker)
         {
-#pragma warning disable S2583
-            if (_openTransactionDepth > 0)
+            if (_openTransactionDepth == 0)
             {
-                _openTransactionDepth--;
+                return;
             }
-#pragma warning restore S2583
+
+            if (TryGetSavepointMark(node.Name, out var mark))
+            {
+                _currentTransactionWrites?.RemoveRange(mark, _currentTransactionWrites.Count - mark);
+                return;
+            }
+
+            _openTransactionDepth = 0;
+            FinalizeCurrentTransaction();
         }
 
         public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker) =>
@@ -158,27 +191,42 @@ public static class CrossModuleLockOrderScanner
         public void OnEnterMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             RecordWrite(node.MergeSpecification.Target, node.StartLine, node.WithCtesAndXmlNamespaces);
 
-        private void EnterProcedure()
+        private bool TryGetSavepointMark(IdentifierOrValueExpression? name, out int mark)
         {
-            _openTransactionDepth = 0;
-            _writes = [];
+            mark = 0;
+            return name?.Value is { } value && _savepointMarks is { } marks && marks.TryGetValue(value, out mark);
         }
 
-        private void LeaveProcedure(string qualifiedName, int line)
+        private void EnterProcedure(string qualifiedName, int line)
         {
-#pragma warning disable S2583
-            if (_writes is { Count: >= 2 })
-            {
-                Orderings.Add(new ProcedureWriteOrder(qualifiedName, sourcePath, line, _writes));
-            }
-#pragma warning restore S2583
+            _procedureQualifiedName = qualifiedName;
+            _procedureLine = line;
+            _openTransactionDepth = 0;
+            _currentTransactionWrites = null;
+            _savepointMarks = null;
+        }
 
-            _writes = null;
+        private void LeaveProcedure()
+        {
+            FinalizeCurrentTransaction();
+            _procedureQualifiedName = null;
+            _openTransactionDepth = 0;
+            _savepointMarks = null;
+        }
+
+        private void FinalizeCurrentTransaction()
+        {
+            if (_currentTransactionWrites is { Count: >= 2 } writes && _procedureQualifiedName is { } qualifiedName)
+            {
+                Orderings.Add(new ProcedureWriteOrder(qualifiedName, sourcePath, _procedureLine, writes));
+            }
+
+            _currentTransactionWrites = null;
         }
 
         private void RecordWrite(TableReference? target, int line, WithCtesAndXmlNamespaces? withCtes)
         {
-            if (_writes is null || _openTransactionDepth == 0)
+            if (_currentTransactionWrites is null)
             {
                 return;
             }
@@ -188,9 +236,9 @@ public static class CrossModuleLockOrderScanner
                 return;
             }
 
-            if (IndexOfTable(_writes, qualifiedName, catalog.IdentifierComparer) < 0)
+            if (IndexOfTable(_currentTransactionWrites, qualifiedName, catalog.IdentifierComparer) < 0)
             {
-                _writes.Add((qualifiedName, line));
+                _currentTransactionWrites.Add((qualifiedName, line));
             }
         }
     }

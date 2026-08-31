@@ -168,16 +168,16 @@ public sealed class CrossModuleLockOrderScannerTests
             + "\nGO\n"
             + "CREATE PROCEDURE dbo.ProcB AS BEGIN "
             + "BEGIN TRANSACTION; "
-            + "UPDATE dbo.T2 SET Id = Id; "
             + "UPDATE dbo.T1 SET Id = Id; "
+            + "UPDATE dbo.T2 SET Id = Id; "
             + "COMMIT TRANSACTION; "
             + "END;");
 
         var finding = Assert.Single(findings);
         Assert.Equal("dbo.T1", finding.FirstTableQualifiedName);
         Assert.Equal("dbo.T2", finding.SecondTableQualifiedName);
-        Assert.Equal("dbo.ProcA", finding.FirstTableFirstOrdering.ProcedureQualifiedName);
-        Assert.Equal("dbo.ProcB", finding.SecondTableFirstOrdering.ProcedureQualifiedName);
+        Assert.Equal("dbo.ProcB", finding.FirstTableFirstOrdering.ProcedureQualifiedName);
+        Assert.Equal("dbo.ProcA", finding.SecondTableFirstOrdering.ProcedureQualifiedName);
     }
 
     [Fact]
@@ -267,16 +267,16 @@ public sealed class CrossModuleLockOrderScannerTests
             + "\nGO\n"
             + "CREATE PROCEDURE dbo.ProcB AS BEGIN "
             + "BEGIN TRANSACTION; "
-            + "UPDATE dbo.T2 SET Id = Id; "
             + "UPDATE dbo.T1 SET Id = Id; "
+            + "UPDATE dbo.T2 SET Id = Id; "
             + "COMMIT TRANSACTION; "
             + "END;");
 
         var finding = Assert.Single(findings);
         Assert.Equal("dbo.T1", finding.FirstTableQualifiedName);
         Assert.Equal("dbo.T2", finding.SecondTableQualifiedName);
-        Assert.Equal("dbo.ProcA", finding.FirstTableFirstOrdering.ProcedureQualifiedName);
-        Assert.Equal("dbo.ProcB", finding.SecondTableFirstOrdering.ProcedureQualifiedName);
+        Assert.Equal("dbo.ProcB", finding.FirstTableFirstOrdering.ProcedureQualifiedName);
+        Assert.Equal("dbo.ProcA", finding.SecondTableFirstOrdering.ProcedureQualifiedName);
     }
 
     [Fact]

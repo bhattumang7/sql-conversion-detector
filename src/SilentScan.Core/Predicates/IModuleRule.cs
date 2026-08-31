@@ -352,6 +352,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterSaveTransactionStatement(SaveTransactionStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterWaitForStatement(WaitForStatement node, ModuleWalker walker)
     {
     }
