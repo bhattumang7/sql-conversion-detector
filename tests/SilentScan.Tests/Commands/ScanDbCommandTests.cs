@@ -61,4 +61,21 @@ public sealed class ScanDbCommandTests
         Assert.Equal(1, exitCode);
         Assert.Contains("error: could not scan the live database", stderr.ToString());
     }
+
+    [Fact]
+    public async Task RunAsync_CheckConnectivityUnreachableServer_ReturnsOneAndWritesConnectionErrorWithoutValidatingOtherOptions()
+    {
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var options = new ReportOptions("not-a-real-format", "not-a-real-confidence", null, "not-a-real-verbosity");
+
+        var exitCode = await ScanDbCommand.RunAsync(
+            "Server=127.0.0.1,1;Database=db;Connect Timeout=1;TrustServerCertificate=true",
+            new ScanFlags(false, false, false, CheckConnectivity: true), options, stdout, stderr, CancellationToken.None);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("error: could not connect to the database", stderr.ToString());
+        Assert.DoesNotContain("unknown --format", stderr.ToString());
+        Assert.Equal(string.Empty, stdout.ToString());
+    }
 }

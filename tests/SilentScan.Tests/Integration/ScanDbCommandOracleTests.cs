@@ -126,4 +126,20 @@ public sealed class ScanDbCommandOracleTests : OracleTestFixture
         Assert.Equal(0, exitCode);
         Assert.Contains("usp_FindWidget", stdout.ToString());
     }
+
+    [Fact]
+    public async Task RunAsync_CheckConnectivityAgainstLiveDatabase_ReturnsZeroAndConfirmsReachabilityWithoutScanning()
+    {
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var options = new ReportOptions("text", "high", null, "brief");
+
+        var exitCode = await ScanDbCommand.RunAsync(
+            Options.BuildConnectionString(DatabaseName), new ScanFlags(false, false, false, CheckConnectivity: true), options, stdout, stderr, CancellationToken.None);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(DatabaseName, stdout.ToString());
+        Assert.DoesNotContain("usp_FindWidget", stdout.ToString());
+        Assert.DoesNotContain("reading catalog", stderr.ToString());
+    }
 }

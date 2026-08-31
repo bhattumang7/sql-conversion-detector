@@ -8,7 +8,7 @@ using SilentScan.Live;
 
 namespace SilentScan.Cli.Commands;
 
-public readonly record struct ScanFlags(bool IncludePlanCacheEvidence, bool FetchSqlFromTables, bool Strict);
+public readonly record struct ScanFlags(bool IncludePlanCacheEvidence, bool FetchSqlFromTables, bool Strict, bool CheckConnectivity = false);
 
 public static class ScanDbCommand
 {
@@ -66,6 +66,12 @@ public static class ScanDbCommand
             DefaultValueFactory = _ => false,
         };
 
+        var checkConnectivityOption = new Option<bool>("--check-connectivity")
+        {
+            Description = ReportOutput.CheckConnectivityOptionDescription,
+            DefaultValueFactory = _ => false,
+        };
+
         var description = "Connect to a live SQL Server database, read its catalog from engine metadata, and scan every readable module across all 234 rules in 11 families: conversions and silent write loss, sargability, lineage metrics, catalog and constraint state, plan shape, control flow and transactions, dynamic SQL, code quality and security, index design, query anti-patterns, triggers and cross-module correctness.\n\nOptions:\n"
             + $"  --format <format> (default: text) - {ReportOutput.FormatOptionDescription}\n"
             + $"  --confidence <confidence> (default: high) - {ReportOutput.ConfidenceOptionDescription}\n"
@@ -73,6 +79,7 @@ public static class ScanDbCommand
             + $"  --fetch-sql-from-tables (default: off) - {ReportOutput.FetchSqlFromTablesOptionDescription}\n"
             + $"  --verbosity <verbosity> (default: brief) - {ReportOutput.VerbosityOptionDescription}\n"
             + $"  --strict (default: off) - {ReportOutput.StrictOptionDescription}\n"
+            + $"  --check-connectivity (default: off) - {ReportOutput.CheckConnectivityOptionDescription}\n"
             + $"  --output <output> - {ReportOutput.OutputOptionDescription}";
 
         var command = new Command("scan-db", description)
@@ -84,6 +91,7 @@ public static class ScanDbCommand
             fetchSqlFromTablesOption,
             verbosityOption,
             strictOption,
+            checkConnectivityOption,
             outputOption,
         };
 
@@ -93,12 +101,13 @@ public static class ScanDbCommand
             var planCacheEvidence = parseResult.GetValue(planCacheEvidenceOption);
             var fetchSqlFromTables = parseResult.GetValue(fetchSqlFromTablesOption);
             var strict = parseResult.GetValue(strictOption);
+            var checkConnectivity = parseResult.GetValue(checkConnectivityOption);
             var options = new ReportOptions(
                 parseResult.GetValue(formatOption)!,
                 parseResult.GetValue(confidenceOption)!,
                 parseResult.GetValue(outputOption),
                 parseResult.GetValue(verbosityOption)!);
-            return await RunAsync(connectionString, new ScanFlags(planCacheEvidence, fetchSqlFromTables, strict), options, Console.Out, Console.Error, cancellationToken);
+            return await RunAsync(connectionString, new ScanFlags(planCacheEvidence, fetchSqlFromTables, strict, checkConnectivity), options, Console.Out, Console.Error, cancellationToken);
         });
 
         return command;
@@ -107,6 +116,11 @@ public static class ScanDbCommand
     internal static async Task<int> RunAsync(
         string connectionString, ScanFlags flags, ReportOptions options, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken = default)
     {
+        if (flags.CheckConnectivity)
+        {
+            return await RunConnectivityCheckAsync(connectionString, stdout, stderr, cancellationToken);
+        }
+
         if (!ReportOutput.TryParseFormat(options.Format, out var reportFormat))
         {
             await stderr.WriteLineAsync(ReportOutput.UnknownFormatMessage(options.Format));
@@ -166,6 +180,21 @@ public static class ScanDbCommand
         }
 
         return flags.Strict && ReportOutput.HasCoverageGaps(result.Report) ? 1 : 0;
+    }
+
+    private static async Task<int> RunConnectivityCheckAsync(string connectionString, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var info = await ConnectivityChecker.CheckAsync(connectionString, cancellationToken);
+            await stdout.WriteLineAsync($"ok: connected to {info.ServerName}/{info.DatabaseName} (SQL Server {info.ProductVersion}, {info.Edition})");
+            return 0;
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+        {
+            await stderr.WriteLineAsync($"error: could not connect to the database: {ex.Message}");
+            return 1;
+        }
     }
 
     private static async Task WarnOnParseHealthAsync(LiveScanResult result, TextWriter stderr)

@@ -36,6 +36,9 @@ internal static class ReportOutput
     internal const string FetchSqlFromTablesOptionDescription =
         "Also fetch the real value(s) of dynamic SQL text stored in a table (e.g. SELECT @sql = Definition FROM dbo.Templates WHERE Name = 'X') instead of leaving it unanalyzable - narrowed by whatever literal WHERE conditions can be pushed down, every distinct value analyzed as its own candidate when more than one matches. Reads real row content, not just catalog metadata - off by default.";
 
+    internal const string CheckConnectivityOptionDescription =
+        "Only open a connection to the target and confirm it is reachable (server name, database, product version, edition), then exit without scanning. Ignores every other scan option. Off by default.";
+
     internal static bool HasCoverageGaps(ScanReport report) =>
         report.ParseHealth.Files.Any(f => f.Errors.Count > 0 || f.UnanalyzedBatches.Count > 0)
         || report.SkippedConstructSummary.TotalCount > 0
