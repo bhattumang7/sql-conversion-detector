@@ -79,7 +79,6 @@ public static class IndexCoverageScanner
 
             var clusteringKeyColumns =
                 table.Indexes.FirstOrDefault(i => i.IsClustered && !i.IsColumnstore)?.KeyColumns
-                ?? table.Indexes.FirstOrDefault(i => i.Kind == CatalogIndexKind.PrimaryKey)?.KeyColumns
                 ?? [];
 
             var indexColumns = index.KeyColumns

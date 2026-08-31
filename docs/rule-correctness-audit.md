@@ -15,37 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 22 remain open below.
+correctness bugs found; 21 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`IndexCoverageScanner`'s clustering-key fallback picks any
-      `PRIMARY KEY`-kind index without checking it's actually the table's
-      clustering key, so a table with a `NONCLUSTERED PRIMARY KEY` can miss
-      a real Key/RID Lookup.**
-      (`src/SilentScan.Core/Predicates/IndexCoverageScanner.cs:80-83`: the
-      second fallback branch selects
-      `table.Indexes.FirstOrDefault(i => i.Kind == CatalogIndexKind.PrimaryKey)`
-      without an `IsClustered` check, then unions those columns into the
-      "already covered by every nonclustered index" set — but only a real
-      clustering key or heap RID is actually carried into a nonclustered
-      index's leaf rows, not a nonclustered primary key's own columns.)
-      Oracle-confirmed (SQL Server 2025) via plan XML: a heap table with
-      `CONSTRAINT PK_HeapT PRIMARY KEY NONCLUSTERED (Id)` and a separate
-      nonclustered index on `A` — `SELECT Id, A FROM ... WHERE A = 5`
-      forced onto the `A` index produces `PhysicalOp="RID Lookup"` in the
-      real plan, because that index's leaf rows carry only the heap's RID,
-      not `Id`. Tracing the scanner's own logic against this shape: the
-      incorrect fallback resolves `clusteringKeyColumns` to `[Id]`, marks
-      `Id` as covered, and the scanner reports no finding at all for a
-      query that provably needs a lookup — a false negative directly
-      contradicting the rule's own "oracle-confirmed via real plan XML"
-      claim. `CatalogIndex.IsClustered` is already populated correctly from
-      `sys.indexes.type_desc` in the tool's live-catalog path, so this is a
-      genuine logic bug reachable through the shipped tool, not a
-      data-population artifact.
 
 - [ ] **`DuplicationScanner`'s `IdenticalBinaryOperands` finding treats any
       two textually-identical non-column expressions as provably equal,

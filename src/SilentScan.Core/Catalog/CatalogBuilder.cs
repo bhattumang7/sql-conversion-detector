@@ -1238,7 +1238,8 @@ public static class CatalogBuilder
                     constraint.IsPrimaryKey ? CatalogIndexKind.PrimaryKey : CatalogIndexKind.UniqueConstraint,
                     IsUnique: true,
                     [.. constraint.Columns.Select(ColumnName)],
-                    IncludedColumns: []));
+                    IncludedColumns: [],
+                    IsClustered: constraint.Clustered ?? constraint.IsPrimaryKey));
             }
 
             return indexes;
@@ -1400,7 +1401,8 @@ public static class CatalogBuilder
                         unique.IsPrimaryKey ? CatalogIndexKind.PrimaryKey : CatalogIndexKind.UniqueConstraint,
                         IsUnique: true,
                         unique.Columns.Count > 0 ? [.. unique.Columns.Select(ColumnName)] : [columnName],
-                        IncludedColumns: []));
+                        IncludedColumns: [],
+                        IsClustered: unique.Clustered ?? unique.IsPrimaryKey));
 
                     if (unique.IsPrimaryKey)
                     {
