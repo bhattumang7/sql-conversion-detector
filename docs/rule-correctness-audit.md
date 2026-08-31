@@ -15,33 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 21 remain open below.
+correctness bugs found; 20 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`DuplicationScanner`'s `IdenticalBinaryOperands` finding treats any
-      two textually-identical non-column expressions as provably equal,
-      with no non-determinism gate — so a repeated non-deterministic
-      function call is claimed to be "always the same value, a tautology,
-      or a fixed degenerate result" when it demonstrably isn't.**
-      (`src/SilentScan.Core/Predicates/DuplicationScanner.cs`:
-      `CanClaimTautologyOrContradiction` (~line 282-290) returns `true` for
-      any non-`ColumnReferenceExpression`, with no determinism check, gating
-      the `Equals`-comparison path; the `AND`/`OR` path (~line 206-213) and
-      the `Subtract`/`Divide`/`Modulo` self-reference path (~line 215-224)
-      fire on same-text operands with no gate at all.) Oracle-confirmed (SQL
-      Server 2025): `NEWID() = NEWID()` across 7.6M cross-joined rows
-      matched zero times — never true, refuting "always the same value /
-      tautology" for the equality path; `RAND() - RAND()` across multiple
-      rows produced a fixed *non-zero* value every time (two textually
-      identical `RAND()` calls in one statement evaluate to two different
-      numbers), refuting "fixed degenerate result" (implying zero) for the
-      self-subtraction path. `WHERE NEWID() = NEWID()` and expressions like
-      `RAND() - RAND()` would both be flagged with `FindingConfidence.High`
-      asserting claims that are empirically false for non-deterministic
-      functions (`NEWID`, `RAND`, `NEWSEQUENTIALID`, `CHECKSUM`, etc.).
 
 - [ ] **`NamingScanner`'s `SpPrefixOnUserRoutine` reverses the real
       name-resolution order — it claims `master` is checked before the

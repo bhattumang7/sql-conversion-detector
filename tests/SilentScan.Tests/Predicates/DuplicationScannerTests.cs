@@ -1562,4 +1562,127 @@ public sealed class DuplicationScannerTests
 
         Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.MutuallyExclusiveAndCondition);
     }
+
+    [Fact]
+    public void NewIdEqualsNewId_NeverFiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF NEWID() = NEWID() PRINT 'x';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void RandMinusRand_NeverFiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @y FLOAT = RAND() - RAND();
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void RandDividedByRand_NeverFiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @y FLOAT = RAND() / RAND();
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void NestedRandExpressionComparedToItself_NeverFiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF RAND() * 2 = RAND() * 2 PRINT 'x';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void LogicalAndOfIdenticalNewIdComparisons_NeverFiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x UNIQUEIDENTIFIER = NEWID();
+                IF (@x = NEWID()) AND (@x = NEWID()) PRINT 'x';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void NewSequentialIdEqualsNewSequentialId_NeverFiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF NEWSEQUENTIALID() = NEWSEQUENTIALID() PRINT 'x';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void CryptGenRandomEqualsCryptGenRandom_NeverFiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF CRYPT_GEN_RANDOM(4) = CRYPT_GEN_RANDOM(4) PRINT 'x';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void IsNullOfSameColumnComparedToItself_ProvenDeterministic_StillFiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Orders (Code VARCHAR(20) NULL);
+            GO
+            SELECT 1 FROM dbo.Orders WHERE ISNULL(Code, '') = ISNULL(Code, '');
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void ChecksumOfSameDeterministicExpressionComparedToItself_StillFiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Orders (Code VARCHAR(20) NULL);
+            GO
+            SELECT 1 FROM dbo.Orders WHERE CHECKSUM(Code) = CHECKSUM(Code);
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void ChecksumWrappingNewId_NeverFiresIdenticalBinaryOperands()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF CHECKSUM(NEWID()) = CHECKSUM(NEWID()) PRINT 'x';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
 }

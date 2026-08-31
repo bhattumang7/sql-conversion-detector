@@ -197,7 +197,9 @@ public static class DuplicationScanner
             {
                 CheckAlwaysTrueOrFalseLiteralComparison(node);
             }
-            else if (SameText(node.FirstExpression, node.SecondExpression) && CanClaimTautologyOrContradiction(node.FirstExpression, walker))
+            else if (SameText(node.FirstExpression, node.SecondExpression)
+                && !ContainsNonDeterministicCall(node.FirstExpression)
+                && CanClaimTautologyOrContradiction(node.FirstExpression, walker))
             {
                 Add(DuplicationFindingKind.IdenticalBinaryOperands, node.ComparisonType.ToString(), node, FindingConfidence.High);
             }
@@ -206,7 +208,8 @@ public static class DuplicationScanner
         public void OnEnterBooleanBinaryExpression(BooleanBinaryExpression node, ModuleWalker walker)
         {
             if (node.BinaryExpressionType is BooleanBinaryExpressionType.And or BooleanBinaryExpressionType.Or
-                && SameText(node.FirstExpression, node.SecondExpression))
+                && SameText(node.FirstExpression, node.SecondExpression)
+                && !ContainsNonDeterministicCall(node.FirstExpression))
             {
                 Add(DuplicationFindingKind.IdenticalBinaryOperands, node.BinaryExpressionType.ToString(), node, FindingConfidence.High);
             }
@@ -217,7 +220,8 @@ public static class DuplicationScanner
 
             if (node.BinaryExpressionType is BinaryExpressionType.Subtract or BinaryExpressionType.Divide or BinaryExpressionType.Modulo
                 && !BothLiterals(node.FirstExpression, node.SecondExpression)
-                && SameText(node.FirstExpression, node.SecondExpression))
+                && SameText(node.FirstExpression, node.SecondExpression)
+                && !ContainsNonDeterministicCall(node.FirstExpression))
             {
                 Add(DuplicationFindingKind.IdenticalBinaryOperands, node.BinaryExpressionType.ToString(), node, FindingConfidence.Medium);
             }
@@ -365,6 +369,31 @@ public static class DuplicationScanner
 
         private static bool SameText(TSqlFragment first, TSqlFragment second) =>
             string.Equals(FragmentTextRenderer.Render(first), FragmentTextRenderer.Render(second), StringComparison.OrdinalIgnoreCase);
+
+        private static readonly HashSet<string> NonDeterministicFunctionNames =
+            new(StringComparer.OrdinalIgnoreCase) { "NEWID", "NEWSEQUENTIALID", "RAND", "CRYPT_GEN_RANDOM" };
+
+        private static bool ContainsNonDeterministicCall(TSqlFragment expression)
+        {
+            var finder = new NonDeterministicCallFinder();
+            expression.Accept(finder);
+            return finder.Found;
+        }
+
+        private sealed class NonDeterministicCallFinder : TSqlFragmentVisitor
+        {
+            public bool Found { get; private set; }
+
+            public override void ExplicitVisit(FunctionCall node)
+            {
+                if (node.FunctionName?.Value is { } name && NonDeterministicFunctionNames.Contains(name))
+                {
+                    Found = true;
+                }
+
+                base.ExplicitVisit(node);
+            }
+        }
 
         private static BooleanExpression Unwrap(BooleanExpression expression) =>
             expression is BooleanParenthesisExpression parenthesis ? Unwrap(parenthesis.Expression) : expression;
