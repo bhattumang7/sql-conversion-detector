@@ -100,13 +100,11 @@ public sealed class DynamicSqlCfg
     private Dictionary<string, SqlTextValue>? ComputeBlockOutput(
         int index, int entryBlock, Dictionary<string, SqlTextValue> initialSeed, List<int>[] predecessors, Dictionary<string, SqlTextValue>?[] outStates, bool emit)
     {
-        var merged = MergeEntry(index, entryBlock, initialSeed, predecessors, outStates);
-        if (merged is null)
+        var working = MergeEntry(index, entryBlock, initialSeed, predecessors, outStates);
+        if (working is null)
         {
             return null;
         }
-
-        var working = new Dictionary<string, SqlTextValue>(merged, StringComparer.OrdinalIgnoreCase);
 
         if (emit && _guardIdByJoinBlock.ContainsKey(index))
         {

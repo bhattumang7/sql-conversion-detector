@@ -181,7 +181,7 @@ public abstract record SqlTextValue
             ? choice.Alternatives
             : null;
 
-    public static bool StructurallyEqual(SqlTextValue a, SqlTextValue b) => (a, b) switch
+    public static bool StructurallyEqual(SqlTextValue a, SqlTextValue b) => ReferenceEquals(a, b) || (a, b) switch
     {
         (Tainted x, Tainted y) => x.Reason == y.Reason && x.Location.Equals(y.Location) && x.DeclaredType == y.DeclaredType && GuardedAlternativesEqual(x.GuardedAlternatives, y.GuardedAlternatives),
         (Template x, Template y) => x.DeclaredType == y.DeclaredType && PiecesEqual(x.Pieces, y.Pieces) && GuardedAlternativesEqual(x.GuardedAlternatives, y.GuardedAlternatives),
