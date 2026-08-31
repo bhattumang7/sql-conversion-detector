@@ -574,6 +574,74 @@ worse than not reporting it at all.
       which has no case with an explicit column list narrower than the temp
       table's full column set.
 
+- [ ] **`TruncateSwallowedScanner` fires a duplicate finding for a nested
+      TRY/CATCH around a swallowed `TRUNCATE`, one copy of which
+      misattributes the swallow to an outer CATCH block that never actually
+      runs for that error.**
+      (`src/SilentScan.Core/Predicates/TruncateSwallowedScanner.cs:34-48`,
+      `OnEnterTryCatchStatement` runs a full-subtree search for the
+      `TRUNCATE` and for a propagating statement independently for *every*
+      `TryCatchStatement` node, nested ones included, since the visitor
+      recurses into every descendant unconditionally.) For `BEGIN TRY BEGIN
+      TRY TRUNCATE TABLE dbo.Foo; END TRY BEGIN CATCH END CATCH; END TRY
+      BEGIN CATCH END CATCH;`, T-SQL routes the error to the *nearest*
+      enclosing CATCH — the inner one — so the inner `TryCatchStatement`
+      finding is correct, but the outer node is also visited: its
+      full-subtree search finds the same `TRUNCATE` (seeing through the
+      inner TRY) and its own empty CATCH, producing a second, identical
+      finding at the same source location whose implicit claim ("this
+      block's CATCH lets the failure continue silently") is false — the
+      outer CATCH never executes for this error at all. Not covered by the
+      existing test suite, which only has flat, single-level TRY/CATCH
+      cases.
+
+- [ ] **`TryCastComputedColumnPredicateScanner` false-negatives for any
+      database reporting a compatibility level below 110 (including
+      currently-supported level 100), because it re-parses the computed
+      column's definition text using a parser grammar that has no
+      production for `TRY_CAST` syntax at all — even though `TRY_CAST`
+      itself is not actually gated by compatibility level on the real
+      engine.**
+      (`src/SilentScan.Core/Predicates/TryCastComputedColumnPredicateScanner.cs:41-52`,
+      `DefinesTryCast` calls `SqlScriptParser.ParseText(...,
+      compatibilityLevel: catalog.CompatibilityLevel)`;
+      `src/SilentScan.Core/Parsing/SqlScriptParser.cs:81-93` maps any
+      `compatibilityLevel < 110` to `TSql100Parser`, whose generated grammar
+      (confirmed against the exact ScriptDom package version this project
+      references) has zero references to `TryCastCall` anywhere, unlike
+      `TSql110Parser` and later.) Oracle-confirmed (SQL Server 2025, `SET
+      COMPATIBILITY_LEVEL = 100`): `TRY_CAST(...)` in a computed column
+      definition deploys and evaluates identically regardless of database
+      compatibility level — it is not a compat-level-gated feature at all.
+      For a database at compat < 110, the scanner's own re-parse of the
+      column's `TRY_CAST(...)` text fails to parse, `DefinesTryCast`
+      returns `false`, and the column is silently dropped as a candidate —
+      even though the real engine treats it exactly as the rule's own
+      rationale describes (session-`DATEFORMAT`-dependent, non-persistable,
+      non-indexable). Purely an internal parser-selection mistake:
+      compatibility level is not a valid proxy for which functions the
+      engine actually accepts.
+
+- [ ] **`UnindexedTempTableUsageScanner` never flags a temp table joined via
+      an old-style comma join or an explicit `CROSS JOIN`, even though that
+      shape is squarely inside the rule's own stated scope ("used later as
+      a JOIN operand").**
+      (`src/SilentScan.Core/Predicates/UnindexedTempTableUsageScanner.cs:82-86`,
+      `OnEnterJoinSearchCondition` only fires for `QualifiedJoin`
+      (ANSI-92 `INNER/LEFT/RIGHT/FULL ... ON`) nodes; the `FilteredInWhere`
+      path at lines 88-96 only matches a single-element
+      `FromClause.TableReferences` list.) For `FROM #t, dbo.Other WHERE
+      #t.Id = Other.Id` or `FROM #t CROSS JOIN dbo.Other WHERE #t.Id =
+      Other.Id`, ScriptDom represents the FROM clause as a 2-element
+      `TableReferences` list with no wrapping `QualifiedJoin` node at all —
+      an AST shape this same codebase's own `CartesianJoinScanner`
+      explicitly detects and handles as a distinct join-shape family,
+      confirming it's real and reachable. Neither of `UnindexedTempTableUsageScanner`'s
+      two match patterns covers it, so a `#temp` table joined this way and
+      filtered by a WHERE-based join predicate is never reported at all —
+      false negative for a real, still-valid, semantically identical join
+      shape. Not covered by the existing test suite.
+
 ---
 
 ## Audited, no bug found
@@ -823,12 +891,26 @@ statement — is uncontroversial syntax, not a claim needing verification).
   and `@@TRANCOUNT` behavior already oracle-tested. Three known blind spots
   are already tracked in `detection-tasklist.md` and excluded from this
   audit's scope, not re-verified here.
+- `TriggerOrderScanner` — `is_first`/`is_last` grouping matches the real
+  `sp_settriggerorder` invariant (at most one trigger can hold First, one
+  Last, per table/event); the "≥2 unordered" threshold correctly treats a
+  single remaining unpinned trigger as fully determined by elimination.
+- `TriggerRecursionCycleScanner` — live-verified the
+  `RECURSIVE_TRIGGERS`-vs-`nested triggers` distinction: `RECURSIVE_TRIGGERS
+  OFF` does not stop an indirect cross-table trigger cascade (confirmed
+  running unbounded), while the server-level `nested triggers` option gates
+  cross-table cascading from the very first hop — the scanner correctly
+  gates on `nested triggers` only and excludes the same-table 1-hop
+  self-loop that `RECURSIVE_TRIGGERS` actually governs.
+- `TvfFenceScanner` — `ClassifyDirectReference` correlated/standalone/
+  from-or-join partitioning, the APPLY-only correlation gate, `InsertExec`
+  matching, and inline-TVF resolution through the fence map all check out;
+  existing oracle tests already verify `FromOrJoin`/`CorrelatedApply`/
+  `InsertExec` outcomes against a real deployed engine.
 
 ---
 
 ## Not yet audited
 
-TriggerOrder,
-TriggerRecursionCycle, TruncateSwallowed, TryCastComputedColumnPredicate,
-TvfFence, UnindexedTempTableUsage, UntrustedConstraint, ViewOrdering,
+UntrustedConstraint, ViewOrdering,
 WaitFor, WindowFrame, WindowFunctionArgument
