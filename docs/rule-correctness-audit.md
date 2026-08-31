@@ -14,6 +14,9 @@ authoritative source, not merely suspected — this project treats a
 false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
+First full pass: all 78 rule scanner families audited, 35 confirmed
+correctness bugs found and recorded below, none fixed yet.
+
 ---
 
 ## Confirmed bugs (open)
@@ -642,6 +645,69 @@ worse than not reporting it at all.
       false negative for a real, still-valid, semantically identical join
       shape. Not covered by the existing test suite.
 
+- [ ] **`WindowFrameScanner` reports `ImplicitDefaultRangeFrame` for
+      ranking, offset, and distribution window functions
+      (`ROW_NUMBER`/`RANK`/`DENSE_RANK`/`NTILE`/`LAG`/`LEAD`/
+      `PERCENT_RANK`/`CUME_DIST`) that don't support a window frame at
+      all — a fabricated finding on one of the most common window-function
+      patterns in real T-SQL code.**
+      (`src/SilentScan.Core/Predicates/WindowFrameScanner.cs:35-51`,
+      `OnEnterOverClause` fires for any `OverClause` with an `ORDER BY` and
+      no explicit frame clause, with no check for which function the
+      `OVER` belongs to.) Oracle-confirmed (SQL Server 2025): attaching an
+      explicit frame to any of `RANK`, `ROW_NUMBER`, `DENSE_RANK`, `NTILE`,
+      `LAG`, `PERCENT_RANK`, `CUME_DIST` is a hard compile error, `Msg
+      10752, The function '<name>' may not have a window frame` — proving
+      no frame, implicit or explicit, is ever computed for them, unlike a
+      true window-aggregate function (`FIRST_VALUE` with an explicit frame
+      executed successfully in the same test). The claim itself —
+      "T-SQL silently defaults this to RANGE BETWEEN UNBOUNDED PRECEDING
+      AND CURRENT ROW" with "the exact same measured cost" as an explicit
+      RANGE frame — is false for every one of these functions, since no
+      frame concept applies to them. The shipped test
+      `RowNumberWithOrderByNoFrame_FiresAsImplicitDefaultRange` locks in
+      exactly this wrong behavior.
+
+- [ ] **`WaitForScanner` resets its open-transaction tracker at every batch
+      boundary (`GO`), so a `WAITFOR` in a later batch after a `BEGIN
+      TRANSACTION` in an earlier batch of the same script is never
+      recognized as being inside a transaction.**
+      (`src/SilentScan.Core/Predicates/WaitForScanner.cs:36`,
+      `OnEnterTSqlBatch` unconditionally zeroes `_openTransactionDepth` at
+      the start of every `TSqlBatch`.) `GO` is purely a client-side batch
+      separator — a transaction opened in one batch stays open into the
+      next batch of the same session. Oracle-confirmed (SQL Server 2025):
+      `BEGIN TRANSACTION; GO SELECT @@TRANCOUNT; WAITFOR DELAY '00:00:01';
+      SELECT @@TRANCOUNT; ROLLBACK; GO` shows `@@TRANCOUNT = 1` on both
+      sides of the `GO` and both sides of the `WAITFOR` — the transaction
+      genuinely holds locks through the batch boundary and through the
+      `WAITFOR`. The scanner reports `IsInsideTransaction = false` for this
+      exact shape, missing precisely the more serious variant the rule's
+      own doc calls out ("a WAITFOR inside a transaction extends that
+      transaction's lock hold duration").
+
+- [ ] **`ViewOrderingScanner` misses a top-level `UNION`/`EXCEPT`/
+      `INTERSECT` query whose `ORDER BY`/`OFFSET...FETCH` sits directly on
+      the set operation itself, rather than nested inside one branch.**
+      (`src/SilentScan.Core/Predicates/ViewOrderingScanner.cs:90-96`,
+      `OutermostQuerySpecification` only unwraps `QueryParenthesisExpression`
+      and matches `QuerySpecification`; any other `QueryExpression` —
+      including a `UNION`/`EXCEPT`/`INTERSECT` `BinaryQueryExpression` —
+      falls through to `null`, and `Inspect` returns immediately without
+      ever looking at that node's own `OrderByClause`/`OffsetClause`.) In
+      ScriptDom, `OrderByClause`/`OffsetClause` are declared on the
+      abstract `QueryExpression` base class itself, shared by both
+      `QuerySpecification` and `BinaryQueryExpression` — a top-level `SELECT
+      ... UNION ALL SELECT ... ORDER BY ... OFFSET ... FETCH ...` genuinely
+      carries its own ORDER BY/OFFSET on the union node, not buried inside
+      either branch. Oracle-confirmed this deploys and runs as valid view
+      SQL on SQL Server 2025. False negative squarely inside the rule's own
+      stated scope ("the view/inline TVF's own outermost query uses a
+      genuinely row-limiting TOP(N) or OFFSET...FETCH together with ORDER
+      BY") — distinct from the existing test's intentionally-declined case,
+      where the ORDER BY is nested inside one UNION branch's own
+      parentheses rather than attached to the union itself.
+
 ---
 
 ## Audited, no bug found
@@ -907,10 +973,23 @@ statement — is uncontroversial syntax, not a claim needing verification).
   matching, and inline-TVF resolution through the fence map all check out;
   existing oracle tests already verify `FromOrJoin`/`CorrelatedApply`/
   `InsertExec` outcomes against a real deployed engine.
+- `UntrustedConstraintScanner` — `IsNotTrusted && !IsDisabled` filter
+  matches live catalog semantics; confirmed disabling a trusted FK sets
+  both `is_disabled` and `is_not_trusted`, so excluding disabled
+  constraints is correct (the optimizer ignores them regardless of trust);
+  the FK `DistinctBy(ConstraintName)` (absent for check constraints) is
+  correct given `sys.foreign_key_columns`' per-column-pair row shape versus
+  check constraints' non-duplicated one.
+- `WindowFunctionArgumentScanner` — `LAG`/`LEAD` negative-offset detection
+  and `PERCENTILE_CONT`/`PERCENTILE_DISC` out-of-range detection match Msg
+  8730/8727 semantics; the shared literal-folding logic correctly handles
+  unary-minus and arithmetic forms; the `[0,1]` inclusive boundary check is
+  correct at both endpoints.
 
 ---
 
 ## Not yet audited
 
-UntrustedConstraint, ViewOrdering,
-WaitFor, WindowFrame, WindowFunctionArgument
+None — all 78 rule scanner families have been audited at least once as of
+this pass. Re-auditing after a shipped fix, or auditing a newly added rule
+family, restarts this list.
