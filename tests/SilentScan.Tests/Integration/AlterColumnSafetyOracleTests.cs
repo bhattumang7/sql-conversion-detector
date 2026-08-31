@@ -37,6 +37,9 @@ public sealed class AlterColumnSafetyOracleTests : OracleTestFixture
 
         CREATE TABLE dbo.SensorReading (SensorReadingId INT NOT NULL PRIMARY KEY, Reading FLOAT NOT NULL);
         INSERT INTO dbo.SensorReading (SensorReadingId, Reading) VALUES (1, 1.23456789012345e0);
+
+        CREATE TABLE dbo.Budget (BudgetId INT NOT NULL PRIMARY KEY, Amount DECIMAL(10, 2) NOT NULL);
+        INSERT INTO dbo.Budget (BudgetId, Amount) VALUES (1, 12345678.12);
         """;
 
     [Fact]
@@ -155,6 +158,27 @@ public sealed class AlterColumnSafetyOracleTests : OracleTestFixture
         var findings = AlterColumnSafetyScanner.Scan(catalog);
 
         Assert.Empty(findings);
+    }
+
+    [Fact]
+    public async Task NarrowingIntegerDigitCapacityWhileBothFacetsWiden_FailsWithArithmeticOverflowAndScannerFires()
+    {
+        var ex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteAsync("ALTER TABLE dbo.Budget ALTER COLUMN Amount DECIMAL(12, 6);"));
+
+        Assert.Equal(ArithmeticOverflowErrorNumber, ex.Number);
+
+        var parseResult = SqlScriptParser.ParseText("test.sql", """
+            CREATE TABLE dbo.Budget (Amount DECIMAL(10, 2) NOT NULL);
+            ALTER TABLE dbo.Budget ALTER COLUMN Amount DECIMAL(12, 6);
+            """);
+        Assert.False(parseResult.HasErrors);
+
+        var catalog = CatalogBuilder.Build([parseResult]);
+        var findings = AlterColumnSafetyScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(AlterColumnSafetyKind.PrecisionOrScaleNarrowing, finding.Kind);
     }
 
     private async Task<object> ReadScalarAsync(string sql)

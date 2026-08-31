@@ -15,25 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 34 remain open below.
+correctness bugs found; 33 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`AlterColumnSafetyScanner` misses combined `DECIMAL`/`NUMERIC`
-      precision+scale narrowing when both facets nominally widen but the
-      integer-digit budget (precision − scale) shrinks.**
-      (`Rules/NumericFamilyNarrowing.cs`: `IsDecimalPrecisionNarrowed`
-      compares `Precision` head-to-head and the family rank compares only
-      `Scale` — neither computes `Precision - Scale`, the actual whole-number
-      capacity that determines overflow.) Oracle-confirmed (SQL Server 2025):
-      `ALTER TABLE ... ALTER COLUMN V DECIMAL(12,6)` on a `DECIMAL(10,2)`
-      column holding `12345678.12` raises `Msg 8115, Arithmetic overflow
-      error converting numeric to data type numeric` — both precision (10→12)
-      and scale (2→6) individually increase, but integer-digit capacity
-      shrinks 8→6, and the scanner reports nothing because each individual
-      facet looks like a widening.
 
 - [ ] **`AlwaysEncryptedOrderByScanner` never detects an ordinal-position
       `ORDER BY` referencing an Always Encrypted column.**

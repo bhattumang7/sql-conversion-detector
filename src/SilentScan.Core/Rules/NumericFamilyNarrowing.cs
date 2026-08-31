@@ -38,6 +38,18 @@ public static class NumericFamilyNarrowing
         target.Category == SqlTypeCategory.Decimal && source.Category == SqlTypeCategory.Decimal
         && (target.Precision ?? DefaultDecimalPrecision) < (source.Precision ?? DefaultDecimalPrecision);
 
+    public static bool IsDecimalIntegerDigitCapacityNarrowed(SqlType target, SqlType source)
+    {
+        if (target.Category != SqlTypeCategory.Decimal || source.Category != SqlTypeCategory.Decimal)
+        {
+            return false;
+        }
+
+        var targetIntegerDigits = (target.Precision ?? DefaultDecimalPrecision) - (target.Scale ?? 0);
+        var sourceIntegerDigits = (source.Precision ?? DefaultDecimalPrecision) - (source.Scale ?? 0);
+        return targetIntegerDigits < sourceIntegerDigits;
+    }
+
     public static Result? Classify(SqlType target, SqlType source)
     {
         if (!Profiles.TryGetValue(target.Category, out var targetProfile) || !Profiles.TryGetValue(source.Category, out var sourceProfile))

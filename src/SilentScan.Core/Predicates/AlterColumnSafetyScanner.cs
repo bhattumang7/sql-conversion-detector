@@ -68,6 +68,11 @@ public static class AlterColumnSafetyScanner
             return true;
         }
 
+        if (NumericFamilyNarrowing.IsDecimalIntegerDigitCapacityNarrowed(next, previous))
+        {
+            return true;
+        }
+
         if (WriteLossClassifier.IsTemporalScaleNarrowingRisk(next, previous))
         {
             return true;
