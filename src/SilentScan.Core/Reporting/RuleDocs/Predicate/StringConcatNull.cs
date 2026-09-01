@@ -9,17 +9,22 @@ internal static class StringConcatNull
     public static RuleDocContent Content { get; } = new(
         WhyItMatters: """
             Under SQL Server's default session settings (CONCAT_NULL_YIELDS_NULL ON, the ANSI
-            standard and default behavior since SQL Server 2005, and the only behavior at all in
-            recent compatibility levels), the `+` operator between string-typed operands propagates
-            NULL: if any single operand in a `+` chain is NULL, the entire expression evaluates to
-            NULL, not to the concatenation of whatever the non-NULL operands were. `'Mr. ' + NULL +
-            ' Smith'` is NULL in its entirety - not `'Mr.  Smith'` with a gap where the middle
-            operand would have been. This is standard, documented behavior, not a bug in the
-            engine - but it's routinely not what the author of a display-string or full-name-
-            building expression actually wants, and there's no error, warning, or type mismatch to
-            flag the mismatch between intent and behavior; the expression simply evaluates to NULL
-            and whatever consumes it - a report column, an email subject line, a WHERE clause -
-            silently receives nothing.
+            standard and default behavior since SQL Server 2005), the `+` operator between
+            string-typed operands propagates NULL: if any single operand in a `+` chain is NULL,
+            the entire expression evaluates to NULL, not to the concatenation of whatever the
+            non-NULL operands were. `'Mr. ' + NULL + ' Smith'` is NULL in its entirety - not
+            `'Mr.  Smith'` with a gap where the middle operand would have been. This is standard,
+            documented behavior, not a bug in the engine - but it's routinely not what the author
+            of a display-string or full-name-building expression actually wants, and there's no
+            error, warning, or type mismatch to flag the mismatch between intent and behavior; the
+            expression simply evaluates to NULL and whatever consumes it - a report column, an
+            email subject line, a WHERE clause - silently receives nothing.
+
+            The setting is honored at every compatibility level, including the newest: an explicit
+            `SET CONCAT_NULL_YIELDS_NULL OFF` makes `+` treat NULL as an empty string instead, for
+            as long as that setting stays in effect. It is not forced on or locked - a module that
+            runs with it OFF genuinely does not exhibit the NULL-propagation behavior described
+            here.
 
             CONCAT(), added in SQL Server 2012, was specifically designed to behave differently: it
             treats a NULL argument as an empty string rather than propagating it, so

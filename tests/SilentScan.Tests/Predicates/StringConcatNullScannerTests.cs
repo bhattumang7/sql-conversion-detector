@@ -156,6 +156,52 @@ public sealed class StringConcatNullScannerTests
     }
 
     [Fact]
+    public void ConcatNullYieldsNullOff_SuppressesFinding()
+    {
+        var findings = Scan("SET CONCAT_NULL_YIELDS_NULL OFF;\nSELECT FirstName + ' ' + MiddleName FROM dbo.Person;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void ConcatNullYieldsNullOff_ThenOnAgain_FindingReturns()
+    {
+        var findings = Scan(
+            "SET CONCAT_NULL_YIELDS_NULL OFF;\n" +
+            "SET CONCAT_NULL_YIELDS_NULL ON;\n" +
+            "SELECT FirstName + ' ' + MiddleName FROM dbo.Person;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("MiddleName", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ConcatNullYieldsNullOff_PersistsAcrossGoBatchBoundary_StillSuppressed()
+    {
+        var findings = Scan("SET CONCAT_NULL_YIELDS_NULL OFF;\nGO\nSELECT FirstName + ' ' + MiddleName FROM dbo.Person;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void ConcatNullYieldsNullOff_InUpdateSetClause_SuppressesFinding()
+    {
+        var findings = Scan(
+            "SET CONCAT_NULL_YIELDS_NULL OFF;\nUPDATE dbo.Person SET FirstName = FirstName + ' ' + MiddleName;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void ConcatNullYieldsNullDefaultUntouched_StillFires()
+    {
+        var findings = Scan("SELECT FirstName + ' ' + MiddleName FROM dbo.Person;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("MiddleName", finding.ColumnName);
+    }
+
+    [Fact]
     public void ThroughView_NotAnalyzed()
     {
 

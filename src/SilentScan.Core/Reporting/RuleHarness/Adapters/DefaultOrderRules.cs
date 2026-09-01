@@ -72,7 +72,7 @@ internal sealed class StringConcatNullRule : IPerFileRule
 {
     public string Id => "StringConcatNullScanner";
     public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => StringConcatNullScanner.Scan(parseResult, context.Catalog);
-    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => StringConcatNullScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => StringConcatNullScanner.CreateRule(parseResult.SourcePath, context.Catalog, parseResult.Fragment);
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => StringConcatNullScanner.Harvest((StringConcatNullScanner.Rule)moduleRule);
 }
 

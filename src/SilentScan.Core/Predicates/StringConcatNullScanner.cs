@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Common;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.TypeInference;
@@ -16,12 +17,13 @@ public static class StringConcatNullScanner
 
     public static IReadOnlyList<StringConcatNullFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var rule = CreateRule(parseResult.SourcePath, catalog);
+        var rule = CreateRule(parseResult.SourcePath, catalog, parseResult.Fragment);
         var walker = new ModuleWalker(parseResult.SourcePath, catalog, EmptyResolvedViews, rules: [rule]);
         parseResult.Fragment.Accept(walker);
     return Harvest(rule);
     }
-    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog) => new(sourcePath, catalog);
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog catalog, TSqlFragment fragment) =>
+        new(sourcePath, catalog, ConcatNullYieldsNullFlowResolver.Resolve(fragment));
 
     internal static IReadOnlyList<StringConcatNullFinding> Harvest(Rule rule) =>
             [
@@ -45,12 +47,27 @@ public static class StringConcatNullScanner
 
     private readonly record struct Leaf(LeafKind Kind, bool IsNullableColumn, string? TableQualifiedName, string? ColumnName);
 
-    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
+    internal sealed class Rule(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<TSqlStatement, bool> concatNullYieldsNullOffByStatement) : IModuleRule
     {
         public List<StringConcatNullFinding> Findings { get; } = [];
 
+        private bool _concatNullYieldsNullOff;
+
+        public void OnEnterSelectStatementScope(SelectStatement node, ModuleWalker walker) => UpdateCurrentState(node);
+
+        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker) => UpdateCurrentState(node);
+
+        public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) => UpdateCurrentState(node);
+
+        public void OnEnterMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker) => UpdateCurrentState(node);
+
         public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker)
         {
+            if (_concatNullYieldsNullOff)
+            {
+                return;
+            }
+
             foreach (var element in node.SelectElements.OfType<SelectScalarExpression>())
             {
                 InspectTopLevel(element.Expression, scopeChain);
@@ -59,6 +76,13 @@ public static class StringConcatNullScanner
 
         public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker)
         {
+            UpdateCurrentState(node);
+
+            if (_concatNullYieldsNullOff)
+            {
+                return;
+            }
+
             var spec = node.UpdateSpecification;
             foreach (var setClause in spec.SetClauses.OfType<AssignmentSetClause>())
             {
@@ -68,6 +92,9 @@ public static class StringConcatNullScanner
                 }
             }
         }
+
+        private void UpdateCurrentState(TSqlStatement statement) =>
+            _concatNullYieldsNullOff = concatNullYieldsNullOffByStatement.GetValueOrDefault(statement);
 
         private void InspectTopLevel(
             ScalarExpression root,

@@ -15,27 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 9 remain open below.
+correctness bugs found; 8 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`StringConcatNullScanner` never tracks `SET
-      CONCAT_NULL_YIELDS_NULL`, and the rule's own doc falsely claims
-      NULL-propagating `+` is "the only behavior at all in recent
-      compatibility levels."**
-      (`Reporting/RuleDocs/Predicate/StringConcatNull.cs:12-14`; the
-      scanner's `Rule` class in
-      `src/SilentScan.Core/Predicates/StringConcatNullScanner.cs` has no
-      `SET`-statement handler at all, unlike sibling scanners in this
-      codebase that do track other SET options.) Oracle-confirmed (SQL
-      Server 2025, `compatibility_level = 170`, the newest level): `SET
-      CONCAT_NULL_YIELDS_NULL OFF; SELECT 'a' + NULL` returns `'a'`, not
-      `NULL` — both statements run without error at the newest compat
-      level, so the setting is not forced/locked as the doc claims. A
-      module with this SET active would have every `+`-NULL-propagation
-      finding reported against behavior that doesn't actually occur.
 
 - [ ] **`TriggerCorrectnessScanner`'s `InsteadOfInsertFilteredNoRejectPath`
       false-positives when an `INSTEAD OF INSERT` trigger routes rows into
