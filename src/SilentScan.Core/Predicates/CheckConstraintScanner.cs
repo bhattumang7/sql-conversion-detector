@@ -161,7 +161,7 @@ public static class CheckConstraintScanner
         return expression is IntegerLiteral;
     }
 
-    private static BooleanExpression? TryParse(string definitionText, int? compatibilityLevel)
+    internal static BooleanExpression? TryParse(string definitionText, int? compatibilityLevel)
     {
         var wrapped = $"SELECT 1 WHERE {definitionText};";
         var result = SqlScriptParser.ParseText("check-constraint.sql", wrapped, initialQuotedIdentifiers: true, compatibilityLevel);

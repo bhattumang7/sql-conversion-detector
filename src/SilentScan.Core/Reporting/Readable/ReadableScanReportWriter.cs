@@ -96,6 +96,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(FilteredIndexParameterMismatch(report, headingLevel, pathBase));
         blocks.AddRange(NotInNullableSubquery(report, headingLevel, pathBase));
         blocks.AddRange(NonUniqueUpdateSource(report, headingLevel, pathBase));
+        blocks.AddRange(CheckConstraintPredicateContradiction(report, headingLevel, pathBase));
         blocks.AddRange(ForcedSerial(report, headingLevel, pathBase));
         blocks.AddRange(UntrustedConstraint(report, headingLevel, pathBase));
         blocks.AddRange(CascadingForeignKey(report, headingLevel, pathBase));
@@ -261,6 +262,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Reference to a nonexistent object", report.Find<DanglingObjectReferenceFinding>(DanglingObjectReferenceRuleId).Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.Find<NotInNullableSubqueryFinding>(nameof(NotInNullableSubqueryScanner)).Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.Find<NonUniqueUpdateSourceFinding>(nameof(NonUniqueUpdateSourceScanner)).Count);
+        AddCount(counts, "Predicates provably contradicting a trusted CHECK constraint or NOT NULL fact", report.Find<CheckConstraintPredicateContradictionFinding>(nameof(CheckConstraintPredicateContradictionScanner)).Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.Find<ForcedSerialFinding>(nameof(ForcedSerialScanner)).Count);
         AddCount(counts, "Untrusted FK/CHECK constraints", report.Find<UntrustedConstraintFinding>(nameof(UntrustedConstraintScanner)).Count);
         AddCount(counts, "Foreign keys with a cascading ON DELETE/UPDATE action", report.Find<CascadingForeignKeyFinding>(nameof(CascadingForeignKeyScanner)).Count);
@@ -1887,6 +1889,35 @@ public static class ReadableScanReportWriter
                 string.Join(", ", f.JoinColumnNames),
                 string.Join(", ", f.SetColumnNames),
             })]);
+    }
+
+    private static IEnumerable<ReadableBlock> CheckConstraintPredicateContradiction(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<CheckConstraintPredicateContradictionFinding>(nameof(CheckConstraintPredicateContradictionScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Predicates provably contradicting a trusted CHECK constraint or NOT NULL fact ({report.Find<CheckConstraintPredicateContradictionFinding>(nameof(CheckConstraintPredicateContradictionScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A WHERE predicate compares a column to a literal (or literal range) that is provably disjoint from a trusted, enabled CHECK constraint's own interval, or tests IS NULL against a column the catalog declares NOT NULL - oracle-confirmed the optimizer itself proves the branch unsatisfiable at compile time and folds it to a Constant Scan, so it can never return a row.");
+
+        foreach (var group in report.Find<CheckConstraintPredicateContradictionFinding>(nameof(CheckConstraintPredicateContradictionScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == CheckConstraintPredicateContradictionKind.CheckConstraintInterval ? "Contradicts a trusted CHECK constraint interval" : "IS NULL against a NOT NULL column";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CheckConstraintPredicateContradictionRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, TableHeader, ColumnHeader, ConstraintHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.TableQualifiedName,
+                    f.ColumnName,
+                    f.ConstraintName ?? "-",
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> ForcedSerial(ScanReport report, int level, string? pathBase)

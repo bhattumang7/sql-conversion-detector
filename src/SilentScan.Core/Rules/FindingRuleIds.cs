@@ -204,6 +204,8 @@ public static class FindingRuleIds
     public const string ControlFlowRiskNonDeterministicCaseInputRuleId = "silentscan/control-flow/non-deterministic-case-input";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
+    public const string CheckConstraintPredicateContradictionIntervalRuleId = "silentscan/correctness/check-constraint-predicate-contradiction";
+    public const string NotNullPredicateContradictionRuleId = "silentscan/correctness/not-null-predicate-contradiction";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
     public const string ForcedSerialFastForwardCursorRuleId = "silentscan/forced-serial/fast-forward-cursor";
     public const string ForcedSerialNonParallelizableIntrinsicRuleId = "silentscan/forced-serial/nonparallelizable-intrinsic";
@@ -564,6 +566,12 @@ public static class FindingRuleIds
         CheckConstraintFindingKind.NullNotHandled => CheckConstraintNullNotHandledRuleId,
         CheckConstraintFindingKind.ConstraintOnIdentityColumn => CheckConstraintOnIdentityColumnRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled CheckConstraintFindingKind."),
+    };
+    public static string CheckConstraintPredicateContradictionRuleId(CheckConstraintPredicateContradictionKind kind) => kind switch
+    {
+        CheckConstraintPredicateContradictionKind.CheckConstraintInterval => CheckConstraintPredicateContradictionIntervalRuleId,
+        CheckConstraintPredicateContradictionKind.NotNullConstraint => NotNullPredicateContradictionRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled CheckConstraintPredicateContradictionKind."),
     };
     public static string TvfFenceRuleId(TvfFenceFindingKind kind) => kind switch
     {

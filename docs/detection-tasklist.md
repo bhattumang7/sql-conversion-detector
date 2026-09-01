@@ -19,18 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **New rule family: predicate provably contradicts a trusted `CHECK`
-      constraint/`NOT NULL`/catalog-proven equality, making the result set
-      empty.** Distinct from the shipped literal-only
-      `AlwaysTrueOrFalseLiteralComparisonRuleId`: a statement predicate on a
-      constrained column that is provably disjoint from a trusted `CHECK`
-      constraint's interval, or contradicts a `NOT NULL` fact, or a
-      catalog-proven equality/constant constraint, makes that branch's
-      result set provably empty — a genuine, catalog-decidable dead-
-      predicate finding. Needs an oracle check of exactly which constraint
-      shapes the optimizer itself proves unsatisfiable (vs. ones this tool
-      would be asserting without engine confirmation).
-
 - [ ] **`OUTER JOIN` predicate on the null-supplying side silently collapses
       to an `INNER JOIN`.** A predicate that references an outer join's
       null-supplying side and rejects `NULL` (no explicit `OR col IS NULL`

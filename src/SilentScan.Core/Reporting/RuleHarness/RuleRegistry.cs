@@ -20,6 +20,7 @@ public static class RuleRegistry
         new ParameterReassignmentPredicateRule(),
         new NotInNullableSubqueryRule(),
         new NonUniqueUpdateSourceRule(),
+        new CheckConstraintPredicateContradictionRule(),
         new FloatEqualityPredicateRule(),
         new FloatOrderDependentAggregateRule(),
         new AlwaysEncryptedOrderByRule(),

@@ -116,6 +116,14 @@ internal sealed class NonUniqueUpdateSourceRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => NonUniqueUpdateSourceScanner.Harvest((NonUniqueUpdateSourceScanner.Rule)moduleRule);
 }
 
+internal sealed class CheckConstraintPredicateContradictionRule : IPerFileRule
+{
+    public string Id => "CheckConstraintPredicateContradictionScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => CheckConstraintPredicateContradictionScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => CheckConstraintPredicateContradictionScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => CheckConstraintPredicateContradictionScanner.Harvest((CheckConstraintPredicateContradictionScanner.Rule)moduleRule);
+}
+
 internal sealed class FloatEqualityPredicateRule : IPerFileRule
 {
     public string Id => "FloatEqualityPredicateScanner";

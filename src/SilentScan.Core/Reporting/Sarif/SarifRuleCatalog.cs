@@ -168,6 +168,9 @@ public static class SarifRuleCatalog
     public const string ControlFlowRiskNonDeterministicCaseInputRuleId = FindingRuleIds.ControlFlowRiskNonDeterministicCaseInputRuleId;
     public const string NotInNullableSubqueryRuleId = FindingRuleIds.NotInNullableSubqueryRuleId;
     public const string NonUniqueUpdateSourceRuleId = FindingRuleIds.NonUniqueUpdateSourceRuleId;
+    public const string CheckConstraintPredicateContradictionIntervalRuleId = FindingRuleIds.CheckConstraintPredicateContradictionIntervalRuleId;
+    public const string NotNullPredicateContradictionRuleId = FindingRuleIds.NotNullPredicateContradictionRuleId;
+    public static string CheckConstraintPredicateContradictionRuleId(CheckConstraintPredicateContradictionKind kind) => FindingRuleIds.CheckConstraintPredicateContradictionRuleId(kind);
     public const string ForcedSerialTableVariableModificationRuleId = FindingRuleIds.ForcedSerialTableVariableModificationRuleId;
     public const string ForcedSerialFastForwardCursorRuleId = FindingRuleIds.ForcedSerialFastForwardCursorRuleId;
     public const string ForcedSerialNonParallelizableIntrinsicRuleId = FindingRuleIds.ForcedSerialNonParallelizableIntrinsicRuleId;

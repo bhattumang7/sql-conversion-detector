@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">296 rules. 208 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">298 rules. 210 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -163,8 +163,10 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <h2>correctness</h2>
     <ul class="rule-list">
       <li><a class="id" href="rules/correctness-between-end-of-period-boundary.html">Between End Of Period Boundary</a> <code class="rule-key">silentscan/correctness/between-end-of-period-boundary</code><span class="snippet">A BETWEEN predicate&#x27;s upper bound literal has fewer fractional-second digits than the TIME/DATETIME2/DATETIMEOFFSET column&#x27;s own declared precision.</span></li>
+      <li><a class="id" href="rules/correctness-check-constraint-predicate-contradiction.html">Check Constraint Predicate Contradiction</a> <code class="rule-key">silentscan/correctness/check-constraint-predicate-contradiction</code><span class="snippet">A WHERE predicate compares a column to a literal (or literal range/BETWEEN) that is provably disjoint from a trusted, enabled CHECK constraint&#x27;s own single-column numeric interval on that same column.</span></li>
       <li><a class="id" href="rules/correctness-nonunique-update-source.html">Nonunique Update Source</a> <code class="rule-key">silentscan/correctness/nonunique-update-source</code><span class="snippet">UPDATE .</span></li>
       <li><a class="id" href="rules/correctness-not-in-nullable-subquery.html">Not In Nullable Subquery</a> <code class="rule-key">silentscan/correctness/not-in-nullable-subquery</code><span class="snippet">WHERE x NOT IN (SELECT y FROM t) where y is a nullable column.</span></li>
+      <li><a class="id" href="rules/correctness-not-null-predicate-contradiction.html">Not Null Predicate Contradiction</a> <code class="rule-key">silentscan/correctness/not-null-predicate-contradiction</code><span class="snippet">A WHERE predicate tests IS NULL against a column the catalog declares NOT NULL (and, for an outer join&#x27;s null-supplying side, the join itself doesn&#x27;t reintroduce NULL).</span></li>
     </ul>
   </section>
 

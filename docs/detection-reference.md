@@ -346,6 +346,52 @@ NULL case.
    warranted. `LiteralComparisonFolder` remains deliberately limited to
    literal-vs-literal arithmetic.
 
+### CHECK-constraint/NOT-NULL predicate contradiction
+
+`CheckConstraintPredicateContradictionRuleId`/`NotNullPredicateContradictionRuleId`
+(`src/SilentScan.Core/Predicates/CheckConstraintPredicateContradictionScanner.cs`).
+Oracle-confirmed directly (Docker SQL Server 2025, module-body compilation, not
+ad-hoc batches): a `WHERE`/(UPDATE/DELETE) predicate that literal-compares a
+column against a value provably outside a trusted, enabled, single-column
+numeric `CHECK` constraint's own `AND`/`OR`/`BETWEEN`-built interval compiles
+to a bare `Constant Scan` - the same plan shape as a literal `WHERE 1 = 0` -
+confirmed for a single comparison, an `AND`-combined range, an `OR`-combined
+domain, a `BETWEEN`-shaped query predicate, an `OR`-of-two-disjoint-ranges
+query predicate, and a nullable column carrying a trusted CHECK (the fold
+doesn't require `NOT NULL`, since a three-valued-logic comparison already
+excludes NULL rows independent of the constraint). The identical fold also
+happens for `IS NULL` against a column the catalog declares `NOT NULL`,
+independent of any CHECK constraint. Confirmed NOT to fold - and the scanner
+never fires - when: the CHECK constraint is `NOT TRUSTED` (`WITH NOCHECK`,
+never revalidated - `sys.check_constraints.is_not_trusted`); the query
+predicate compares against a session variable/parameter rather than a
+literal (unknown at compile time to the module, unlike ad-hoc-batch simple
+parameterization which is a separate, session-level effect this scanner
+doesn't need to reason about since it only reads module source text); or an
+`OR`'s other branch doesn't itself contradict (three-valued `OR` semantics -
+only proven when every disjunct is independently proven unsatisfiable, exactly
+mirroring the existing `PredicateSurvivalAnalyzer.Classify` `OR` rule).
+
+Scope narrowed deliberately to keep every finding inside the exact shape
+oracle-confirmed above: only single-column `CHECK` constraints built purely
+from `AND`/`OR`/`BETWEEN` over column-vs-numeric-literal comparisons are
+folded into a trusted interval (reusing `NumericValueRangeSet`, the same
+interval algebra `PredicateSurvivalAnalyzer` already uses for its own
+same-predicate contradiction detection). A `CHECK` constraint that spans more
+than one column, compares against a string/date literal, calls a function, or
+uses an `IN` list contributes no interval and is silently skipped - not
+because the optimizer wouldn't fold some of those shapes too, but because this
+project's precision bar requires a shape actually oracle-confirmed before
+shipping it, and string/date-domain folding needs its own value-set lattice
+design (a `Required`/`Excluded` set with `AND`/`OR`-aware union/intersect,
+distinct from the numeric range algebra) not yet built. `WHERE`/`JOIN ... ON`
+positions other than a top-level `SELECT`/`UPDATE`/`DELETE` `WHERE` clause
+(`HAVING`, `JOIN ... ON`) are excluded too: an unsatisfiable `INNER JOIN ON`
+predicate does make the whole join empty (same claim), but an `OUTER JOIN ON`
+predicate does not - it still preserves null-extended rows from the
+non-null-supplying side - and disentangling that per-join-kind case wasn't
+worth mixing into this pass.
+
 ### Shipped rules that assume a predicate reaches the optimizer as written
 
 Every one of these treats each `FlattenAnd`-split leaf (or, for
