@@ -19,17 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`RemovedSecurityStoredProcedureNames` is missing two engine-tracked
-      names.** Diffed the full list against `sys.dm_os_performance_counters`
-      `'Deprecated Features'` (255 entries, authoritative for the exact
-      running engine version): `sp_change_users_login` and
-      `sp_changedbowner` are tracked deprecated security/user-mapping
-      procedures, same flavor as `sp_addlogin`/`sp_grantdbaccess` already
-      in the set, but absent from it. (The same diff also found three of
-      our entries - `sp_dropalias`, `sp_helprotect`, `sp_helpuser` - not in
-      the engine's current tracked list; not necessarily wrong to keep,
-      just not corroborated by this source.)
-
 - [ ] **Legacy LOB statements (`READTEXT`/`WRITETEXT`/`UPDATETEXT`/
       `TEXTPTR`/`TEXTVALID`) have zero coverage anywhere.** Confirmed by two
       independent methods: none of the five appear as a referenced AST node

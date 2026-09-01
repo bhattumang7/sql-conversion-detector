@@ -22,7 +22,8 @@ public static class DeprecatedSyntaxScanner
     private static readonly HashSet<string> RemovedSecurityStoredProcedureNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "sp_addapprole", "sp_addlogin", "sp_addremotelogin", "sp_addrole", "sp_addrolemember",
-        "sp_addserver", "sp_addsrvrolemember", "sp_adduser", "sp_approlepassword", "sp_changeobjectowner",
+        "sp_addserver", "sp_addsrvrolemember", "sp_adduser", "sp_approlepassword", "sp_change_users_login",
+        "sp_changedbowner", "sp_changeobjectowner",
         "sp_dbfixedrolepermission", "sp_defaultdb", "sp_defaultlanguage", "sp_denylogin", "sp_dropalias",
         "sp_dropapprole", "sp_droplogin", "sp_dropremotelogin", "sp_droprole", "sp_droprolemember",
         "sp_dropsrvrolemember", "sp_dropuser", "sp_grantdbaccess", "sp_grantlogin", "sp_helpremotelogin",

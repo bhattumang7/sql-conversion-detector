@@ -450,6 +450,15 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`RemovedSecurityStoredProcedureNames` diffed against `sys.dm_os_performance_counters`
+  `'Deprecated Features'` (oracle-confirmed).** `sp_change_users_login` and
+  `sp_changedbowner` are tracked and now in the set. `sp_dropalias`,
+  `sp_helprotect`, and `sp_helpuser` are NOT present as `instance_name` rows
+  under that counter object on the running engine version - kept in the set
+  anyway since they're still real deprecated names, just not corroborated by
+  this particular source; don't re-run this diff expecting a different
+  answer without a version change.
+
 * **`CatalogBuilder`'s column-nullability fallback: shipped, branch-aware.**
   Oracle-confirmed (Docker, SQL Server 2025): a `CREATE TABLE` column with no
   explicit `NULL`/`NOT NULL` is created `NOT NULL` under `SET
