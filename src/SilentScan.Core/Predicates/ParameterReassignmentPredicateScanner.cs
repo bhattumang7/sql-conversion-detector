@@ -87,9 +87,12 @@ public static class ParameterReassignmentPredicateScanner
                 InspectStatementForFindings(statement, state);
             }
 
-            foreach (var (name, site) in VariableWriteSites.InStatement(statement))
+            foreach (var (name, site, isUnconditional) in VariableWriteSites.InStatement(statement))
             {
-                Reassign(state, name, site);
+                if (isUnconditional)
+                {
+                    Reassign(state, name, site);
+                }
             }
 
             return state;

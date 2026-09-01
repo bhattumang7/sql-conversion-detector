@@ -675,6 +675,51 @@ public sealed class ParameterReassignmentPredicateScannerTests
     }
 
     [Fact]
+    public void SelectSetVariableWithFromClauseAndNonAggregateColumn_MayNeverExecute_NeverFires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SELECT @p = Region FROM dbo.Customers WHERE Code = 'ZZZ_NEVER_MATCHES';
+                SELECT 1 FROM dbo.Customers WHERE Code = @p;
+            END
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void SelectSetVariableWithAggregateAndFromClause_AlwaysExecutes_StillFires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SELECT @p = MAX(Region) FROM dbo.Customers WHERE Code = 'ZZZ_NEVER_MATCHES';
+                SELECT 1 FROM dbo.Customers WHERE Code = @p;
+            END
+            """);
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void SelectSetVariableWithAggregateAndGroupBy_MayProduceZeroGroups_NeverFires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SELECT @p = MAX(Region) FROM dbo.Customers WHERE Code = 'ZZZ_NEVER_MATCHES' GROUP BY Region;
+                SELECT 1 FROM dbo.Customers WHERE Code = @p;
+            END
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void ComputedColumnInDerivedTable_NeverFires()
     {
         var findings = Scan(

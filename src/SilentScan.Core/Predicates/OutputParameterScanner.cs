@@ -96,9 +96,12 @@ public static class OutputParameterScanner
 
         public FlowState PerStatement(TSqlStatement statement, FlowState state)
         {
-            foreach (var (name, _) in VariableWriteSites.InStatement(statement))
+            foreach (var (name, _, isUnconditional) in VariableWriteSites.InStatement(statement))
             {
-                state.Unassigned!.Remove(name);
+                if (isUnconditional)
+                {
+                    state.Unassigned!.Remove(name);
+                }
             }
 
             return state;

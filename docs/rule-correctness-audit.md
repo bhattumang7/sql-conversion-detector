@@ -15,35 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 14 remain open below.
+correctness bugs found; 13 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`OutputParameterScanner` treats `SELECT @p = col FROM t WHERE ...`
-      (a non-aggregate variable-assignment SELECT) as an unconditional
-      write, when it silently does nothing if the WHERE clause matches zero
-      rows — so a procedure whose only assignment to an OUTPUT parameter
-      takes this form can leave the caller's variable completely unchanged
-      without the scanner ever reporting it.**
-      (`src/SilentScan.Core/Predicates/VariableWriteSites.cs:15-21` yields a
-      write for any `SelectSetVariable` in a `QuerySpecification`'s select
-      list, with no check for whether the query is guaranteed to produce a
-      row; this feeds `OutputParameterScanner.Rule.PerStatement`
-      (`OutputParameterScanner.cs:97-105`), which removes the parameter from
-      the unassigned set on any such statement.) Oracle-confirmed (SQL
-      Server 2025): `DECLARE @x INT = 42; SELECT @x = Val FROM #T WHERE Id =
-      1;` against a table with no matching row leaves `@x` at `42`,
-      completely unchanged — while the aggregate form, `SELECT @y =
-      SUM(Val) FROM #T2 WHERE Id = 1` under the identical zero-row
-      condition, does assign (`@y` becomes `NULL`), confirming aggregate
-      vs. non-aggregate is exactly the line that matters and the scanner
-      doesn't draw it. This is precisely the "caller's own variable is left
-      completely unchanged" scenario `RuleCatalog.cs:169` says the rule is
-      built to catch, but it produces no finding here. Not exercised by the
-      existing test suite, which only covers the always-executes,
-      no-`FROM`-clause form (`SELECT @x = 1;`).
 
 - [ ] **`QueryAntiPatternScanner`'s `AlterTableSwitchColumnMismatch` shape
       check omits collation, missing a real, distinct engine error that's
@@ -479,15 +455,14 @@ statement — is uncontroversial syntax, not a claim needing verification).
 - `ParameterReassignmentPredicateScanner` — WITH RECOMPILE/OPTION(RECOMPILE)
   suppression at both proc and statement level, intersect-on-merge "every
   path" semantics, and the `Depth: 0` correlated-subquery guard are all
-  correct. Note: this scanner shares `VariableWriteSites`
-  (`Predicates/VariableWriteSites.cs`) with `OutputParameterScanner` above,
-  so the same non-aggregate-`SELECT @p = col FROM t WHERE ...`-may-not-
-  execute gap could in principle affect this rule's "reassigned before this
-  predicate" claim in the opposite direction (false positive risk rather
-  than false negative) — not independently oracle-demonstrated as a
-  concrete divergence for this rule specifically, and the finding already
-  defaults to `Confidence: Low`, so not filed as a second confirmed bug;
-  worth re-checking once the shared primitive above is fixed.
+  correct. This scanner shares `VariableWriteSites`
+  (`Predicates/VariableWriteSites.cs`) with `OutputParameterScanner`;
+  `VariableWriteSites.InStatement` now reports whether each write is
+  guaranteed to execute (no `FROM` clause, or a `GROUP BY`-free aggregate
+  assignment) versus merely conditional (a non-aggregate `SELECT @p = col
+  FROM t WHERE ...` that may match zero rows), and both scanners only treat
+  guaranteed writes as reassignment/assignment - closing the false-positive
+  risk previously flagged here.
 - `PartialCompositeForeignKeyJoinScanner` — composite-only grouping,
   local-vs-statement-wide equality coverage split, comma-join dedup, and
   the unique-index suppression direction (`i.KeyColumns.All(usedColumns.Contains)`,

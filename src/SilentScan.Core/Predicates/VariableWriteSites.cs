@@ -4,18 +4,25 @@ namespace SilentScan.Core.Predicates;
 
 public static class VariableWriteSites
 {
-    public static IEnumerable<(string Name, TSqlFragment Site)> InStatement(TSqlStatement statement)
+    private static readonly HashSet<string> AggregateFunctionNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "SUM", "COUNT", "COUNT_BIG", "AVG", "MIN", "MAX",
+        "STDEV", "STDEVP", "VAR", "VARP",
+        "GROUPING", "GROUPING_ID", "STRING_AGG", "CHECKSUM_AGG", "APPROX_COUNT_DISTINCT",
+    };
+
+    public static IEnumerable<(string Name, TSqlFragment Site, bool IsUnconditional)> InStatement(TSqlStatement statement)
     {
         switch (statement)
         {
             case SetVariableStatement set:
-                yield return (set.Variable.Name, set);
+                yield return (set.Variable.Name, set, true);
                 break;
 
             case SelectStatement { QueryExpression: QuerySpecification spec }:
                 foreach (var element in spec.SelectElements.OfType<SelectSetVariable>())
                 {
-                    yield return (element.Variable.Name, statement);
+                    yield return (element.Variable.Name, statement, IsGuaranteedRow(spec, element));
                 }
 
                 break;
@@ -23,7 +30,7 @@ public static class VariableWriteSites
             case DeclareVariableStatement declare:
                 foreach (var element in declare.Declarations.Where(e => e.Value is not null))
                 {
-                    yield return (element.VariableName.Value, statement);
+                    yield return (element.VariableName.Value, statement, true);
                 }
 
                 break;
@@ -31,7 +38,7 @@ public static class VariableWriteSites
             case FetchCursorStatement { IntoVariables: { } intoVariables }:
                 foreach (var variable in intoVariables)
                 {
-                    yield return (variable.Name, statement);
+                    yield return (variable.Name, statement, true);
                 }
 
                 break;
@@ -41,11 +48,42 @@ public static class VariableWriteSites
                 {
                     if (parameter is { IsOutput: true, ParameterValue: VariableReference variable })
                     {
-                        yield return (variable.Name, statement);
+                        yield return (variable.Name, statement, true);
                     }
                 }
 
                 break;
+        }
+    }
+
+    private static bool IsGuaranteedRow(QuerySpecification spec, SelectSetVariable element) =>
+        spec.FromClause is null || (spec.GroupByClause is null && ContainsTopLevelAggregate(element.Expression));
+
+    private static bool ContainsTopLevelAggregate(ScalarExpression expression)
+    {
+        var collector = new TopLevelAggregateCollector();
+        expression.Accept(collector);
+        return collector.Found;
+    }
+
+    private sealed class TopLevelAggregateCollector : TSqlFragmentVisitor
+    {
+        public bool Found { get; private set; }
+
+        public override void ExplicitVisit(FunctionCall node)
+        {
+            if (AggregateFunctionNames.Contains(node.FunctionName.Value))
+            {
+                Found = true;
+                return;
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(ScalarSubquery node)
+        {
+            _ = node;
         }
     }
 

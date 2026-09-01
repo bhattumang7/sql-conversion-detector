@@ -1,4 +1,7 @@
 using Microsoft.Data.SqlClient;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates;
 using SilentScan.Tests.Support;
 using SilentScan.Verify.Oracle;
 
@@ -22,6 +25,12 @@ public sealed class ParameterReassignmentPredicateOracleTests : OracleTestFixtur
         GO
         CREATE PROCEDURE dbo.usp_FindDirect @p VARCHAR(20) AS
         BEGIN
+            SELECT Id FROM dbo.Customers WHERE Region = @p;
+        END
+        GO
+        CREATE PROCEDURE dbo.usp_FindConditionallyReassigned @p VARCHAR(20) AS
+        BEGIN
+            SELECT @p = Region FROM dbo.Customers WHERE Region = 'Zzz_Never_Seeded';
             SELECT Id FROM dbo.Customers WHERE Region = @p;
         END
         GO
@@ -76,5 +85,46 @@ public sealed class ParameterReassignmentPredicateOracleTests : OracleTestFixtur
         start += Marker.Length;
         var end = planXml.IndexOf('"', start);
         return double.Parse(planXml[start..end], System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    [Fact]
+    public async Task ConditionalNonAggregateReassignment_NeverMatchesAnyRow_LeavesParameterAtOriginalArgument_ScannerCorrectlyDoesNotFlag()
+    {
+        await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));
+        await connection.OpenAsync();
+
+        await using var command = new SqlCommand(
+            "EXEC dbo.usp_FindConditionallyReassigned @p = 'Common';",
+            connection);
+        await using var reader = await command.ExecuteReaderAsync();
+        var rowCount = 0;
+        while (await reader.ReadAsync())
+        {
+            rowCount++;
+        }
+
+        Assert.True(rowCount > 1500, $"expected the predicate at 'Common' to still see the original ~1900-row skew (the conditional SELECT never matched, so @p was never actually reassigned), got {rowCount} rows.");
+
+        var findings = ScanConditionalReassignment(
+            """
+            CREATE PROCEDURE dbo.usp_FindConditionallyReassigned @p VARCHAR(20) AS
+            BEGIN
+                SELECT @p = Region FROM dbo.Customers WHERE Region = 'Zzz_Never_Seeded';
+                SELECT Id FROM dbo.Customers WHERE Region = @p;
+            END
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    private static IReadOnlyList<ParameterReassignmentPredicateFinding> ScanConditionalReassignment(string sql)
+    {
+        var result = SqlScriptParser.ParseText(
+            "test.sql",
+            "CREATE TABLE dbo.Customers (Id INT NOT NULL, Region VARCHAR(20) NOT NULL, INDEX IX_Customers_Region (Region));\nGO\n" + sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([result]);
+        return ParameterReassignmentPredicateScanner.Scan(result, catalog);
     }
 }

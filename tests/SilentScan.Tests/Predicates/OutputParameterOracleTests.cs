@@ -1,4 +1,6 @@
 using Microsoft.Data.SqlClient;
+using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates;
 using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
@@ -19,6 +21,20 @@ public sealed class OutputParameterOracleTests : OracleTestFixture
         BEGIN
             SET NOCOUNT ON;
             SET @x = 42;
+        END
+        GO
+        CREATE PROCEDURE dbo.p_conditional_select_assigns @x INT OUTPUT AS
+        BEGIN
+            SET NOCOUNT ON;
+            DECLARE @T TABLE (Id INT, Val INT);
+            SELECT @x = Val FROM @T WHERE Id = 1;
+        END
+        GO
+        CREATE PROCEDURE dbo.p_conditional_aggregate_assigns @x INT OUTPUT AS
+        BEGIN
+            SET NOCOUNT ON;
+            DECLARE @T TABLE (Id INT, Val INT);
+            SELECT @x = SUM(Val) FROM @T WHERE Id = 1;
         END
         GO
         """;
@@ -67,5 +83,73 @@ public sealed class OutputParameterOracleTests : OracleTestFixture
         var result = await command.ExecuteScalarAsync();
 
         Assert.Equal(42, (int)result!);
+    }
+
+    [Fact]
+    public async Task ConditionalNonAggregateSelectAssignment_ZeroMatchingRows_LeavesCallerVariableAtItsPriorRealValue_AndScannerNowFlagsSoleAssignment()
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        await using var command = new SqlCommand(
+            "DECLARE @caller INT = 42; EXEC dbo.p_conditional_select_assigns @x = @caller OUTPUT; SELECT @caller;",
+            connection);
+        var result = await command.ExecuteScalarAsync();
+
+        Assert.Equal(42, (int)result!);
+
+        var findings = Scan(
+            """
+            DECLARE @T TABLE (Id INT, Val INT);
+            SELECT @x = Val FROM @T WHERE Id = 1;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("@x", finding.ParameterName);
+    }
+
+    [Fact]
+    public async Task ConditionalAggregateSelectAssignment_ZeroMatchingRows_StillAssignsNull_AndScannerStillDoesNotFlagSoleAssignment()
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        await using var command = new SqlCommand(
+            "DECLARE @caller INT = 42; EXEC dbo.p_conditional_aggregate_assigns @x = @caller OUTPUT; SELECT @caller;",
+            connection);
+        var result = await command.ExecuteScalarAsync();
+
+        Assert.True(result is null or DBNull);
+
+        var findings = Scan(
+            """
+            DECLARE @T TABLE (Id INT, Val INT);
+            SELECT @x = SUM(Val) FROM @T WHERE Id = 1;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public async Task NoFromClauseSelectSetVariable_AlwaysAssigns_AndScannerStillDoesNotFlagSoleAssignment()
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        await using var command = new SqlCommand(
+            "DECLARE @caller INT = 999; SELECT @caller = 42; SELECT @caller;",
+            connection);
+        var result = await command.ExecuteScalarAsync();
+
+        Assert.Equal(42, (int)result!);
+
+        var findings = Scan("SELECT @x = 42;");
+
+        Assert.Empty(findings);
+    }
+
+    private static IReadOnlyList<OutputParameterFinding> Scan(string procedureBody)
+    {
+        var sql = $"CREATE PROCEDURE dbo.p @x INT OUTPUT AS\nBEGIN\n{procedureBody}\nEND";
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return OutputParameterScanner.Scan(result);
     }
 }
