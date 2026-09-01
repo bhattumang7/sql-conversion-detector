@@ -15,29 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 10 remain open below.
+correctness bugs found; 9 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`StatementShapeScanner`'s `TableWithNoPrimaryKey` claims "no
-      engine-enforced row uniqueness" for any table lacking a `PRIMARY KEY`,
-      even when the table carries a `UNIQUE` constraint/index that enforces
-      exactly that.**
-      (`src/SilentScan.Core/Predicates/StatementShapeScanner.cs:43-56` only
-      suppresses the finding when
-      `table.Indexes.Any(i => i.Kind == CatalogIndexKind.PrimaryKey)`,
-      ignoring the separately tracked `CatalogIndexKind.UniqueConstraint`;
-      message: "no engine-enforced row uniqueness"; doc adds "nothing stops
-      two rows from being byte-for-byte identical".) Oracle-confirmed (SQL
-      Server 2025): a table with `Id INT NOT NULL UNIQUE` and no primary
-      key rejects a duplicate `Id` insert with `Violation of UNIQUE KEY
-      constraint` — demonstrably engine-enforced row uniqueness, directly
-      contradicting the message. (The doc's separate, narrower claim that
-      change tracking specifically requires a real `PRIMARY KEY` — not
-      satisfied by `UNIQUE` — was independently oracle-confirmed correct;
-      only the "no engine-enforced row uniqueness" phrasing is false.)
 
 - [ ] **`StringConcatNullScanner` never tracks `SET
       CONCAT_NULL_YIELDS_NULL`, and the rule's own doc falsely claims

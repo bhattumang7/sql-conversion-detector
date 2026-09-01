@@ -46,13 +46,19 @@ public static class StatementShapeScanner
                 continue;
             }
 
+            var hasEnforcedUniqueIndex = table.Indexes.Any(i => i.IsUnique && !i.IsFiltered && !i.IsDisabled);
+
+            var detailText = hasEnforcedUniqueIndex
+                ? $"Table '{table.QualifiedName}' has no PRIMARY KEY constraint - it can't participate in transactional replication or change tracking, both of which require a real primary key, even though it already has a UNIQUE index/constraint enforcing row uniqueness."
+                : $"Table '{table.QualifiedName}' has no PRIMARY KEY constraint - no engine-enforced row uniqueness.";
+
             findings.Add(new StatementShapeFinding(
                 StatementShapeFindingKind.TableWithNoPrimaryKey,
                 table.QualifiedName,
                 table.SourcePath,
                 table.SourceLine,
                 1,
-                $"Table '{table.QualifiedName}' has no PRIMARY KEY constraint - no engine-enforced row uniqueness.",
+                detailText,
                 FindingConfidence.Medium));
         }
 

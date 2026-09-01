@@ -109,6 +109,7 @@ public sealed class StatementShapeScannerTests
 
         var finding = Assert.Single(findings, f => f.Kind == StatementShapeFindingKind.TableWithNoPrimaryKey);
         Assert.Equal("dbo.T", finding.ModuleQualifiedName);
+        Assert.Contains("no engine-enforced row uniqueness", finding.DetailText);
     }
 
     [Fact]
@@ -117,5 +118,46 @@ public sealed class StatementShapeScannerTests
         var findings = ScanCatalog("CREATE TABLE dbo.T (A INT NOT NULL PRIMARY KEY);");
 
         Assert.DoesNotContain(findings, f => f.Kind == StatementShapeFindingKind.TableWithNoPrimaryKey);
+    }
+
+    [Fact]
+    public void TableWithUniqueConstraintButNoPrimaryKey_DoesNotClaimNoRowUniqueness()
+    {
+        var findings = ScanCatalog("CREATE TABLE dbo.T (A INT NOT NULL UNIQUE);");
+
+        var finding = Assert.Single(findings, f => f.Kind == StatementShapeFindingKind.TableWithNoPrimaryKey);
+        Assert.DoesNotContain("no engine-enforced row uniqueness", finding.DetailText);
+        Assert.Contains("transactional replication or change tracking", finding.DetailText);
+    }
+
+    [Fact]
+    public void TableWithUniqueIndexButNoPrimaryKey_DoesNotClaimNoRowUniqueness()
+    {
+        var findings = ScanCatalog(
+            "CREATE TABLE dbo.T (A INT NOT NULL); CREATE UNIQUE INDEX IX_T_A ON dbo.T (A);");
+
+        var finding = Assert.Single(findings, f => f.Kind == StatementShapeFindingKind.TableWithNoPrimaryKey);
+        Assert.DoesNotContain("no engine-enforced row uniqueness", finding.DetailText);
+        Assert.Contains("transactional replication or change tracking", finding.DetailText);
+    }
+
+    [Fact]
+    public void TableWithFilteredUniqueIndexButNoPrimaryKey_StillClaimsNoRowUniqueness()
+    {
+        var findings = ScanCatalog(
+            "CREATE TABLE dbo.T (A INT NULL); CREATE UNIQUE INDEX IX_T_A ON dbo.T (A) WHERE A IS NOT NULL;");
+
+        var finding = Assert.Single(findings, f => f.Kind == StatementShapeFindingKind.TableWithNoPrimaryKey);
+        Assert.Contains("no engine-enforced row uniqueness", finding.DetailText);
+    }
+
+    [Fact]
+    public void TableWithDisabledUniqueIndexButNoPrimaryKey_StillClaimsNoRowUniqueness()
+    {
+        var findings = ScanCatalog(
+            "CREATE TABLE dbo.T (A INT NOT NULL); CREATE UNIQUE INDEX IX_T_A ON dbo.T (A); ALTER INDEX IX_T_A ON dbo.T DISABLE;");
+
+        var finding = Assert.Single(findings, f => f.Kind == StatementShapeFindingKind.TableWithNoPrimaryKey);
+        Assert.Contains("no engine-enforced row uniqueness", finding.DetailText);
     }
 }
