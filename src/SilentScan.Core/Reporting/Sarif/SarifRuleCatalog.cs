@@ -196,6 +196,7 @@ public static class SarifRuleCatalog
     public static string ModuleCompileFlagRuleId(ModuleCompileFlagFindingKind kind) => FindingRuleIds.ModuleCompileFlagRuleId(kind);
     public static string WindowFrameRuleId(WindowFrameFindingKind kind) => FindingRuleIds.WindowFrameRuleId(kind);
     public static string WindowFunctionArgumentRuleId(WindowFunctionArgumentFindingKind kind) => FindingRuleIds.WindowFunctionArgumentRuleId(kind);
+    public static string StringSplitArgumentRuleId(StringSplitArgumentFindingKind kind) => FindingRuleIds.StringSplitArgumentRuleId(kind);
     public const string WaitForRuleId = FindingRuleIds.WaitForRuleId;
     public const string CursorCloseOnCommitRuleId = FindingRuleIds.CursorCloseOnCommitRuleId;
     public static string TransactionHygieneRuleId(TransactionHygieneFindingKind kind) => FindingRuleIds.TransactionHygieneRuleId(kind);

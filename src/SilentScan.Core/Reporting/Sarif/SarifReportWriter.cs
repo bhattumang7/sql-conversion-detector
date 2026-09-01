@@ -70,6 +70,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<ModuleCompileFlagFinding>("ModuleCompileFlagScanner").Select(ToResult));
         results.AddRange(report.Find<WindowFrameFinding>("WindowFrameScanner").Select(ToResult));
         results.AddRange(report.Find<WindowFunctionArgumentFinding>("WindowFunctionArgumentScanner").Select(ToResult));
+        results.AddRange(report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner").Select(ToResult));
         results.AddRange(report.Find<WaitForFinding>("WaitForScanner").Select(ToResult));
         results.AddRange(report.Find<CursorCloseOnCommitFinding>("CursorCloseOnCommitScanner").Select(ToResult));
         results.AddRange(report.Find<ViewOrderingFinding>("ViewOrderingScanner").Select(ToResult));
@@ -959,6 +960,20 @@ public static class SarifReportWriter
                 $"{finding.FunctionName}'s offset argument '{finding.ArgumentText}' constant-folds to a negative value - oracle-confirmed (Msg 8730) this fails the moment any row reaches the window function.",
             WindowFunctionArgumentFindingKind.PercentileOutOfRange =>
                 $"{finding.FunctionName}'s percentile argument '{finding.ArgumentText}' constant-folds to a value outside [0, 1] - oracle-confirmed (Msg 8727) this fails the moment any row reaches the function.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(StringSplitArgumentFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.StringSplitArgumentRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            StringSplitArgumentFindingKind.SeparatorNotSingleCharacter =>
+                $"STRING_SPLIT's separator argument '{finding.SeparatorText}' is not exactly one character - oracle-confirmed (Msg 214) this call fails at compile/bind time.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
         };
 

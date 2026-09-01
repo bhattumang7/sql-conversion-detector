@@ -20,6 +20,15 @@ public static class LiteralComparisonFolder
         return null;
     }
 
+    public static string? TryFoldToString(ScalarExpression expression) => expression switch
+    {
+        StringLiteral literal => literal.Value,
+        ParenthesisExpression paren => TryFoldToString(paren.Expression),
+        BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } binary
+            when TryFoldToString(binary.FirstExpression) is { } a && TryFoldToString(binary.SecondExpression) is { } b => a + b,
+        _ => null,
+    };
+
     public static decimal? TryFoldToNumeric(ScalarExpression expression) => expression switch
     {
         NullLiteral => null,

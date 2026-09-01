@@ -110,6 +110,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ModuleCompileFlag(report, headingLevel, pathBase));
         blocks.AddRange(WindowFrame(report, headingLevel, pathBase));
         blocks.AddRange(WindowFunctionArgument(report, headingLevel, pathBase));
+        blocks.AddRange(StringSplitArgument(report, headingLevel, pathBase));
         blocks.AddRange(WaitFor(report, headingLevel, pathBase));
         blocks.AddRange(CursorCloseOnCommit(report, headingLevel, pathBase));
         blocks.AddRange(ViewOrdering(report, headingLevel, pathBase));
@@ -270,6 +271,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Module compile flags (WITH RECOMPILE / TVF database-collation return)", report.Find<ModuleCompileFlagFinding>(nameof(ModuleCompileFlagScanner)).Count);
         AddCount(counts, "RANGE window-function frames", report.Find<WindowFrameFinding>(nameof(WindowFrameScanner)).Count);
         AddCount(counts, "LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC out-of-range constant arguments", report.Find<WindowFunctionArgumentFinding>(nameof(WindowFunctionArgumentScanner)).Count);
+        AddCount(counts, "STRING_SPLIT separator arguments not exactly one character", report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).Count);
         AddCount(counts, "WAITFOR DELAY/TIME", report.Find<WaitForFinding>(nameof(WaitForScanner)).Count);
         AddCount(counts, "Cursors silently closed by CURSOR_CLOSE_ON_COMMIT then fetched", report.Find<CursorCloseOnCommitFinding>(nameof(CursorCloseOnCommitScanner)).Count);
         AddCount(counts, "View/inline TVF ordering not guaranteed", report.Find<ViewOrderingFinding>(nameof(ViewOrderingScanner)).Count);
@@ -2409,6 +2411,32 @@ public static class ReadableScanReportWriter
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                     f.FunctionName,
                     f.ArgumentText,
+                })]);
+        }
+    }
+
+    private static IEnumerable<ReadableBlock> StringSplitArgument(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"STRING_SPLIT separator arguments not exactly one character ({report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "STRING_SPLIT's separator argument constant-folds to a literal (or literal NULL) whose length is not exactly one character - oracle-confirmed the call fails (Msg 214) at compile/bind time, before any row is read.");
+
+        foreach (var group in report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.StringSplitArgumentRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Separator"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.SeparatorText,
                 })]);
         }
     }

@@ -19,10 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`STRING_SPLIT` separator must be exactly one character.** A literal
-      (or constant-folded) separator argument of any length other than 1 is
-      a compile-error fact, pure source-level analysis, no catalog needed.
-
 - [ ] **`ColumnstoreUnsupportedColumnTypeRuleId` may be narrower than the
       real engine gate.** Currently fires only for `SQL_VARIANT`. The
       underlying columnstore type-support check is reportedly broader (a

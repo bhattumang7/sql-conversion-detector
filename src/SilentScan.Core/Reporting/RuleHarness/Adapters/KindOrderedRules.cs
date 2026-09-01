@@ -43,6 +43,15 @@ internal sealed class WindowFunctionArgumentRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => WindowFunctionArgumentScanner.Harvest((WindowFunctionArgumentScanner.Rule)moduleRule);
 }
 
+internal sealed class StringSplitArgumentRule : IPerFileRule
+{
+    public string Id => "StringSplitArgumentScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => StringSplitArgumentScanner.Scan(parseResult);
+    public IComparer<IFinding>? Comparer => new KindThenLocationComparer<StringSplitArgumentFinding>(f => f.Kind);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => StringSplitArgumentScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => StringSplitArgumentScanner.Harvest((StringSplitArgumentScanner.Rule)moduleRule);
+}
+
 internal sealed class ViewOrderingRule : IPerFileRule
 {
     public string Id => "ViewOrderingScanner";

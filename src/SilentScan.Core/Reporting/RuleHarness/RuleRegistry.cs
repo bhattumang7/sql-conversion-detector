@@ -32,6 +32,7 @@ public static class RuleRegistry
         new ModuleCompileFlagRule(),
         new WindowFrameRule(),
         new WindowFunctionArgumentRule(),
+        new StringSplitArgumentRule(),
         new ViewOrderingRule(),
         new IndexHintRule(),
         new CodeMetricRule(),

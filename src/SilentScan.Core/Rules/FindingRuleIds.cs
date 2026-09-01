@@ -247,6 +247,11 @@ public static class FindingRuleIds
         WindowFunctionArgumentFindingKind.PercentileOutOfRange => "silentscan/window-function/percentile-out-of-range",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
+    public static string StringSplitArgumentRuleId(StringSplitArgumentFindingKind kind) => kind switch
+    {
+        StringSplitArgumentFindingKind.SeparatorNotSingleCharacter => "silentscan/string-tvf/string-split-separator-length",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
     public const string WaitForRuleId = "silentscan/control-flow/waitfor";
     public const string CursorCloseOnCommitRuleId = "silentscan/control-flow/cursor-close-on-commit";
     public static string TransactionHygieneRuleId(TransactionHygieneFindingKind kind) => kind switch

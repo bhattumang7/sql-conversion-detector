@@ -100,6 +100,7 @@ public static class TestScanReports
         IReadOnlyList<MemoryOptimizedForeignKeyFinding>? MemoryOptimizedForeignKeyFindings = null,
         IReadOnlyList<MemoryOptimizedSchemaOnlyDurabilityFinding>? MemoryOptimizedSchemaOnlyDurabilityFindings = null,
         IReadOnlyList<WindowFunctionArgumentFinding>? WindowFunctionArgumentFindings = null,
+        IReadOnlyList<StringSplitArgumentFinding>? StringSplitArgumentFindings = null,
         IReadOnlyList<SelectiveXmlIndexValueColumnFinding>? SelectiveXmlIndexValueColumnFindings = null,
         IReadOnlyList<FloatOrderDependentAggregateFinding>? FloatOrderDependentAggregateFindings = null,
         IReadOnlyList<DynamicDataMaskingFinding>? DynamicDataMaskingFindings = null,
@@ -209,6 +210,7 @@ public static class TestScanReports
         Set("MemoryOptimizedForeignKeyScanner", MemoryOptimizedForeignKeyFindings);
         Set("MemoryOptimizedSchemaOnlyDurabilityScanner", MemoryOptimizedSchemaOnlyDurabilityFindings);
         Set("WindowFunctionArgumentScanner", WindowFunctionArgumentFindings);
+        Set("StringSplitArgumentScanner", StringSplitArgumentFindings);
         Set("SelectiveXmlIndexValueColumnScanner", SelectiveXmlIndexValueColumnFindings);
         Set("FloatOrderDependentAggregateScanner", FloatOrderDependentAggregateFindings);
         Set(nameof(DynamicDataMaskingScanner), DynamicDataMaskingFindings);

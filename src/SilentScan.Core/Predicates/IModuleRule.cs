@@ -280,6 +280,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterGlobalFunctionTableReference(GlobalFunctionTableReference node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterOutputClause(OutputClause node, ModuleWalker walker)
     {
     }

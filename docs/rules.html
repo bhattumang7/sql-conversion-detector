@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">288 rules. 201 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">289 rules. 202 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -523,6 +523,13 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <h2>statistics</h2>
     <ul class="rule-list">
       <li><a class="id" href="rules/statistics-no-applicable-statistic-auto-create-disabled.html">No Applicable Statistic Auto Create Disabled</a> <code class="rule-key">silentscan/statistics/no-applicable-statistic-auto-create-disabled</code><span class="snippet">A predicate resolves to a real base table column that no statistic (single-column, or a multi-column statistic with this column as its own leading key) covers, while the connected database has automatic statistics creation turned off.</span></li>
+    </ul>
+  </section>
+
+  <section class="family-section">
+    <h2>string-tvf</h2>
+    <ul class="rule-list">
+      <li><a class="id" href="rules/string-tvf-string-split-separator-length.html">String Split Separator Length</a> <code class="rule-key">silentscan/string-tvf/string-split-separator-length</code><span class="snippet">STRING_SPLIT&#x27;s separator argument is a literal (or constant-folded, or a literal NULL) whose length is not exactly one character.</span></li>
     </ul>
   </section>
 
