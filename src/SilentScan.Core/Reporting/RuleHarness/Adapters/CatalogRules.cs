@@ -102,6 +102,18 @@ internal sealed class OnlineRebuildLegacyLobRule : ICatalogRule
     public IReadOnlyList<IFinding> Scan(RuleContext context) => OnlineRebuildLegacyLobScanner.Scan(context.Catalog);
 }
 
+internal sealed class SparseColumnDisallowedTypeRule : ICatalogRule
+{
+    public string Id => "SparseColumnDisallowedTypeScanner";
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => SparseColumnDisallowedTypeScanner.Scan(context.Catalog);
+}
+
+internal sealed class LegacyLobUtf8CollationRule : ICatalogRule
+{
+    public string Id => "LegacyLobUtf8CollationScanner";
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => LegacyLobUtf8CollationScanner.Scan(context.Catalog);
+}
+
 internal sealed class MemoryOptimizedForeignKeyRule : ICatalogRule
 {
     public string Id => "MemoryOptimizedForeignKeyScanner";

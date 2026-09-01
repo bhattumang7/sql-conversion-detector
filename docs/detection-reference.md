@@ -497,20 +497,80 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 ## Settled (do not re-propose)
 
 * **`OnlineRebuildLegacyLobRuleId` — shipped for `ALTER TABLE ... REBUILD
-  WITH (ONLINE = ON)` and `ALTER INDEX ALL ... REBUILD WITH (ONLINE = ON)`
-  (Msg 2725).** Oracle-confirmed (Docker): a table carrying a
-  TEXT/NTEXT/IMAGE column always fails an online rebuild that touches its
-  clustered index or heap, because that always includes every column.
-  `ALTER TABLE ... REBUILD` and `ALTER INDEX ALL ... REBUILD` both rebuild
-  the clustered index/heap and so both fail; a single named index's own
-  `REBUILD WITH (ONLINE = ON)` only fails if that specific index's own key/
-  include list carries the legacy large-object column - oracle-confirmed a
-  nonclustered index that does not reference the column rebuilds online
-  successfully even while the table carries one. Decidable purely from the
-  target table's own catalog column types; no data inspection needed. The
-  `ALTER COLUMN ... ONLINE` and `DROP INDEX ... ONLINE` forms, and the
-  single-named-index-carries-the-column shape, remain open - see
-  `detection-tasklist.md`.
+  WITH (ONLINE = ON)`, `ALTER INDEX ALL ... REBUILD WITH (ONLINE = ON)`
+  (Msg 2725), `ALTER TABLE ... ALTER COLUMN ... WITH (ONLINE = ON)`
+  (Msg 11427), and `DROP INDEX ... WITH (ONLINE = ON)` (Msg 2725).**
+  Oracle-confirmed (Docker): a table carrying a TEXT/NTEXT/IMAGE column
+  always fails an online rebuild that touches its clustered index or heap,
+  because that always includes every column. `ALTER TABLE ... REBUILD` and
+  `ALTER INDEX ALL ... REBUILD` both rebuild the clustered index/heap and so
+  both fail; a single named index's own `REBUILD WITH (ONLINE = ON)` only
+  fails if that specific index's own key/include list carries the legacy
+  large-object column - oracle-confirmed a nonclustered index that does not
+  reference the column rebuilds online successfully even while the table
+  carries one (this narrower single-index shape remains open). `ALTER
+  COLUMN ... WITH (ONLINE = ON)` fails online if the column's type either
+  currently is, or is being converted into, TEXT/NTEXT/IMAGE -
+  oracle-confirmed both directions (staying TEXT/NTEXT/IMAGE, and converting
+  a non-LOB column into one) fail identically. `DROP INDEX ... WITH
+  (ONLINE = ON)` fails the same way only for a *clustered* index (which
+  always carries every column of the table); a nonclustered index's online
+  drop is unconditionally rejected for an unrelated reason (Msg 3745, "only
+  a clustered index can be dropped online") regardless of any LOB column, so
+  that path is deliberately not flagged by this rule. Decidable purely from
+  the target table's own catalog column types (and, for `ALTER COLUMN`, the
+  statement's own before/after declared types); no data inspection needed.
+  Fixed a pre-existing bug while shipping the `DROP INDEX` leg: a plain
+  `CREATE [CLUSTERED] INDEX` statement never set `CatalogIndex.IsClustered`
+  at all, so a clustered index created that way was cataloged as
+  non-clustered.
+
+* **`UnpivotExactTypeMismatchRuleId` — shipped (Msg 8167).** Oracle-confirmed
+  (Docker): every column named in an `UNPIVOT` IN-list must share exactly
+  the same type - base type, length/precision/scale, and collation all
+  included - not just implicit-convertibility. `INT` vs `BIGINT` conflicts,
+  `VARCHAR(10)` vs `VARCHAR(20)` conflicts, and two `VARCHAR(10)` columns
+  under different collations conflict, even though every one of those pairs
+  converts freely elsewhere (comparison, assignment). Decidable directly
+  from the source table's own catalog column types; only the simple
+  `UNPIVOT` case over a plain named table is modeled - a derived table or
+  subquery as the `UNPIVOT` source is not resolved and is silently skipped
+  rather than guessed at.
+
+* **`SchemaboundAliasTypeRuleId` — shipped (Msg 2792).** Oracle-confirmed
+  (Docker): a `WITH SCHEMABINDING` `CREATE`/`ALTER FUNCTION` can never
+  declare a parameter, a scalar `RETURNS` type, or a multi-statement
+  table-valued `RETURNS @table` column using a `CREATE TYPE ... FROM` alias
+  - the statement fails to compile regardless of the alias's own underlying
+  type. The message's "CLR type" wording is misleading; the type tested was
+  a plain `CREATE TYPE ... FROM int` alias, not CLR. Since the function
+  never comes into existence, there's no live-catalog "referenced by a
+  schemabound object" state to detect after the fact - the rule is a
+  param/return-type check on the schemabound declaration itself.
+  `CREATE VIEW`/`CREATE TRIGGER` have no parameter or return-type
+  declarations of their own, so this family applies to `CREATE FUNCTION`
+  only. The "invalid parsed type name" half of the original bullet was not
+  separately tested.
+
+* **`SparseColumnDisallowedTypeRuleId` — shipped (Msg 1731).**
+  Oracle-confirmed (Docker): a `SPARSE` column can never be
+  `TEXT`/`NTEXT`/`IMAGE`/`GEOMETRY`/`GEOGRAPHY` (per the engine's own error
+  text) or `TIMESTAMP`/`ROWVERSION` (confirmed separately, not named in the
+  message). `XML`, `HIERARCHYID`, and `SQL_VARIANT` are all oracle-confirmed
+  to remain allowed as sparse - don't add them to the disallow-list.
+  Decidable purely from the column's own declared type and `SPARSE` flag.
+  General hand-authored CLR user-defined types (beyond the built-in spatial
+  types) are not modeled and so are not covered by this rule.
+
+* **`LegacyLobUtf8CollationRuleId` — shipped (Msg 4188).** Oracle-confirmed
+  (Docker): a TEXT/NTEXT column's effective collation can never carry the
+  `_UTF8` or `_SC` (supplementary-character-aware) flag, whether that
+  collation comes from an explicit column-level `COLLATE` clause or from the
+  database's own default collation. Fixed a pre-existing bug in
+  `SqlTypeReferenceResolver` while shipping this: TEXT/NTEXT were missing
+  from `IsStringOrBinaryFamily`, so an explicit column-level `COLLATE`
+  clause on a TEXT/NTEXT column was silently dropped and never reached the
+  resolved `SqlType` at all.
 
 * **`DropProtectedObjectRuleId` — shipped for `DROP SCHEMA` non-empty (Msg
   3729) and `DROP ROLE` against a fixed database role (Msg 15150).**

@@ -284,6 +284,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterUnpivotedTableReference(UnpivotedTableReference node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterGlobalFunctionTableReference(GlobalFunctionTableReference node, ModuleWalker walker)
     {
     }

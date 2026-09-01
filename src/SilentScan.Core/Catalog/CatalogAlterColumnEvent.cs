@@ -8,4 +8,6 @@ public sealed record CatalogAlterColumnEvent(
     SqlType? PreviousType,
     SqlType? NewType,
     string SourcePath,
-    int SourceLine);
+    int SourceLine,
+    bool IsOnline = false,
+    int SourceColumn = 0);

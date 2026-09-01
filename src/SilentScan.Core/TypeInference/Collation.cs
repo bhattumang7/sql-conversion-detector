@@ -27,6 +27,12 @@ public sealed record Collation(string Name, CollationSource Source = CollationSo
 
     public bool GuaranteesDistinctLiteralsAreUnequal => IsCaseSensitive && !IsAccentInsensitive;
 
+    public bool IsUtf8 => Name.EndsWith("_UTF8", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsSupplementaryCharacterAware =>
+        Name.EndsWith("_SC", StringComparison.OrdinalIgnoreCase)
+        || Name.Contains("_SC_", StringComparison.OrdinalIgnoreCase);
+
     public static StringComparer IdentifierComparer(Collation? collation) =>
         collation is { IsCaseSensitive: true } ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
 }

@@ -3,16 +3,7 @@ using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
-public enum OnlineRebuildLegacyLobKind
-{
-    AlterTableRebuild,
-    AlterIndexAllRebuild,
-    AlterColumnOnline,
-    DropIndexOnline,
-}
-
-public sealed record OnlineRebuildLegacyLobFinding(
-    OnlineRebuildLegacyLobKind Kind,
+public sealed record SparseColumnDisallowedTypeFinding(
     string TableQualifiedName,
     string ColumnName,
     string TypeDisplay,
@@ -21,7 +12,7 @@ public sealed record OnlineRebuildLegacyLobFinding(
     [property: JsonIgnore] int Column,
     FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
-    public string RuleId { get; } = FindingRuleIds.OnlineRebuildLegacyLobRuleId(Kind);
+    public string RuleId { get; } = FindingRuleIds.SparseColumnDisallowedTypeRuleId;
 
     public SourceSpan Location => new(SourcePath, Line, Column);
 }

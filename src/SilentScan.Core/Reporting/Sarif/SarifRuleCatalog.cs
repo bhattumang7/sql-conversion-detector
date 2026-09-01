@@ -48,6 +48,10 @@ public static class SarifRuleCatalog
     public static string OnlineRebuildLegacyLobRuleId(OnlineRebuildLegacyLobKind kind) => FindingRuleIds.OnlineRebuildLegacyLobRuleId(kind);
     public static string OperandComparabilityRuleId(OperandComparabilityFindingKind kind) => FindingRuleIds.OperandComparabilityRuleId(kind);
     public const string MemoryOptimizedUnsupportedColumnTypeRuleId = FindingRuleIds.MemoryOptimizedUnsupportedColumnTypeRuleId;
+    public const string UnpivotExactTypeMismatchRuleId = FindingRuleIds.UnpivotExactTypeMismatchRuleId;
+    public const string SchemaboundAliasTypeRuleId = FindingRuleIds.SchemaboundAliasTypeRuleId;
+    public const string SparseColumnDisallowedTypeRuleId = FindingRuleIds.SparseColumnDisallowedTypeRuleId;
+    public const string LegacyLobUtf8CollationRuleId = FindingRuleIds.LegacyLobUtf8CollationRuleId;
     public static string MemoryOptimizedUnsupportedIndexOptionRuleId(MemoryOptimizedUnsupportedIndexOptionKind kind) => FindingRuleIds.MemoryOptimizedUnsupportedIndexOptionRuleId(kind);
     public static string MemoryOptimizedForeignKeyRuleId(MemoryOptimizedForeignKeyFindingKind kind) => FindingRuleIds.MemoryOptimizedForeignKeyRuleId(kind);
     public const string MemoryOptimizedSchemaOnlyDurabilityRuleId = FindingRuleIds.MemoryOptimizedSchemaOnlyDurabilityRuleId;

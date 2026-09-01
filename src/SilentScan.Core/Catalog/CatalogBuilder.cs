@@ -825,6 +825,16 @@ public static class CatalogBuilder
                     continue;
                 }
 
+                if (clause is DropIndexClause { } modernClause && IsOnline(modernClause.Options))
+                {
+                    var droppedIndex = existing.Indexes.FirstOrDefault(i => string.Equals(i.Name, indexName, StringComparison.OrdinalIgnoreCase));
+                    if (droppedIndex is { IsClustered: true, Kind: CatalogIndexKind.Index })
+                    {
+                        catalog.AddDropIndexOnlineEvent(new CatalogDropIndexOnlineEvent(
+                            qualifiedName, indexName, sourcePath, dropIndex.StartLine, dropIndex.StartColumn));
+                    }
+                }
+
                 catalog.AddOrReplace(existing with { Indexes = remainingIndexes }, writeScope);
             }
         }
@@ -1105,7 +1115,8 @@ public static class CatalogBuilder
                 }
 
                 catalog.AddAlterColumnEvent(new CatalogAlterColumnEvent(
-                    qualifiedName, columnName, existingColumn.Type, newType, sourcePath, alterColumn.StartLine));
+                    qualifiedName, columnName, existingColumn.Type, newType, sourcePath, alterColumn.StartLine,
+                    IsOnline(alterColumn.Options), alterColumn.StartColumn));
 
                 updatedColumns = existing.Columns
                     .Select(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
@@ -1181,7 +1192,8 @@ public static class CatalogBuilder
                 createIndex.Unique,
                 [.. createIndex.Columns.Select(ColumnName)],
                 [.. createIndex.IncludeColumns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)],
-                IsFiltered: createIndex.FilterPredicate is not null);
+                IsFiltered: createIndex.FilterPredicate is not null,
+                IsClustered: createIndex.Clustered == true);
 
             catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] }, writeScope);
         }
@@ -1410,7 +1422,8 @@ public static class CatalogBuilder
             EnclaveSupport: ResolveEnclaveSupport(columnDefinition.Encryption, context.Catalog),
             IsMasked: columnDefinition.IsMasked,
             MaskingFunctionName: MaskingFunctionNameNormalizer.Normalize(columnDefinition.MaskingFunction?.Value),
-            IsGeneratedAlwaysPeriod: columnDefinition.GeneratedAlways is GeneratedAlwaysType.RowStart or GeneratedAlwaysType.RowEnd);
+            IsGeneratedAlwaysPeriod: columnDefinition.GeneratedAlways is GeneratedAlwaysType.RowStart or GeneratedAlwaysType.RowEnd,
+            IsSparse: columnDefinition.StorageOptions?.SparseOption == SparseColumnOption.Sparse);
     }
 
     private static ColumnEncryptionEnclaveSupport ResolveEnclaveSupport(ColumnEncryptionDefinition? encryption, DatabaseCatalog? catalog) =>

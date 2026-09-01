@@ -99,7 +99,7 @@ public static class SqlTypeReferenceResolver
 
     private static bool IsStringOrBinaryFamily(SqlTypeCategory category) => category is
         SqlTypeCategory.Char or SqlTypeCategory.VarChar or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar
-        or SqlTypeCategory.Binary or SqlTypeCategory.VarBinary;
+        or SqlTypeCategory.Binary or SqlTypeCategory.VarBinary or SqlTypeCategory.Text or SqlTypeCategory.NText;
 
     private static SqlType ResolveStringOrBinary(
         SqlTypeCategory category, SqlDataTypeReference sqlDataType, Collation? collation, int? unsizedDefaultLength)

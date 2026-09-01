@@ -172,6 +172,22 @@ internal sealed class OperandComparabilityRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => OperandComparabilityScanner.Harvest((OperandComparabilityScanner.Rule)moduleRule);
 }
 
+internal sealed class UnpivotExactTypeMismatchRule : IPerFileRule
+{
+    public string Id => "UnpivotExactTypeMismatchScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => UnpivotExactTypeMismatchScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => UnpivotExactTypeMismatchScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => UnpivotExactTypeMismatchScanner.Harvest((UnpivotExactTypeMismatchScanner.Rule)moduleRule);
+}
+
+internal sealed class SchemaboundAliasTypeRule : IPerFileRule
+{
+    public string Id => "SchemaboundAliasTypeScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => SchemaboundAliasTypeScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => SchemaboundAliasTypeScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => SchemaboundAliasTypeScanner.Harvest((SchemaboundAliasTypeScanner.Rule)moduleRule);
+}
+
 internal sealed class IndexCoverageRule : IPerFileRule
 {
     public string Id => "IndexCoverageScanner";

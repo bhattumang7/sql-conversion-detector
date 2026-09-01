@@ -30,6 +30,31 @@ public static class OnlineRebuildLegacyLobScanner
                 rebuild.SourcePath, rebuild.SourceLine, rebuild.SourceColumn));
         }
 
+        foreach (var drop in catalog.DropIndexOnlineEvents)
+        {
+            findings.AddRange(ScanEvent(
+                catalog, OnlineRebuildLegacyLobKind.DropIndexOnline, drop.TableQualifiedName,
+                drop.SourcePath, drop.SourceLine, drop.SourceColumn));
+        }
+
+        foreach (var alter in catalog.AlterColumnEvents)
+        {
+            if (!alter.IsOnline)
+            {
+                continue;
+            }
+
+            var lobType = IsLegacyLob(alter.PreviousType) ? alter.PreviousType : IsLegacyLob(alter.NewType) ? alter.NewType : null;
+            if (lobType is null)
+            {
+                continue;
+            }
+
+            findings.Add(new OnlineRebuildLegacyLobFinding(
+                OnlineRebuildLegacyLobKind.AlterColumnOnline, alter.TableQualifiedName, alter.ColumnName,
+                lobType.ToString()!, alter.SourcePath, alter.SourceLine, alter.SourceColumn));
+        }
+
         return
         [
             .. findings
@@ -38,6 +63,8 @@ public static class OnlineRebuildLegacyLobScanner
                 .ThenBy(f => f.ColumnName, StringComparer.Ordinal),
         ];
     }
+
+    private static bool IsLegacyLob(SqlType? type) => type is not null && LegacyLobCategories.Contains(type.Category);
 
     private static IEnumerable<OnlineRebuildLegacyLobFinding> ScanEvent(
         DatabaseCatalog catalog, OnlineRebuildLegacyLobKind kind, string tableQualifiedName,

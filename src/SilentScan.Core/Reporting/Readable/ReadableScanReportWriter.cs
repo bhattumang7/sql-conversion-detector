@@ -155,6 +155,10 @@ public static class ReadableScanReportWriter
         blocks.AddRange(AlterColumnSafety(report, headingLevel, pathBase));
         blocks.AddRange(DropProtectedObject(report, headingLevel, pathBase));
         blocks.AddRange(OnlineRebuildLegacyLob(report, headingLevel, pathBase));
+        blocks.AddRange(UnpivotExactTypeMismatch(report, headingLevel, pathBase));
+        blocks.AddRange(SchemaboundAliasType(report, headingLevel, pathBase));
+        blocks.AddRange(SparseColumnDisallowedType(report, headingLevel, pathBase));
+        blocks.AddRange(LegacyLobUtf8Collation(report, headingLevel, pathBase));
         blocks.AddRange(OperandComparability(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
         blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
@@ -254,6 +258,10 @@ public static class ReadableScanReportWriter
         AddCount(counts, "ALTER COLUMN safety", report.Find<AlterColumnSafetyFinding>(nameof(AlterColumnSafetyScanner)).Count);
         AddCount(counts, "DROP against a protected object", report.Find<DropProtectedObjectFinding>(nameof(DropProtectedObjectScanner)).Count);
         AddCount(counts, "Online index rebuild blocked by a legacy large-object column", report.Find<OnlineRebuildLegacyLobFinding>(nameof(OnlineRebuildLegacyLobScanner)).Count);
+        AddCount(counts, "UNPIVOT source columns with mismatched exact types", report.Find<UnpivotExactTypeMismatchFinding>(nameof(UnpivotExactTypeMismatchScanner)).Count);
+        AddCount(counts, "WITH SCHEMABINDING function using an alias type", report.Find<SchemaboundAliasTypeFinding>(nameof(SchemaboundAliasTypeScanner)).Count);
+        AddCount(counts, "SPARSE column of a disallowed type", report.Find<SparseColumnDisallowedTypeFinding>(nameof(SparseColumnDisallowedTypeScanner)).Count);
+        AddCount(counts, "TEXT/NTEXT column with a UTF-8 or supplementary-character-aware collation", report.Find<LegacyLobUtf8CollationFinding>(nameof(LegacyLobUtf8CollationScanner)).Count);
         AddCount(counts, "Operand not comparable (xml/json/legacy large object/spatial)", report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count);
         AddCount(counts, "Query anti-patterns", report.Find<QueryAntiPatternFinding>(nameof(QueryAntiPatternScanner)).Count);
         AddCount(counts, "Index-coverage shapes", report.Find<IndexCoverageFinding>(nameof(IndexCoverageScanner)).Count);
@@ -1772,8 +1780,106 @@ public static class ReadableScanReportWriter
     {
         OnlineRebuildLegacyLobKind.AlterTableRebuild => "ALTER TABLE ... REBUILD",
         OnlineRebuildLegacyLobKind.AlterIndexAllRebuild => "ALTER INDEX ALL ... REBUILD",
+        OnlineRebuildLegacyLobKind.AlterColumnOnline => "ALTER TABLE ... ALTER COLUMN",
+        OnlineRebuildLegacyLobKind.DropIndexOnline => "DROP INDEX",
         _ => "Unknown",
     };
+
+    private static IEnumerable<ReadableBlock> UnpivotExactTypeMismatch(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<UnpivotExactTypeMismatchFinding>(nameof(UnpivotExactTypeMismatchScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"UNPIVOT source columns with mismatched exact types ({report.Find<UnpivotExactTypeMismatchFinding>(nameof(UnpivotExactTypeMismatchScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "UNPIVOT requires every column named in its IN-list to share exactly the same type - oracle-confirmed (Msg 8167) a mismatch in base type, length/precision/scale, or collation always fails to compile, even when the types would otherwise implicitly convert.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.UnpivotExactTypeMismatchRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Reference column", "Reference type", "Mismatched column", "Mismatched type"],
+            [.. report.Find<UnpivotExactTypeMismatchFinding>(nameof(UnpivotExactTypeMismatchScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.ReferenceColumnName,
+                f.ReferenceTypeDisplay,
+                f.MismatchedColumnName,
+                f.MismatchedTypeDisplay,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> SchemaboundAliasType(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<SchemaboundAliasTypeFinding>(nameof(SchemaboundAliasTypeScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"WITH SCHEMABINDING function using an alias type ({report.Find<SchemaboundAliasTypeFinding>(nameof(SchemaboundAliasTypeScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A WITH SCHEMABINDING function's own parameter, RETURNS type, or table-valued RETURNS column names a CREATE TYPE alias - oracle-confirmed (Msg 2792) this never compiles, regardless of the alias's underlying type.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SchemaboundAliasTypeRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Function", "Kind", "Member", "Alias type"],
+            [.. report.Find<SchemaboundAliasTypeFinding>(nameof(SchemaboundAliasTypeScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.FunctionQualifiedName,
+                f.Kind.ToString(),
+                f.MemberName,
+                f.AliasTypeQualifiedName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> SparseColumnDisallowedType(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<SparseColumnDisallowedTypeFinding>(nameof(SparseColumnDisallowedTypeScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"SPARSE column of a disallowed type ({report.Find<SparseColumnDisallowedTypeFinding>(nameof(SparseColumnDisallowedTypeScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A column marked SPARSE has a type on the engine's own closed disallow-list - oracle-confirmed (Msg 1731) the CREATE/ALTER never compiles.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SparseColumnDisallowedTypeRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Column", "Type"],
+            [.. report.Find<SparseColumnDisallowedTypeFinding>(nameof(SparseColumnDisallowedTypeScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.ColumnName,
+                f.TypeDisplay,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> LegacyLobUtf8Collation(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<LegacyLobUtf8CollationFinding>(nameof(LegacyLobUtf8CollationScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"TEXT/NTEXT column with a UTF-8 or supplementary-character-aware collation ({report.Find<LegacyLobUtf8CollationFinding>(nameof(LegacyLobUtf8CollationScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A TEXT/NTEXT column's effective collation carries the _UTF8 or _SC flag - oracle-confirmed (Msg 4188) the CREATE/ALTER never compiles.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.LegacyLobUtf8CollationRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Column", "Type", "Collation"],
+            [.. report.Find<LegacyLobUtf8CollationFinding>(nameof(LegacyLobUtf8CollationScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.ColumnName,
+                f.TypeDisplay,
+                f.CollationName,
+            })]);
+    }
 
     private static IEnumerable<ReadableBlock> OperandComparability(ScanReport report, int level, string? pathBase)
     {

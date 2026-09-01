@@ -81,9 +81,15 @@ public static class FindingRuleIds
     {
         OnlineRebuildLegacyLobKind.AlterTableRebuild => "silentscan/catalog/online-rebuild-legacy-lob-alter-table",
         OnlineRebuildLegacyLobKind.AlterIndexAllRebuild => "silentscan/catalog/online-rebuild-legacy-lob-alter-index-all",
+        OnlineRebuildLegacyLobKind.AlterColumnOnline => "silentscan/catalog/online-rebuild-legacy-lob-alter-column",
+        OnlineRebuildLegacyLobKind.DropIndexOnline => "silentscan/catalog/online-rebuild-legacy-lob-drop-index",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled OnlineRebuildLegacyLobKind."),
     };
     public const string MemoryOptimizedUnsupportedColumnTypeRuleId = "silentscan/catalog/memory-optimized-unsupported-column-type";
+    public const string UnpivotExactTypeMismatchRuleId = "silentscan/catalog/unpivot-exact-type-mismatch";
+    public const string SchemaboundAliasTypeRuleId = "silentscan/catalog/schemabound-alias-type";
+    public const string SparseColumnDisallowedTypeRuleId = "silentscan/catalog/sparse-column-disallowed-type";
+    public const string LegacyLobUtf8CollationRuleId = "silentscan/catalog/legacy-lob-utf8-collation";
     public static string MemoryOptimizedUnsupportedIndexOptionRuleId(MemoryOptimizedUnsupportedIndexOptionKind kind) => kind switch
     {
         MemoryOptimizedUnsupportedIndexOptionKind.ClusteredIndex => "silentscan/catalog/memory-optimized-clustered-index",

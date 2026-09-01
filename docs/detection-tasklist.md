@@ -64,10 +64,6 @@ Competitor tools are referred to generically; real identities are in
         family. `sql_variant = xml` (item 3) remains the one confirmed
         "cannot implicit-convert at all" case; encryption-state and
         legacy-LOB legs still unverified.
-      6. Remaining legs of the shipped `OnlineRebuildLegacyLobRuleId` family
-        (`ALTER TABLE ... REBUILD WITH (ONLINE=ON)`, `ALTER INDEX ALL ...
-        REBUILD WITH (ONLINE=ON)` — both shipped): `ALTER COLUMN ...
-        ONLINE` and `DROP INDEX ... ONLINE` forms not yet tested.
       7. New family: partition/filegroup DDL alignment siblings to the
         shipped `ALTER TABLE SWITCH` family — partition-`REBUILD` alignment
         mismatch, `DROP` against a non-updateable (read-only/offline)
@@ -78,15 +74,6 @@ Competitor tools are referred to generically; real identities are in
       8. `CREATE TRIGGER` on a FILESTREAM-backed table failing at DDL time.
         **FINDING:** not tested this pass — needs FILESTREAM enabled on a
         throwaway database, out of scope for the VALUES-only probes used.
-      9. `UNPIVOT` source columns requiring *exact* type match, not just
-        implicit-convertibility (`sys.columns`-decidable). **FINDING:
-        confirmed real, and stricter than the bullet implies.** `int` vs
-        `bigint` errors (Msg 8167) even though both are in-model and
-        would otherwise convert — UNPIVOT requires exact type equality.
-        (The `int` vs `xml` leg of the original bullet is already covered
-        by the shipped comparability-gate rule, below.) Decidable directly
-        from `sys.columns` type equality; scope the rule as
-        exact-type-mismatch, not "incompatible types."
       10. Memory-optimized (Hekaton) natively compiled module restrictions
         distinct from the shipped table-level family (unsupported column
         type, unsupported index option, cross-storage/CASCADE foreign key):
@@ -100,19 +87,6 @@ Competitor tools are referred to generically; real identities are in
         expressions have to be walked, not just the table's own catalog
         shape. **FINDING:** not tested this pass — needs a
         MEMORY_OPTIMIZED_DATA filegroup set up on a throwaway database.
-      11. `WITH SCHEMABINDING` referencing an alias user type (or an invalid
-        parsed type name) is a documented restriction. **FINDING: confirmed
-        real.** `CREATE FUNCTION ... (@x dbo.MyAliasType) RETURNS int WITH
-        SCHEMABINDING` fails at create time (`Msg 2792`: "Cannot specify a
-        sql CLR type in a Schema-bound object..." — the message's "CLR
-        type" wording is misleading, the type here was a plain
-        `CREATE TYPE ... FROM int` alias, not CLR). Since the function
-        never comes into existence, there's no live-catalog "referenced by
-        a schemabound object" state to detect after the fact — the value
-        here is a param/return-type check on schemabound `CREATE
-        FUNCTION`/`VIEW`/`TRIGGER` statements themselves, not a dangling-
-        reference scan. The "invalid parsed type name" half wasn't
-        separately tested.
       12. Full-text index DDL validation (unsupported column type, invalid
         language id, nondeterministic computed column, >1024 indexed
         columns) — real but needs new full-text-index modeling in the
@@ -124,18 +98,6 @@ Competitor tools are referred to generically; real identities are in
         family already written up — a column type the engine's own
         encryption-support rules reject outright. **FINDING:** not tested
         this pass.
-      14. Sparse column type/compression restrictions (`sys.columns.is_sparse`
-        plus table compression state) — allow-list is version-dependent.
-        **FINDING: confirmed real for the type-allow-list half.** A sparse
-        `ntext` column and a sparse `geometry` (UDT) column both reject at
-        create time with `Msg 1731` ("cannot be of the follow[ing types]").
-        A sparse `xml` column, by contrast, is **allowed** — don't assume
-        XML belongs on the disallowed list. The `NOT NULL` + `SPARSE`
-        combination wasn't cleanly isolated (test hit a DDL syntax issue,
-        not an engine rejection) — retest before relying on that leg.
-        Compression-state interaction not tested.
-      15. Legacy LOB type (`text`/`ntext`/`image`) paired with a surrogate-
-        aware or UTF-8 collation. **FINDING:** not tested this pass.
       16. New family: `STRING_SPLIT`/`REGEXP_MATCHES`-style string TVF
         argument-type and MAX-width validation, and `STRING_SPLIT`'s
         3-argument ordinality form being version-gated — fold together
