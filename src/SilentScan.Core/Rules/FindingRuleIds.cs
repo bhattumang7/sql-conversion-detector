@@ -238,7 +238,13 @@ public static class FindingRuleIds
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
     public const string WaitForRuleId = "silentscan/control-flow/waitfor";
-    public const string TransactionHygieneRuleId = "silentscan/control-flow/unresolved-transaction";
+    public static string TransactionHygieneRuleId(TransactionHygieneFindingKind kind) => kind switch
+    {
+        TransactionHygieneFindingKind.UnresolvedOnSomePath => "silentscan/control-flow/unresolved-transaction",
+        TransactionHygieneFindingKind.ImplicitTransactionUnresolvedOnSomePath => "silentscan/control-flow/unresolved-implicit-transaction",
+        TransactionHygieneFindingKind.CommitAfterXactAbortDoomsTransaction => "silentscan/control-flow/commit-after-xact-abort-dooms-transaction",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
     public const string OutputParameterRuleId = "silentscan/control-flow/unassigned-output-parameter";
     public const string CompositeIndexLeadingColumnRuleId = "silentscan/index-shape/composite-leading-column-unconstrained";
     public const string MissingStatisticsRuleId = "silentscan/statistics/no-applicable-statistic-auto-create-disabled";

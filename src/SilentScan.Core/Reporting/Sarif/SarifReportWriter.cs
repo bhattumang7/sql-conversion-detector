@@ -968,10 +968,17 @@ public static class SarifReportWriter
     private static SarifResult ToResult(TransactionHygieneFinding finding)
     {
 
-        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TransactionHygieneRuleId, finding.Confidence);
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TransactionHygieneRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
-        var message =
-            $"BEGIN TRANSACTION at line {finding.BeginTransactionLine} reaches this point with no intervening COMMIT/ROLLBACK - @@TRANCOUNT is left elevated by one on this path, holding its locks until the session or connection pool eventually clears it.";
+        var message = finding.Kind switch
+        {
+            TransactionHygieneFindingKind.ImplicitTransactionUnresolvedOnSomePath =>
+                $"SET IMPLICIT_TRANSACTIONS ON silently opens a transaction at line {finding.BeginTransactionLine} with no matching BEGIN TRANSACTION - it reaches this point with no intervening COMMIT/ROLLBACK, leaving @@TRANCOUNT elevated by one on this path.",
+            TransactionHygieneFindingKind.CommitAfterXactAbortDoomsTransaction =>
+                $"COMMIT TRANSACTION here always fails: SET XACT_ABORT ON dooms the transaction opened at line {finding.BeginTransactionLine} the instant an error is caught by this CATCH block, and a doomed transaction cannot be committed (Msg 3930) - only ROLLBACK is possible.",
+            _ =>
+                $"BEGIN TRANSACTION at line {finding.BeginTransactionLine} reaches this point with no intervening COMMIT/ROLLBACK - @@TRANCOUNT is left elevated by one on this path, holding its locks until the session or connection pool eventually clears it.",
+        };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.UnresolvedExitLine, finding.UnresolvedExitColumn);
     }

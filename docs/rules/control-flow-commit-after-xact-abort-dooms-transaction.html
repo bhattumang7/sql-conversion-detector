@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Commit After Xact Abort Dooms Transaction - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Commit After Xact Abort Dooms Transaction</h1>
+  <p class="rule-key"><code>silentscan/control-flow/commit-after-xact-abort-dooms-transaction</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">SET XACT_ABORT ON is in effect (set earlier in the same module body) for a transaction that was already open before entering a TRY block, and the matching CATCH block directly contains a COMMIT TRANSACTION - oracle-confirmed that XACT_ABORT ON marks any transaction open at the moment an error is caught as uncommittable (XACT_STATE() = -1, @@TRANCOUNT unchanged), so this COMMIT always fails with Msg 3930 (&quot;The current transaction cannot be committed and cannot support operations that write to the log file. Roll back the transaction.&quot;) regardless of which error reached the CATCH block.</p>
+  <p class="rationale">`SET XACT_ABORT ON` changes what a `CATCH` block can safely do with an already-open transaction. Oracle-confirmed directly: with `XACT_ABORT ON`, a transaction that was already open before a `TRY` block began is marked uncommittable - `XACT_STATE()` reads `-1` - the instant any error inside that `TRY` is caught, while `@@TRANCOUNT` itself stays unchanged (still 1). A `COMMIT TRANSACTION` reached directly inside the matching `CATCH` block then always fails with Msg 3930 (&quot;The current transaction cannot be committed and cannot support operations that write to the log file. Roll back the transaction.&quot;), regardless of which error reached the CATCH block or what the COMMIT&#x27;s own code otherwise does.</p>
+  <p class="rationale">This is a genuine blind spot for a `CATCH` block that looks correctly handled from source alone: `IF @@TRANCOUNT &gt; 0 COMMIT TRANSACTION` reads as a defensive guard, but `@@TRANCOUNT` does not reflect the doomed state at all, so the guard never prevents the COMMIT from running and failing.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Replace the COMMIT TRANSACTION in the CATCH block with a ROLLBACK TRANSACTION - a transaction doomed by XACT_ABORT ON can only be rolled back, never committed.</p>
+  <h3>A CATCH block that tries to commit a doomed transaction</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE PROCEDURE dbo.usp_ProcessOrder&#xA;    @OrderId INT&#xA;AS&#xA;BEGIN&#xA;    SET XACT_ABORT ON;&#xA;    BEGIN TRANSACTION;&#xA;    BEGIN TRY&#xA;        UPDATE dbo.Orders SET Status = &#x27;Processing&#x27; WHERE Id = @OrderId;&#xA;        COMMIT TRANSACTION;&#xA;    END TRY&#xA;    BEGIN CATCH&#xA;        COMMIT TRANSACTION;&#xA;    END CATCH&#xA;END;</code></pre></div>
+  <p class="example-explanation">SET XACT_ABORT ON dooms the transaction the instant the UPDATE&#x27;s error is caught - the CATCH block&#x27;s own COMMIT TRANSACTION always fails with Msg 3930, it can never actually commit anything here.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE PROCEDURE dbo.usp_ProcessOrder&#xA;    @OrderId INT&#xA;AS&#xA;BEGIN&#xA;    SET XACT_ABORT ON;&#xA;    BEGIN TRANSACTION;&#xA;    BEGIN TRY&#xA;        UPDATE dbo.Orders SET Status = &#x27;Processing&#x27; WHERE Id = @OrderId;&#xA;        COMMIT TRANSACTION;&#xA;    END TRY&#xA;    BEGIN CATCH&#xA;        ROLLBACK TRANSACTION;&#xA;    END CATCH&#xA;END;</code></pre></div>
+  <p class="example-explanation">ROLLBACK TRANSACTION is the only operation a doomed transaction accepts - the CATCH block now does the one thing that actually succeeds.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

@@ -5,6 +5,8 @@ namespace SilentScan.Core.Predicates;
 public enum TransactionHygieneFindingKind
 {
     UnresolvedOnSomePath,
+    ImplicitTransactionUnresolvedOnSomePath,
+    CommitAfterXactAbortDoomsTransaction,
 }
 
 public sealed record TransactionHygieneFinding(
@@ -16,7 +18,7 @@ public sealed record TransactionHygieneFinding(
     int UnresolvedExitColumn,
     FindingConfidence Confidence = FindingConfidence.High) : IFinding
 {
-    public string RuleId { get; } = FindingRuleIds.TransactionHygieneRuleId;
+    public string RuleId { get; } = FindingRuleIds.TransactionHygieneRuleId(Kind);
 
     public SourceSpan Location => new(SourcePath, BeginTransactionLine, BeginTransactionColumn);
 }

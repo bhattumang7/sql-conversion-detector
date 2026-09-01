@@ -2415,18 +2415,38 @@ public static class ReadableScanReportWriter
             yield break;
         }
 
-        yield return new ReadableBlock.Heading(level, $"Unresolved BEGIN TRANSACTION ({report.Find<TransactionHygieneFinding>(nameof(TransactionHygieneScanner)).Count})");
-        yield return new ReadableBlock.Paragraph(
-            "A BEGIN TRANSACTION reaches a RETURN/THROW, or the natural end of the module body, on some statically reachable path with no intervening COMMIT/ROLLBACK - oracle-confirmed directly that SQL Server raises Msg 266 and leaves @@TRANCOUNT elevated by one the instant such a procedure returns, holding its locks indefinitely.");
+        yield return new ReadableBlock.Heading(level, $"Transaction hygiene ({report.Find<TransactionHygieneFinding>(nameof(TransactionHygieneScanner)).Count})");
 
-        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TransactionHygieneRuleId));
-        yield return new ReadableBlock.Table(
-            ["BEGIN TRANSACTION at", "Unresolved at"],
-            [.. report.Find<TransactionHygieneFinding>(nameof(TransactionHygieneScanner)).Select(f => new List<string>
+        foreach (var group in report.Find<TransactionHygieneFinding>(nameof(TransactionHygieneScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var (title, paragraph, columns) = group.Key switch
             {
-                Where(f.SourcePath, f.BeginTransactionLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                $"{f.SourcePath}:{f.UnresolvedExitLine}",
-            })]);
+                TransactionHygieneFindingKind.ImplicitTransactionUnresolvedOnSomePath => (
+                    "Unresolved implicit transaction",
+                    "SET IMPLICIT_TRANSACTIONS ON silently opens a transaction ahead of the next INSERT/UPDATE/DELETE/MERGE/TRUNCATE/SELECT (with a FROM)/CREATE/ALTER/DROP/GRANT/REVOKE/OPEN CURSOR/FETCH CURSOR with no matching BEGIN TRANSACTION - a RETURN/THROW, or the natural end of the module body, on some statically reachable path with no intervening COMMIT/ROLLBACK leaves @@TRANCOUNT elevated by one the instant the procedure returns, same as an unresolved explicit BEGIN TRANSACTION.",
+                    new[] { "Implicit transaction opened at", "Unresolved at" }),
+                TransactionHygieneFindingKind.CommitAfterXactAbortDoomsTransaction => (
+                    "COMMIT after XACT_ABORT dooms the transaction",
+                    "SET XACT_ABORT ON marks a transaction that was already open before a TRY block as uncommittable (XACT_STATE() = -1) the instant an error is caught by the matching CATCH block - oracle-confirmed a COMMIT TRANSACTION reached directly inside that CATCH block always fails with Msg 3930, regardless of the error that triggered the CATCH; only ROLLBACK is possible.",
+                    new[] { "Transaction opened at", "Doomed COMMIT at" }),
+                _ => (
+                    "Unresolved BEGIN TRANSACTION",
+                    "A BEGIN TRANSACTION reaches a RETURN/THROW, or the natural end of the module body, on some statically reachable path with no intervening COMMIT/ROLLBACK - oracle-confirmed directly that SQL Server raises Msg 266 and leaves @@TRANCOUNT elevated by one the instant such a procedure returns, holding its locks indefinitely.",
+                    new[] { "BEGIN TRANSACTION at", "Unresolved at" }),
+            };
+
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(paragraph);
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TransactionHygieneRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                columns,
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.BeginTransactionLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    $"{f.SourcePath}:{f.UnresolvedExitLine}",
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> MissingStatistics(ScanReport report, int level, string? pathBase)

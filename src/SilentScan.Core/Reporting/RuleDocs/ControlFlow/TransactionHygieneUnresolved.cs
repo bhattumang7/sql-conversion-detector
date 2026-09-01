@@ -1,10 +1,11 @@
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting.Sarif;
 
 namespace SilentScan.Core.Reporting.RuleDocs.ControlFlow;
 
-internal static class TransactionHygiene
+internal static class TransactionHygieneUnresolved
 {
-    public static string RuleId => SarifRuleCatalog.TransactionHygieneRuleId;
+    public static string RuleId => SarifRuleCatalog.TransactionHygieneRuleId(TransactionHygieneFindingKind.UnresolvedOnSomePath);
 
     public static RuleDocContent Content { get; } = new(
         WhyItMatters: """
@@ -23,10 +24,17 @@ internal static class TransactionHygiene
             the transaction rolls back by default. Every path through a procedure that opens a
             transaction needs a matching close on that same path - a single unclosed path is enough
             to leak a transaction on every call that happens to take it.
+
+            A `ROLLBACK TRANSACTION` that names a savepoint does not close the transaction it
+            partially undoes - oracle-confirmed `@@TRANCOUNT` is completely unaffected by a
+            savepoint rollback, unlike a full `ROLLBACK TRANSACTION`. A `SAVE TRANSACTION
+            sp1; ... ROLLBACK TRANSACTION sp1; RETURN;` path leaves the transaction just as open as
+            a bare `BEGIN TRANSACTION; RETURN;` would.
             """,
         HowToFixIt: """
             Ensure every RETURN/THROW path, and the natural end of the module body, is preceded by a
-            matching COMMIT or ROLLBACK for every BEGIN TRANSACTION.
+            matching COMMIT or ROLLBACK for every BEGIN TRANSACTION - a ROLLBACK TRANSACTION naming
+            a savepoint does not count as that matching close.
             """,
         Examples:
         [
@@ -55,5 +63,41 @@ internal static class TransactionHygiene
                     END;
                     """,
                 CompliantExplanation: "The transaction is committed before the procedure returns on every path, so no locks are left held."),
+            new RuleDocExample(
+                Title: "A savepoint rollback mistaken for a real rollback",
+                NoncompliantSql: """
+                    CREATE PROCEDURE dbo.usp_ProcessOrder
+                        @OrderId INT
+                    AS
+                    BEGIN
+                        BEGIN TRANSACTION;
+                        SAVE TRANSACTION BeforeUpdate;
+                        UPDATE dbo.Orders SET Status = 'Processing' WHERE Id = @OrderId;
+                        IF (@@ERROR <> 0)
+                        BEGIN
+                            ROLLBACK TRANSACTION BeforeUpdate;
+                            RETURN;
+                        END
+                        COMMIT TRANSACTION;
+                    END;
+                    """,
+                NoncompliantExplanation: "ROLLBACK TRANSACTION BeforeUpdate only undoes the UPDATE back to the savepoint - it does not decrement @@TRANCOUNT, so the RETURN on this path leaves the outer transaction from BEGIN TRANSACTION still open.",
+                CompliantSql: """
+                    CREATE PROCEDURE dbo.usp_ProcessOrder
+                        @OrderId INT
+                    AS
+                    BEGIN
+                        BEGIN TRANSACTION;
+                        SAVE TRANSACTION BeforeUpdate;
+                        UPDATE dbo.Orders SET Status = 'Processing' WHERE Id = @OrderId;
+                        IF (@@ERROR <> 0)
+                        BEGIN
+                            ROLLBACK TRANSACTION;
+                            RETURN;
+                        END
+                        COMMIT TRANSACTION;
+                    END;
+                    """,
+                CompliantExplanation: "ROLLBACK TRANSACTION with no savepoint name fully closes the outer transaction, so @@TRANCOUNT is back to zero before the RETURN."),
         ]);
 }

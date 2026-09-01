@@ -119,6 +119,43 @@ public sealed class WaitForScannerTransactionScopeOracleTests : OracleTestFixtur
     }
 
     [Fact]
+    public async Task RollbackToSavepoint_DoesNotCloseTheTransaction_WaitForStillSeesItOpen()
+    {
+        await using var connection = await OpenConnectionAsync();
+
+        await new SqlCommand("BEGIN TRANSACTION;", connection).ExecuteNonQueryAsync();
+        await new SqlCommand("SAVE TRANSACTION sp1;", connection).ExecuteNonQueryAsync();
+
+        Assert.Equal(1, await ReadTranCountAsync(connection));
+
+        await new SqlCommand("ROLLBACK TRANSACTION sp1;", connection).ExecuteNonQueryAsync();
+
+        Assert.Equal(1, await ReadTranCountAsync(connection));
+
+        await new SqlCommand("WAITFOR DELAY '00:00:01';", connection).ExecuteNonQueryAsync();
+
+        Assert.Equal(1, await ReadTranCountAsync(connection));
+
+        await new SqlCommand("ROLLBACK TRANSACTION;", connection).ExecuteNonQueryAsync();
+
+        Assert.Equal(0, await ReadTranCountAsync(connection));
+
+        var findings = Scan(
+            """
+            BEGIN TRANSACTION;
+            SAVE TRANSACTION sp1;
+            GO
+            ROLLBACK TRANSACTION sp1;
+            WAITFOR DELAY '00:00:01';
+            ROLLBACK TRANSACTION;
+            GO
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.True(finding.IsInsideTransaction);
+    }
+
+    [Fact]
     public async Task ProcedureBoundary_DoesNotInheritAnOpenTransactionFromAPrecedingUnrelatedProcedure()
     {
         var findings = Scan(

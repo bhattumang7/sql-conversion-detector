@@ -27,10 +27,10 @@ public static class TransactionHygieneScanner
         ];
 
 
-    private readonly record struct FlowState(BeginTransactionStatement? OpenSite, bool Declined)
+    private readonly record struct FlowState(TSqlStatement? OpenSite, bool Declined, bool ImplicitTransactionsOn, bool XactAbortOn)
     {
-        public static readonly FlowState NotTracking = new(null, false);
-        public static readonly FlowState DeclinedState = new(null, true);
+        public static readonly FlowState NotTracking = new(null, false, false, false);
+        public static readonly FlowState DeclinedState = new(null, true, false, false);
     }
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
@@ -57,17 +57,15 @@ public static class TransactionHygieneScanner
                 return;
             }
 
-            var statements = statementList.Statements is [BeginEndBlockStatement singleBlock]
-                ? singleBlock.StatementList.Statements
-                : statementList.Statements;
+            var statements = Unwrap(statementList.Statements);
 
             var finalState = AnalyzeSequential(statements, FlowState.NotTracking);
 
             if (finalState is { Declined: false, OpenSite: { } openSite })
             {
-                var exitAnchor = statements.Count > 0 ? statements[^1] : (TSqlStatement)openSite;
+                var exitAnchor = statements.Count > 0 ? statements[^1] : openSite;
                 Findings.Add(new TransactionHygieneFinding(
-                    TransactionHygieneFindingKind.UnresolvedOnSomePath,
+                    ClassifyOpenSiteKind(openSite),
                     sourcePath,
                     openSite.StartLine,
                     openSite.StartColumn,
@@ -75,6 +73,14 @@ public static class TransactionHygieneScanner
                     exitAnchor.StartColumn));
             }
         }
+
+        private static IList<TSqlStatement> Unwrap(IList<TSqlStatement> statements) =>
+            statements is [BeginEndBlockStatement singleBlock] ? singleBlock.StatementList.Statements : statements;
+
+        private static TransactionHygieneFindingKind ClassifyOpenSiteKind(TSqlStatement openSite) =>
+            openSite is BeginTransactionStatement
+                ? TransactionHygieneFindingKind.UnresolvedOnSomePath
+                : TransactionHygieneFindingKind.ImplicitTransactionUnresolvedOnSomePath;
 
         private FlowState AnalyzeSequential(IList<TSqlStatement> statements, FlowState state)
         {
@@ -87,29 +93,28 @@ public static class TransactionHygieneScanner
 
                 switch (statement)
                 {
+                    case PredicateSetStatement { Options: var options, IsOn: var isOn }:
+                        state = ApplySetOptions(state, options, isOn);
+                        break;
+
                     case BeginTransactionStatement begin:
                         state = state.OpenSite is not null
                             ? FlowState.DeclinedState
                             : state with { OpenSite = begin };
                         break;
 
-                    case CommitTransactionStatement or RollbackTransactionStatement:
+                    case CommitTransactionStatement:
                         state = state with { OpenSite = null };
                         break;
 
-                    case ReturnStatement or ThrowStatement:
-                        if (state.OpenSite is { } openSite)
-                        {
-                            Findings.Add(new TransactionHygieneFinding(
-                                TransactionHygieneFindingKind.UnresolvedOnSomePath,
-                                sourcePath,
-                                openSite.StartLine,
-                                openSite.StartColumn,
-                                statement.StartLine,
-                                statement.StartColumn));
-                        }
+                    case RollbackTransactionStatement rollback:
+                        state = rollback.Name is not null
+                            ? state
+                            : state with { OpenSite = null };
+                        break;
 
-                        return state with { OpenSite = null };
+                    case ReturnStatement or ThrowStatement:
+                        return ExitWithUnresolvedFinding(state, statement);
 
                     case GoToStatement:
 
@@ -132,13 +137,61 @@ public static class TransactionHygieneScanner
                         break;
 
                     default:
-
+                        state = MaybeOpenImplicitTransaction(state, statement);
                         break;
                 }
             }
 
             return state;
         }
+
+        private FlowState ExitWithUnresolvedFinding(FlowState state, TSqlStatement exitStatement)
+        {
+            if (state.OpenSite is { } openSite)
+            {
+                Findings.Add(new TransactionHygieneFinding(
+                    ClassifyOpenSiteKind(openSite),
+                    sourcePath,
+                    openSite.StartLine,
+                    openSite.StartColumn,
+                    exitStatement.StartLine,
+                    exitStatement.StartColumn));
+            }
+
+            return state with { OpenSite = null };
+        }
+
+        private static FlowState ApplySetOptions(FlowState state, SetOptions options, bool isOn)
+        {
+            if ((options & SetOptions.ImplicitTransactions) != 0)
+            {
+                state = state with { ImplicitTransactionsOn = isOn };
+            }
+
+            if ((options & SetOptions.XactAbort) != 0)
+            {
+                state = state with { XactAbortOn = isOn };
+            }
+
+            return state;
+        }
+
+        private static FlowState MaybeOpenImplicitTransaction(FlowState state, TSqlStatement statement) =>
+            state.OpenSite is null && state.ImplicitTransactionsOn && OpensImplicitTransaction(statement)
+                ? state with { OpenSite = statement }
+                : state;
+
+        private static bool OpensImplicitTransaction(TSqlStatement statement) => statement switch
+        {
+            InsertStatement or UpdateStatement or DeleteStatement or MergeStatement or TruncateTableStatement => true,
+            CreateTableStatement or CreateIndexStatement => true,
+            CreateViewStatement or CreateOrAlterViewStatement or AlterViewStatement or DropViewStatement => true,
+            DropTableStatement or DropIndexStatement or AlterTableStatement => true,
+            GrantStatement or RevokeStatement => true,
+            OpenCursorStatement or FetchCursorStatement => true,
+            SelectStatement { QueryExpression: QuerySpecification { FromClause: not null } } => true,
+            _ => false,
+        };
 
         private FlowState AnalyzeIf(IfStatement ifStatement, FlowState enteringState)
         {
@@ -176,6 +229,23 @@ public static class TransactionHygieneScanner
 
             var tryResult = AnalyzeSequential(tryCatch.TryStatements.Statements, enteringState);
 
+            if (enteringState is { OpenSite: { } doomedOpenSite, XactAbortOn: true })
+            {
+                foreach (var catchStatement in Unwrap(tryCatch.CatchStatements.Statements))
+                {
+                    if (catchStatement is CommitTransactionStatement commit)
+                    {
+                        Findings.Add(new TransactionHygieneFinding(
+                            TransactionHygieneFindingKind.CommitAfterXactAbortDoomsTransaction,
+                            sourcePath,
+                            doomedOpenSite.StartLine,
+                            doomedOpenSite.StartColumn,
+                            commit.StartLine,
+                            commit.StartColumn));
+                    }
+                }
+            }
+
             var catchResult = AnalyzeSequential(tryCatch.CatchStatements.Statements, enteringState);
 
             return MergeBranches(tryResult, catchResult);
@@ -188,22 +258,27 @@ public static class TransactionHygieneScanner
                 return FlowState.DeclinedState;
             }
 
+            var implicitTransactionsOn = a.ImplicitTransactionsOn && b.ImplicitTransactionsOn;
+            var xactAbortOn = a.XactAbortOn && b.XactAbortOn;
+
             if (a.OpenSite is null && b.OpenSite is null)
             {
-                return FlowState.NotTracking;
+                return FlowState.NotTracking with { ImplicitTransactionsOn = implicitTransactionsOn, XactAbortOn = xactAbortOn };
             }
 
             if (a.OpenSite is null)
             {
-                return b;
+                return b with { ImplicitTransactionsOn = implicitTransactionsOn, XactAbortOn = xactAbortOn };
             }
 
             if (b.OpenSite is null)
             {
-                return a;
+                return a with { ImplicitTransactionsOn = implicitTransactionsOn, XactAbortOn = xactAbortOn };
             }
 
-            return ReferenceEquals(a.OpenSite, b.OpenSite) ? a : FlowState.DeclinedState;
+            return ReferenceEquals(a.OpenSite, b.OpenSite)
+                ? a with { ImplicitTransactionsOn = implicitTransactionsOn, XactAbortOn = xactAbortOn }
+                : FlowState.DeclinedState;
         }
 
         private static IList<TSqlStatement> ToStatementList(TSqlStatement statement) =>

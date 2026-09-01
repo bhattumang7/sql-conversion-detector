@@ -19,25 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`TransactionHygieneScanner`'s transaction-state model has three
-      distinct blind spots**, all confirmed live, best fixed as one
-      redesign rather than three patches: (1) `SAVE TRANSACTION` /
-      `ROLLBACK TRANSACTION <savepoint>` is treated identically to a full
-      `ROLLBACK TRANSACTION` (`case CommitTransactionStatement or
-      RollbackTransactionStatement`) - a savepoint rollback does not
-      decrement `@@TRANCOUNT`, so a `SAVE TRANSACTION sp1; ... ROLLBACK
-      TRANSACTION sp1; RETURN;` branch is misclassified as "properly
-      closed" when the transaction is actually left open on return; (2) the
-      scanner only starts tracking on an explicit `BeginTransactionStatement`
-      - under `SET IMPLICIT_TRANSACTIONS ON`, ordinary DML/DDL silently
-      opens a transaction (`@@TRANCOUNT` becomes 1 after a plain `CREATE
-      TABLE` with no `BEGIN TRAN` at all) and the scanner never begins
-      tracking it; (3) zero references to `XACT_ABORT`/`XACT_STATE()`
-      anywhere in Core - under `XACT_ABORT ON`, a `CATCH` block still runs
-      but the transaction is silently marked doomed rather than rolled
-      back, reported only at end-of-batch (`Msg 3998`), a state the scanner
-      has no way to distinguish from a correctly-handled `CATCH`.
-
 - [ ] **`WriteLossNumericScaleNarrowingRuleId`'s "silent, no error" claim is
       false under `NUMERIC_ROUNDABORT ON`.** Oracle-confirmed:
       `DECLARE @d DECIMAL(5,2) = 123.456` silently rounds to `123.46` when

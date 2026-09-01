@@ -53,6 +53,11 @@ public static class WaitForScanner
 
         public void OnEnterRollbackTransactionStatement(RollbackTransactionStatement node, ModuleWalker walker)
         {
+            if (node.Name is not null)
+            {
+                return;
+            }
+
             if (_openTransactionDepth > 0)
             {
                 _openTransactionDepth--;

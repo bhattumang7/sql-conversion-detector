@@ -161,7 +161,9 @@ public static class RuleDocCatalog
         [ControlFlow.CaseExpressionMissingElse.RuleId] = ControlFlow.CaseExpressionMissingElse.Content,
         [ControlFlow.NonDeterministicCaseInput.RuleId] = ControlFlow.NonDeterministicCaseInput.Content,
         [ControlFlow.WaitFor.RuleId] = ControlFlow.WaitFor.Content,
-        [ControlFlow.TransactionHygiene.RuleId] = ControlFlow.TransactionHygiene.Content,
+        [ControlFlow.TransactionHygieneUnresolved.RuleId] = ControlFlow.TransactionHygieneUnresolved.Content,
+        [ControlFlow.TransactionHygieneImplicit.RuleId] = ControlFlow.TransactionHygieneImplicit.Content,
+        [ControlFlow.TransactionHygieneXactAbortCommit.RuleId] = ControlFlow.TransactionHygieneXactAbortCommit.Content,
         [ControlFlow.TruncateSwallowed.RuleId] = ControlFlow.TruncateSwallowed.Content,
         [ControlFlow.OutputParameter.RuleId] = ControlFlow.OutputParameter.Content,
 

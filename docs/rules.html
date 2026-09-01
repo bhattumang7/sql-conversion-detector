@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">278 rules. 191 carry fix guidance; 28 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">280 rules. 193 carry fix guidance; 28 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -137,6 +137,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <h2>control-flow</h2>
     <ul class="rule-list">
       <li><a class="id" href="rules/control-flow-case-expression-missing-else.html">Case Expression Missing Else</a> <code class="rule-key">silentscan/control-flow/case-expression-missing-else</code><span class="snippet">A simple CASE expression has no ELSE.</span></li>
+      <li><a class="id" href="rules/control-flow-commit-after-xact-abort-dooms-transaction.html">Commit After Xact Abort Dooms Transaction</a> <code class="rule-key">silentscan/control-flow/commit-after-xact-abort-dooms-transaction</code><span class="snippet">SET XACT_ABORT ON is in effect (set earlier in the same module body) for a transaction that was already open before entering a TRY block, and the matching CATCH block directly contains a COMMIT TRANSACTION.</span></li>
       <li><a class="id" href="rules/control-flow-cursor-fetch-column-count-mismatch.html">Cursor Fetch Column Count Mismatch</a> <code class="rule-key">silentscan/control-flow/cursor-fetch-column-count-mismatch</code><span class="snippet">A cursor FETCH INTO variable count doesn&#x27;t match its own cursor&#x27;s defining SELECT column count.</span></li>
       <li><a class="id" href="rules/control-flow-dirty-read-isolation-hint.html">Dirty Read Isolation Hint</a> <code class="rule-key">silentscan/control-flow/dirty-read-isolation-hint</code><span class="snippet">NOLOCK/READUNCOMMITTED allows dirty reads and can miss or double-count rows during a concurrent page split.</span></li>
       <li><a class="id" href="rules/control-flow-duplicated-call-argument.html">Duplicated Call Argument</a> <code class="rule-key">silentscan/control-flow/duplicated-call-argument</code><span class="snippet">The same non-literal expression is passed as two different arguments to the same call.</span></li>
@@ -147,6 +148,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/control-flow-trigger-emits-output.html">Trigger Emits Output</a> <code class="rule-key">silentscan/control-flow/trigger-emits-output</code><span class="snippet">A trigger emits a result set or message that reaches whatever connection fired the DML rather than the calling application.</span></li>
       <li><a class="id" href="rules/control-flow-truncate-swallowed-by-catch.html">Truncate Swallowed By Catch</a> <code class="rule-key">silentscan/control-flow/truncate-swallowed-by-catch</code><span class="snippet">TRUNCATE TABLE sits inside a TRY block whose CATCH block never THROWs/RAISERRORs anywhere in its own statement tree.</span></li>
       <li><a class="id" href="rules/control-flow-unassigned-output-parameter.html">Unassigned Output Parameter</a> <code class="rule-key">silentscan/control-flow/unassigned-output-parameter</code><span class="snippet">A procedure&#x27;s own OUTPUT parameter is not assigned on some statically reachable path (a RETURN, or the natural end of the body).</span></li>
+      <li><a class="id" href="rules/control-flow-unresolved-implicit-transaction.html">Unresolved Implicit Transaction</a> <code class="rule-key">silentscan/control-flow/unresolved-implicit-transaction</code><span class="snippet">SET IMPLICIT_TRANSACTIONS ON is in effect (set earlier in the same module body) when an INSERT/UPDATE/DELETE/MERGE/TRUNCATE TABLE/a SELECT with a FROM clause/CREATE/ALTER TABLE/DROP/GRANT/REVOKE/OPEN CURSOR/FETCH CURSOR statement runs with no transaction already open.</span></li>
       <li><a class="id" href="rules/control-flow-unresolved-transaction.html">Unresolved Transaction</a> <code class="rule-key">silentscan/control-flow/unresolved-transaction</code><span class="snippet">A BEGIN TRANSACTION reaches a RETURN/THROW, or the natural end of the module body, on some statically reachable path with no intervening COMMIT/ROLLBACK.</span></li>
       <li><a class="id" href="rules/control-flow-waitfor.html">WAITFOR</a> <code class="rule-key">silentscan/control-flow/waitfor</code><span class="snippet">WAITFOR DELAY/WAITFOR TIME holds the calling worker thread idle for the full delay/until-time.</span></li>
     </ul>
