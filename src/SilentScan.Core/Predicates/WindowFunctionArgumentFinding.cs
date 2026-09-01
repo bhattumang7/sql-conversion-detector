@@ -8,6 +8,7 @@ public enum WindowFunctionArgumentFindingKind
 {
     LagLeadNegativeOffset,
     PercentileOutOfRange,
+    TableSamplePercentOutOfRange,
 }
 
 public sealed record WindowFunctionArgumentFinding(

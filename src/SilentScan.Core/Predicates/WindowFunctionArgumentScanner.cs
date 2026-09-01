@@ -57,6 +57,18 @@ public static class WindowFunctionArgumentScanner
             }
         }
 
+        public void OnEnterNamedTableReference(NamedTableReference node, ModuleWalker walker)
+        {
+            if (node.TableSampleClause is not { TableSampleClauseOption: TableSampleClauseOption.Percent, SampleNumber: { } sampleNumber }
+                || LiteralComparisonFolder.TryFoldToNumeric(sampleNumber) is not { } percent
+                || (percent >= 0 && percent <= 100))
+            {
+                return;
+            }
+
+            Add(WindowFunctionArgumentFindingKind.TableSamplePercentOutOfRange, "TABLESAMPLE", sampleNumber);
+        }
+
         private void Add(WindowFunctionArgumentFindingKind kind, string functionName, ScalarExpression argument) =>
             Findings.Add(new WindowFunctionArgumentFinding(
                 kind, functionName.ToUpperInvariant(), FragmentTextRenderer.Render(argument),

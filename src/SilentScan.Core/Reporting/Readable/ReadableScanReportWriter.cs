@@ -250,7 +250,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Always Encrypted ORDER BY", report.Find<AlwaysEncryptedOrderByFinding>(nameof(AlwaysEncryptedOrderByScanner)).Count);
         AddCount(counts, "Always Encrypted non-enclave key column", report.Find<AlwaysEncryptedKeyColumnFinding>(nameof(AlwaysEncryptedKeyColumnScanner)).Count);
         AddCount(counts, "ALTER COLUMN safety", report.Find<AlterColumnSafetyFinding>(nameof(AlterColumnSafetyScanner)).Count);
-        AddCount(counts, "Operand not comparable (xml/json/legacy large object)", report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count);
+        AddCount(counts, "Operand not comparable (xml/json/legacy large object/spatial)", report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count);
         AddCount(counts, "Query anti-patterns", report.Find<QueryAntiPatternFinding>(nameof(QueryAntiPatternScanner)).Count);
         AddCount(counts, "Index-coverage shapes", report.Find<IndexCoverageFinding>(nameof(IndexCoverageScanner)).Count);
         AddCount(counts, "Trigger correctness", report.Find<TriggerCorrectnessFinding>(nameof(TriggerCorrectnessScanner)).Count);
@@ -287,7 +287,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Explicit assignments to a GENERATED ALWAYS temporal period column", report.Find<GeneratedAlwaysColumnAssignmentFinding>(nameof(GeneratedAlwaysColumnAssignmentScanner)).Count);
         AddCount(counts, "Module compile flags (WITH RECOMPILE / TVF database-collation return)", report.Find<ModuleCompileFlagFinding>(nameof(ModuleCompileFlagScanner)).Count);
         AddCount(counts, "RANGE window-function frames", report.Find<WindowFrameFinding>(nameof(WindowFrameScanner)).Count);
-        AddCount(counts, "LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC out-of-range constant arguments", report.Find<WindowFunctionArgumentFinding>(nameof(WindowFunctionArgumentScanner)).Count);
+        AddCount(counts, "LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC/TABLESAMPLE out-of-range constant arguments", report.Find<WindowFunctionArgumentFinding>(nameof(WindowFunctionArgumentScanner)).Count);
         AddCount(counts, "STRING_SPLIT separator arguments not exactly one character", report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).Count);
         AddCount(counts, "REPLICATE/REPLACE/SPACE constant-provable result truncation", report.Find<BoundedStringBuiltinTruncationFinding>(nameof(BoundedStringBuiltinTruncationScanner)).Count);
         AddCount(counts, "WAITFOR DELAY/TIME", report.Find<WaitForFinding>(nameof(WaitForScanner)).Count);
@@ -1712,7 +1712,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Operand not comparable ({report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count})");
         yield return new ReadableBlock.Paragraph(
-            "An xml, json, or legacy large-object (text/ntext/image) column is referenced from a comparison, IN list, BETWEEN, NULLIF, ORDER BY, GROUP BY, or SELECT DISTINCT - these types are not comparable at all outside IS NULL (and, for the legacy large-object types, LIKE); the statement does not compile. Direct base-table columns resolved through the immediate statement's own FROM/CTE scope only - a column reached only through a view/derived table is not analyzed by this v1.");
+            "An xml, json, legacy large-object (text/ntext/image), or spatial (geometry/geography) column is referenced from a comparison, IN list, BETWEEN, NULLIF, ORDER BY, GROUP BY, SELECT DISTINCT, or a window function's PARTITION BY - these types are not comparable at all outside IS NULL (and, for the legacy large-object types, LIKE); the statement does not compile. Direct base-table columns resolved through the immediate statement's own FROM/CTE scope only - a column reached only through a view/derived table is not analyzed by this v1.");
 
         foreach (var group in report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
         {
@@ -2573,9 +2573,9 @@ public static class ReadableScanReportWriter
             yield break;
         }
 
-        yield return new ReadableBlock.Heading(level, $"LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC out-of-range constant arguments ({report.Find<WindowFunctionArgumentFinding>(nameof(WindowFunctionArgumentScanner)).Count})");
+        yield return new ReadableBlock.Heading(level, $"LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC/TABLESAMPLE out-of-range constant arguments ({report.Find<WindowFunctionArgumentFinding>(nameof(WindowFunctionArgumentScanner)).Count})");
         yield return new ReadableBlock.Paragraph(
-            "A LAG/LEAD offset argument, or a PERCENTILE_CONT/PERCENTILE_DISC percentile argument, constant-folds to a value the engine rejects (a negative offset, or a percentile outside the inclusive [0, 1] range) - oracle-confirmed the statement fails (Msg 8730/Msg 8727) the moment any row reaches the function.");
+            "A LAG/LEAD offset argument, a PERCENTILE_CONT/PERCENTILE_DISC percentile argument, or a TABLESAMPLE (... PERCENT) percent argument, constant-folds to a value the engine rejects (a negative offset, a percentile outside the inclusive [0, 1] range, or a percent outside the inclusive [0, 100] range) - oracle-confirmed the statement fails (Msg 8730/Msg 8727/Msg 476) the moment any row reaches the function, or never compiles at all for TABLESAMPLE.");
 
         foreach (var group in report.Find<WindowFunctionArgumentFinding>(nameof(WindowFunctionArgumentScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
         {

@@ -25,6 +25,7 @@ public enum OperandComparabilityFindingKind
     Xml,
     LegacyLargeObject,
     Json,
+    Spatial,
 }
 
 public enum OperandComparabilityContext
@@ -36,4 +37,5 @@ public enum OperandComparabilityContext
     OrderBy,
     GroupBy,
     Distinct,
+    PartitionBy,
 }

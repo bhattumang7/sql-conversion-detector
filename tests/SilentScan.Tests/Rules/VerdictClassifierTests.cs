@@ -478,6 +478,46 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
+    public void Classify_GeometryColumnVsGeometryValue_NowOutOfModel_Unknown()
+    {
+
+        var column = new SqlType(SqlTypeCategory.Geometry);
+        var value = new SqlType(SqlTypeCategory.Geometry);
+
+        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_GeometryColumnVsIntValue_NowOutOfModel_Unknown()
+    {
+
+        var column = new SqlType(SqlTypeCategory.Geometry);
+        var value = new SqlType(SqlTypeCategory.Int);
+
+        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_GeographyColumnVsGeographyValue_NowOutOfModel_Unknown()
+    {
+
+        var column = new SqlType(SqlTypeCategory.Geography);
+        var value = new SqlType(SqlTypeCategory.Geography);
+
+        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_HierarchyIdColumnVsHierarchyIdValue_EngineSupportsComparison_SeekPreserved()
+    {
+
+        var column = new SqlType(SqlTypeCategory.HierarchyId);
+        var value = new SqlType(SqlTypeCategory.HierarchyId);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
     public void Classify_SqlVariantColumnVsSqlVariantValue_SameCategoryStillOutOfModel_Unknown()
     {
         var column = new SqlType(SqlTypeCategory.SqlVariant);
@@ -599,13 +639,13 @@ public sealed class VerdictClassifierTests
     [Fact]
     public void ClassifyWithReason_OutOfModelColumnCategory_ReasonNamesTheCategory()
     {
-        var column = new SqlType(SqlTypeCategory.Xml);
+        var column = new SqlType(SqlTypeCategory.UserDefined);
         var value = new SqlType(SqlTypeCategory.Int);
 
         var (verdict, reason) = VerdictClassifier.ClassifyWithReason(column, value);
 
         Assert.Equal(Verdict.Unknown, verdict);
-        Assert.Equal("out-of-model-category:Xml", reason);
+        Assert.Equal("out-of-model-category:UserDefined", reason);
     }
 
     [Fact]
@@ -613,12 +653,12 @@ public sealed class VerdictClassifierTests
     {
 
         var column = new SqlType(SqlTypeCategory.Int);
-        var value = new SqlType(SqlTypeCategory.Xml);
+        var value = new SqlType(SqlTypeCategory.UserDefined);
 
         var (verdict, reason) = VerdictClassifier.ClassifyWithReason(column, value);
 
         Assert.Equal(Verdict.Unknown, verdict);
-        Assert.Equal("out-of-model-category:Xml", reason);
+        Assert.Equal("out-of-model-category:UserDefined", reason);
     }
 
     [Fact]

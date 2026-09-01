@@ -12,6 +12,7 @@ public sealed class OperandComparabilityScannerTests
             "CREATE TABLE dbo.Document (Id INT NOT NULL PRIMARY KEY, Payload XML NOT NULL, Template XML NOT NULL, Name VARCHAR(50) NOT NULL);"
             + "CREATE TABLE dbo.Article (Id INT NOT NULL PRIMARY KEY, Body TEXT NOT NULL, Notes NTEXT NOT NULL, Picture IMAGE NOT NULL, Title VARCHAR(50) NOT NULL);"
             + "CREATE TABLE dbo.Ticket (Id INT NOT NULL PRIMARY KEY, Payload JSON NOT NULL, Template JSON NOT NULL, Name VARCHAR(50) NOT NULL);"
+            + "CREATE TABLE dbo.Parcel (Id INT NOT NULL PRIMARY KEY, Boundary GEOMETRY NOT NULL, Prior GEOMETRY NOT NULL, Region GEOGRAPHY NOT NULL, Name VARCHAR(50) NOT NULL);"
             + (extraDdl.Length > 0 ? $"\nGO\n{extraDdl}" : string.Empty);
         var result = SqlScriptParser.ParseText("test.sql", $"{ddl}\nGO\n{sql}");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
@@ -361,6 +362,92 @@ public sealed class OperandComparabilityScannerTests
         var finding = Assert.Single(findings);
         Assert.Equal("dbo.Document", finding.TableQualifiedName);
         Assert.Equal("Payload", finding.ColumnName);
+    }
+
+    [Fact]
+    public void EqualityAgainstTwoGeometryColumns_Fires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Parcel WHERE Boundary = Prior;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Parcel", finding.TableQualifiedName);
+        Assert.Equal("Boundary", finding.ColumnName);
+        Assert.Equal(OperandComparabilityFindingKind.Spatial, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.Comparison, finding.Context);
+    }
+
+    [Fact]
+    public void EqualityAgainstGeographyColumn_Fires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Parcel WHERE Region = Region;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Spatial, finding.Kind);
+    }
+
+    [Fact]
+    public void OrderByGeometryColumn_Fires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Parcel ORDER BY Boundary;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Spatial, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.OrderBy, finding.Context);
+    }
+
+    [Fact]
+    public void IsNullAgainstGeometryColumn_NeverFires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Parcel WHERE Boundary IS NULL;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void PartitionByXmlColumn_Fires()
+    {
+        var findings = Scan("SELECT Id, ROW_NUMBER() OVER (PARTITION BY Payload ORDER BY Id) FROM dbo.Document;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Xml, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.PartitionBy, finding.Context);
+        Assert.Equal("Payload", finding.ColumnName);
+    }
+
+    [Fact]
+    public void PartitionByGeometryColumn_Fires()
+    {
+        var findings = Scan("SELECT Id, ROW_NUMBER() OVER (PARTITION BY Boundary ORDER BY Id) FROM dbo.Parcel;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Spatial, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.PartitionBy, finding.Context);
+    }
+
+    [Fact]
+    public void PartitionByLegacyLobColumn_Fires()
+    {
+        var findings = Scan("SELECT Id, ROW_NUMBER() OVER (PARTITION BY Body ORDER BY Id) FROM dbo.Article;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.LegacyLargeObject, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.PartitionBy, finding.Context);
+    }
+
+    [Fact]
+    public void PartitionByOrdinaryColumn_NeverFires()
+    {
+        var findings = Scan("SELECT Id, ROW_NUMBER() OVER (PARTITION BY Name ORDER BY Id) FROM dbo.Document;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void WindowFunctionWithNoPartitionByClause_NeverFires()
+    {
+        var findings = Scan("SELECT Id, ROW_NUMBER() OVER (ORDER BY Id) FROM dbo.Document;");
+
+        Assert.Empty(findings);
     }
 
     [Fact]

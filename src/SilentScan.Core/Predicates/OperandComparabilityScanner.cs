@@ -63,6 +63,20 @@ public static class OperandComparabilityScanner
             }
         }
 
+        public void OnEnterFunctionCall(FunctionCall node, ModuleWalker walker)
+        {
+            if (node.OverClause is not { Partitions.Count: > 0 } overClause)
+            {
+                return;
+            }
+
+            var scopeChain = walker.CurrentScopeChain();
+            foreach (var partitionExpression in overClause.Partitions)
+            {
+                InspectMembership(partitionExpression, scopeChain, OperandComparabilityContext.PartitionBy);
+            }
+        }
+
         public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             ModuleWalker.InspectAllPredicateLocations(node, scopeChain, InspectSearchCondition);
 
@@ -200,6 +214,7 @@ public static class OperandComparabilityScanner
                 SqlTypeCategory.Xml => (resolved, OperandComparabilityFindingKind.Xml),
                 SqlTypeCategory.Json => (resolved, OperandComparabilityFindingKind.Json),
                 SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image => (resolved, OperandComparabilityFindingKind.LegacyLargeObject),
+                SqlTypeCategory.Geometry or SqlTypeCategory.Geography => (resolved, OperandComparabilityFindingKind.Spatial),
                 _ => null,
             };
         }

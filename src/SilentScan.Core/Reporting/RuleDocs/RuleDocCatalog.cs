@@ -54,6 +54,7 @@ public static class RuleDocCatalog
         [WindowFrame.ImplicitDefaultRangeFrame.RuleId] = WindowFrame.ImplicitDefaultRangeFrame.Content,
         [WindowFunctionArgument.LagLeadNegativeOffset.RuleId] = WindowFunctionArgument.LagLeadNegativeOffset.Content,
         [WindowFunctionArgument.PercentileOutOfRange.RuleId] = WindowFunctionArgument.PercentileOutOfRange.Content,
+        [WindowFunctionArgument.TableSamplePercentOutOfRange.RuleId] = WindowFunctionArgument.TableSamplePercentOutOfRange.Content,
         [StringSplitArgument.SeparatorNotSingleCharacter.RuleId] = StringSplitArgument.SeparatorNotSingleCharacter.Content,
         [BoundedStringBuiltinTruncation.ReplicateResultTruncated.RuleId] = BoundedStringBuiltinTruncation.ReplicateResultTruncated.Content,
         [BoundedStringBuiltinTruncation.ReplaceResultTruncated.RuleId] = BoundedStringBuiltinTruncation.ReplaceResultTruncated.Content,
@@ -138,6 +139,7 @@ public static class RuleDocCatalog
         [Predicates.XmlOperandNotComparable.RuleId] = Predicates.XmlOperandNotComparable.Content,
         [Predicates.LegacyLobOperandNotComparable.RuleId] = Predicates.LegacyLobOperandNotComparable.Content,
         [Predicates.JsonOperandNotComparable.RuleId] = Predicates.JsonOperandNotComparable.Content,
+        [Predicates.SpatialOperandNotComparable.RuleId] = Predicates.SpatialOperandNotComparable.Content,
 
         [Catalog.UntrustedForeignKey.RuleId] = Catalog.UntrustedForeignKey.Content,
         [Catalog.UntrustedCheckConstraint.RuleId] = Catalog.UntrustedCheckConstraint.Content,

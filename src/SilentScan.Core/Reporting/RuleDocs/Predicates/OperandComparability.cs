@@ -16,8 +16,10 @@ internal static class XmlOperandNotComparable
             NULLIF against an xml column produce; compared against a differently-typed operand (a
             string literal, for instance) the engine instead raises the narrower Msg 402 for the
             identical reason. SELECT DISTINCT over an xml column fails its own way, Msg 421 ("...
-            cannot be selected as DISTINCT because it is not comparable"). Every one of these was
-            confirmed directly against a real SQL Server instance, not assumed from documentation.
+            cannot be selected as DISTINCT because it is not comparable"), and a window function's
+            own PARTITION BY clause fails yet another way, Msg 249 ("The type ... is not comparable.
+            It cannot be used in the PARTITION BY clause"). Every one of these was confirmed directly
+            against a real SQL Server instance, not assumed from documentation.
 
             IS NULL/IS NOT NULL are unaffected (comparability isn't at stake - null-ness is a
             distinct, always-legal question), and so is a bare CASE/COALESCE branch: picking one of
@@ -68,7 +70,8 @@ internal static class JsonOperandNotComparable
             JSON data type cannot be compared or sorted, except when using the IS NULL operator"),
             the same message ORDER BY/GROUP BY/IN/BETWEEN/NULLIF against a json column produce.
             SELECT DISTINCT over a json column fails its own way, Msg 421 ("The json data type
-            cannot be selected as DISTINCT because it is not comparable"). Both were confirmed
+            cannot be selected as DISTINCT because it is not comparable"), and a window function's
+            own PARTITION BY clause rejects it the same way as ORDER BY/GROUP BY. All were confirmed
             directly against a real SQL Server instance, not assumed from documentation.
 
             IS NULL/IS NOT NULL are unaffected (comparability isn't at stake - null-ness is a
@@ -119,12 +122,12 @@ internal static class LegacyLobOperandNotComparable
             other type follows. Confirmed directly against a real SQL Server instance: a TEXT/NTEXT/
             IMAGE column used in =, &lt;&gt;, a range operator, an IN list, BETWEEN, or NULLIF fails
             to compile with Msg 402 ("The data types ... are incompatible in the ... operator");
-            referenced in ORDER BY or GROUP BY it instead raises Msg 306 ("The text, ntext, and image
-            data types cannot be compared or sorted, except when using IS NULL or LIKE operator") -
-            the engine's own error text names the two exceptions explicitly, and both were confirmed
-            to actually compile: LIKE against a TEXT/NTEXT column works, and so does IS NULL. SELECT
-            DISTINCT over one of these columns fails its own way (Msg 421), the identical restriction
-            xml carries.
+            referenced in ORDER BY, GROUP BY, or a window function's own PARTITION BY clause it
+            instead raises Msg 306 ("The text, ntext, and image data types cannot be compared or
+            sorted, except when using IS NULL or LIKE operator") - the engine's own error text names
+            the two exceptions explicitly, and both were confirmed to actually compile: LIKE against
+            a TEXT/NTEXT column works, and so does IS NULL. SELECT DISTINCT over one of these columns
+            fails its own way (Msg 421), the identical restriction xml carries.
             """,
         HowToFixIt: """
             Migrate the column to VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) - the modern large-object
@@ -156,5 +159,59 @@ internal static class LegacyLobOperandNotComparable
                     ORDER BY Body;
                     """,
                 CompliantExplanation: "Body is migrated to VARCHAR(MAX) - the modern large-object type has no comparison/ordering restriction."),
+        ]);
+}
+
+internal static class SpatialOperandNotComparable
+{
+    public static string RuleId => SarifRuleCatalog.OperandComparabilityRuleId(SilentScan.Core.Predicates.OperandComparabilityFindingKind.Spatial);
+
+    public static RuleDocContent Content { get; } = new(
+        WhyItMatters: """
+            geometry and geography carry no comparison operator at all, not even against another
+            value of the identical spatial type - unlike xml/json/legacy large-object types, this
+            isn't restricted to ordering/grouping, it is every relational operator SQL Server has.
+            Confirmed directly against a real SQL Server instance: comparing two geometry values with
+            = fails with Msg 403 ("Invalid operator for data type. Operator equals equal to, type
+            equals geometry"), and so does comparing a geometry value against an ordinary scalar like
+            an int - the message and mechanism are identical regardless of what sits on the other
+            side. geography fails the identical way. Referenced in ORDER BY, GROUP BY, or a window
+            function's own PARTITION BY clause, the engine instead raises Msg 249 ("The type ... is
+            not comparable. It cannot be used in the ... clause"); SELECT DISTINCT over a spatial
+            column fails its own way, Msg 421, the same restriction xml/json carry.
+
+            IS NULL/IS NOT NULL are unaffected (comparability isn't at stake), and so is a bare CASE/
+            COALESCE branch: picking one of several spatial-typed branches never compares them
+            against each other, and neither does this rule flag it.
+            """,
+        HowToFixIt: """
+            Remove the geometry/geography column from the comparison/ordering/grouping/partitioning/
+            DISTINCT position. If the comparison is genuinely needed, use a spatial method that
+            returns a comparable scalar instead - .STEquals() for equality, .STDistance() for
+            ordering by proximity - and compare that instead of the raw spatial value itself.
+            """,
+        Examples:
+        [
+            new RuleDocExample(
+                Title: "Comparing two geometry columns never compiles",
+                NoncompliantSql: """
+                    CREATE TABLE dbo.Parcel
+                    (
+                        ParcelId INT NOT NULL PRIMARY KEY,
+                        Boundary geometry NOT NULL,
+                        Prior    geometry NOT NULL
+                    );
+
+                    SELECT ParcelId
+                    FROM dbo.Parcel
+                    WHERE Boundary = Prior;
+                    """,
+                NoncompliantExplanation: "Boundary and Prior are both geometry - this statement fails to compile with Msg 403 every time it runs.",
+                CompliantSql: """
+                    SELECT ParcelId
+                    FROM dbo.Parcel
+                    WHERE Boundary.STEquals(Prior) = 1;
+                    """,
+                CompliantExplanation: "STEquals() returns a bit - a genuinely comparable scalar, not the raw geometry value."),
         ]);
 }

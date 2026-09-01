@@ -1418,6 +1418,7 @@ public static class SarifReportWriter
         {
             OperandComparabilityFindingKind.Xml => "xml",
             OperandComparabilityFindingKind.Json => "json",
+            OperandComparabilityFindingKind.Spatial => "geometry/geography",
             _ => "text/ntext/image",
         };
         var positionText = finding.Context switch
@@ -1429,6 +1430,7 @@ public static class SarifReportWriter
             OperandComparabilityContext.OrderBy => "referenced in this ORDER BY clause",
             OperandComparabilityContext.GroupBy => "referenced in this GROUP BY clause",
             OperandComparabilityContext.Distinct => "selected under SELECT DISTINCT",
+            OperandComparabilityContext.PartitionBy => "referenced in this window function's PARTITION BY clause",
             _ => "used in a comparison",
         };
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TypeDisplay}) is {positionText} - the {typeLabel} data type is not comparable here; the statement does not compile.";

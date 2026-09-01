@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Json Operand Not Comparable - SilentScan rules</title>
+<title>Tablesample Percent Out Of Range - SilentScan rules</title>
 <style>
 :root {
   color-scheme: light dark;
@@ -86,22 +86,22 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <body>
 <main>
   <a class="back-link" href="../rules.html">&larr; All rules</a>
-  <h1>Json Operand Not Comparable</h1>
-  <p class="rule-key"><code>silentscan/predicates/json-operand-not-comparable</code></p>
+  <h1>Tablesample Percent Out Of Range</h1>
+  <p class="rule-key"><code>silentscan/window-function/tablesample-percent-out-of-range</code></p>
   <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
   <h2>Why is this an issue?</h2>
-  <p class="rationale">A json column is used in a comparison, IN list, BETWEEN, NULLIF, ORDER BY, GROUP BY, SELECT DISTINCT, or a window function&#x27;s PARTITION BY - oracle-confirmed the statement never compiles (Msg 13636/421/249 depending on the shape): the JSON data type cannot be compared or sorted at all, except IS NULL.</p>
-  <p class="rationale">The json data type carries the identical comparability restriction xml does. SQL Server&#x27;s binder rejects the statement outright at compile time, before any row is ever touched: a json column compared with another json column fails with Msg 13636 (&quot;The JSON data type cannot be compared or sorted, except when using the IS NULL operator&quot;), the same message ORDER BY/GROUP BY/IN/BETWEEN/NULLIF against a json column produce. SELECT DISTINCT over a json column fails its own way, Msg 421 (&quot;The json data type cannot be selected as DISTINCT because it is not comparable&quot;), and a window function&#x27;s own PARTITION BY clause rejects it the same way as ORDER BY/GROUP BY. All were confirmed directly against a real SQL Server instance, not assumed from documentation.</p>
-  <p class="rationale">IS NULL/IS NOT NULL are unaffected (comparability isn&#x27;t at stake - null-ness is a distinct, always-legal question), and so is a bare CASE/COALESCE branch: picking one of several json-typed branches never compares them against each other, and neither does this rule flag it.</p>
+  <p class="rationale">A TABLESAMPLE (... PERCENT) clause&#x27;s percent argument constant-folds to a value outside the inclusive range [0, 100] - oracle-confirmed (Msg 476: &quot;The PERCENT tablesample size must be between 0 and 100&quot;) the statement never compiles; pure source-level constant-folding, no catalog dependency, the same mechanism as the LAG/LEAD offset and PERCENTILE_CONT/PERCENTILE_DISC percentile checks.</p>
+  <p class="rationale">TABLESAMPLE (... PERCENT)&#x27;s percent argument names a percentage of the table&#x27;s rows, and only the inclusive range [0, 100] is a valid percentage - 0 samples zero rows, 100 samples the whole table, and both ends were probed directly against a real engine and confirmed valid. A percent argument that constant-folds to a value outside that range - whether written as a bare literal or as an arithmetic expression that folds to one - raises Msg 476 (&quot;The PERCENT tablesample size must be between 0 and 100&quot;) at compile time, before any row is ever touched.</p>
+  <p class="rationale">This is pure source-level constant-folding with no catalog dependency - the same shape as the LAG/LEAD offset argument and the PERCENTILE_CONT/PERCENTILE_DISC percentile argument being compile-time constants regardless of whether they are literals or expressions that fold to one.</p>
   <h2>How can I fix it?</h2>
-  <p class="rationale">Remove the json column from the comparison/ordering/grouping/DISTINCT position. If the comparison is genuinely needed, extract a comparable scalar value first with JSON_VALUE(), and compare that instead of the raw json value itself.</p>
-  <h3>Comparing two json columns never compiles</h3>
+  <p class="rationale">Change the TABLESAMPLE percent argument to a value between 0 and 100 inclusive.</p>
+  <h3>A TABLESAMPLE clause with an out-of-range percent</h3>
   <p class="example-label fires-label">Noncompliant code example</p>
-  <div class="fires-block"><pre><code>CREATE TABLE dbo.Document&#xA;(&#xA;    DocumentId INT NOT NULL PRIMARY KEY,&#xA;    Payload    JSON NOT NULL,&#xA;    Template   JSON NOT NULL&#xA;);&#xA;&#xA;SELECT DocumentId&#xA;FROM dbo.Document&#xA;WHERE Payload = Template;</code></pre></div>
-  <p class="example-explanation">Payload and Template are both json - this statement fails to compile with Msg 13636 every time it runs.</p>
+  <div class="fires-block"><pre><code>SELECT * FROM dbo.Sales TABLESAMPLE (150 PERCENT);</code></pre></div>
+  <p class="example-explanation">The percent argument 150 constant-folds to a value outside [0, 100] - the statement never compiles (Msg 476).</p>
   <p class="example-label clean-label">Compliant solution</p>
-  <div class="clean-block"><pre><code>SELECT DocumentId&#xA;FROM dbo.Document&#xA;WHERE JSON_VALUE(Payload, &#x27;$.id&#x27;) = JSON_VALUE(Template, &#x27;$.id&#x27;);</code></pre></div>
-  <p class="example-explanation">Both sides are extracted down to a scalar value with JSON_VALUE() first - a genuinely comparable value, not the raw json value.</p>
+  <div class="clean-block"><pre><code>SELECT * FROM dbo.Sales TABLESAMPLE (10 PERCENT);</code></pre></div>
+  <p class="example-explanation">10 is inside the inclusive [0, 100] range and samples roughly a tenth of the table.</p>
   <footer>
     Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
   </footer>

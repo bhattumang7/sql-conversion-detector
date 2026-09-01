@@ -138,6 +138,60 @@ public sealed class WindowFunctionArgumentScannerTests
     }
 
     [Fact]
+    public void TableSampleWithPercentAboveOneHundred_Fires()
+    {
+        var findings = Scan("SELECT * FROM dbo.Sales TABLESAMPLE (150 PERCENT);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WindowFunctionArgumentFindingKind.TableSamplePercentOutOfRange, finding.Kind);
+        Assert.Equal("TABLESAMPLE", finding.FunctionName);
+    }
+
+    [Fact]
+    public void TableSampleWithNegativePercent_Fires()
+    {
+        var findings = Scan("SELECT * FROM dbo.Sales TABLESAMPLE (-1 PERCENT);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WindowFunctionArgumentFindingKind.TableSamplePercentOutOfRange, finding.Kind);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("100")]
+    [InlineData("50")]
+    public void TableSampleWithinInclusiveBoundaries_NeverFires(string percent)
+    {
+        var findings = Scan($"SELECT * FROM dbo.Sales TABLESAMPLE ({percent} PERCENT);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void TableSampleWithRowsOption_NeverFires()
+    {
+        var findings = Scan("SELECT * FROM dbo.Sales TABLESAMPLE (1000 ROWS);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void TableSampleWithNonFoldablePercent_NeverFires()
+    {
+        var findings = Scan("SELECT * FROM dbo.Sales TABLESAMPLE (@P PERCENT);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void NoTableSampleClause_NeverFires()
+    {
+        var findings = Scan("SELECT * FROM dbo.Sales;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void MultipleWindowFunctionsInOneQuery_EachReportedIndependently()
     {
         var findings = Scan(@"

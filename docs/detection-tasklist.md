@@ -45,19 +45,6 @@ Competitor tools are referred to generically; real identities are in
         non-inlineable one (using `ERROR_NUMBER()`) on SQL Server 2022 —
         not a usable oracle signal as tried. Needs a different verification
         method (e.g. checking actual plan inlining) before scoping.
-      3. `VerdictClassifier.IsOutOfModelCategory` returns `Unknown` (never an
-        actionable finding) for XML/JSON/UDT/legacy-LOB comparisons where
-        the engine's own comparability gate hard-rejects the comparison —
-        check this against the oracle-probed type matrix; if real, these
-        should reclassify as `OperandClash`, not stay `Unknown`.
-        **FINDING: confirmed real** for XML and spatial (UDT). Oracle:
-        `CAST(x AS XML) = CAST(x AS XML)` → Msg 305; `sql_variant = xml`
-        assignment → Msg 206 (operand type clash); `geometry = geometry`
-        → Msg 403. All are hard compile-time rejects, not "unknown."
-        `VerdictClassifier.cs` lines 97-100 lump these into `Unknown`.
-        JSON and legacy-LOB (text/ntext/image) categories not individually
-        oracle-tested — check separately before folding them into the same
-        reclassification.
       4. New family: an assignment (`SET`/`INSERT`/`UPDATE`) whose source
         type cannot legally implicit-convert to the target at all
         (encryption-state mismatch, illegal collation coercion, legacy-LOB
@@ -104,13 +91,15 @@ Competitor tools are referred to generically; real identities are in
       8. `CREATE TRIGGER` on a FILESTREAM-backed table failing at DDL time.
         **FINDING:** not tested this pass — needs FILESTREAM enabled on a
         throwaway database, out of scope for the VALUES-only probes used.
-      9. `UNPIVOT` mixing source columns with incompatible types
-        (`sys.columns`-decidable). **FINDING: confirmed real, and
-        stricter than the bullet implies.** `int` vs `xml` errors as
-        expected (Msg 8167), but so does `int` vs `bigint` — UNPIVOT
-        requires *exact* type match, not just implicit-convertibility.
-        Decidable directly from `sys.columns` type equality; scope the
-        rule as exact-type-mismatch, not "incompatible types."
+      9. `UNPIVOT` source columns requiring *exact* type match, not just
+        implicit-convertibility (`sys.columns`-decidable). **FINDING:
+        confirmed real, and stricter than the bullet implies.** `int` vs
+        `bigint` errors (Msg 8167) even though both are in-model and
+        would otherwise convert — UNPIVOT requires exact type equality.
+        (The `int` vs `xml` leg of the original bullet is already covered
+        by the shipped comparability-gate rule, below.) Decidable directly
+        from `sys.columns` type equality; scope the rule as
+        exact-type-mismatch, not "incompatible types."
       10. Memory-optimized (Hekaton) natively compiled module restrictions
         distinct from the shipped table-level family (unsupported column
         type, unsupported index option, cross-storage/CASCADE foreign key):
@@ -204,13 +193,6 @@ Competitor tools are referred to generically; real identities are in
         type is supplied in the 'Revert' statement"); the engine requires
         the fixed `varbinary(100)` shape produced by `CREATE USER ...
         WITH... COOKIE INTO`. Decidable from the variable's declared type.
-      22. Broaden the `LAG`/`LEAD`/`PERCENTILE_*` constant-argument-validation
-        family (already written up) to cover any compile-time-constant
-        percent-like argument outside the inclusive 0-100 range (e.g.
-        `TABLESAMPLE PERCENT`) — same mechanism, one family. **FINDING:
-        confirmed real** for the `TABLESAMPLE PERCENT` case — a literal
-        `150 PERCENT` is rejected with Msg 476 ("must be between 0 and
-        100"). Supports folding it into the same family.
       23. `FOR XML` forbidden option combinations (e.g. `EXPLICIT` with inline
         XSD) — decidable purely from the statement's own option list, no
         catalog access needed. **FINDING: real, but as an unimplemented
@@ -250,13 +232,6 @@ Competitor tools are referred to generically; real identities are in
       33. A full-text predicate (`CONTAINS`/`FREETEXT`) used inside an
         aggregate/`GROUP BY` scope the engine rejects. **FINDING:** not
         tested this pass.
-      34. A window `PARTITION BY` expression resolving to a type SQL Server
-        cannot compare for partitioning (LOB/XML/spatial). **FINDING:
-        confirmed real**, same comparability gate as item 3.
-        `ROW_NUMBER() OVER (PARTITION BY x ORDER BY ...)` with `x` typed
-        `xml` fails with the same Msg 305 as a direct XML comparison —
-        one shared comparability-gate rule can cover items 3, 9, and 34,
-        not three separate ones.
       35. New family: `CHANGE_TRACKING` restrictions — `ALTER TABLE ...
         ENABLE CHANGE_TRACKING` against a table carrying an Always Encrypted
         column, and change tracking already enabled on a table carrying a

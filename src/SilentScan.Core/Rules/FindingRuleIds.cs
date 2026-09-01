@@ -68,6 +68,7 @@ public static class FindingRuleIds
         OperandComparabilityFindingKind.Xml => "silentscan/predicates/xml-operand-not-comparable",
         OperandComparabilityFindingKind.LegacyLargeObject => "silentscan/predicates/legacy-lob-operand-not-comparable",
         OperandComparabilityFindingKind.Json => "silentscan/predicates/json-operand-not-comparable",
+        OperandComparabilityFindingKind.Spatial => "silentscan/predicates/spatial-operand-not-comparable",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled OperandComparabilityFindingKind."),
     };
     public const string MemoryOptimizedUnsupportedColumnTypeRuleId = "silentscan/catalog/memory-optimized-unsupported-column-type";
@@ -258,6 +259,7 @@ public static class FindingRuleIds
     {
         WindowFunctionArgumentFindingKind.LagLeadNegativeOffset => "silentscan/window-function/lag-lead-negative-offset",
         WindowFunctionArgumentFindingKind.PercentileOutOfRange => "silentscan/window-function/percentile-out-of-range",
+        WindowFunctionArgumentFindingKind.TableSamplePercentOutOfRange => "silentscan/window-function/tablesample-percent-out-of-range",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
     public static string StringSplitArgumentRuleId(StringSplitArgumentFindingKind kind) => kind switch
