@@ -381,6 +381,8 @@ public sealed class DatabaseCatalog
 
     public bool? IsAnsiNullDefaultOn { get; set; }
 
+    public bool? IsReadCommittedSnapshotOn { get; set; }
+
     public SkipLedger Skipped { get; } = new();
 
     public void AddOrReplace(CatalogTable table) => AddOrReplace(table, scope: null);

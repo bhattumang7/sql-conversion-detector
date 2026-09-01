@@ -155,6 +155,7 @@ public static class RuleDocCatalog
         [ControlFlow.EmptyCatchBlock.RuleId] = ControlFlow.EmptyCatchBlock.Content,
         [ControlFlow.TriggerEmitsOutput.RuleId] = ControlFlow.TriggerEmitsOutput.Content,
         [ControlFlow.DirtyReadIsolationHint.RuleId] = ControlFlow.DirtyReadIsolationHint.Content,
+        [ControlFlow.ReadCommittedLockRevertsRowVersioning.RuleId] = ControlFlow.ReadCommittedLockRevertsRowVersioning.Content,
         [ControlFlow.DuplicatedCallArgument.RuleId] = ControlFlow.DuplicatedCallArgument.Content,
         [ControlFlow.LegacyIdentityIntrinsic.RuleId] = ControlFlow.LegacyIdentityIntrinsic.Content,
         [ControlFlow.GotoUsage.RuleId] = ControlFlow.GotoUsage.Content,

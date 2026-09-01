@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">280 rules. 193 carry fix guidance; 28 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">281 rules. 194 carry fix guidance; 28 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -145,6 +145,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/control-flow-goto-usage.html">Goto Usage</a> <code class="rule-key">silentscan/control-flow/goto-usage</code><span class="snippet">A GOTO statement.</span></li>
       <li><a class="id" href="rules/control-flow-legacy-identity-intrinsic.html">Legacy Identity Intrinsic</a> <code class="rule-key">silentscan/control-flow/legacy-identity-intrinsic</code><span class="snippet">@@IDENTITY returns the last identity value inserted in this session across any table/scope.</span></li>
       <li><a class="id" href="rules/control-flow-non-deterministic-case-input.html">Non Deterministic Case Input</a> <code class="rule-key">silentscan/control-flow/non-deterministic-case-input</code><span class="snippet">A non-deterministic function (NEWID/RAND/CRYPT_GEN_RANDOM) is used as a simple CASE expression&#x27;s input.</span></li>
+      <li><a class="id" href="rules/control-flow-read-committed-lock-reverts-row-versioning.html">Read Committed Lock Reverts Row Versioning</a> <code class="rule-key">silentscan/control-flow/read-committed-lock-reverts-row-versioning</code><span class="snippet">On a database with READ_COMMITTED_SNAPSHOT ON, a READCOMMITTEDLOCK table hint reverts that one table reference from row-versioned, non-blocking reads back to blocking/locking reads.</span></li>
       <li><a class="id" href="rules/control-flow-trigger-emits-output.html">Trigger Emits Output</a> <code class="rule-key">silentscan/control-flow/trigger-emits-output</code><span class="snippet">A trigger emits a result set or message that reaches whatever connection fired the DML rather than the calling application.</span></li>
       <li><a class="id" href="rules/control-flow-truncate-swallowed-by-catch.html">Truncate Swallowed By Catch</a> <code class="rule-key">silentscan/control-flow/truncate-swallowed-by-catch</code><span class="snippet">TRUNCATE TABLE sits inside a TRY block whose CATCH block never THROWs/RAISERRORs anywhere in its own statement tree.</span></li>
       <li><a class="id" href="rules/control-flow-unassigned-output-parameter.html">Unassigned Output Parameter</a> <code class="rule-key">silentscan/control-flow/unassigned-output-parameter</code><span class="snippet">A procedure&#x27;s own OUTPUT parameter is not assigned on some statically reachable path (a RETURN, or the natural end of the body).</span></li>

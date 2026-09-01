@@ -153,6 +153,7 @@ public static class SarifRuleCatalog
     public const string ControlFlowRiskEmptyCatchBlockRuleId = FindingRuleIds.ControlFlowRiskEmptyCatchBlockRuleId;
     public const string ControlFlowRiskTriggerEmitsOutputRuleId = FindingRuleIds.ControlFlowRiskTriggerEmitsOutputRuleId;
     public const string ControlFlowRiskDirtyReadIsolationHintRuleId = FindingRuleIds.ControlFlowRiskDirtyReadIsolationHintRuleId;
+    public const string ControlFlowRiskReadCommittedLockRevertsRowVersioningRuleId = FindingRuleIds.ControlFlowRiskReadCommittedLockRevertsRowVersioningRuleId;
     public const string ControlFlowRiskDuplicatedCallArgumentRuleId = FindingRuleIds.ControlFlowRiskDuplicatedCallArgumentRuleId;
     public const string ControlFlowRiskLegacyIdentityIntrinsicRuleId = FindingRuleIds.ControlFlowRiskLegacyIdentityIntrinsicRuleId;
     public const string ControlFlowRiskGotoUsageRuleId = FindingRuleIds.ControlFlowRiskGotoUsageRuleId;

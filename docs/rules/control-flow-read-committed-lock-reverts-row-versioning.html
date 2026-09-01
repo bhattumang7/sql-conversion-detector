@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Read Committed Lock Reverts Row Versioning - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Read Committed Lock Reverts Row Versioning</h1>
+  <p class="rule-key"><code>silentscan/control-flow/read-committed-lock-reverts-row-versioning</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">On a database with READ_COMMITTED_SNAPSHOT ON, a READCOMMITTEDLOCK table hint reverts that one table reference from row-versioned, non-blocking reads back to blocking/locking reads.</p>
+  <p class="rationale">When a database has `READ_COMMITTED_SNAPSHOT` turned on, every ordinary `READ COMMITTED` read in that database becomes row-versioned: readers see a transactionally consistent snapshot and never block writers (or get blocked by them). A `READCOMMITTEDLOCK` table hint opts a single table reference back out of that - it forces the pre-snapshot, share-lock-based `READ COMMITTED` behavior for just that one reference, silently reintroducing the blocking/deadlock risk the rest of the batch no longer has.</p>
+  <p class="rationale">Nothing at the query site signals this reversion: the hint reads like an ordinary, conservative locking choice, and is easy to miss as changing behavior specifically *because* the database has row versioning turned on. This is only reported when this tool can confirm, from the target database&#x27;s own catalog, that `READ_COMMITTED_SNAPSHOT` is actually on - on a database where it is off, `READCOMMITTEDLOCK` is a no-op restating the database&#x27;s own default behavior.</p>
+  <h2>How can I fix it?</h2>
+  <p class="fix">Remove the READCOMMITTEDLOCK hint unless reverting this specific table reference to blocking/locking reads is deliberate.</p>
+  <h3>A READCOMMITTEDLOCK hint on a database with row versioning on</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>SELECT Balance&#xA;FROM dbo.Accounts WITH (READCOMMITTEDLOCK)&#xA;WHERE Id = @AccountId;</code></pre></div>
+  <p class="example-explanation">On a database with READ_COMMITTED_SNAPSHOT ON, this reference alone reverts to blocking/locking reads while every other read in the batch stays row-versioned and non-blocking.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT Balance&#xA;FROM dbo.Accounts&#xA;WHERE Id = @AccountId;</code></pre></div>
+  <p class="example-explanation">Without the hint, this reference reads under the database&#x27;s own row-versioned READ COMMITTED behavior, consistent with the rest of the batch.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

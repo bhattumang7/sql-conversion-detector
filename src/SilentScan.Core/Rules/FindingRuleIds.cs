@@ -184,6 +184,7 @@ public static class FindingRuleIds
     public const string ControlFlowRiskEmptyCatchBlockRuleId = "silentscan/control-flow/empty-catch-block";
     public const string ControlFlowRiskTriggerEmitsOutputRuleId = "silentscan/control-flow/trigger-emits-output";
     public const string ControlFlowRiskDirtyReadIsolationHintRuleId = "silentscan/control-flow/dirty-read-isolation-hint";
+    public const string ControlFlowRiskReadCommittedLockRevertsRowVersioningRuleId = "silentscan/control-flow/read-committed-lock-reverts-row-versioning";
     public const string ControlFlowRiskDuplicatedCallArgumentRuleId = "silentscan/control-flow/duplicated-call-argument";
     public const string ControlFlowRiskLegacyIdentityIntrinsicRuleId = "silentscan/control-flow/legacy-identity-intrinsic";
     public const string ControlFlowRiskGotoUsageRuleId = "silentscan/control-flow/goto-usage";
@@ -466,6 +467,7 @@ public static class FindingRuleIds
         ControlFlowRiskFindingKind.EmptyCatchBlock => ControlFlowRiskEmptyCatchBlockRuleId,
         ControlFlowRiskFindingKind.TriggerEmitsOutput => ControlFlowRiskTriggerEmitsOutputRuleId,
         ControlFlowRiskFindingKind.DirtyReadIsolationHint => ControlFlowRiskDirtyReadIsolationHintRuleId,
+        ControlFlowRiskFindingKind.ReadCommittedLockRevertsRowVersioning => ControlFlowRiskReadCommittedLockRevertsRowVersioningRuleId,
         ControlFlowRiskFindingKind.DuplicatedCallArgument => ControlFlowRiskDuplicatedCallArgumentRuleId,
         ControlFlowRiskFindingKind.LegacyIdentityIntrinsic => ControlFlowRiskLegacyIdentityIntrinsicRuleId,
         ControlFlowRiskFindingKind.GotoUsage => ControlFlowRiskGotoUsageRuleId,

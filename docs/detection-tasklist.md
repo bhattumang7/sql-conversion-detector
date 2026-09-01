@@ -19,14 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`READ_COMMITTED_SNAPSHOT` × `READCOMMITTEDLOCK` table hint.**
-      `ControlFlowRiskScanner.cs` matches `TableHintKind.NoLock`/
-      `ReadUncommitted` for dirty-read risk but not `ReadCommittedLock`. On
-      a database with RCSI on (`sys.databases.is_read_committed_snapshot_on`,
-      catalog-decidable), `READCOMMITTEDLOCK` silently reverts that one
-      query from row-versioned to blocking/locking reads - a real
-      concurrency/consistency change invisible from the rest of the batch.
-
 - [ ] **`DURABILITY = SCHEMA_ONLY` memory-optimized tables: zero
       coverage.** Pure DDL-time fact, no live-database dependency. A table
       declared `WITH (DURABILITY = SCHEMA_ONLY)` loses all data on

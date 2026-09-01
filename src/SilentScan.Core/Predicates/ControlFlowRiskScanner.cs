@@ -146,6 +146,14 @@ public static class ControlFlowRiskScanner
                     "NOLOCK/READUNCOMMITTED allows dirty reads of uncommitted, possibly-rolled-back data, and can miss or double-count rows during a concurrent page split.",
                     FindingConfidence.Low));
             }
+            else if (node.HintKind == TableHintKind.ReadCommittedLock && catalog.IsReadCommittedSnapshotOn == true)
+            {
+                Findings.Add(new ControlFlowRiskFinding(
+                    ControlFlowRiskFindingKind.ReadCommittedLockRevertsRowVersioning,
+                    CurrentModule(walker), sourcePath, node.StartLine, node.StartColumn,
+                    "This database has READ_COMMITTED_SNAPSHOT ON, so READ COMMITTED reads are normally row-versioned and non-blocking - the READCOMMITTEDLOCK hint reverts just this one table reference back to blocking/locking reads, silently changing its concurrency behavior relative to the rest of the batch.",
+                    FindingConfidence.High));
+            }
         }
 
         public void OnEnterSetTransactionIsolationLevelStatement(SetTransactionIsolationLevelStatement node, ModuleWalker walker)
