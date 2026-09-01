@@ -450,6 +450,22 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`ColumnstoreUnsupportedColumnTypeScanner` widening: no feature-switch-
+  gated type exists to widen further.** Msg 35343's type gate is now fully
+  covered (`sql_variant`, `xml`, `hierarchyid`, `geometry`, `geography`,
+  `ntext`, `text`, `image`, `timestamp`/`rowversion` unconditionally; MAX-
+  length `varchar`/`nvarchar`/`varbinary` on nonclustered only). Oracle-
+  confirmed (SQL Server 2025, Docker) there is no database-compatibility-
+  level dependence for any of these — `sql_variant` on a clustered columnstore
+  index fails with Msg 35343 identically at every compatibility level from
+  100 through 170. An alias type over `sql_variant` isn't itself legal T-SQL
+  (`CREATE TYPE ... FROM SQL_VARIANT` is rejected outright), so there's no
+  alias-indirection gap to close either. Two adjacent columnstore rejections
+  exist but are structurally different mechanisms, not a column-type
+  restriction, and are correctly out of this scanner's scope: a sparse
+  column (any type) hits Msg 35309, and a non-persisted computed column hits
+  Msg 35307 — both already tracked as their own separate backlog items.
+
 * **`IndexDesignFindingKind.NoRecomputeStatistics` already covers `CREATE
   INDEX`/`ALTER INDEX ... REBUILD WITH (STATISTICS_NORECOMPUTE = ON)`, not
   just `CREATE`/`UPDATE STATISTICS ... WITH NORECOMPUTE`.** Oracle-confirmed

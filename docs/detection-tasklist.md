@@ -19,14 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`ColumnstoreUnsupportedColumnTypeRuleId` may be narrower than the
-      real engine gate.** Currently fires only for `SQL_VARIANT`. The
-      underlying columnstore type-support check is reportedly broader (a
-      wider disallowed-type set, and at least one type gated behind a
-      feature switch rather than an unconditional ban) — widen only after
-      each additional type is independently oracle-confirmed the same way
-      `SQL_VARIANT` was.
-
 - [ ] **`ProcCallArgumentMismatchRuleId` sibling: table-valued parameter
       column-shape mismatch.** The shipped rule covers a scalar EXEC
       argument marshalling mismatch; a statically resolved TVP call whose
