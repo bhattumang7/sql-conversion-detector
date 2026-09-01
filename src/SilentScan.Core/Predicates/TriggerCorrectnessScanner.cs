@@ -3,6 +3,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
+using SilentScan.Core.Predicates.Normalization;
 
 namespace SilentScan.Core.Predicates;
 
@@ -56,7 +57,7 @@ public static class TriggerCorrectnessScanner
             {
                 InspectMultiRowUnsafeAssignments(qualifiedName, topLevelStatements);
                 InspectMissingEarlyOut(qualifiedName, node, topLevelStatements);
-                InspectInsteadOfInsertFilteredReinsert(qualifiedName, node, topLevelStatements);
+                InspectInsteadOfInsertFilteredReinsert(qualifiedName, node, triggerObject, topLevelStatements);
             }
 
             if (triggerObject.Name is { } targetTableName)
@@ -225,7 +226,7 @@ public static class TriggerCorrectnessScanner
                 && PseudoTableNames.Contains(named.SchemaObject.BaseIdentifier.Value);
         }
 
-        private void InspectInsteadOfInsertFilteredReinsert(string triggerQualifiedName, TriggerStatementBody node, IList<TSqlStatement> topLevelStatements)
+        private void InspectInsteadOfInsertFilteredReinsert(string triggerQualifiedName, TriggerStatementBody node, TriggerObject triggerObject, IList<TSqlStatement> topLevelStatements)
         {
             if (node.TriggerType != TriggerType.InsteadOf
                 || node.TriggerActions is not { } actions
@@ -248,8 +249,9 @@ public static class TriggerCorrectnessScanner
 
             var hasCompanionInsert = topLevelStatements.OfType<InsertStatement>().Count() > filteredInserts.Count;
             var hasRaiseErrorOrThrow = ContainsRaiseErrorOrThrow(topLevelStatements);
+            var hasProvenExhaustiveCoverage = filteredInserts.Count > 1 && HasProvenExhaustiveCoverage(filteredInserts, triggerObject);
 
-            if (hasCompanionInsert || hasRaiseErrorOrThrow)
+            if (hasCompanionInsert || hasRaiseErrorOrThrow || hasProvenExhaustiveCoverage)
             {
                 return;
             }
@@ -283,6 +285,54 @@ public static class TriggerCorrectnessScanner
             QualifiedJoin join => ReferencesInsertedTable(join.FirstTableReference) || ReferencesInsertedTable(join.SecondTableReference),
             _ => false,
         };
+
+        private bool HasProvenExhaustiveCoverage(List<InsertStatement> filteredInserts, TriggerObject triggerObject)
+        {
+            if (triggerObject.Name is not { } targetTableName)
+            {
+                return false;
+            }
+
+            var searchConditions = new List<BooleanExpression>();
+            foreach (var insert in filteredInserts)
+            {
+                if (insert.InsertSpecification.InsertSource is not SelectInsertSource
+                    {
+                        Select: QuerySpecification
+                        {
+                            FromClause.TableReferences: [NamedTableReference { SchemaObject.SchemaIdentifier: null } named],
+                            WhereClause: { SearchCondition: { } condition },
+                        },
+                    }
+                    || !string.Equals(named.SchemaObject.BaseIdentifier.Value, "inserted", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                searchConditions.Add(condition);
+            }
+
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(targetTableName));
+
+            PredicateSurvivalAnalyzer.ColumnFacts ResolveInsertedColumnFacts(ColumnReferenceExpression columnRef)
+            {
+                var identifiers = columnRef.MultiPartIdentifier.Identifiers;
+                if (identifiers is not [.., { } last])
+                {
+                    return default;
+                }
+
+                if (identifiers.Count > 1 && !PseudoTableNames.Contains(identifiers[^2].Value))
+                {
+                    return default;
+                }
+
+                var catalogColumn = catalog.Find(targetQualifiedName)?.FindColumn(last.Value, catalog.IdentifierComparer);
+                return new PredicateSurvivalAnalyzer.ColumnFacts(catalogColumn is null ? null : !catalogColumn.IsNullable, null);
+            }
+
+            return PredicateSurvivalAnalyzer.IsTautology(searchConditions, ResolveInsertedColumnFacts);
+        }
 
         private static bool ContainsRaiseErrorOrThrow(IList<TSqlStatement> statements)
         {

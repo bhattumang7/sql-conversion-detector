@@ -15,30 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 8 remain open below.
+correctness bugs found; 7 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`TriggerCorrectnessScanner`'s `InsteadOfInsertFilteredNoRejectPath`
-      false-positives when an `INSTEAD OF INSERT` trigger routes rows into
-      two or more mutually-exclusive filtered `INSERT`s — no rows are
-      actually dropped, but every one of those statements gets flagged as
-      silently dropping rows.**
-      (`src/SilentScan.Core/Predicates/TriggerCorrectnessScanner.cs:228-265`,
-      line 249: `hasCompanionInsert` only recognizes an *unconditional*
-      extra `INSERT` as a companion/catch-all, never checking whether two or
-      more filtered inserts' predicates jointly cover the input — so a
-      trigger where every `INSERT` is itself filtered always has
-      `hasCompanionInsert = false` regardless of coverage.) Oracle-confirmed
-      (SQL Server 2025): an `INSTEAD OF INSERT` trigger with `INSERT INTO
-      Included ... WHERE Val > 0` and `INSERT INTO Excluded ... WHERE Val <=
-      0` — a common "route rows to different tables by filter" pattern —
-      accounts for every inserted row across the two tables with zero rows
-      lost. Both statements would be flagged, each falsely claiming "rows
-      matching the negated filter are silently dropped, no error, no
-      trace."
 
 - [ ] **`TempTableExecShapeCandidateScanner`'s `ColumnCountMismatch` ignores
       an explicit column list on `INSERT INTO #temp (<cols>) EXEC proc`,

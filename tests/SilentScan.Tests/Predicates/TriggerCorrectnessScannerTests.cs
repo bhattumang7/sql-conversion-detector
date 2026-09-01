@@ -8,7 +8,8 @@ public sealed class TriggerCorrectnessScannerTests
 {
     private const string Ddl =
         "CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY, Val INT NOT NULL);"
-        + "CREATE TABLE dbo.Other (Id INT NOT NULL PRIMARY KEY, Val INT NOT NULL);";
+        + "CREATE TABLE dbo.Other (Id INT NOT NULL PRIMARY KEY, Val INT NOT NULL);"
+        + "CREATE TABLE dbo.NullableVal (Id INT NOT NULL PRIMARY KEY, Val INT NULL);";
 
     private static IReadOnlyList<TriggerCorrectnessFinding> Scan(string triggerSql, bool? recursiveTriggersEnabled = null)
     {
@@ -256,6 +257,111 @@ public sealed class TriggerCorrectnessScannerTests
             + "BEGIN INSERT INTO dbo.T (Id, Val) SELECT Id, Val FROM inserted; END;");
 
         Assert.DoesNotContain(findings, f => f.Kind == TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath);
+    }
+
+    [Fact]
+    public void InsteadOfInsertTrigger_ExactComplementGreaterThanLessOrEqual_NotNullColumn_NeverFires()
+    {
+        var findings = Scan(
+            "CREATE TRIGGER dbo.trg_T ON dbo.T INSTEAD OF INSERT AS "
+            + "BEGIN "
+            + "INSERT INTO dbo.T (Id, Val) SELECT Id, Val FROM inserted WHERE Val > 0; "
+            + "INSERT INTO dbo.Other (Id, Val) SELECT Id, Val FROM inserted WHERE Val <= 0; "
+            + "END;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath);
+    }
+
+    [Fact]
+    public void InsteadOfInsertTrigger_ExactComplementGreaterOrEqualLessThan_NotNullColumn_NeverFires()
+    {
+        var findings = Scan(
+            "CREATE TRIGGER dbo.trg_T ON dbo.T INSTEAD OF INSERT AS "
+            + "BEGIN "
+            + "INSERT INTO dbo.T (Id, Val) SELECT Id, Val FROM inserted WHERE Val >= 0; "
+            + "INSERT INTO dbo.Other (Id, Val) SELECT Id, Val FROM inserted WHERE Val < 0; "
+            + "END;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath);
+    }
+
+    [Fact]
+    public void InsteadOfInsertTrigger_ExactComplementEqualsNotEquals_NotNullColumn_NeverFires()
+    {
+        var findings = Scan(
+            "CREATE TRIGGER dbo.trg_T ON dbo.T INSTEAD OF INSERT AS "
+            + "BEGIN "
+            + "INSERT INTO dbo.T (Id, Val) SELECT Id, Val FROM inserted WHERE Val = 0; "
+            + "INSERT INTO dbo.Other (Id, Val) SELECT Id, Val FROM inserted WHERE Val <> 0; "
+            + "END;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath);
+    }
+
+    [Fact]
+    public void InsteadOfInsertTrigger_IsNullIsNotNullComplement_NullableColumn_NeverFires()
+    {
+        var findings = Scan(
+            "CREATE TRIGGER dbo.trg_NV ON dbo.NullableVal INSTEAD OF INSERT AS "
+            + "BEGIN "
+            + "INSERT INTO dbo.NullableVal (Id, Val) SELECT Id, Val FROM inserted WHERE Val IS NULL; "
+            + "INSERT INTO dbo.Other (Id, Val) SELECT Id, 0 FROM inserted WHERE Val IS NOT NULL; "
+            + "END;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath);
+    }
+
+    [Fact]
+    public void InsteadOfInsertTrigger_GreaterThanLessOrEqualPair_NullableColumn_StillFires()
+    {
+        var findings = Scan(
+            "CREATE TRIGGER dbo.trg_NV ON dbo.NullableVal INSTEAD OF INSERT AS "
+            + "BEGIN "
+            + "INSERT INTO dbo.NullableVal (Id, Val) SELECT Id, Val FROM inserted WHERE Val > 0; "
+            + "INSERT INTO dbo.Other (Id, Val) SELECT Id, Val FROM inserted WHERE Val <= 0; "
+            + "END;");
+
+        Assert.Equal(2, findings.Count(f => f.Kind == TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath));
+    }
+
+    [Fact]
+    public void InsteadOfInsertTrigger_OverlappingNonComplementaryFilters_NotNullColumn_StillFires()
+    {
+        var findings = Scan(
+            "CREATE TRIGGER dbo.trg_T ON dbo.T INSTEAD OF INSERT AS "
+            + "BEGIN "
+            + "INSERT INTO dbo.T (Id, Val) SELECT Id, Val FROM inserted WHERE Val > 0; "
+            + "INSERT INTO dbo.Other (Id, Val) SELECT Id, Val FROM inserted WHERE Val > 10; "
+            + "END;");
+
+        Assert.Equal(2, findings.Count(f => f.Kind == TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath));
+    }
+
+    [Fact]
+    public void InsteadOfInsertTrigger_ThreeWayNonAdjacentRangeGap_NotNullColumn_StillFires()
+    {
+        var findings = Scan(
+            "CREATE TRIGGER dbo.trg_T ON dbo.T INSTEAD OF INSERT AS "
+            + "BEGIN "
+            + "INSERT INTO dbo.T (Id, Val) SELECT Id, Val FROM inserted WHERE Val < 0; "
+            + "INSERT INTO dbo.Other (Id, Val) SELECT Id, Val FROM inserted WHERE Val = 0; "
+            + "INSERT INTO dbo.Other (Id, Val) SELECT Id, Val FROM inserted WHERE Val > 5; "
+            + "END;");
+
+        Assert.Equal(3, findings.Count(f => f.Kind == TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath));
+    }
+
+    [Fact]
+    public void InsteadOfInsertTrigger_ComplementPairWithOneJoinFilteredLeg_StillFires()
+    {
+        var findings = Scan(
+            "CREATE TRIGGER dbo.trg_T ON dbo.T INSTEAD OF INSERT AS "
+            + "BEGIN "
+            + "INSERT INTO dbo.T (Id, Val) SELECT i.Id, i.Val FROM inserted i INNER JOIN dbo.Other o ON i.Id = o.Id WHERE i.Val > 0; "
+            + "INSERT INTO dbo.Other (Id, Val) SELECT Id, Val FROM inserted WHERE Val <= 0; "
+            + "END;");
+
+        Assert.Equal(2, findings.Count(f => f.Kind == TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath));
     }
 
     [Fact]

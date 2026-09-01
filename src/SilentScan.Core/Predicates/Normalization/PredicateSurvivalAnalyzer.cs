@@ -23,6 +23,10 @@ public static class PredicateSurvivalAnalyzer
     public static bool IsUnsatisfiable(BooleanExpression? searchCondition, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>
         searchCondition is not null && Classify(searchCondition, resolveColumnFacts).NeverTrue;
 
+    public static bool IsTautology(IReadOnlyList<BooleanExpression> orMembers, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>
+        orMembers.Count > 0
+        && (orMembers.Any(member => Classify(member, resolveColumnFacts).AlwaysTrue) || DetectTautology(orMembers, resolveColumnFacts));
+
     private readonly record struct ColumnKey(string Qualifier, string Name);
 
     private enum CmpOp { Eq, Ne, Lt, Le, Gt, Ge }
