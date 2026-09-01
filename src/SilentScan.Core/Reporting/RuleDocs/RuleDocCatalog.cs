@@ -283,6 +283,8 @@ public static class RuleDocCatalog
         [DeprecatedSyntax.StringLiteralColumnAlias.RuleId] = DeprecatedSyntax.StringLiteralColumnAlias.Content,
         [DeprecatedSyntax.RemovedSecurityStoredProcedure.RuleId] = DeprecatedSyntax.RemovedSecurityStoredProcedure.Content,
         [DeprecatedSyntax.DeprecatedSetRowcount.RuleId] = DeprecatedSyntax.DeprecatedSetRowcount.Content,
+        [DeprecatedSyntax.LegacyLobStatement.RuleId] = DeprecatedSyntax.LegacyLobStatement.Content,
+        [DeprecatedSyntax.LegacyLobFunction.RuleId] = DeprecatedSyntax.LegacyLobFunction.Content,
 
         [Duplication.CommentedOutCode.RuleId] = Duplication.CommentedOutCode.Content,
         [Duplication.DuplicatedStringLiteral.RuleId] = Duplication.DuplicatedStringLiteral.Content,

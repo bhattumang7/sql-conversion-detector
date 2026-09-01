@@ -30,6 +30,10 @@ public enum DeprecatedSyntaxFindingKind
     RemovedSecurityStoredProcedure,
 
     DeprecatedSetRowcount,
+
+    LegacyLobStatement,
+
+    LegacyLobFunction,
 }
 
 public sealed record DeprecatedSyntaxFinding(

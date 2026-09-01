@@ -688,6 +688,27 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
         base.ExplicitVisit(node);
     }
 
+    public sealed override void ExplicitVisit(ReadTextStatement node)
+    {
+        Dispatch(rule => rule.OnEnterReadTextStatement(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(WriteTextStatement node)
+    {
+        Dispatch(rule => rule.OnEnterWriteTextStatement(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(UpdateTextStatement node)
+    {
+        Dispatch(rule => rule.OnEnterUpdateTextStatement(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
     public sealed override void ExplicitVisit(SetTransactionIsolationLevelStatement node)
     {
         Dispatch(rule => rule.OnEnterSetTransactionIsolationLevelStatement(node, this));

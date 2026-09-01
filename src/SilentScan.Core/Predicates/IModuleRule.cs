@@ -423,4 +423,16 @@ public interface IModuleRule
     void OnEnterCreateOrAlterFunctionStatement(CreateOrAlterFunctionStatement node, ModuleWalker walker)
     {
     }
+
+    void OnEnterReadTextStatement(ReadTextStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterWriteTextStatement(WriteTextStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterUpdateTextStatement(UpdateTextStatement node, ModuleWalker walker)
+    {
+    }
 }

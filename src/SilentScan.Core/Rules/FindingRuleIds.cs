@@ -176,6 +176,8 @@ public static class FindingRuleIds
     public const string DeprecatedSyntaxStringLiteralColumnAliasRuleId = "silentscan/deprecated-syntax/string-literal-column-alias";
     public const string DeprecatedSyntaxRemovedSecurityStoredProcedureRuleId = "silentscan/deprecated-syntax/removed-security-stored-procedure";
     public const string DeprecatedSyntaxDeprecatedSetRowcountRuleId = "silentscan/deprecated-syntax/deprecated-set-rowcount";
+    public const string DeprecatedSyntaxLegacyLobStatementRuleId = "silentscan/deprecated-syntax/legacy-lob-statement";
+    public const string DeprecatedSyntaxLegacyLobFunctionRuleId = "silentscan/deprecated-syntax/legacy-lob-function";
     public const string StatementShapeInsertWithoutColumnListRuleId = "silentscan/statement-shape/insert-without-column-list";
     public const string StatementShapeOrdinalOrderByRuleId = "silentscan/statement-shape/ordinal-order-by";
     public const string StatementShapeTableWithNoPrimaryKeyRuleId = "silentscan/statement-shape/table-with-no-primary-key";
@@ -451,6 +453,8 @@ public static class FindingRuleIds
         DeprecatedSyntaxFindingKind.StringLiteralColumnAlias => DeprecatedSyntaxStringLiteralColumnAliasRuleId,
         DeprecatedSyntaxFindingKind.RemovedSecurityStoredProcedure => DeprecatedSyntaxRemovedSecurityStoredProcedureRuleId,
         DeprecatedSyntaxFindingKind.DeprecatedSetRowcount => DeprecatedSyntaxDeprecatedSetRowcountRuleId,
+        DeprecatedSyntaxFindingKind.LegacyLobStatement => DeprecatedSyntaxLegacyLobStatementRuleId,
+        DeprecatedSyntaxFindingKind.LegacyLobFunction => DeprecatedSyntaxLegacyLobFunctionRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DeprecatedSyntaxFindingKind."),
     };
     public static string StatementShapeRuleId(StatementShapeFindingKind kind) => kind switch

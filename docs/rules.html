@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">282 rules. 195 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">284 rules. 197 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -204,6 +204,8 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <ul class="rule-list">
       <li><a class="id" href="rules/deprecated-syntax-deprecated-set-rowcount.html">Deprecated Set Rowcount</a> <code class="rule-key">silentscan/deprecated-syntax/deprecated-set-rowcount</code><span class="snippet">SET ROWCOUNT is deprecated.</span></li>
       <li><a class="id" href="rules/deprecated-syntax-equals-null-comparison.html">Equals Null Comparison</a> <code class="rule-key">silentscan/deprecated-syntax/equals-null-comparison</code><span class="snippet">&quot;= NULL&quot; never matches any row under the default ANSI_NULLS ON session setting, including a genuinely NULL value.</span></li>
+      <li><a class="id" href="rules/deprecated-syntax-legacy-lob-function.html">Legacy Lob Function</a> <code class="rule-key">silentscan/deprecated-syntax/legacy-lob-function</code><span class="snippet">TEXTPTR/TEXTVALID are legacy functions tied to the deprecated text/ntext/image large-object types, tracked by the engine&#x27;s own deprecated-features counters.</span></li>
+      <li><a class="id" href="rules/deprecated-syntax-legacy-lob-statement.html">Legacy Lob Statement</a> <code class="rule-key">silentscan/deprecated-syntax/legacy-lob-statement</code><span class="snippet">READTEXT/WRITETEXT/UPDATETEXT are legacy statements for the deprecated text/ntext/image large-object types, tracked by the engine&#x27;s own deprecated-features counters.</span></li>
       <li><a class="id" href="rules/deprecated-syntax-legacy-system-compatibility-view.html">Legacy System Compatibility View</a> <code class="rule-key">silentscan/deprecated-syntax/legacy-system-compatibility-view</code><span class="snippet">A reference to a pre-SQL-Server-2005 system compatibility view, retained only for backward compatibility and missing columns/rows the real sys.* catalog view exposes.</span></li>
       <li><a class="id" href="rules/deprecated-syntax-like-with-no-wildcard.html">LIKE With No Wildcard</a> <code class="rule-key">silentscan/deprecated-syntax/like-with-no-wildcard</code><span class="snippet">A LIKE pattern contains no wildcard character.</span></li>
       <li><a class="id" href="rules/deprecated-syntax-non-ansi-comparison-operator.html">Non ANSI Comparison Operator</a> <code class="rule-key">silentscan/deprecated-syntax/non-ansi-comparison-operator</code><span class="snippet">A non-ANSI comparison operator (!=, !&lt;, !&gt;) is used instead of the ANSI-standard spelling.</span></li>

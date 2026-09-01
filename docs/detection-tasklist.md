@@ -19,13 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **Legacy LOB statements (`READTEXT`/`WRITETEXT`/`UPDATETEXT`/
-      `TEXTPTR`/`TEXTVALID`) have zero coverage anywhere.** Confirmed by two
-      independent methods: none of the five appear as a referenced AST node
-      type anywhere in `src/`, and all five are official
-      engine-tracked deprecated features (same `sys.dm_os_performance_counters`
-      diff as above).
-
 - [ ] **Dynamic Data Masking has zero coverage as a feature area** - not one
       missing case, no references anywhere in Core at all (no check for
       masked-column arithmetic/comparison exposure, no check for

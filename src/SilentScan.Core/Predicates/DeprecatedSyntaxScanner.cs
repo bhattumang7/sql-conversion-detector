@@ -349,6 +349,21 @@ public static class DeprecatedSyntaxScanner
             }
         }
 
+        public void OnEnterFunctionCall(FunctionCall node, ModuleWalker walker)
+        {
+            if (node.CallTarget is not null || node.FunctionName?.Value is not { } functionName)
+            {
+                return;
+            }
+
+            if (functionName.Equals("TEXTPTR", StringComparison.OrdinalIgnoreCase)
+                || functionName.Equals("TEXTVALID", StringComparison.OrdinalIgnoreCase))
+            {
+                Add(DeprecatedSyntaxFindingKind.LegacyLobFunction, node,
+                    $"{functionName.ToUpperInvariant()}() is a legacy function tied to the deprecated text/ntext/image large-object types - migrate the column to VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) so it is no longer needed.");
+            }
+        }
+
         public void OnEnterSelectScalarExpression(SelectScalarExpression node, ModuleWalker walker)
         {
             if (node.ColumnName?.ValueExpression is StringLiteral { Value: { } alias })
@@ -362,6 +377,24 @@ public static class DeprecatedSyntaxScanner
         {
             Add(DeprecatedSyntaxFindingKind.DeprecatedSetRowcount, node,
                 "SET ROWCOUNT is deprecated - use TOP (n) instead; Microsoft documents it as not honored by INSERT/UPDATE/DELETE in a future release.");
+        }
+
+        public void OnEnterReadTextStatement(ReadTextStatement node, ModuleWalker walker)
+        {
+            Add(DeprecatedSyntaxFindingKind.LegacyLobStatement, node,
+                $"READTEXT against \"{QualifyColumn(node.Column)}\" is a legacy statement for the deprecated text/ntext/image large-object types - migrate the column to VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) and use SUBSTRING() instead.");
+        }
+
+        public void OnEnterWriteTextStatement(WriteTextStatement node, ModuleWalker walker)
+        {
+            Add(DeprecatedSyntaxFindingKind.LegacyLobStatement, node,
+                $"WRITETEXT against \"{QualifyColumn(node.Column)}\" is a legacy statement for the deprecated text/ntext/image large-object types - migrate the column to VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) and use UPDATE instead.");
+        }
+
+        public void OnEnterUpdateTextStatement(UpdateTextStatement node, ModuleWalker walker)
+        {
+            Add(DeprecatedSyntaxFindingKind.LegacyLobStatement, node,
+                $"UPDATETEXT against \"{QualifyColumn(node.Column)}\" is a legacy statement for the deprecated text/ntext/image large-object types - migrate the column to VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) and use UPDATE/STUFF() instead.");
         }
 
         private static bool HasPrecedingWithKeyword(IList<TSqlParserToken> tokens, int hintFirstTokenIndex)
@@ -388,5 +421,10 @@ public static class DeprecatedSyntaxScanner
 
         private void Add(DeprecatedSyntaxFindingKind kind, TSqlFragment node, string detail) =>
             Findings.Add(BuildComparisonFinding(kind, node, detail, sourcePath));
+
+        private static string QualifyColumn(ColumnReferenceExpression? column) =>
+            column?.MultiPartIdentifier?.Identifiers is { Count: > 0 } identifiers
+                ? string.Join(".", identifiers.Select(i => i.Value))
+                : "<unknown column>";
     }
 }
