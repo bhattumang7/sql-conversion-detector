@@ -138,6 +138,8 @@ public static class RuleDocCatalog
         [Predicates.AlterColumnTemporalOffsetDropped.RuleId] = Predicates.AlterColumnTemporalOffsetDropped.Content,
         [Predicates.DropSchemaNotEmpty.RuleId] = Predicates.DropSchemaNotEmpty.Content,
         [Predicates.DropFixedDatabaseRole.RuleId] = Predicates.DropFixedDatabaseRole.Content,
+        [Predicates.OnlineRebuildLegacyLobAlterTable.RuleId] = Predicates.OnlineRebuildLegacyLobAlterTable.Content,
+        [Predicates.OnlineRebuildLegacyLobAlterIndexAll.RuleId] = Predicates.OnlineRebuildLegacyLobAlterIndexAll.Content,
         [Predicates.XmlOperandNotComparable.RuleId] = Predicates.XmlOperandNotComparable.Content,
         [Predicates.LegacyLobOperandNotComparable.RuleId] = Predicates.LegacyLobOperandNotComparable.Content,
         [Predicates.JsonOperandNotComparable.RuleId] = Predicates.JsonOperandNotComparable.Content,

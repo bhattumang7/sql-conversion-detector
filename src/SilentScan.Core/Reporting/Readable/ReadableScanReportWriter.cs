@@ -154,6 +154,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(AlwaysEncryptedKeyColumn(report, headingLevel, pathBase));
         blocks.AddRange(AlterColumnSafety(report, headingLevel, pathBase));
         blocks.AddRange(DropProtectedObject(report, headingLevel, pathBase));
+        blocks.AddRange(OnlineRebuildLegacyLob(report, headingLevel, pathBase));
         blocks.AddRange(OperandComparability(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
         blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
@@ -252,6 +253,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Always Encrypted non-enclave key column", report.Find<AlwaysEncryptedKeyColumnFinding>(nameof(AlwaysEncryptedKeyColumnScanner)).Count);
         AddCount(counts, "ALTER COLUMN safety", report.Find<AlterColumnSafetyFinding>(nameof(AlterColumnSafetyScanner)).Count);
         AddCount(counts, "DROP against a protected object", report.Find<DropProtectedObjectFinding>(nameof(DropProtectedObjectScanner)).Count);
+        AddCount(counts, "Online index rebuild blocked by a legacy large-object column", report.Find<OnlineRebuildLegacyLobFinding>(nameof(OnlineRebuildLegacyLobScanner)).Count);
         AddCount(counts, "Operand not comparable (xml/json/legacy large object/spatial)", report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count);
         AddCount(counts, "Query anti-patterns", report.Find<QueryAntiPatternFinding>(nameof(QueryAntiPatternScanner)).Count);
         AddCount(counts, "Index-coverage shapes", report.Find<IndexCoverageFinding>(nameof(IndexCoverageScanner)).Count);
@@ -1735,6 +1737,41 @@ public static class ReadableScanReportWriter
     {
         DropProtectedObjectKind.SchemaNotEmpty => "Schema not empty",
         DropProtectedObjectKind.FixedDatabaseRole => "Fixed database role",
+        _ => "Unknown",
+    };
+
+    private static IEnumerable<ReadableBlock> OnlineRebuildLegacyLob(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<OnlineRebuildLegacyLobFinding>(nameof(OnlineRebuildLegacyLobScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Online index rebuild blocked by a legacy large-object column ({report.Find<OnlineRebuildLegacyLobFinding>(nameof(OnlineRebuildLegacyLobScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An ALTER TABLE ... REBUILD or ALTER INDEX ALL ... REBUILD statement specifies ONLINE = ON against a table carrying a TEXT/NTEXT/IMAGE column - the online rebuild always touches every column and never completes.");
+
+        foreach (var group in report.Find<OnlineRebuildLegacyLobFinding>(nameof(OnlineRebuildLegacyLobScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{OnlineRebuildLegacyLobTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.OnlineRebuildLegacyLobRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Table", "Column", "Type"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.TableQualifiedName,
+                    f.ColumnName,
+                    f.TypeDisplay,
+                })]);
+        }
+    }
+
+    private static string OnlineRebuildLegacyLobTitle(OnlineRebuildLegacyLobKind kind) => kind switch
+    {
+        OnlineRebuildLegacyLobKind.AlterTableRebuild => "ALTER TABLE ... REBUILD",
+        OnlineRebuildLegacyLobKind.AlterIndexAllRebuild => "ALTER INDEX ALL ... REBUILD",
         _ => "Unknown",
     };
 

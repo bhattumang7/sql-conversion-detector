@@ -112,6 +112,7 @@ public static class TestScanReports
         IReadOnlyList<AlwaysEncryptedKeyColumnFinding>? AlwaysEncryptedKeyColumnFindings = null,
         IReadOnlyList<AlterColumnSafetyFinding>? AlterColumnSafetyFindings = null,
         IReadOnlyList<DropProtectedObjectFinding>? DropProtectedObjectFindings = null,
+        IReadOnlyList<OnlineRebuildLegacyLobFinding>? OnlineRebuildLegacyLobFindings = null,
         IReadOnlyList<SpExecuteSqlParameterMismatchFinding>? SpExecuteSqlParameterMismatchFindings = null,
         IReadOnlyList<SkippedConstruct>? SkippedConstructs = null,
         SkippedConstructSummary? SkippedConstructSummary = null,
@@ -228,6 +229,7 @@ public static class TestScanReports
         Set("AlwaysEncryptedKeyColumnScanner", AlwaysEncryptedKeyColumnFindings);
         Set("AlterColumnSafetyScanner", AlterColumnSafetyFindings);
         Set("DropProtectedObjectScanner", DropProtectedObjectFindings);
+        Set("OnlineRebuildLegacyLobScanner", OnlineRebuildLegacyLobFindings);
         Set("SpExecuteSqlParameterMismatchScanner", SpExecuteSqlParameterMismatchFindings);
 
         return new ScanReport(

@@ -109,6 +109,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<AlwaysEncryptedKeyColumnFinding>("AlwaysEncryptedKeyColumnScanner").Select(ToResult));
         results.AddRange(report.Find<AlterColumnSafetyFinding>("AlterColumnSafetyScanner").Select(ToResult));
         results.AddRange(report.Find<DropProtectedObjectFinding>("DropProtectedObjectScanner").Select(ToResult));
+        results.AddRange(report.Find<OnlineRebuildLegacyLobFinding>("OnlineRebuildLegacyLobScanner").Select(ToResult));
         results.AddRange(report.Find<OperandComparabilityFinding>("OperandComparabilityScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>("MemoryOptimizedUnsupportedColumnTypeScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUnsupportedIndexOptionFinding>("MemoryOptimizedUnsupportedIndexOptionScanner").Select(ToResult));
@@ -1423,6 +1424,20 @@ public static class SarifReportWriter
                 $"DROP ROLE '{finding.ObjectName}' fails (Msg 15150) because it names one of the engine's fixed database roles, which can never be dropped.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled DropProtectedObjectKind."),
         };
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(OnlineRebuildLegacyLobFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.OnlineRebuildLegacyLobRuleId(finding.Kind), finding.Confidence);
+        var statementLabel = finding.Kind switch
+        {
+            OnlineRebuildLegacyLobKind.AlterTableRebuild => "ALTER TABLE ... REBUILD WITH (ONLINE = ON)",
+            OnlineRebuildLegacyLobKind.AlterIndexAllRebuild => "ALTER INDEX ALL ... REBUILD WITH (ONLINE = ON)",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled OnlineRebuildLegacyLobKind."),
+        };
+        var message = $"{statementLabel} on '{finding.TableQualifiedName}' fails (Msg 2725) because column '{finding.ColumnName}' is {finding.TypeDisplay} - text, ntext, image, and FILESTREAM columns can never be carried through an online index rebuild.";
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, finding.Column);
     }

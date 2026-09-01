@@ -496,6 +496,22 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`OnlineRebuildLegacyLobRuleId` — shipped for `ALTER TABLE ... REBUILD
+  WITH (ONLINE = ON)` and `ALTER INDEX ALL ... REBUILD WITH (ONLINE = ON)`
+  (Msg 2725).** Oracle-confirmed (Docker): a table carrying a
+  TEXT/NTEXT/IMAGE column always fails an online rebuild that touches its
+  clustered index or heap, because that always includes every column.
+  `ALTER TABLE ... REBUILD` and `ALTER INDEX ALL ... REBUILD` both rebuild
+  the clustered index/heap and so both fail; a single named index's own
+  `REBUILD WITH (ONLINE = ON)` only fails if that specific index's own key/
+  include list carries the legacy large-object column - oracle-confirmed a
+  nonclustered index that does not reference the column rebuilds online
+  successfully even while the table carries one. Decidable purely from the
+  target table's own catalog column types; no data inspection needed. The
+  `ALTER COLUMN ... ONLINE` and `DROP INDEX ... ONLINE` forms, and the
+  single-named-index-carries-the-column shape, remain open - see
+  `detection-tasklist.md`.
+
 * **`DropProtectedObjectRuleId` — shipped for `DROP SCHEMA` non-empty (Msg
   3729) and `DROP ROLE` against a fixed database role (Msg 15150).**
   Oracle-confirmed (Docker): `DROP SCHEMA` fails unconditionally while any

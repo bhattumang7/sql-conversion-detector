@@ -64,15 +64,10 @@ Competitor tools are referred to generically; real identities are in
         family. `sql_variant = xml` (item 3) remains the one confirmed
         "cannot implicit-convert at all" case; encryption-state and
         legacy-LOB legs still unverified.
-      6. New family: online DDL blocked by column type. `ALTER COLUMN`/
-        `ALTER TABLE`/`ALTER INDEX ... REBUILD`/`DROP INDEX` with `ONLINE`,
-        and a whole-table online rebuild, are all documented to reject a
-        legacy-LOB/CLR-incompatible column type shape — one consolidated
-        rule, not four/five separate ones. **FINDING: confirmed real** for
-        the two forms tested. `ALTER TABLE ... REBUILD WITH (ONLINE=ON)`
-        and `ALTER INDEX ALL ... REBUILD WITH (ONLINE=ON)` both reject a
-        table with an `ntext` column, same catalog-decidable error message.
-        `ALTER COLUMN`/`DROP INDEX ONLINE` forms not individually tested.
+      6. Remaining legs of the shipped `OnlineRebuildLegacyLobRuleId` family
+        (`ALTER TABLE ... REBUILD WITH (ONLINE=ON)`, `ALTER INDEX ALL ...
+        REBUILD WITH (ONLINE=ON)` — both shipped): `ALTER COLUMN ...
+        ONLINE` and `DROP INDEX ... ONLINE` forms not yet tested.
       7. New family: partition/filegroup DDL alignment siblings to the
         shipped `ALTER TABLE SWITCH` family — partition-`REBUILD` alignment
         mismatch, `DROP` against a non-updateable (read-only/offline)

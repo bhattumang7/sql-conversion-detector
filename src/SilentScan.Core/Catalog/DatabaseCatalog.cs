@@ -29,6 +29,8 @@ public sealed class DatabaseCatalog
     private readonly List<CatalogAlterColumnEvent> _alterColumnEvents = [];
     private readonly List<CatalogDropSchemaEvent> _dropSchemaEvents = [];
     private readonly List<CatalogDropRoleEvent> _dropRoleEvents = [];
+    private readonly List<CatalogAlterTableRebuildEvent> _alterTableRebuildEvents = [];
+    private readonly List<CatalogAlterIndexAllRebuildEvent> _alterIndexAllRebuildEvents = [];
 
     private readonly List<CatalogSecurityPredicate> _securityPredicates = [];
 
@@ -171,6 +173,14 @@ public sealed class DatabaseCatalog
     public void AddDropRoleEvent(CatalogDropRoleEvent dropRoleEvent) => _dropRoleEvents.Add(dropRoleEvent);
 
     public IReadOnlyList<CatalogDropRoleEvent> DropRoleEvents => _dropRoleEvents;
+
+    public void AddAlterTableRebuildEvent(CatalogAlterTableRebuildEvent alterTableRebuildEvent) => _alterTableRebuildEvents.Add(alterTableRebuildEvent);
+
+    public IReadOnlyList<CatalogAlterTableRebuildEvent> AlterTableRebuildEvents => _alterTableRebuildEvents;
+
+    public void AddAlterIndexAllRebuildEvent(CatalogAlterIndexAllRebuildEvent alterIndexAllRebuildEvent) => _alterIndexAllRebuildEvents.Add(alterIndexAllRebuildEvent);
+
+    public IReadOnlyList<CatalogAlterIndexAllRebuildEvent> AlterIndexAllRebuildEvents => _alterIndexAllRebuildEvents;
 
     public bool SchemaOwnsAnyKnownObject(string schemaName)
     {

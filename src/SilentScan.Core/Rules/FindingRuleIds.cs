@@ -77,6 +77,12 @@ public static class FindingRuleIds
         DropProtectedObjectKind.FixedDatabaseRole => "silentscan/catalog/drop-fixed-database-role",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DropProtectedObjectKind."),
     };
+    public static string OnlineRebuildLegacyLobRuleId(OnlineRebuildLegacyLobKind kind) => kind switch
+    {
+        OnlineRebuildLegacyLobKind.AlterTableRebuild => "silentscan/catalog/online-rebuild-legacy-lob-alter-table",
+        OnlineRebuildLegacyLobKind.AlterIndexAllRebuild => "silentscan/catalog/online-rebuild-legacy-lob-alter-index-all",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled OnlineRebuildLegacyLobKind."),
+    };
     public const string MemoryOptimizedUnsupportedColumnTypeRuleId = "silentscan/catalog/memory-optimized-unsupported-column-type";
     public static string MemoryOptimizedUnsupportedIndexOptionRuleId(MemoryOptimizedUnsupportedIndexOptionKind kind) => kind switch
     {

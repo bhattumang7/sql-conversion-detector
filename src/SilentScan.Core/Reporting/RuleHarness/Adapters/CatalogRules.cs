@@ -96,6 +96,12 @@ internal sealed class DropProtectedObjectRule : ICatalogRule
     public IReadOnlyList<IFinding> Scan(RuleContext context) => DropProtectedObjectScanner.Scan(context.Catalog);
 }
 
+internal sealed class OnlineRebuildLegacyLobRule : ICatalogRule
+{
+    public string Id => "OnlineRebuildLegacyLobScanner";
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => OnlineRebuildLegacyLobScanner.Scan(context.Catalog);
+}
+
 internal sealed class MemoryOptimizedForeignKeyRule : ICatalogRule
 {
     public string Id => "MemoryOptimizedForeignKeyScanner";

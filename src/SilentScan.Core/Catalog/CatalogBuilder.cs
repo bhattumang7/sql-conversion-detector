@@ -254,6 +254,17 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
+        public override void ExplicitVisit(AlterTableRebuildStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse && IsOnline(node.IndexOptions))
+            {
+                var qualifiedName = SchemaObjectNameHelper.Qualify(node.SchemaObjectName);
+                catalog.AddAlterTableRebuildEvent(new CatalogAlterTableRebuildEvent(qualifiedName, sourcePath, node.StartLine, node.StartColumn));
+            }
+
+            node.AcceptChildren(this);
+        }
+
         public override void ExplicitVisit(CreateAssemblyStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
@@ -700,6 +711,9 @@ public static class CatalogBuilder
             catalog.AddSynonym(qualifiedName, SchemaObjectNameHelper.Qualify(createSynonym.ForName));
         }
 
+        private static bool IsOnline(IList<IndexOption> indexOptions) =>
+            indexOptions.OfType<OnlineIndexOption>().Any(o => o.OptionState == OptionState.On);
+
         private void VisitAlterIndex(AlterIndexStatement alterIndex)
         {
             if (alterIndex.AlterIndexType is not (AlterIndexType.Disable or AlterIndexType.Rebuild))
@@ -716,6 +730,11 @@ public static class CatalogBuilder
             {
                 RecordUnresolvedTarget("ALTER INDEX", qualifiedName, alterIndex);
                 return;
+            }
+
+            if (alterIndex.All && alterIndex.AlterIndexType == AlterIndexType.Rebuild && IsOnline(alterIndex.IndexOptions))
+            {
+                catalog.AddAlterIndexAllRebuildEvent(new CatalogAlterIndexAllRebuildEvent(qualifiedName, sourcePath, alterIndex.StartLine, alterIndex.StartColumn));
             }
 
             var targetDisabledState = alterIndex.AlterIndexType == AlterIndexType.Disable;
