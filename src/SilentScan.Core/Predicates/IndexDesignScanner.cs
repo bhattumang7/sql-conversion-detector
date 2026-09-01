@@ -48,6 +48,7 @@ public static class IndexDesignScanner
             ScanColumnstoreOnDmlTargetTable(table, dmlTargetTables, findings);
             ScanMonotonicClusteredKeyMissingSequentialOptimization(table, catalog.IdentifierComparer, findings);
             ScanNonAlignedPartitionedIndex(table, catalog.IdentifierComparer, findings);
+            ScanRowOrPageLockingDisabled(table, findings);
         }
 
         ScanUnindexedForeignKeys(catalog, findings);
@@ -658,6 +659,42 @@ public static class IndexDesignScanner
                 $"'{table.QualifiedName}' is partitioned on scheme '{tablePartitionScheme}' keyed on '{clusteredIndex.PartitioningColumnName ?? "<unresolved>"}', but index '{index.Name ?? UnnamedIndexPlaceholder}' {whereText} - not aligned with the table. A non-aligned index cannot participate in a partition SWITCH against this table, and per-partition maintenance on it degrades to a full-index operation.",
                 table.SourcePath,
                 table.SourceLine));
+        }
+    }
+
+    private static void ScanRowOrPageLockingDisabled(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        foreach (var index in table.Indexes)
+        {
+            if (index.IsDisabled || index.IsHypothetical || index.IsColumnstore)
+            {
+                continue;
+            }
+
+            if (index.AllowRowLocks && index.AllowPageLocks)
+            {
+                continue;
+            }
+
+            var disabledOptions = new List<string>();
+            if (!index.AllowRowLocks)
+            {
+                disabledOptions.Add("ALLOW_ROW_LOCKS");
+            }
+
+            if (!index.AllowPageLocks)
+            {
+                disabledOptions.Add("ALLOW_PAGE_LOCKS");
+            }
+
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.RowOrPageLockingDisabled,
+                table.QualifiedName,
+                index.Name,
+                $"'{table.QualifiedName}' index '{index.Name ?? UnnamedIndexPlaceholder}' has {string.Join(" and ", disabledOptions)} set to OFF - any DML statement touching this index is silently forced onto a coarser locking granularity than the statement itself suggests, with no hint of this at the DML site. Structural risk flag only: whether this actually causes blocking or deadlocks depends on the concurrent access pattern, which is workload data out of reach for this static pass.",
+                table.SourcePath,
+                table.SourceLine,
+                FindingConfidence.Medium));
         }
     }
 

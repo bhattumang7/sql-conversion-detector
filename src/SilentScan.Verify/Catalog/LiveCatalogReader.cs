@@ -873,7 +873,8 @@ public sealed class LiveCatalogReader
                    ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name,
                    ic.is_descending_key,
                    CASE WHEN ds.type = 'PS' THEN ds.name ELSE NULL END AS partition_scheme_name,
-                   pc.name AS partitioning_column_name, i.ignore_dup_key
+                   pc.name AS partitioning_column_name, i.ignore_dup_key,
+                   i.allow_row_locks, i.allow_page_locks
             FROM sys.indexes i
             JOIN sys.tables t ON t.object_id = i.object_id
             LEFT JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
@@ -927,7 +928,9 @@ public sealed class LiveCatalogReader
                 OptimizeForSequentialKey: reader.GetBoolean(11),
                 PartitionSchemeName: partitionSchemeName,
                 PartitioningColumnName: partitioningColumnName,
-                IgnoreDupKey: reader.GetBoolean(19));
+                IgnoreDupKey: reader.GetBoolean(19),
+                AllowRowLocks: reader.GetBoolean(20),
+                AllowPageLocks: reader.GetBoolean(21));
             rowsByIndex[key] = row;
         }
 
@@ -981,7 +984,9 @@ public sealed class LiveCatalogReader
                 PartitioningColumnName: row.PartitioningColumnName,
                 IgnoreDupKey: row.IgnoreDupKey,
                 IsXmlIndex: string.Equals(row.TypeDesc, "XML", StringComparison.OrdinalIgnoreCase),
-                IsSpatialIndex: string.Equals(row.TypeDesc, "SPATIAL", StringComparison.OrdinalIgnoreCase));
+                IsSpatialIndex: string.Equals(row.TypeDesc, "SPATIAL", StringComparison.OrdinalIgnoreCase),
+                AllowRowLocks: row.AllowRowLocks,
+                AllowPageLocks: row.AllowPageLocks);
 
             if (!indexesByTable.TryGetValue(objectId, out var indexes))
             {
@@ -1215,7 +1220,9 @@ public sealed class LiveCatalogReader
 
         string? PartitionSchemeName = null,
         string? PartitioningColumnName = null,
-        bool IgnoreDupKey = false);
+        bool IgnoreDupKey = false,
+        bool AllowRowLocks = true,
+        bool AllowPageLocks = true);
 
     private static async Task<Dictionary<string, IReadOnlyList<CatalogIndex>>> ReadIndexedViewsAsync(
         SqlConnection connection, CancellationToken cancellationToken)

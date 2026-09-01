@@ -333,6 +333,7 @@ public static class FindingRuleIds
         IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable => "silentscan/index-design/columnstore-index-on-dml-target-table",
         IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization => "silentscan/index-design/monotonic-clustered-key-missing-sequential-optimization",
         IndexDesignFindingKind.NonAlignedPartitionedIndex => "silentscan/index-design/non-aligned-partitioned-index",
+        IndexDesignFindingKind.RowOrPageLockingDisabled => "silentscan/index-design/row-or-page-locking-disabled",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
     public static string ForcedParameterizationRuleId(ForcedParameterizationFindingKind kind) => kind switch

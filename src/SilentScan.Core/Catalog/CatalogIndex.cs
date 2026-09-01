@@ -18,7 +18,9 @@ public sealed record CatalogIndex(
     string? PartitioningColumnName = null,
     bool IgnoreDupKey = false,
     bool IsXmlIndex = false,
-    bool IsSpatialIndex = false)
+    bool IsSpatialIndex = false,
+    bool AllowRowLocks = true,
+    bool AllowPageLocks = true)
 {
     public IReadOnlyList<bool> KeyColumnIsDescending => KeyColumnIsDescendingRaw ?? [];
 }

@@ -229,6 +229,7 @@ public static class RuleDocCatalog
         [IndexDesign.ColumnstoreIndexOnDmlTargetTable.RuleId] = IndexDesign.ColumnstoreIndexOnDmlTargetTable.Content,
         [IndexDesign.MonotonicClusteredKeyMissingSequentialOptimization.RuleId] = IndexDesign.MonotonicClusteredKeyMissingSequentialOptimization.Content,
         [IndexDesign.NonAlignedPartitionedIndex.RuleId] = IndexDesign.NonAlignedPartitionedIndex.Content,
+        [IndexDesign.RowOrPageLockingDisabled.RuleId] = IndexDesign.RowOrPageLockingDisabled.Content,
         [ForcedParameterization.LikePatternLiteral.RuleId] = ForcedParameterization.LikePatternLiteral.Content,
         [ForcedParameterization.TopOrPagingLiteral.RuleId] = ForcedParameterization.TopOrPagingLiteral.Content,
         [ForcedParameterization.SelectListLiteral.RuleId] = ForcedParameterization.SelectListLiteral.Content,

@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">286 rules. 199 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">287 rules. 200 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -342,6 +342,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/index-design-non-aligned-partitioned-index.html">Non Aligned Partitioned Index</a> <code class="rule-key">silentscan/index-design/non-aligned-partitioned-index</code><span class="snippet">The table is genuinely partitioned, but another active index on it is not aligned with that partitioning.</span></li>
       <li><a class="id" href="rules/index-design-non-unique-clustered-index.html">Non Unique Clustered Index</a> <code class="rule-key">silentscan/index-design/non-unique-clustered-index</code><span class="snippet">A CLUSTERED index is not unique.</span></li>
       <li><a class="id" href="rules/index-design-random-clustered-key-guid-default.html">Random Clustered Key Guid Default</a> <code class="rule-key">silentscan/index-design/random-clustered-key-guid-default</code><span class="snippet">A CLUSTERED index leads on a uniqueidentifier column defaulted to NEWID().</span></li>
+      <li><a class="id" href="rules/index-design-row-or-page-locking-disabled.html">Row Or Page Locking Disabled</a> <code class="rule-key">silentscan/index-design/row-or-page-locking-disabled</code><span class="snippet">An active index carries ALLOW_ROW_LOCKS = OFF and/or ALLOW_PAGE_LOCKS = OFF.</span></li>
       <li><a class="id" href="rules/index-design-subsumed-index.html">Subsumed Index</a> <code class="rule-key">silentscan/index-design/subsumed-index</code><span class="snippet">An active index&#x27;s key list is a leading-column prefix of another index&#x27;s own key list, with its INCLUDE columns already covered by the wider index.</span></li>
       <li><a class="id" href="rules/index-design-timestamp-column-naming.html">Timestamp Column Naming</a> <code class="rule-key">silentscan/index-design/timestamp-column-naming</code><span class="snippet">A column is declared timestamp.</span></li>
       <li><a class="id" href="rules/index-design-unindexed-foreign-key.html">Unindexed Foreign Key</a> <code class="rule-key">silentscan/index-design/unindexed-foreign-key</code><span class="snippet">A real FOREIGN KEY constraint&#x27;s own parent-side column set has no active index leading on it.</span></li>

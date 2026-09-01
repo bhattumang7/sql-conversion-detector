@@ -43,6 +43,8 @@ public enum IndexDesignFindingKind
     MonotonicClusteredKeyMissingSequentialOptimization,
 
     NonAlignedPartitionedIndex,
+
+    RowOrPageLockingDisabled,
 }
 
 public sealed record IndexDesignFinding(

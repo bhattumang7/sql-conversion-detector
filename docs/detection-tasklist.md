@@ -19,18 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`ALLOW_ROW_LOCKS`/`ALLOW_PAGE_LOCKS = OFF` is a hidden concurrency
-      hazard, zero coverage.** Both are plain DDL-declared/catalog-visible
-      facts (`sys.indexes.allow_row_locks`/`allow_page_locks`), fully
-      decidable, currently referenced nowhere except as a column name in
-      `SystemCatalogViewRegistry`. An index built with either `OFF` forces
-      page- or table-level locking for any DML touching it - a plain
-      `UPDATE`/`DELETE` statement gives no hint of this, so two statements a
-      developer assumes can run concurrently against unrelated rows can
-      block or deadlock instead. Same shape as the `READCOMMITTEDLOCK`/RCSI
-      gap already on this list - a table-hint/index-option silently
-      reverting locking granularity in a way invisible from the DML site.
-
 - [ ] **`STATISTICS_NORECOMPUTE` index option is a distinct staleness gap
       from `MissingStatisticsScanner`.** The shipped rule catches "no
       statistic exists and auto-create is off." An index built `WITH
