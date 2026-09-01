@@ -777,6 +777,7 @@ public sealed class SarifReportWriterCoverageTests
     [Theory]
     [InlineData(OperandComparabilityFindingKind.Xml, "the xml data type is not comparable")]
     [InlineData(OperandComparabilityFindingKind.LegacyLargeObject, "the text/ntext/image data type is not comparable")]
+    [InlineData(OperandComparabilityFindingKind.Json, "the json data type is not comparable")]
     public void Write_OperandComparabilityFinding_MapsKindToTypeLabel(OperandComparabilityFindingKind kind, string expectedSubstring)
     {
         var finding = new OperandComparabilityFinding("dbo.T", "Col", "xml", kind, OperandComparabilityContext.Comparison, "=", "test.sql", 1, 1);

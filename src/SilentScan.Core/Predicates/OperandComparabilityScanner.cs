@@ -176,6 +176,7 @@ public static class OperandComparabilityScanner
             return resolved.Type?.Category switch
             {
                 SqlTypeCategory.Xml => (resolved, OperandComparabilityFindingKind.Xml),
+                SqlTypeCategory.Json => (resolved, OperandComparabilityFindingKind.Json),
                 SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image => (resolved, OperandComparabilityFindingKind.LegacyLargeObject),
                 _ => null,
             };

@@ -122,6 +122,7 @@ public static class RuleDocCatalog
         [Predicates.AlterColumnTemporalOffsetDropped.RuleId] = Predicates.AlterColumnTemporalOffsetDropped.Content,
         [Predicates.XmlOperandNotComparable.RuleId] = Predicates.XmlOperandNotComparable.Content,
         [Predicates.LegacyLobOperandNotComparable.RuleId] = Predicates.LegacyLobOperandNotComparable.Content,
+        [Predicates.JsonOperandNotComparable.RuleId] = Predicates.JsonOperandNotComparable.Content,
 
         [Catalog.UntrustedForeignKey.RuleId] = Catalog.UntrustedForeignKey.Content,
         [Catalog.UntrustedCheckConstraint.RuleId] = Catalog.UntrustedCheckConstraint.Content,

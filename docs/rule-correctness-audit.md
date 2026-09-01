@@ -15,26 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 16 remain open below.
+correctness bugs found; 15 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`OperandComparabilityScanner`'s comparability gate never checks the
-      native `json` type, so a `json`-typed operand in a comparison/IN/
-      BETWEEN/NULLIF/ORDER BY/GROUP BY/DISTINCT position is silently never
-      flagged.**
-      (`src/SilentScan.Core/Predicates/OperandComparabilityScanner.cs:176-181`,
-      `TryClassify`'s switch matches `Xml` and
-      `Text`/`NText`/`Image` but has no `SqlTypeCategory.Json` case, falling
-      through to `null`.) Oracle-confirmed (SQL Server 2025): `json = json`
-      raises `Msg 13636, The JSON data type cannot be compared or sorted,
-      except when using the IS NULL operator` — the identical restriction
-      shape as `xml`'s `Msg 305`, and this codebase's own sibling
-      `VerdictClassifier.IsOutOfModelCategory` already buckets `Json`
-      together with `Xml`/`Text`/`NText`/`Image` for exactly this reason.
-      False negative squarely inside the rule's own stated scope.
 
 - [ ] **`OperandComparabilityScanner`'s `IN` handling only inspects the
       tested (left-hand) expression, never the value list, so an XML/legacy-

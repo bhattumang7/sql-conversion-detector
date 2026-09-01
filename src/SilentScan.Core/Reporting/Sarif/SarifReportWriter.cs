@@ -1281,7 +1281,12 @@ public static class SarifReportWriter
     private static SarifResult ToResult(OperandComparabilityFinding finding)
     {
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.OperandComparabilityRuleId(finding.Kind), finding.Confidence);
-        var typeLabel = finding.Kind == OperandComparabilityFindingKind.Xml ? "xml" : "text/ntext/image";
+        var typeLabel = finding.Kind switch
+        {
+            OperandComparabilityFindingKind.Xml => "xml",
+            OperandComparabilityFindingKind.Json => "json",
+            _ => "text/ntext/image",
+        };
         var positionText = finding.Context switch
         {
             OperandComparabilityContext.Comparison => $"compared with {finding.OperatorText} in this predicate",

@@ -232,7 +232,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Always Encrypted ORDER BY", report.Find<AlwaysEncryptedOrderByFinding>(nameof(AlwaysEncryptedOrderByScanner)).Count);
         AddCount(counts, "Always Encrypted non-enclave key column", report.Find<AlwaysEncryptedKeyColumnFinding>(nameof(AlwaysEncryptedKeyColumnScanner)).Count);
         AddCount(counts, "ALTER COLUMN safety", report.Find<AlterColumnSafetyFinding>(nameof(AlterColumnSafetyScanner)).Count);
-        AddCount(counts, "Operand not comparable (xml/legacy large object)", report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count);
+        AddCount(counts, "Operand not comparable (xml/json/legacy large object)", report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count);
         AddCount(counts, "Query anti-patterns", report.Find<QueryAntiPatternFinding>(nameof(QueryAntiPatternScanner)).Count);
         AddCount(counts, "Index-coverage shapes", report.Find<IndexCoverageFinding>(nameof(IndexCoverageScanner)).Count);
         AddCount(counts, "Trigger correctness", report.Find<TriggerCorrectnessFinding>(nameof(TriggerCorrectnessScanner)).Count);
@@ -1591,7 +1591,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Operand not comparable ({report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count})");
         yield return new ReadableBlock.Paragraph(
-            "An xml or legacy large-object (text/ntext/image) column is referenced from a comparison, IN list, BETWEEN, NULLIF, ORDER BY, GROUP BY, or SELECT DISTINCT - these types are not comparable at all outside IS NULL (and, for the legacy large-object types, LIKE); the statement does not compile. Direct base-table columns resolved through the immediate statement's own FROM/CTE scope only - a column reached only through a view/derived table is not analyzed by this v1.");
+            "An xml, json, or legacy large-object (text/ntext/image) column is referenced from a comparison, IN list, BETWEEN, NULLIF, ORDER BY, GROUP BY, or SELECT DISTINCT - these types are not comparable at all outside IS NULL (and, for the legacy large-object types, LIKE); the statement does not compile. Direct base-table columns resolved through the immediate statement's own FROM/CTE scope only - a column reached only through a view/derived table is not analyzed by this v1.");
 
         foreach (var group in report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
         {

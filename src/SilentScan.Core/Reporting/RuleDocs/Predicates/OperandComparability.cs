@@ -56,6 +56,57 @@ internal static class XmlOperandNotComparable
         ]);
 }
 
+internal static class JsonOperandNotComparable
+{
+    public static string RuleId => SarifRuleCatalog.OperandComparabilityRuleId(SilentScan.Core.Predicates.OperandComparabilityFindingKind.Json);
+
+    public static RuleDocContent Content { get; } = new(
+        WhyItMatters: """
+            The json data type carries the identical comparability restriction xml does. SQL
+            Server's binder rejects the statement outright at compile time, before any row is ever
+            touched: a json column compared with another json column fails with Msg 13636 ("The
+            JSON data type cannot be compared or sorted, except when using the IS NULL operator"),
+            the same message ORDER BY/GROUP BY/IN/BETWEEN/NULLIF against a json column produce.
+            SELECT DISTINCT over a json column fails its own way, Msg 421 ("The json data type
+            cannot be selected as DISTINCT because it is not comparable"). Both were confirmed
+            directly against a real SQL Server instance, not assumed from documentation.
+
+            IS NULL/IS NOT NULL are unaffected (comparability isn't at stake - null-ness is a
+            distinct, always-legal question), and so is a bare CASE/COALESCE branch: picking one of
+            several json-typed branches never compares them against each other, and neither does
+            this rule flag it.
+            """,
+        HowToFixIt: """
+            Remove the json column from the comparison/ordering/grouping/DISTINCT position. If the
+            comparison is genuinely needed, extract a comparable scalar value first with
+            JSON_VALUE(), and compare that instead of the raw json value itself.
+            """,
+        Examples:
+        [
+            new RuleDocExample(
+                Title: "Comparing two json columns never compiles",
+                NoncompliantSql: """
+                    CREATE TABLE dbo.Document
+                    (
+                        DocumentId INT NOT NULL PRIMARY KEY,
+                        Payload    JSON NOT NULL,
+                        Template   JSON NOT NULL
+                    );
+
+                    SELECT DocumentId
+                    FROM dbo.Document
+                    WHERE Payload = Template;
+                    """,
+                NoncompliantExplanation: "Payload and Template are both json - this statement fails to compile with Msg 13636 every time it runs.",
+                CompliantSql: """
+                    SELECT DocumentId
+                    FROM dbo.Document
+                    WHERE JSON_VALUE(Payload, '$.id') = JSON_VALUE(Template, '$.id');
+                    """,
+                CompliantExplanation: "Both sides are extracted down to a scalar value with JSON_VALUE() first - a genuinely comparable value, not the raw json value."),
+        ]);
+}
+
 internal static class LegacyLobOperandNotComparable
 {
     public static string RuleId => SarifRuleCatalog.OperandComparabilityRuleId(SilentScan.Core.Predicates.OperandComparabilityFindingKind.LegacyLargeObject);

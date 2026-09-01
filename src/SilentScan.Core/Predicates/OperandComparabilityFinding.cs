@@ -24,6 +24,7 @@ public enum OperandComparabilityFindingKind
 {
     Xml,
     LegacyLargeObject,
+    Json,
 }
 
 public enum OperandComparabilityContext

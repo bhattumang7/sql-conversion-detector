@@ -11,6 +11,7 @@ public sealed class OperandComparabilityScannerTests
         var ddl =
             "CREATE TABLE dbo.Document (Id INT NOT NULL PRIMARY KEY, Payload XML NOT NULL, Template XML NOT NULL, Name VARCHAR(50) NOT NULL);"
             + "CREATE TABLE dbo.Article (Id INT NOT NULL PRIMARY KEY, Body TEXT NOT NULL, Notes NTEXT NOT NULL, Picture IMAGE NOT NULL, Title VARCHAR(50) NOT NULL);"
+            + "CREATE TABLE dbo.Ticket (Id INT NOT NULL PRIMARY KEY, Payload JSON NOT NULL, Template JSON NOT NULL, Name VARCHAR(50) NOT NULL);"
             + (extraDdl.Length > 0 ? $"\nGO\n{extraDdl}" : string.Empty);
         var result = SqlScriptParser.ParseText("test.sql", $"{ddl}\nGO\n{sql}");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
@@ -170,6 +171,87 @@ public sealed class OperandComparabilityScannerTests
 
         var finding = Assert.Single(findings);
         Assert.Equal(OperandComparabilityContext.Distinct, finding.Context);
+    }
+
+    [Fact]
+    public void EqualityAgainstTwoJsonColumns_Fires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Ticket WHERE Payload = Template;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Ticket", finding.TableQualifiedName);
+        Assert.Equal("Payload", finding.ColumnName);
+        Assert.Equal(OperandComparabilityFindingKind.Json, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.Comparison, finding.Context);
+        Assert.Equal("=", finding.OperatorText);
+    }
+
+    [Fact]
+    public void InPredicateAgainstJsonColumn_Fires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Ticket WHERE Payload IN (Template);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Json, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.In, finding.Context);
+    }
+
+    [Fact]
+    public void BetweenAgainstJsonColumn_Fires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Ticket WHERE Payload BETWEEN Template AND Template;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Json, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.Between, finding.Context);
+    }
+
+    [Fact]
+    public void NullIfAgainstJsonColumn_Fires()
+    {
+        var findings = Scan("SELECT NULLIF(Payload, Template) FROM dbo.Ticket;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Json, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.NullIf, finding.Context);
+    }
+
+    [Fact]
+    public void OrderByJsonColumn_Fires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Ticket ORDER BY Payload;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Json, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.OrderBy, finding.Context);
+    }
+
+    [Fact]
+    public void GroupByJsonColumn_Fires()
+    {
+        var findings = Scan("SELECT Payload, COUNT(*) FROM dbo.Ticket GROUP BY Payload;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Json, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.GroupBy, finding.Context);
+    }
+
+    [Fact]
+    public void SelectDistinctJsonColumn_Fires()
+    {
+        var findings = Scan("SELECT DISTINCT Payload FROM dbo.Ticket;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Json, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.Distinct, finding.Context);
+    }
+
+    [Fact]
+    public void IsNullAgainstJsonColumn_NeverFires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Ticket WHERE Payload IS NULL;");
+
+        Assert.Empty(findings);
     }
 
     [Fact]
