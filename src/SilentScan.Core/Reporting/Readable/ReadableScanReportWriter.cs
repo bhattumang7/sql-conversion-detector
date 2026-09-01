@@ -84,6 +84,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(MemoryOptimizedUnsupportedColumnType(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUnsupportedIndexOption(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedForeignKey(report, headingLevel, pathBase));
+        blocks.AddRange(MemoryOptimizedSchemaOnlyDurability(report, headingLevel, pathBase));
         blocks.AddRange(NonPersistedComputedColumn(report, headingLevel, pathBase));
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
         blocks.AddRange(UnderLengthParameter(report, headingLevel, pathBase));
@@ -207,6 +208,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Unsupported column type on a memory-optimized table (does not deploy)", report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>(nameof(MemoryOptimizedUnsupportedColumnTypeScanner)).Count);
         AddCount(counts, "Unsupported index option on a memory-optimized table (does not deploy)", report.Find<MemoryOptimizedUnsupportedIndexOptionFinding>(nameof(MemoryOptimizedUnsupportedIndexOptionScanner)).Count);
         AddCount(counts, "Unsupported memory-optimized foreign key (does not deploy)", report.Find<MemoryOptimizedForeignKeyFinding>(nameof(MemoryOptimizedForeignKeyScanner)).Count);
+        AddCount(counts, "Memory-optimized table declared SCHEMA_ONLY durability (data lost on restart)", report.Find<MemoryOptimizedSchemaOnlyDurabilityFinding>(nameof(MemoryOptimizedSchemaOnlyDurabilityScanner)).Count);
         AddCount(counts, "Non-persisted computed columns", report.Find<NonPersistedComputedColumnFinding>(nameof(NonPersistedComputedColumnScanner)).Count);
         AddCount(counts, "Predicates comparing a column against an oversized parameter/variable", report.Find<OversizedParameterFinding>(nameof(TypedPredicateExtractor)).Count);
         AddCount(counts, "Predicates comparing a column against an under-length parameter/variable", report.Find<UnderLengthParameterFinding>(nameof(TypedPredicateExtractor)).Count);
@@ -930,6 +932,27 @@ public static class ReadableScanReportWriter
         MemoryOptimizedForeignKeyFindingKind.ReferentialAction => "Non-NO ACTION referential action",
         _ => "Unsupported foreign key shape",
     };
+
+    private static IEnumerable<ReadableBlock> MemoryOptimizedSchemaOnlyDurability(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<MemoryOptimizedSchemaOnlyDurabilityFinding>(nameof(MemoryOptimizedSchemaOnlyDurabilityScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Memory-optimized table declared SCHEMA_ONLY durability ({report.Find<MemoryOptimizedSchemaOnlyDurabilityFinding>(nameof(MemoryOptimizedSchemaOnlyDurabilityScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A structural catalog fact: DURABILITY = SCHEMA_ONLY persists only the table's schema, not its rows - oracle-confirmed every row is lost on a server restart, failover, or database restore/attach, with no error or warning.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MemoryOptimizedSchemaOnlyDurabilityRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table"],
+            [.. report.Find<MemoryOptimizedSchemaOnlyDurabilityFinding>(nameof(MemoryOptimizedSchemaOnlyDurabilityScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+            })]);
+    }
 
     private static IEnumerable<ReadableBlock> NonPersistedComputedColumn(ScanReport report, int level, string? pathBase)
     {

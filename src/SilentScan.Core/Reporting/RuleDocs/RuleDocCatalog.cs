@@ -247,6 +247,7 @@ public static class RuleDocCatalog
         [Verdict.CollationConflict.RuleId] = Verdict.CollationConflict.Content,
         [Catalog.TriggerOrder.RuleId] = Catalog.TriggerOrder.Content,
         [Catalog.MemoryOptimizedUnsupportedColumnType.RuleId] = Catalog.MemoryOptimizedUnsupportedColumnType.Content,
+        [Catalog.MemoryOptimizedSchemaOnlyDurability.RuleId] = Catalog.MemoryOptimizedSchemaOnlyDurability.Content,
         [IndexShape.CompositeIndexLeadingColumn.RuleId] = IndexShape.CompositeIndexLeadingColumn.Content,
         [Statistics.MissingStatistics.RuleId] = Statistics.MissingStatistics.Content,
 

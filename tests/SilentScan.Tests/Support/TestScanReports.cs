@@ -97,6 +97,7 @@ public static class TestScanReports
         IReadOnlyList<MemoryOptimizedUnsupportedColumnTypeFinding>? MemoryOptimizedUnsupportedColumnTypeFindings = null,
         IReadOnlyList<MemoryOptimizedUnsupportedIndexOptionFinding>? MemoryOptimizedUnsupportedIndexOptionFindings = null,
         IReadOnlyList<MemoryOptimizedForeignKeyFinding>? MemoryOptimizedForeignKeyFindings = null,
+        IReadOnlyList<MemoryOptimizedSchemaOnlyDurabilityFinding>? MemoryOptimizedSchemaOnlyDurabilityFindings = null,
         IReadOnlyList<WindowFunctionArgumentFinding>? WindowFunctionArgumentFindings = null,
         IReadOnlyList<SelectiveXmlIndexValueColumnFinding>? SelectiveXmlIndexValueColumnFindings = null,
         IReadOnlyList<FloatOrderDependentAggregateFinding>? FloatOrderDependentAggregateFindings = null,
@@ -203,6 +204,7 @@ public static class TestScanReports
         Set("MemoryOptimizedUnsupportedColumnTypeScanner", MemoryOptimizedUnsupportedColumnTypeFindings);
         Set("MemoryOptimizedUnsupportedIndexOptionScanner", MemoryOptimizedUnsupportedIndexOptionFindings);
         Set("MemoryOptimizedForeignKeyScanner", MemoryOptimizedForeignKeyFindings);
+        Set("MemoryOptimizedSchemaOnlyDurabilityScanner", MemoryOptimizedSchemaOnlyDurabilityFindings);
         Set("WindowFunctionArgumentScanner", WindowFunctionArgumentFindings);
         Set("SelectiveXmlIndexValueColumnScanner", SelectiveXmlIndexValueColumnFindings);
         Set("FloatOrderDependentAggregateScanner", FloatOrderDependentAggregateFindings);

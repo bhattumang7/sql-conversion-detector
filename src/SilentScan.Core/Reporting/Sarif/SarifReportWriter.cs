@@ -103,6 +103,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>("MemoryOptimizedUnsupportedColumnTypeScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUnsupportedIndexOptionFinding>("MemoryOptimizedUnsupportedIndexOptionScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedForeignKeyFinding>("MemoryOptimizedForeignKeyScanner").Select(ToResult));
+        results.AddRange(report.Find<MemoryOptimizedSchemaOnlyDurabilityFinding>("MemoryOptimizedSchemaOnlyDurabilityScanner").Select(ToResult));
         results.AddRange(report.Find<QueryAntiPatternFinding>("QueryAntiPatternScanner").Select(ToResult));
         results.AddRange(report.Find<IndexCoverageFinding>("IndexCoverageScanner").Select(ToResult));
         results.AddRange(report.Find<TriggerCorrectnessFinding>("TriggerCorrectnessScanner").Select(ToResult));
@@ -410,6 +411,15 @@ public static class SarifReportWriter
             MemoryOptimizedForeignKeyFindingKind.ReferentialAction => $"Foreign key '{finding.ConstraintName}' between memory-optimized tables '{finding.ParentTableQualifiedName}' and '{finding.ReferencedTableQualifiedName}' declares a referential action other than NO ACTION - not supported on a memory-optimized-to-memory-optimized foreign key (Msg 10794), so the constraint does not deploy.",
             _ => $"Foreign key '{finding.ConstraintName}' between '{finding.ParentTableQualifiedName}' and '{finding.ReferencedTableQualifiedName}' is not supported on a memory-optimized table.",
         };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(MemoryOptimizedSchemaOnlyDurabilityFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MemoryOptimizedSchemaOnlyDurabilityRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"Memory-optimized table '{finding.TableQualifiedName}' is declared WITH (DURABILITY = SCHEMA_ONLY) - only its schema is persisted, so every row is lost on a server restart, failover, or database restore/attach, with no error or warning.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
     }

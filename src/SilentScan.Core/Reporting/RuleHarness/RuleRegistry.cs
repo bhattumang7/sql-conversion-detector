@@ -66,6 +66,7 @@ public static class RuleRegistry
         new AlwaysEncryptedKeyColumnRule(),
         new AlterColumnSafetyRule(),
         new MemoryOptimizedForeignKeyRule(),
+        new MemoryOptimizedSchemaOnlyDurabilityRule(),
         new NonPersistedComputedColumnRule(),
         new UntrustedConstraintRule(),
         new CheckConstraintRule(),

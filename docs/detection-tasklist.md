@@ -19,13 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`DURABILITY = SCHEMA_ONLY` memory-optimized tables: zero
-      coverage.** Pure DDL-time fact, no live-database dependency. A table
-      declared `WITH (DURABILITY = SCHEMA_ONLY)` loses all data on
-      restart/failover - about as squarely "silent data loss" as this
-      tool's mission gets, and nothing currently checks for it despite the
-      rest of the memory-optimized-table rule family already existing.
-
 - [ ] **`RemovedSecurityStoredProcedureNames` is missing two engine-tracked
       names.** Diffed the full list against `sys.dm_os_performance_counters`
       `'Deprecated Features'` (255 entries, authoritative for the exact

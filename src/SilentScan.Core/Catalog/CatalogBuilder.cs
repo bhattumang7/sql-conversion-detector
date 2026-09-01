@@ -978,7 +978,8 @@ public static class CatalogBuilder
                 allIndexes,
                 sourcePath,
                 createTable.StartLine,
-                IsMemoryOptimized: IsMemoryOptimizedTable(createTable.Options));
+                IsMemoryOptimized: IsMemoryOptimizedTable(createTable.Options),
+                IsSchemaOnlyDurability: IsSchemaOnlyDurabilityTable(createTable.Options));
 
             catalog.AddOrReplace(table, isTemp && SchemaObjectNameHelper.IsLocalTempName(name) ? _currentScope : null);
 
@@ -1262,6 +1263,9 @@ public static class CatalogBuilder
 
         private static bool IsMemoryOptimizedTable(IList<TableOption> options) =>
             options.OfType<MemoryOptimizedTableOption>().Any(o => o.OptionState == OptionState.On);
+
+        private static bool IsSchemaOnlyDurabilityTable(IList<TableOption> options) =>
+            options.OfType<DurabilityTableOption>().Any(o => o.DurabilityTableOptionKind == DurabilityTableOptionKind.SchemaOnly);
     }
 
     public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(

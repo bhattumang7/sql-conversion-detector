@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">281 rules. 194 carry fix guidance; 28 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">282 rules. 195 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -118,6 +118,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/catalog-memory-optimized-filtered-index.html">Memory Optimized Filtered Index</a> <code class="rule-key">silentscan/catalog/memory-optimized-filtered-index</code><span class="snippet">A memory-optimized table carries a filtered index (a WHERE clause on the index definition).</span></li>
       <li><a class="id" href="rules/catalog-memory-optimized-foreign-key-referential-action.html">Memory Optimized Foreign Key Referential Action</a> <code class="rule-key">silentscan/catalog/memory-optimized-foreign-key-referential-action</code><span class="snippet">A foreign key between two memory-optimized tables declares an ON DELETE/ON UPDATE referential action other than NO ACTION (CASCADE, SET NULL, or SET DEFAULT).</span></li>
       <li><a class="id" href="rules/catalog-memory-optimized-index-included-columns.html">Memory Optimized Index Included Columns</a> <code class="rule-key">silentscan/catalog/memory-optimized-index-included-columns</code><span class="snippet">A memory-optimized table&#x27;s index declares INCLUDE columns.</span></li>
+      <li><a class="id" href="rules/catalog-memory-optimized-schema-only-durability.html">Memory Optimized Schema Only Durability</a> <code class="rule-key">silentscan/catalog/memory-optimized-schema-only-durability</code><span class="snippet">A memory-optimized table declares WITH (MEMORY_OPTIMIZED = ON, DURABILITY = SCHEMA_ONLY).</span></li>
       <li><a class="id" href="rules/catalog-memory-optimized-unsupported-column-type.html">Memory Optimized Unsupported Column Type</a> <code class="rule-key">silentscan/catalog/memory-optimized-unsupported-column-type</code><span class="snippet">A memory-optimized table declares a column typed xml, sql_variant, text, ntext, image, or timestamp/rowversion.</span></li>
       <li><a class="id" href="rules/catalog-non-persisted-computed-column.html">Non Persisted Computed Column</a> <code class="rule-key">silentscan/catalog/non-persisted-computed-column</code><span class="snippet">A computed column with is_persisted = 0 (sys.computed_columns).</span></li>
       <li><a class="id" href="rules/catalog-rls-predicate-unindexed-column.html">Rls Predicate Unindexed Column</a> <code class="rule-key">silentscan/catalog/rls-predicate-unindexed-column</code><span class="snippet">An enabled Row-Level Security FILTER predicate&#x27;s own bound column(s) lead no active index on the secured table.</span></li>

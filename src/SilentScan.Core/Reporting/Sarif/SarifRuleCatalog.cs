@@ -45,6 +45,7 @@ public static class SarifRuleCatalog
     public const string MemoryOptimizedUnsupportedColumnTypeRuleId = FindingRuleIds.MemoryOptimizedUnsupportedColumnTypeRuleId;
     public static string MemoryOptimizedUnsupportedIndexOptionRuleId(MemoryOptimizedUnsupportedIndexOptionKind kind) => FindingRuleIds.MemoryOptimizedUnsupportedIndexOptionRuleId(kind);
     public static string MemoryOptimizedForeignKeyRuleId(MemoryOptimizedForeignKeyFindingKind kind) => FindingRuleIds.MemoryOptimizedForeignKeyRuleId(kind);
+    public const string MemoryOptimizedSchemaOnlyDurabilityRuleId = FindingRuleIds.MemoryOptimizedSchemaOnlyDurabilityRuleId;
     public const string QueryAntiPatternTableVariableLowCompatEstimateRuleId = FindingRuleIds.QueryAntiPatternTableVariableLowCompatEstimateRuleId;
     public const string QueryAntiPatternTableVariablePspSkipRuleId = FindingRuleIds.QueryAntiPatternTableVariablePspSkipRuleId;
     public const string QueryAntiPatternTableVariableStaleEstimateInLoopRuleId = FindingRuleIds.QueryAntiPatternTableVariableStaleEstimateInLoopRuleId;

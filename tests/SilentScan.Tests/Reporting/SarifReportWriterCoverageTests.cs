@@ -692,6 +692,15 @@ public sealed class SarifReportWriterCoverageTests
         Assert.Contains(expectedSubstring, FirstResult(report).GetProperty("message").GetProperty("text").GetString());
     }
 
+    [Fact]
+    public void Write_MemoryOptimizedSchemaOnlyDurabilityFinding_MapsToDeploymentMessage()
+    {
+        var finding = new MemoryOptimizedSchemaOnlyDurabilityFinding("dbo.SessionCache", "test.sql", 1);
+        var report = TestScanReports.Build(MemoryOptimizedSchemaOnlyDurabilityFindings: [finding]);
+
+        Assert.Contains("DURABILITY = SCHEMA_ONLY", FirstResult(report).GetProperty("message").GetProperty("text").GetString());
+    }
+
     [Theory]
     [InlineData(QueryAntiPatternFindingKind.TableVariableLowCompatEstimate, "error")]
     [InlineData(QueryAntiPatternFindingKind.CountStarVariableExistenceCheck, "error")]

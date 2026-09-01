@@ -76,6 +76,7 @@ public static class FindingRuleIds
         MemoryOptimizedForeignKeyFindingKind.ReferentialAction => "silentscan/catalog/memory-optimized-foreign-key-referential-action",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled MemoryOptimizedForeignKeyFindingKind."),
     };
+    public const string MemoryOptimizedSchemaOnlyDurabilityRuleId = "silentscan/catalog/memory-optimized-schema-only-durability";
     public const string QueryAntiPatternTableVariableLowCompatEstimateRuleId = "silentscan/query/table-variable-low-compat-estimate";
     public const string QueryAntiPatternTableVariablePspSkipRuleId = "silentscan/query/table-variable-psp-skip";
     public const string QueryAntiPatternTableVariableStaleEstimateInLoopRuleId = "silentscan/query/table-variable-stale-estimate-in-loop";

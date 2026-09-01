@@ -65,6 +65,13 @@ internal sealed class MemoryOptimizedUnsupportedIndexOptionRule : ICatalogRule
     public IReadOnlyList<IFinding> Scan(RuleContext context) => MemoryOptimizedUnsupportedIndexOptionScanner.Scan(context.Catalog);
 }
 
+internal sealed class MemoryOptimizedSchemaOnlyDurabilityRule : ICatalogRule
+{
+    public string Id => "MemoryOptimizedSchemaOnlyDurabilityScanner";
+    public bool ApplyConfidenceFilter => false;
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => MemoryOptimizedSchemaOnlyDurabilityScanner.Scan(context.Catalog);
+}
+
 internal sealed class AlwaysEncryptedKeyColumnRule : ICatalogRule
 {
     public string Id => "AlwaysEncryptedKeyColumnScanner";

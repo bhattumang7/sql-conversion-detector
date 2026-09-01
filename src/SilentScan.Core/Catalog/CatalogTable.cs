@@ -20,6 +20,7 @@ public sealed record CatalogTable(
     string SourcePath,
     int SourceLine,
     bool IsMemoryOptimized = false,
+    bool IsSchemaOnlyDurability = false,
     IReadOnlyList<CatalogStatisticsInfo>? Statistics = null,
     string? FilegroupName = null,
     bool FilegroupIsReadOnly = false,
