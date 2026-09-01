@@ -19,15 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`WriteLossNumericScaleNarrowingRuleId`'s "silent, no error" claim is
-      false under `NUMERIC_ROUNDABORT ON`.** Oracle-confirmed:
-      `DECLARE @d DECIMAL(5,2) = 123.456` silently rounds to `123.46` when
-      `NUMERIC_ROUNDABORT` is `OFF` (the default), but raises `Msg 8115,
-      Arithmetic overflow error` when it's `ON`. Scoped narrowly to
-      same-family numeric/decimal scale narrowing - confirmed *not* to
-      affect `INT` truncation, `VARCHAR` length truncation, or
-      `FLOAT`-to-`DECIMAL` narrowing under the same setting.
-
 - [ ] **`READ_COMMITTED_SNAPSHOT` × `READCOMMITTEDLOCK` table hint.**
       `ControlFlowRiskScanner.cs` matches `TableHintKind.NoLock`/
       `ReadUncommitted` for dirty-read risk but not `ReadCommittedLock`. On

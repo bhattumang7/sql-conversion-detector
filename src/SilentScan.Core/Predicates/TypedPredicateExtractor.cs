@@ -17,7 +17,8 @@ public static class TypedPredicateExtractor
     {
         var resolvedViews = lineage.AllRelations;
         var ledger = new SkipLedger();
-        var rule = new Rule(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, callerScopeByCalleeScope);
+        var numericRoundAbortByStatement = NumericRoundAbortFlowResolver.Resolve(parseResult.Fragment);
+        var rule = new Rule(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, callerScopeByCalleeScope, numericRoundAbortByStatement);
         var walker = new ModuleWalker(
             parseResult.SourcePath, catalog, resolvedViews, rules: [rule],
             callerContext: new ModuleWalkerCallerContext(ledger, enclosingScope?.ProcScope, callerScopeByCalleeScope));
@@ -40,7 +41,8 @@ public static class TypedPredicateExtractor
         IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
         IReadOnlyDictionary<string, SqlType?>? externalVariables,
         SkipLedger ledger,
-        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope) : IModuleRule
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope,
+        IReadOnlyDictionary<TSqlStatement, bool> numericRoundAbortByStatement) : IModuleRule
     {
         private const string PredicateOperandConstructKind = "predicate operand";
 
@@ -157,6 +159,13 @@ public static class TypedPredicateExtractor
 
         private bool _previousProcedureHasWithRecompile;
 
+        private TSqlStatement? _currentWriteStatement;
+
+        private bool IsNumericRoundAbortOnForCurrentStatement =>
+            _currentWriteStatement is { } statement
+            && numericRoundAbortByStatement.TryGetValue(statement, out var isOn)
+            && isOn;
+
         public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
         {
             _variables.Clear();
@@ -246,14 +255,23 @@ public static class TypedPredicateExtractor
 
         public void OnLeaveMergeActionSearchCondition(MergeActionClause node, ModuleWalker walker) => _position = _positionStack.Pop();
 
-        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+        public void OnEnterUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker)
+        {
+            _currentWriteStatement = node;
             _statementRecompileStack.Push(BeginStatementOptimizerHints(node.OptimizerHints));
+        }
 
-        public void OnLeaveUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+        public void OnLeaveUpdateStatementScope(UpdateStatement node, ScopeChain scopeChain, ModuleWalker walker)
+        {
             _statementHasOptionRecompile = _statementRecompileStack.Pop();
+            _currentWriteStatement = null;
+        }
 
-        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker) =>
+        public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker)
+        {
+            _currentWriteStatement = node;
             AnalyzeInsertWriteLoss(node.InsertSpecification, walker);
+        }
 
         public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             _statementRecompileStack.Push(BeginStatementOptimizerHints(node.OptimizerHints));
@@ -261,11 +279,17 @@ public static class TypedPredicateExtractor
         public void OnLeaveDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
             _statementHasOptionRecompile = _statementRecompileStack.Pop();
 
-        public void OnEnterMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+        public void OnEnterMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker)
+        {
+            _currentWriteStatement = node;
             _statementRecompileStack.Push(BeginStatementOptimizerHints(node.OptimizerHints));
+        }
 
-        public void OnLeaveMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker) =>
+        public void OnLeaveMergeStatementScope(MergeStatement node, ScopeChain scopeChain, ModuleWalker walker)
+        {
             _statementHasOptionRecompile = _statementRecompileStack.Pop();
+            _currentWriteStatement = null;
+        }
 
         public void OnEnterAssignmentSetClause(AssignmentSetClause node, ModuleWalker walker)
         {
@@ -284,6 +308,8 @@ public static class TypedPredicateExtractor
 
         public void OnEnterSetVariableStatement(SetVariableStatement node, ModuleWalker walker)
         {
+            _currentWriteStatement = node;
+
             if (node.Expression is not { } sourceExpression
                 || !_variables.TryGetValue(node.Variable.Name, out var targetType) || targetType is not { } target)
             {
@@ -311,9 +337,19 @@ public static class TypedPredicateExtractor
 
         public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)
         {
+            _currentWriteStatement = node;
+
+            var scopeChain = walker.CurrentScopeChain();
             foreach (var declaration in node.Declarations)
             {
-                _variables[declaration.VariableName.Value] = SqlTypeReferenceResolver.Resolve(declaration.DataType, columnCollation: null, catalog.TypeAliases);
+                var targetType = SqlTypeReferenceResolver.Resolve(declaration.DataType, columnCollation: null, catalog.TypeAliases);
+                _variables[declaration.VariableName.Value] = targetType;
+
+                if (declaration.Value is { } sourceExpression && targetType is { } resolvedTargetType)
+                {
+                    var sourceType = OperandType(ResolveOperand(sourceExpression, scopeChain, walker));
+                    EmitWriteLossFinding(tableQualifiedName: null, declaration.VariableName.Value, resolvedTargetType, sourceType, sourceExpression);
+                }
             }
         }
 
@@ -472,6 +508,13 @@ public static class TypedPredicateExtractor
         {
             var kind = Rules.WriteLossClassifier.Classify(targetType, sourceType, sourceExpression, isVariableTarget: tableQualifiedName is null);
             if (kind is null)
+            {
+                return;
+            }
+
+            if (kind.Value == WriteLossKind.NumericScaleNarrowing
+                && targetType.Category == SqlTypeCategory.Decimal && sourceType!.Category == SqlTypeCategory.Decimal
+                && IsNumericRoundAbortOnForCurrentStatement)
             {
                 return;
             }
