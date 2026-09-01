@@ -89,6 +89,11 @@ public static class TypedPredicateExtractor
             ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(externalVariables.Keys, StringComparer.OrdinalIgnoreCase);
 
+        private readonly Dictionary<string, IReadOnlyList<(SqlType? Type, ScalarExpression Expression)>> _cursorSelectSourcesByName =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        private string? _pendingCursorDeclarationName;
+
         public List<TypedPredicateFinding> Findings { get; } = [];
 
         public List<ExpressionDerivedFinding> ExpressionDerivedFindings { get; } = [];
@@ -170,6 +175,7 @@ public static class TypedPredicateExtractor
         {
             _variables.Clear();
             _formalParameterNames.Clear();
+            _cursorSelectSourcesByName.Clear();
             RecordParameters(node.Parameters);
 
             _previousProcedureHasWithRecompile = _procedureHasWithRecompile;
@@ -184,6 +190,7 @@ public static class TypedPredicateExtractor
         {
             _variables.Clear();
             _formalParameterNames.Clear();
+            _cursorSelectSourcesByName.Clear();
         }
 
         public void OnEnterSelectStatementScope(SelectStatement node, ModuleWalker walker) =>
@@ -200,6 +207,12 @@ public static class TypedPredicateExtractor
                 var pendingTable = _pendingInsertTargetTable!;
                 _pendingInsertTargetTable = null;
                 AnalyzeSelectListWriteLoss(node.SelectElements, pendingColumns, pendingTable, scopeChain, walker);
+            }
+
+            if (_pendingCursorDeclarationName is { } pendingCursorName)
+            {
+                _pendingCursorDeclarationName = null;
+                _cursorSelectSourcesByName[pendingCursorName] = ResolveCursorSelectSources(node.SelectElements, scopeChain, walker);
             }
 
             _positionStack.Push(_position);
@@ -325,6 +338,8 @@ public static class TypedPredicateExtractor
         {
             _variables.Clear();
             _formalParameterNames.Clear();
+            _cursorSelectSourcesByName.Clear();
+            _pendingCursorDeclarationName = null;
             if (externalVariables is not null)
             {
                 foreach (var (name, type) in externalVariables)
@@ -333,6 +348,61 @@ public static class TypedPredicateExtractor
                     _formalParameterNames.Add(name);
                 }
             }
+        }
+
+        public void OnEnterDeclareCursorStatement(DeclareCursorStatement node, ModuleWalker walker)
+        {
+            var name = node.Name.Value;
+            _cursorSelectSourcesByName.Remove(name);
+
+            if (node.CursorDefinition.Select.QueryExpression is QuerySpecification { SelectElements: { Count: > 0 } elements }
+                && elements.All(e => e is SelectScalarExpression))
+            {
+                _pendingCursorDeclarationName = name;
+                return;
+            }
+
+            ledger.Record(
+                AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn,
+                WriteSourceConstructKind, $"cursor '{name}' is defined by a query this pass does not resolve a flat scalar select list for (UNION/non-QuerySpecification top level) - FETCH INTO write-loss analysis skipped for it");
+        }
+
+        public void OnEnterFetchCursorStatement(FetchCursorStatement node, ModuleWalker walker)
+        {
+            _currentWriteStatement = node;
+
+            var name = node.Cursor?.Name?.Value;
+            if (name is null || node.IntoVariables is not { Count: > 0 } intoVariables
+                || !_cursorSelectSourcesByName.TryGetValue(name, out var sources))
+            {
+                return;
+            }
+
+            var count = Math.Min(intoVariables.Count, sources.Count);
+            for (var i = 0; i < count; i++)
+            {
+                var variableName = intoVariables[i].Name;
+                if (!_variables.TryGetValue(variableName, out var targetType) || targetType is not { } target)
+                {
+                    continue;
+                }
+
+                var (sourceType, sourceExpression) = sources[i];
+                EmitWriteLossFinding(tableQualifiedName: null, variableName, target, sourceType, sourceExpression);
+            }
+        }
+
+        private List<(SqlType? Type, ScalarExpression Expression)> ResolveCursorSelectSources(
+            IList<SelectElement> selectElements, ScopeChain scopeChain, ModuleWalker walker)
+        {
+            var sources = new List<(SqlType?, ScalarExpression)>(selectElements.Count);
+            foreach (var element in selectElements)
+            {
+                var expression = ((SelectScalarExpression)element).Expression;
+                sources.Add((OperandType(ResolveOperand(expression, scopeChain, walker)), expression));
+            }
+
+            return sources;
         }
 
         public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)

@@ -450,6 +450,26 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **Partition function parameter type mismatch — killed, engine-guaranteed
+  unreachable.** Oracle-confirmed (Docker, SQL Server 2022): the partitioning
+  column's type/precision/scale/collation is checked against the partition
+  function's own parameter at every DDL surface that could introduce a
+  mismatch, and each one hard-fails instead of allowing drift. `CREATE
+  TABLE ... ON scheme(col)` and `CREATE INDEX ... ON scheme(col)` both reject
+  a column whose type disagrees with the function's parameter type (Msg
+  7726) or whose collation disagrees (Msg 7727) - confirmed for base type,
+  decimal precision/scale, and collation independently. `ALTER TABLE ALTER
+  COLUMN` on the partitioning column itself (or on a column a persisted
+  computed partitioning column depends on) is unconditionally blocked (Msg
+  5074/4922, "object is dependent on column") regardless of what the new
+  type would be - even a same-shape re-declaration. There is no `ALTER
+  PARTITION SCHEME`/`ALTER PARTITION FUNCTION` surface that touches the
+  parameter's type. Since both creation and mutation paths are closed, a
+  live catalog can never contain this mismatch, so the finding this task
+  would produce could never fire - not a design gap, a false premise. Do not
+  re-propose without new evidence (e.g. a cross-version restore/attach path)
+  that reintroduces drift outside these DDL surfaces.
+
 * **`ProcCallArgumentMismatchRuleId` TVP sibling: the call-boundary type
   itself can never mismatch by shape, only by identity, and identity
   mismatches always hard-error.** Oracle-confirmed (SQL Server 2025, Docker):

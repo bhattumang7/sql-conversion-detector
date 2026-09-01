@@ -19,13 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **Partition function parameter type mismatch.** A partitioned object's
-      partitioning column with a catalog type/precision/scale/length/
-      collation that does not exactly match its partition function's own
-      parameter type is a clean catalog join
-      (`sys.partition_functions`/`sys.partition_parameters`/
-      `sys.index_columns`/`sys.columns`) proving a real DDL-time mismatch.
-
 - [ ] **`WriteLossClassifier` sibling: cursor `FETCH INTO` binding loss.** A
       cursor's `FETCH INTO` variable binding that statically loses precision
       or truncates against the cursor's own defining `SELECT` expression
