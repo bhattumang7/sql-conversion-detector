@@ -19,15 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **New rule family: bounded string builtins with constant-provable
-      truncation (`REPLICATE`/`REPLACE`/`SPACE`/`TRANSLATE`).** Each
-      function's non-MAX-typed result is capped at 8000 bytes; when every
-      operand controlling the result length is a compile-time constant, the
-      exact result length is constant-foldable, so an overflow past 8000
-      bytes is provable with no runtime data — sibling to the shipped
-      `WriteLoss` family. Ships as one rule family across the four
-      functions.
-
 - [ ] **New rule family: predicate provably contradicts a trusted `CHECK`
       constraint/`NOT NULL`/catalog-proven equality, making the result set
       empty.** Distinct from the shipped literal-only

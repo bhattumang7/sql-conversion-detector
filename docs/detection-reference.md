@@ -450,6 +450,25 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`TRANSLATE` in the bounded-string-builtins truncation family — killed,
+  the premise doesn't apply to this function.** `REPLICATE`/`REPLACE`/
+  `SPACE` are already shipped (`BoundedStringBuiltinTruncationScanner`)
+  because each can produce a result *longer* than any single input argument
+  (repetition/replacement growth), so a non-MAX declared return type's fixed
+  8000/4000-byte cap can provably be exceeded. `TRANSLATE` cannot: it is a
+  strict 1:1 character substitution, so its result's actual length always
+  equals its input argument's actual length — oracle-confirmed (Docker) via
+  `sp_describe_first_result_set`: for a non-MAX input, `TRANSLATE` always
+  declares its return type at the full cap (`varchar(8000)`/`nvarchar(4000)`)
+  *regardless of the input's own declared width* (a `varchar(10)` input
+  still describes as `varchar(8000)`), and for a MAX-typed input it declares
+  `varchar(max)`. Since the input's actual data can never be longer than its
+  own bounded declared type, and `TRANSLATE`'s declared return width is
+  always at least that wide, the runtime result can never exceed the
+  declared cap — no silent truncation is reachable for any input. Confirmed
+  with `DATALENGTH`: `TRANSLATE(REPLICATE(CAST('a' AS varchar(max)), 9000), 'a','b')`
+  preserves the full 9000 bytes (declared `varchar(max)`, no cap at all).
+
 * **`REGEXP_INSTR`/`REGEXP_REPLACE`/`REGEXP_LIKE`/`REGEXP_SUBSTR` MAX-typed
   argument rejection — killed, the premise is false on the shipping
   engine.** Oracle-confirmed (Docker, SQL Server 2025 RTM-CU8): none of the
