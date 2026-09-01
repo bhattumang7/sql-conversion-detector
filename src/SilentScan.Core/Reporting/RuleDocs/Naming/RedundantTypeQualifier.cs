@@ -10,23 +10,26 @@ internal static class RedundantTypeQualifier
         WhyItMatters: """
             A user-defined type reference (a parameter, a variable's DECLARE, a table-type
             parameter) can carry a schema qualifier the same way a table reference can - `@p
-            dbo.MyType READONLY` instead of just `@p MyType READONLY`. When that qualifier names
-            `dbo` - the default schema this codebase treats as the baseline everywhere else - it
-            adds nothing: the type would resolve to the exact same object without it, since `dbo` is
-            already where an unqualified type name resolves for the overwhelming majority of
-            databases. The qualifier only adds visual noise and couples the declaration to a schema
-            name it doesn't actually need to state.
+            dbo.MyType READONLY` instead of just `@p MyType READONLY`. An unqualified type name
+            resolves via the connecting principal's own default schema first, exactly like an
+            unqualified table or view reference - so a `dbo.` qualifier is only genuinely redundant
+            once the catalog confirms no other schema in the scanned database defines a same-named
+            type. This check only reports the finding once that's been confirmed.
 
             This check is deliberately narrow: it flags an explicit `dbo.` qualifier only, never any
-            other schema name. A qualifier naming some other schema might be genuinely load-bearing -
-            whether it's redundant depends on the connecting principal's own actual default schema,
-            which this static, catalog-free pass has no way to know, so flagging any schema other
-            than the one universally-safe case would risk a real false positive in a multi-schema
-            database.
+            other schema name, and only once the catalog rules out a same-named type existing
+            elsewhere. A qualifier naming some other schema might still be genuinely load-bearing
+            regardless of catalog data - whether it's redundant also depends on the connecting
+            principal's own actual default schema, which this pass has no way to know, so flagging
+            any schema other than `dbo` would risk a false positive. Flagging `dbo` without that
+            catalog confirmation would risk exactly the same false positive, whenever a same-named
+            type exists in another schema and the code later runs under a principal whose default
+            schema is that other one.
             """,
         HowToFixIt: """
-            Drop the redundant "dbo." schema qualifier from the data type reference - the type
-            resolves identically without it.
+            Drop the redundant "dbo." schema qualifier from the data type reference - the catalog
+            confirms no other schema defines a same-named type, so it resolves identically without
+            it.
             """,
         Examples:
         [

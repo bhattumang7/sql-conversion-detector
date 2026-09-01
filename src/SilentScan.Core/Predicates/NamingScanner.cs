@@ -44,7 +44,7 @@ public static class NamingScanner
 
     return Harvest(rule);
     }
-    internal static Rule CreateRule(string sourcePath, DatabaseCatalog? catalog = null) => new(sourcePath, catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase);
+    internal static Rule CreateRule(string sourcePath, DatabaseCatalog? catalog = null) => new(sourcePath, catalog?.IdentifierComparer ?? StringComparer.OrdinalIgnoreCase, catalog);
 
     internal static IReadOnlyList<NamingFinding> Harvest(Rule rule) =>
             [
@@ -58,7 +58,7 @@ public static class NamingScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    internal sealed class Rule(string sourcePath, StringComparer identifierComparer) : IModuleRule
+    internal sealed class Rule(string sourcePath, StringComparer identifierComparer, DatabaseCatalog? catalog = null) : IModuleRule
     {
         private string? _currentViewModule;
 
@@ -199,10 +199,54 @@ public static class NamingScanner
                 return;
             }
 
+            if (SameNamedTypeExistsInAnotherSchema(schema.Value, userType.Name.BaseIdentifier.Value))
+            {
+                return;
+            }
+
             Findings.Add(new NamingFinding(
                 NamingFindingKind.RedundantTypeQualifier, CurrentModule(walker), sourcePath,
                 userType.StartLine, userType.StartColumn,
                 $"Type reference \"{schema.Value}.{userType.Name.BaseIdentifier.Value}\" carries a redundant schema qualifier."));
+        }
+
+        private bool SameNamedTypeExistsInAnotherSchema(string schemaName, string baseName)
+        {
+            if (catalog is null)
+            {
+                return false;
+            }
+
+            foreach (var qualifiedName in catalog.TypeAliases.Keys)
+            {
+                var separatorIndex = qualifiedName.IndexOf('.');
+                if (separatorIndex < 0)
+                {
+                    continue;
+                }
+
+                var otherSchema = qualifiedName[..separatorIndex];
+                var otherName = qualifiedName[(separatorIndex + 1)..];
+                if (!identifierComparer.Equals(otherSchema, schemaName) && identifierComparer.Equals(otherName, baseName))
+                {
+                    return true;
+                }
+            }
+
+            foreach (var table in catalog.Tables)
+            {
+                if (table.Kind != CatalogTableKind.TableType || table.SchemaName is null)
+                {
+                    continue;
+                }
+
+                if (!identifierComparer.Equals(table.SchemaName, schemaName) && identifierComparer.Equals(table.Name, baseName))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

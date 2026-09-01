@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
@@ -13,6 +14,15 @@ public sealed class NamingScannerTests
         var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return NamingScanner.Scan(result);
+    }
+
+    private static IReadOnlyList<NamingFinding> ScanWithCatalog(string ddl, string sql)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", $"{ddl}\nGO\n{sql}");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([result]);
+        return NamingScanner.Scan(result, catalog);
     }
 
     [Fact]
@@ -158,6 +168,29 @@ public sealed class NamingScannerTests
     public void TableColumn_RedundantDboTypeQualifier_Fires()
     {
         var findings = Scan("CREATE TABLE dbo.T (Id dbo.MyType NOT NULL);");
+
+        Assert.Contains(findings, f => f.Kind == NamingFindingKind.RedundantTypeQualifier);
+    }
+
+    [Fact]
+    public void RedundantDboTypeQualifier_SuppressedWhenSameNamedTypeExistsInAnotherSchema()
+    {
+        const string ddl = """
+            CREATE TYPE dbo.mytype FROM INT;
+            CREATE TYPE alt.mytype FROM VARCHAR(50);
+            """;
+
+        var findings = ScanWithCatalog(ddl, "DECLARE @p dbo.mytype;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == NamingFindingKind.RedundantTypeQualifier);
+    }
+
+    [Fact]
+    public void RedundantDboTypeQualifier_StillFiresWhenTypeNameIsUniqueToDbo()
+    {
+        const string ddl = "CREATE TYPE dbo.mytype FROM INT;";
+
+        var findings = ScanWithCatalog(ddl, "DECLARE @p dbo.mytype;");
 
         Assert.Contains(findings, f => f.Kind == NamingFindingKind.RedundantTypeQualifier);
     }

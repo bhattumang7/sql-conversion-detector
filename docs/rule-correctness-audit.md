@@ -15,34 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 19 remain open below.
+correctness bugs found; 18 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`NamingScanner`'s `RedundantTypeQualifier` claims a `dbo.` schema
-      qualifier on a user-defined type "adds nothing" unconditionally, but
-      the same default-schema dependency the rule's own doc cites for other
-      schemas also applies to `dbo`.**
-      (`src/SilentScan.Core/Predicates/NamingScanner.cs:190-206` special-cases
-      `dbo` via `Common/SchemaObjectNameHelper.cs:7`; claim text in
-      `RuleCatalog.cs:210` and
-      `Reporting/RuleDocs/Naming/RedundantTypeQualifier.cs:10-25` asserts
-      `dbo.MyType` and `MyType` "resolve to the exact same object" for "the
-      overwhelming majority of databases.") Oracle-confirmed (SQL Server
-      2025): an unqualified user-defined type reference resolves via the
-      connecting principal's own default schema first, exactly like an
-      unqualified table/object name — not unconditionally to `dbo`. With
-      both `dbo.mytype` (`FROM int`) and `alt.mytype` (`FROM varchar(50)`)
-      defined in the same database, and a principal whose
-      `DEFAULT_SCHEMA = alt`, `CREATE TABLE ... (col mytype)` run under that
-      principal binds the column to `alt.mytype`, not `dbo.mytype`. The
-      rule's own stated mechanism for why other schemas are risky to
-      de-qualify applies equally to `dbo` whenever a same-named type exists
-      in another schema and the DDL later runs under a principal whose
-      default schema is that other one — stripping the qualifier per this
-      rule's own fix guidance can silently change which type gets bound.
 
 - [ ] **`NonPersistedComputedColumnScanner` claims a non-persisted computed
       column "recalculates its own expression from the base row every
