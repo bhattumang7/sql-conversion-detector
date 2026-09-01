@@ -11,6 +11,14 @@ internal sealed class WaitForRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => WaitForScanner.Harvest((WaitForScanner.Rule)moduleRule);
 }
 
+internal sealed class CursorCloseOnCommitRule : IPerFileRule
+{
+    public string Id => "CursorCloseOnCommitScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => CursorCloseOnCommitScanner.Scan(parseResult);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => CursorCloseOnCommitScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => CursorCloseOnCommitScanner.Harvest((CursorCloseOnCommitScanner.Rule)moduleRule);
+}
+
 internal sealed class CompositeIndexLeadingColumnRule : IPerFileRule
 {
     public string Id => "CompositeIndexLeadingColumnScanner";

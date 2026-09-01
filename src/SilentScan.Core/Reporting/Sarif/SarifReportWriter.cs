@@ -71,6 +71,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<WindowFrameFinding>("WindowFrameScanner").Select(ToResult));
         results.AddRange(report.Find<WindowFunctionArgumentFinding>("WindowFunctionArgumentScanner").Select(ToResult));
         results.AddRange(report.Find<WaitForFinding>("WaitForScanner").Select(ToResult));
+        results.AddRange(report.Find<CursorCloseOnCommitFinding>("CursorCloseOnCommitScanner").Select(ToResult));
         results.AddRange(report.Find<ViewOrderingFinding>("ViewOrderingScanner").Select(ToResult));
         results.AddRange(report.Find<TransactionHygieneFinding>("TransactionHygieneScanner").Select(ToResult));
         results.AddRange(report.Find<CompositeIndexLeadingColumnFinding>("CompositeIndexLeadingColumnScanner").Select(ToResult));
@@ -974,6 +975,17 @@ public static class SarifReportWriter
             : "WAITFOR DELAY/TIME holds this worker thread idle for the full delay/until-time, contributing to worker-pool exhaustion under load.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(CursorCloseOnCommitFinding finding)
+    {
+
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CursorCloseOnCommitRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var closer = finding.ClosedByRollback ? "ROLLBACK" : "COMMIT";
+        var message = $"Cursor '{finding.CursorName}' (opened at line {finding.OpenLine}) was silently closed by CURSOR_CLOSE_ON_COMMIT ON when this {closer} ran at line {finding.ClosingStatementLine} - this FETCH fails at runtime with Msg 16917 (\"Cursor is not open\") unless the cursor is re-opened first.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.FetchLine, finding.FetchColumn);
     }
 
     private static SarifResult ToResult(TransactionHygieneFinding finding)

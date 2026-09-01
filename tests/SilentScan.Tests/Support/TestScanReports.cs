@@ -51,6 +51,7 @@ public static class TestScanReports
         IReadOnlyList<ModuleCompileFlagFinding>? ModuleCompileFlagFindings = null,
         IReadOnlyList<WindowFrameFinding>? WindowFrameFindings = null,
         IReadOnlyList<WaitForFinding>? WaitForFindings = null,
+        IReadOnlyList<CursorCloseOnCommitFinding>? CursorCloseOnCommitFindings = null,
         IReadOnlyList<ViewOrderingFinding>? ViewOrderingFindings = null,
         IReadOnlyList<TransactionHygieneFinding>? TransactionHygieneFindings = null,
         IReadOnlyList<CompositeIndexLeadingColumnFinding>? CompositeIndexLeadingColumnFindings = null,
@@ -160,6 +161,7 @@ public static class TestScanReports
         Set("ModuleCompileFlagScanner", ModuleCompileFlagFindings);
         Set("WindowFrameScanner", WindowFrameFindings);
         Set("WaitForScanner", WaitForFindings);
+        Set("CursorCloseOnCommitScanner", CursorCloseOnCommitFindings);
         Set("ViewOrderingScanner", ViewOrderingFindings);
         Set("TransactionHygieneScanner", TransactionHygieneFindings);
         Set("CompositeIndexLeadingColumnScanner", CompositeIndexLeadingColumnFindings);

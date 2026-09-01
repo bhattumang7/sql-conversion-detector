@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">287 rules. 200 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">288 rules. 201 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -139,6 +139,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <ul class="rule-list">
       <li><a class="id" href="rules/control-flow-case-expression-missing-else.html">Case Expression Missing Else</a> <code class="rule-key">silentscan/control-flow/case-expression-missing-else</code><span class="snippet">A simple CASE expression has no ELSE.</span></li>
       <li><a class="id" href="rules/control-flow-commit-after-xact-abort-dooms-transaction.html">Commit After Xact Abort Dooms Transaction</a> <code class="rule-key">silentscan/control-flow/commit-after-xact-abort-dooms-transaction</code><span class="snippet">SET XACT_ABORT ON is in effect (set earlier in the same module body) for a transaction that was already open before entering a TRY block, and the matching CATCH block directly contains a COMMIT TRANSACTION.</span></li>
+      <li><a class="id" href="rules/control-flow-cursor-close-on-commit.html">Cursor Close On Commit</a> <code class="rule-key">silentscan/control-flow/cursor-close-on-commit</code><span class="snippet">SET CURSOR_CLOSE_ON_COMMIT ON is in effect (set earlier in the same script/module) when a COMMIT or full ROLLBACK (not one naming a savepoint) runs while a local, name-declared cursor is open.</span></li>
       <li><a class="id" href="rules/control-flow-cursor-fetch-column-count-mismatch.html">Cursor Fetch Column Count Mismatch</a> <code class="rule-key">silentscan/control-flow/cursor-fetch-column-count-mismatch</code><span class="snippet">A cursor FETCH INTO variable count doesn&#x27;t match its own cursor&#x27;s defining SELECT column count.</span></li>
       <li><a class="id" href="rules/control-flow-dirty-read-isolation-hint.html">Dirty Read Isolation Hint</a> <code class="rule-key">silentscan/control-flow/dirty-read-isolation-hint</code><span class="snippet">NOLOCK/READUNCOMMITTED allows dirty reads and can miss or double-count rows during a concurrent page split.</span></li>
       <li><a class="id" href="rules/control-flow-duplicated-call-argument.html">Duplicated Call Argument</a> <code class="rule-key">silentscan/control-flow/duplicated-call-argument</code><span class="snippet">The same non-literal expression is passed as two different arguments to the same call.</span></li>

@@ -197,6 +197,7 @@ public static class SarifRuleCatalog
     public static string WindowFrameRuleId(WindowFrameFindingKind kind) => FindingRuleIds.WindowFrameRuleId(kind);
     public static string WindowFunctionArgumentRuleId(WindowFunctionArgumentFindingKind kind) => FindingRuleIds.WindowFunctionArgumentRuleId(kind);
     public const string WaitForRuleId = FindingRuleIds.WaitForRuleId;
+    public const string CursorCloseOnCommitRuleId = FindingRuleIds.CursorCloseOnCommitRuleId;
     public static string TransactionHygieneRuleId(TransactionHygieneFindingKind kind) => FindingRuleIds.TransactionHygieneRuleId(kind);
     public const string OutputParameterRuleId = FindingRuleIds.OutputParameterRuleId;
     public const string CompositeIndexLeadingColumnRuleId = FindingRuleIds.CompositeIndexLeadingColumnRuleId;

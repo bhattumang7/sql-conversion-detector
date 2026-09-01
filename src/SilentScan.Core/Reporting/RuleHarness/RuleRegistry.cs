@@ -7,6 +7,7 @@ public static class RuleRegistry
     public static IReadOnlyList<IRule> All { get; } =
     [
         new WaitForRule(),
+        new CursorCloseOnCommitRule(),
         new CompositeIndexLeadingColumnRule(),
         new MissingStatisticsRule(),
         new SessionDateSettingRule(),

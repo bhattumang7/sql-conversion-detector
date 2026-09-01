@@ -292,6 +292,18 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterOpenCursorStatement(OpenCursorStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterCloseCursorStatement(CloseCursorStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterDeallocateCursorStatement(DeallocateCursorStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterPrintStatement(PrintStatement node, ModuleWalker walker)
     {
     }

@@ -19,15 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`CURSOR_CLOSE_ON_COMMIT` - zero coverage, narrow blast radius.**
-      When `ON`, any open cursor is silently closed by the next
-      `COMMIT`/`ROLLBACK` - a script that opens a cursor, commits mid-flow,
-      then keeps fetching from it errors at runtime with no hint from the
-      cursor-open site itself. Real and decidable (session setting × cursor
-      lifetime across a commit), but only reachable by scripts that mix
-      cursors with a mid-flow commit - low priority relative to the rest of
-      this list, recorded so it isn't rediscovered from scratch.
-
 - [ ] **`STRING_SPLIT` separator must be exactly one character.** A literal
       (or constant-folded) separator argument of any length other than 1 is
       a compile-error fact, pure source-level analysis, no catalog needed.

@@ -111,6 +111,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(WindowFrame(report, headingLevel, pathBase));
         blocks.AddRange(WindowFunctionArgument(report, headingLevel, pathBase));
         blocks.AddRange(WaitFor(report, headingLevel, pathBase));
+        blocks.AddRange(CursorCloseOnCommit(report, headingLevel, pathBase));
         blocks.AddRange(ViewOrdering(report, headingLevel, pathBase));
         blocks.AddRange(TransactionHygiene(report, headingLevel, pathBase));
         blocks.AddRange(CompositeIndexLeadingColumn(report, headingLevel, pathBase));
@@ -270,6 +271,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "RANGE window-function frames", report.Find<WindowFrameFinding>(nameof(WindowFrameScanner)).Count);
         AddCount(counts, "LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC out-of-range constant arguments", report.Find<WindowFunctionArgumentFinding>(nameof(WindowFunctionArgumentScanner)).Count);
         AddCount(counts, "WAITFOR DELAY/TIME", report.Find<WaitForFinding>(nameof(WaitForScanner)).Count);
+        AddCount(counts, "Cursors silently closed by CURSOR_CLOSE_ON_COMMIT then fetched", report.Find<CursorCloseOnCommitFinding>(nameof(CursorCloseOnCommitScanner)).Count);
         AddCount(counts, "View/inline TVF ordering not guaranteed", report.Find<ViewOrderingFinding>(nameof(ViewOrderingScanner)).Count);
         AddCount(counts, "Unresolved BEGIN TRANSACTION", report.Find<TransactionHygieneFinding>(nameof(TransactionHygieneScanner)).Count);
         AddCount(counts, "Composite index leading-column violations", report.Find<CompositeIndexLeadingColumnFinding>(nameof(CompositeIndexLeadingColumnScanner)).Count);
@@ -2429,6 +2431,28 @@ public static class ReadableScanReportWriter
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.IsInsideTransaction ? "Yes" : "No",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> CursorCloseOnCommit(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<CursorCloseOnCommitFinding>(nameof(CursorCloseOnCommitScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Cursor silently closed by CURSOR_CLOSE_ON_COMMIT ({report.Find<CursorCloseOnCommitFinding>(nameof(CursorCloseOnCommitScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "SET CURSOR_CLOSE_ON_COMMIT ON silently closes every open cursor the instant a COMMIT/full ROLLBACK runs - the next FETCH from that cursor fails at runtime (Msg 16917, \"Cursor is not open\") with no error at the cursor's own OPEN site.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CursorCloseOnCommitRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Cursor", "Closed by"],
+            [.. report.Find<CursorCloseOnCommitFinding>(nameof(CursorCloseOnCommitScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.FetchLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.CursorName,
+                f.ClosedByRollback ? "ROLLBACK" : "COMMIT",
             })]);
     }
 
