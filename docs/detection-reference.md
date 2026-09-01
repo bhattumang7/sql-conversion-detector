@@ -1081,3 +1081,48 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
   Oracle test fixtures do (`CREATE PROCEDURE` in the fixture's own DDL would
   itself fail to deploy) — its Oracle tests instead parse/execute each
   scenario as ad-hoc SQL text against a live-read catalog.
+
+* **`NonPersistedComputedColumnRuleId`/`TryCastComputedColumnPredicateRuleId`
+  nondeterministic-index sibling — killed, unreachable.** Hypothesized: an
+  indexed view or indexed computed column referencing a nondeterministic
+  expression (e.g. `NEWID()`) as a direct DDL-time hard failure worth its
+  own rule. Oracle-confirmed (Docker) the failure itself is real —
+  `CREATE UNIQUE CLUSTERED INDEX` on a schema-bound view selecting
+  `NEWID()` fails ("yields nondeterministic results"), and `CREATE INDEX`
+  on a computed column using `NEWID()` fails ("cannot be used in an
+  index... because it is non-deterministic") — but SQL Server refuses to
+  ever *create* the index in the first place, same shape as the temporal
+  history column-mapping gap killed above. A scanner reading only a live
+  catalog would never observe an indexed nondeterministic column, so there
+  is no reachable bad state for a new rule to detect.
+
+* **`IndexDesignRuleId` duplicate-column sibling — killed, unreachable.**
+  Hypothesized: an index definition repeating the same column across its
+  key/include/partition/order-by lists. Oracle-confirmed (Docker)
+  `CREATE INDEX ... (a) INCLUDE (a)` and `CREATE INDEX ... (a, a)` both
+  reject at DDL time (Msg 1909, "duplicate column names in index") — same
+  unreachable-via-live-catalog shape as the two entries above. Partition-
+  column and columnstore order-by-column repetition weren't oracle-tested
+  and may behave differently; re-open only if one of those specific forms
+  is later shown to actually succeed at create time.
+
+* **`AnsiPaddingMismatchRuleId` broaden-to-join/equality — killed, false
+  premise.** Hypothesized: the shipped rule's `LIKE` trailing-whitespace
+  boundary also affects join matching, equality, and persisted-expression
+  results under different `ANSI_PADDING` states. Oracle-confirmed (Docker)
+  general string equality trims trailing spaces unconditionally
+  (`'ab' = 'ab   '` is always true) — this is baseline ANSI SQL comparison
+  behavor, not something `ANSI_PADDING` toggles. Also confirmed
+  `ANSI_PADDING OFF` does not affect `varchar` storage (`DATALENGTH`
+  unchanged after insert) — that setting only governs fixed-length
+  `char`/`binary` padding, a different mechanism than the shipped rule's
+  `LIKE` boundary. No case found where join/equality results actually vary
+  by `ANSI_PADDING` state.
+
+* **`DBCC RULE ON/OFF` deprecated-syntax sibling — killed, doesn't exist.**
+  Hypothesized: `DBCC RULE ON/OFF` toggles the same legacy `CREATE RULE`/
+  `sp_bindrule` mechanism already flagged elsewhere as deprecated.
+  Oracle-confirmed (Docker) `DBCC RULE` is not a real DBCC statement on
+  either local instance — `DBCC HELP('RULE')` returns "No help available
+  for DBCC statement 'RULE'", and the syntax itself doesn't parse. The
+  premise was invented, not documented.
