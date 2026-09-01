@@ -73,6 +73,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TvfFence(report, headingLevel, pathBase));
         blocks.AddRange(ScalarUdf(report, headingLevel, pathBase));
         blocks.AddRange(ColumnCollationDrift(report, headingLevel, pathBase));
+        blocks.AddRange(AnsiPaddingOffColumn(report, headingLevel, pathBase));
         blocks.AddRange(CrossTableTypeDrift(report, headingLevel, pathBase));
         blocks.AddRange(TriggerOrder(report, headingLevel, pathBase));
         blocks.AddRange(ProcCallArgumentMismatch(report, headingLevel, pathBase));
@@ -200,6 +201,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Multi-statement/CLR TVF references acting as optimization fences", report.Find<TvfFenceFinding>(nameof(TvfFenceScanner)).Count);
         AddCount(counts, "Scalar UDF calls (per-row cost, non-sargable when predicate-context)", report.Find<ScalarUdfFinding>(nameof(ScalarUdfScanner)).Count);
         AddCount(counts, "Columns whose collation drifts from the database/tempdb default", report.Find<ColumnCollationDriftFinding>(nameof(ColumnCollationDriftScanner)).Count);
+        AddCount(counts, "Columns with ANSI_PADDING OFF in their own catalog state", report.Find<AnsiPaddingOffColumnFinding>(nameof(AnsiPaddingOffColumnScanner)).Count);
         AddCount(counts, "Foreign-key column pairs whose types/collations drift", report.Find<CrossTableTypeDriftFinding>(nameof(CrossTableTypeDriftScanner)).Count);
         AddCount(counts, "Tables with undefined AFTER trigger firing order", report.Find<TriggerOrderFinding>(nameof(TriggerOrderScanner)).Count);
         AddCount(counts, "EXEC call-site arguments risking silent data loss at the parameter boundary", report.Find<ProcCallArgumentMismatchFinding>(nameof(ProcCallArgumentMismatchScanner)).Count);
@@ -633,6 +635,27 @@ public static class ReadableScanReportWriter
                 f.ColumnCollationName,
                 f.BaselineCollationName,
                 f.IsTempObject ? "temp table/table variable" : "table",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> AnsiPaddingOffColumn(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<AnsiPaddingOffColumnFinding>(nameof(AnsiPaddingOffColumnScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Columns with ANSI_PADDING OFF in their own catalog state ({report.Find<AnsiPaddingOffColumnFinding>(nameof(AnsiPaddingOffColumnScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A VARCHAR/NVARCHAR/VARBINARY column's own ANSI_PADDING state was fixed OFF at creation (or its last ALTER COLUMN) and stays that way regardless of any later session's own ANSI_PADDING setting - every write into it silently strips trailing blanks/zero bytes, oracle-confirmed even under a writing session with ANSI_PADDING ON.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ColumnAnsiPaddingOffRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader],
+            [.. report.Find<AnsiPaddingOffColumnFinding>(nameof(AnsiPaddingOffColumnScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
             })]);
     }
 

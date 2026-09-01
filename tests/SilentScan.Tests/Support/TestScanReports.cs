@@ -22,6 +22,7 @@ public static class TestScanReports
         IReadOnlyList<TvfFenceFinding>? TvfFenceFindings = null,
         IReadOnlyList<ScalarUdfFinding>? ScalarUdfFindings = null,
         IReadOnlyList<ColumnCollationDriftFinding>? ColumnCollationDriftFindings = null,
+        IReadOnlyList<AnsiPaddingOffColumnFinding>? AnsiPaddingOffColumnFindings = null,
         IReadOnlyList<CrossTableTypeDriftFinding>? CrossTableTypeDriftFindings = null,
         IReadOnlyList<ProcCallArgumentMismatchFinding>? ProcCallArgumentMismatchFindings = null,
         IReadOnlyList<ProcCallTableValuedArgumentMismatchFinding>? ProcCallTableValuedArgumentMismatchFindings = null,
@@ -141,6 +142,7 @@ public static class TestScanReports
         Set("ScalarUdfScanner", ScalarUdfFindings);
         Set("SecurityScanner", SecurityFindings);
         Set("ColumnCollationDriftScanner", ColumnCollationDriftFindings);
+        Set("AnsiPaddingOffColumnScanner", AnsiPaddingOffColumnFindings);
         Set("CrossTableTypeDriftScanner", CrossTableTypeDriftFindings);
         Set("ProcCallArgumentMismatchScanner", ProcCallArgumentMismatchFindings);
         Set("ProcCallTableValuedArgumentMismatchScanner", ProcCallTableValuedArgumentMismatchFindings);

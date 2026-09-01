@@ -26,6 +26,7 @@ public static class FindingRuleIds
     public const string ScalarUdfSchemaDependencyRuleId = "silentscan/scalar-udf/in-computed-column-or-constraint";
     public const string ScalarUdfProjectionInvocationRuleId = "silentscan/scalar-udf/in-select-or-expression";
     public const string ColumnCollationDriftRuleId = "silentscan/catalog/column-collation-drift";
+    public const string ColumnAnsiPaddingOffRuleId = "silentscan/catalog/column-ansi-padding-off";
     public const string CrossTableTypeDriftRuleId = "silentscan/catalog/cross-table-fk-type-drift";
     public const string ProcCallArgumentMismatchRuleId = "silentscan/call-graph/argument-type-mismatch";
     public const string ProcCallTableValuedArgumentMismatchRuleId = "silentscan/call-graph/table-valued-argument-column-mismatch";

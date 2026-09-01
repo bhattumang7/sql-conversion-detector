@@ -57,6 +57,7 @@ public static class RuleRegistry
         new UnindexedTempTableUsageRule(),
 
         new ColumnCollationDriftRule(),
+        new AnsiPaddingOffColumnRule(),
         new CrossTableTypeDriftRule(),
         new TriggerOrderRule(),
         new ProcCallArgumentMismatchRule(),

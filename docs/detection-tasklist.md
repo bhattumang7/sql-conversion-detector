@@ -19,20 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`WriteLossClassifier` sibling: cursor `FETCH INTO` binding loss.** A
-      cursor's `FETCH INTO` variable binding that statically loses precision
-      or truncates against the cursor's own defining `SELECT` expression
-      type is the cursor-FETCH analogue of the shipped write-loss family and
-      should reuse `WriteLossClassifier` rather than being designed from
-      scratch.
-
-- [ ] **`ColumnCollationDriftRuleId` sibling: `sys.columns.is_ansi_padded`
-      structural fact.** A variable-length character/binary column's own
-      `ANSI_PADDING` state is fixed at creation and stays sticky regardless
-      of later session settings — catalog-only, distinct from the shipped
-      session-level `SetOptionFindingKind` ANSI_PADDING rule, same family
-      shape as `ColumnCollationDriftRuleId`.
-
 - [ ] **`GROUPING`/`GROUPING_ID` argument absent from the query's own
       `GROUP BY` list.** Pure syntactic fact provable from the parse tree,
       no catalog dependency.

@@ -450,6 +450,19 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`sys.columns.is_ansi_padded` is not scoped to string/binary types, and
+  `ALTER COLUMN` (not just `CREATE TABLE`/`ADD COLUMN`) resets it in place.**
+  Oracle-confirmed (Docker, SQL Server 2022): every column created while
+  `SET ANSI_PADDING` is `OFF` - including a plain `INT` column, where the flag
+  has no behavioral meaning at all - carries `is_ansi_padded = 0`, so a rule
+  reading this catalog column must gate on the column's own type category
+  (`VARCHAR`/`NVARCHAR`/`VARBINARY`) or it false-positives on unrelated
+  numeric/date columns. Separately, running `ALTER TABLE ... ALTER COLUMN`
+  against an already-`OFF` column while `SET ANSI_PADDING ON` is in effect
+  resets `is_ansi_padded` to `1` in place - it is not a permanent, only-at-
+  creation snapshot the way the shipped `ColumnAnsiPaddingOffRuleId` fix
+  guidance depends on being reversible; no `DROP`/recreate is required.
+
 * **Partition function parameter type mismatch — killed, engine-guaranteed
   unreachable.** Oracle-confirmed (Docker, SQL Server 2022): the partitioning
   column's type/precision/scale/collation is checked against the partition

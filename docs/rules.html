@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">290 rules. 202 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">291 rules. 203 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -107,6 +107,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/catalog-cascading-foreign-key.html">Cascading Foreign Key</a> <code class="rule-key">silentscan/catalog/cascading-foreign-key</code><span class="snippet">A foreign key with a non-NO_ACTION ON DELETE/ON UPDATE action.</span></li>
       <li><a class="id" href="rules/catalog-check-constraint-null-not-handled.html">Check Constraint Null Not Handled</a> <code class="rule-key">silentscan/catalog/check-constraint-null-not-handled</code><span class="snippet">A nullable column&#x27;s own CHECK constraint predicate has no IS NULL/IS NOT NULL test against that column anywhere in the predicate.</span></li>
       <li><a class="id" href="rules/catalog-check-constraint-on-identity-column.html">Check Constraint On Identity Column</a> <code class="rule-key">silentscan/catalog/check-constraint-on-identity-column</code><span class="snippet">A CHECK constraint&#x27;s own definition directly references an IDENTITY column.</span></li>
+      <li><a class="id" href="rules/catalog-column-ansi-padding-off.html">Column ANSI Padding Off</a> <code class="rule-key">silentscan/catalog/column-ansi-padding-off</code><span class="snippet">A VARCHAR/NVARCHAR/VARBINARY column&#x27;s own ANSI_PADDING state (sys.columns.is_ansi_padded) is OFF.</span></li>
       <li><a class="id" href="rules/catalog-column-collation-drift.html">Column Collation Drift</a> <code class="rule-key">silentscan/catalog/column-collation-drift</code><span class="snippet">A string-family column&#x27;s own collation differs from the database&#x27;s default collation (or, for a temp table/table variable, from tempdb&#x27;s effective collation).</span></li>
       <li><a class="id" href="rules/catalog-columnstore-unsupported-column-type.html">Columnstore Unsupported Column Type</a> <code class="rule-key">silentscan/catalog/columnstore-unsupported-column-type</code><span class="snippet">A column typed SQL_VARIANT, XML, HIERARCHYID, GEOMETRY, GEOGRAPHY, NTEXT, TEXT, IMAGE, or TIMESTAMP/ROWVERSION participates in a columnstore index on the same table, or a VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) column participates in a NONCLUSTERED columnstore index specifically.</span></li>
       <li><a class="id" href="rules/catalog-cross-table-fk-type-drift.html">Cross Table FK Type Drift</a> <code class="rule-key">silentscan/catalog/cross-table-fk-type-drift</code><span class="snippet">A foreign-key column pair&#x27;s declared types and/or collations genuinely differ.</span></li>

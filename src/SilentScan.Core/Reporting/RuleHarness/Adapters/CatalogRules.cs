@@ -8,6 +8,12 @@ internal sealed class ColumnCollationDriftRule : ICatalogRule
     public IReadOnlyList<IFinding> Scan(RuleContext context) => ColumnCollationDriftScanner.Scan(context.Catalog);
 }
 
+internal sealed class AnsiPaddingOffColumnRule : ICatalogRule
+{
+    public string Id => "AnsiPaddingOffColumnScanner";
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => AnsiPaddingOffColumnScanner.Scan(context.Catalog);
+}
+
 internal sealed class CrossTableTypeDriftRule : ICatalogRule
 {
     public string Id => "CrossTableTypeDriftScanner";

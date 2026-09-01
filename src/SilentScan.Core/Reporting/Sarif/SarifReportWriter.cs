@@ -38,6 +38,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<TvfFenceFinding>("TvfFenceScanner").Select(ToResult));
         results.AddRange(report.Find<ScalarUdfFinding>("ScalarUdfScanner").Select(ToResult));
         results.AddRange(report.Find<ColumnCollationDriftFinding>("ColumnCollationDriftScanner").Select(ToResult));
+        results.AddRange(report.Find<AnsiPaddingOffColumnFinding>("AnsiPaddingOffColumnScanner").Select(ToResult));
         results.AddRange(report.Find<CrossTableTypeDriftFinding>("CrossTableTypeDriftScanner").Select(ToResult));
         results.AddRange(report.Find<ProcCallArgumentMismatchFinding>("ProcCallArgumentMismatchScanner").Select(ToResult));
         results.AddRange(report.Find<ProcCallTableValuedArgumentMismatchFinding>("ProcCallTableValuedArgumentMismatchScanner").Select(ToResult));
@@ -297,6 +298,16 @@ public static class SarifReportWriter
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (COLLATE {finding.ColumnCollationName}) differs from {kindNote} collation (COLLATE {finding.BaselineCollationName}) - a conversion seed for any future comparison against a column/literal carrying that collation.";
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ColumnCollationDriftRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(AnsiPaddingOffColumnFinding finding)
+    {
+
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' has ANSI_PADDING OFF in its own catalog state (sys.columns.is_ansi_padded = 0) - every write into it silently strips trailing blanks/zero bytes regardless of the writing session's own ANSI_PADDING setting.";
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ColumnAnsiPaddingOffRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
     }

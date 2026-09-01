@@ -28,6 +28,7 @@ public static class SarifRuleCatalog
     public const string ScalarUdfSchemaDependencyRuleId = FindingRuleIds.ScalarUdfSchemaDependencyRuleId;
     public const string ScalarUdfProjectionInvocationRuleId = FindingRuleIds.ScalarUdfProjectionInvocationRuleId;
     public const string ColumnCollationDriftRuleId = FindingRuleIds.ColumnCollationDriftRuleId;
+    public const string ColumnAnsiPaddingOffRuleId = FindingRuleIds.ColumnAnsiPaddingOffRuleId;
     public const string CrossTableTypeDriftRuleId = FindingRuleIds.CrossTableTypeDriftRuleId;
     public const string ProcCallArgumentMismatchRuleId = FindingRuleIds.ProcCallArgumentMismatchRuleId;
     public const string ProcCallTableValuedArgumentMismatchRuleId = FindingRuleIds.ProcCallTableValuedArgumentMismatchRuleId;

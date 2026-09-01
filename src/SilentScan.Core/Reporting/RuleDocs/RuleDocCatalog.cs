@@ -105,6 +105,7 @@ public static class RuleDocCatalog
         [ScalarUdf.SchemaDependency.RuleId] = ScalarUdf.SchemaDependency.Content,
         [ScalarUdf.ProjectionInvocation.RuleId] = ScalarUdf.ProjectionInvocation.Content,
         [Catalog.ColumnCollationDrift.RuleId] = Catalog.ColumnCollationDrift.Content,
+        [Catalog.AnsiPaddingOffColumn.RuleId] = Catalog.AnsiPaddingOffColumn.Content,
         [Catalog.CrossTableFkTypeDrift.RuleId] = Catalog.CrossTableFkTypeDrift.Content,
         [CallGraph.ArgumentTypeMismatch.RuleId] = CallGraph.ArgumentTypeMismatch.Content,
         [CallGraph.TableValuedArgumentMismatch.RuleId] = CallGraph.TableValuedArgumentMismatch.Content,
