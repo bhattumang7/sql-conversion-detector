@@ -218,6 +218,8 @@ public static class RuleDocCatalog
         [Catalog.CascadingForeignKey.RuleId] = Catalog.CascadingForeignKey.Content,
         [Catalog.NonPersistedComputedColumn.RuleId] = Catalog.NonPersistedComputedColumn.Content,
         [Catalog.TemporalTableHistoryIndexGap.RuleId] = Catalog.TemporalTableHistoryIndexGap.Content,
+        [Catalog.GeneratedAlwaysColumnExplicitInsert.RuleId] = Catalog.GeneratedAlwaysColumnExplicitInsert.Content,
+        [Catalog.GeneratedAlwaysColumnExplicitUpdate.RuleId] = Catalog.GeneratedAlwaysColumnExplicitUpdate.Content,
         [Catalog.StaleSelectStarView.RuleId] = Catalog.StaleSelectStarView.Content,
         [Catalog.SecurityPredicateIndex.RuleId] = Catalog.SecurityPredicateIndex.Content,
         [Predicate.TryCastComputedColumn.RuleId] = Predicate.TryCastComputedColumn.Content,

@@ -132,6 +132,14 @@ internal sealed class CheckConstraintPredicateContradictionRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => CheckConstraintPredicateContradictionScanner.Harvest((CheckConstraintPredicateContradictionScanner.Rule)moduleRule);
 }
 
+internal sealed class GeneratedAlwaysColumnAssignmentRule : IPerFileRule
+{
+    public string Id => "GeneratedAlwaysColumnAssignmentScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => GeneratedAlwaysColumnAssignmentScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => GeneratedAlwaysColumnAssignmentScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => GeneratedAlwaysColumnAssignmentScanner.Harvest((GeneratedAlwaysColumnAssignmentScanner.Rule)moduleRule);
+}
+
 internal sealed class FloatEqualityPredicateRule : IPerFileRule
 {
     public string Id => "FloatEqualityPredicateScanner";

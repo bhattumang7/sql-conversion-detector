@@ -112,6 +112,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TempTableExecShape(report, headingLevel, pathBase));
         blocks.AddRange(SelfReferencingDml(report, headingLevel, pathBase));
         blocks.AddRange(TemporalTableHistoryIndexGap(report, headingLevel, pathBase));
+        blocks.AddRange(GeneratedAlwaysColumnAssignment(report, headingLevel, pathBase));
         blocks.AddRange(ModuleCompileFlag(report, headingLevel, pathBase));
         blocks.AddRange(WindowFrame(report, headingLevel, pathBase));
         blocks.AddRange(WindowFunctionArgument(report, headingLevel, pathBase));
@@ -279,6 +280,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "INSERT INTO #temp EXEC proc shape mismatches", report.Find<TempTableExecShapeFinding>(TempTableExecShapeRuleId).Count);
         AddCount(counts, "Self-referencing DML (Halloween Protection risk)", report.Find<SelfReferencingDmlFinding>(nameof(SelfReferencingDmlScanner)).Count);
         AddCount(counts, "Temporal table history-side index gaps", report.Find<TemporalTableHistoryIndexGapFinding>(nameof(TemporalTableHistoryIndexGapScanner)).Count);
+        AddCount(counts, "Explicit assignments to a GENERATED ALWAYS temporal period column", report.Find<GeneratedAlwaysColumnAssignmentFinding>(nameof(GeneratedAlwaysColumnAssignmentScanner)).Count);
         AddCount(counts, "Module compile flags (WITH RECOMPILE / TVF database-collation return)", report.Find<ModuleCompileFlagFinding>(nameof(ModuleCompileFlagScanner)).Count);
         AddCount(counts, "RANGE window-function frames", report.Find<WindowFrameFinding>(nameof(WindowFrameScanner)).Count);
         AddCount(counts, "LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC out-of-range constant arguments", report.Find<WindowFunctionArgumentFinding>(nameof(WindowFunctionArgumentScanner)).Count);
@@ -2444,6 +2446,36 @@ public static class ReadableScanReportWriter
                 f.CurrentIndexName ?? "(unnamed)",
                 string.Join(", ", f.KeyColumns),
             })]);
+    }
+
+    private static IEnumerable<ReadableBlock> GeneratedAlwaysColumnAssignment(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<GeneratedAlwaysColumnAssignmentFinding>(nameof(GeneratedAlwaysColumnAssignmentScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Explicit assignments to a GENERATED ALWAYS temporal period column ({report.Find<GeneratedAlwaysColumnAssignmentFinding>(nameof(GeneratedAlwaysColumnAssignmentScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An INSERT/UPDATE/MERGE names a system-versioned temporal table's GENERATED ALWAYS AS ROW START/END period column - oracle-confirmed a hard compile/runtime error unconditionally (Msg 13536 for an explicit INSERT value, Msg 13537 for any UPDATE assignment, DEFAULT included).");
+
+        foreach (var group in report.Find<GeneratedAlwaysColumnAssignmentFinding>(nameof(GeneratedAlwaysColumnAssignmentScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == GeneratedAlwaysColumnAssignmentKind.ExplicitInsertValue
+                ? "Explicit INSERT value (Msg 13536)"
+                : "UPDATE SET assignment (Msg 13537)";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.GeneratedAlwaysColumnAssignmentRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, TableHeader, ColumnHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.TableQualifiedName,
+                    f.ColumnName,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> ModuleCompileFlag(ScanReport report, int level, string? pathBase)

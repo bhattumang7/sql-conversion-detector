@@ -840,7 +840,7 @@ public sealed class LiveCatalogReader
                    c.is_nullable, c.is_identity, c.is_computed, cc.is_persisted, c.is_ansi_padded,
                    CONVERT(decimal(38,0), idc.seed_value), CONVERT(decimal(38,0), idc.increment_value),
                    CONVERT(decimal(38,0), idc.last_value), c.encryption_type,
-                   c.is_masked, mc.masking_function
+                   c.is_masked, mc.masking_function, c.generated_always_type
             FROM sys.columns c
             JOIN sys.types ty ON ty.user_type_id = c.user_type_id
             JOIN sys.tables t ON t.object_id = c.object_id
@@ -892,6 +892,7 @@ public sealed class LiveCatalogReader
         var encryptionType = await ReadEncryptionTypeAsync(reader, cancellationToken);
         var isMasked = reader.GetBoolean(18);
         var maskingFunctionName = MaskingFunctionNameNormalizer.Normalize(await ReadNullableStringAsync(reader, 19, cancellationToken));
+        var generatedAlwaysType = await reader.IsDBNullAsync(20, cancellationToken) ? 0 : reader.GetByte(20);
         var column = new CatalogColumn(
             columnName, type, reader.GetBoolean(9), reader.GetBoolean(10), reader.GetBoolean(11),
             !await reader.IsDBNullAsync(12, cancellationToken) && reader.GetBoolean(12), reader.GetBoolean(13),
@@ -900,7 +901,8 @@ public sealed class LiveCatalogReader
             await ReadNullableDecimalAsync(reader, 16, cancellationToken), encryptionType,
             EnclaveSupport: ColumnEncryptionEnclaveSupport.Unknown,
             IsMasked: isMasked,
-            MaskingFunctionName: maskingFunctionName);
+            MaskingFunctionName: maskingFunctionName,
+            IsGeneratedAlwaysPeriod: generatedAlwaysType is 1 or 2);
         return (objectId, column);
     }
 

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generated Always Column Explicit Insert - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Generated Always Column Explicit Insert</h1>
+  <p class="rule-key"><code>silentscan/catalog/generated-always-column-explicit-insert</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">An INSERT (or a MERGE ... WHEN NOT MATCHED THEN INSERT) target list explicitly names a system-versioned temporal table&#x27;s GENERATED ALWAYS AS ROW START/END period column, and supplies it a non-DEFAULT value (or the row source is a SELECT/EXEC, which can never supply DEFAULT at all) - oracle-confirmed a hard compile/runtime error (Msg 13536, &quot;Cannot insert an explicit value into a GENERATED ALWAYS column&quot;) regardless of the value or table content. Never fires when the column list omits the period column, or when every VALUES row supplies DEFAULT for it.</p>
+  <p class="rationale">A system-versioned temporal table&#x27;s `GENERATED ALWAYS AS ROW START`/`ROW END` period columns are populated by the engine itself on every INSERT - it never accepts a caller- supplied value for one. Oracle-confirmed directly (Docker SQL Server 2022): an `INSERT` (or a MERGE `WHEN NOT MATCHED THEN INSERT`) whose column list names a period column and supplies it a non-`DEFAULT` value fails with Msg 13536, &quot;Cannot insert an explicit value into a GENERATED ALWAYS column&quot;, before a single row is written - not a data-dependent failure, and not specific to the `VALUES` clause: naming the column at all from a `SELECT`/`EXEC` row source fails the same way, since neither can supply the `DEFAULT` keyword.</p>
+  <p class="rationale">`DEFAULT` is the one value the engine accepts in a period column&#x27;s position - explicitly in a `VALUES` row, or implicitly by leaving the column out of the column list entirely (including the fully-implicit `INSERT INTO t VALUES (...)` form, provided the value supplied at the period column&#x27;s own ordinal position is `DEFAULT`) - so this rule never fires on either of those shapes.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Drop the period column from the INSERT&#x27;s column list and let the engine populate it, or supply DEFAULT for it explicitly in every VALUES row.</p>
+  <h3>An explicit value for a temporal period column</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Widget&#xA;(&#xA;    Id   INT NOT NULL PRIMARY KEY,&#xA;    Code VARCHAR(20) NOT NULL,&#xA;    ValidFrom DATETIME2 GENERATED ALWAYS AS ROW START,&#xA;    ValidTo   DATETIME2 GENERATED ALWAYS AS ROW END,&#xA;    PERIOD FOR SYSTEM_TIME (ValidFrom, ValidTo)&#xA;)&#xA;WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.WidgetHistory));&#xA;&#xA;INSERT INTO dbo.Widget (Id, Code, ValidFrom) VALUES (1, &#x27;ABC&#x27;, SYSUTCDATETIME());</code></pre></div>
+  <p class="example-explanation">ValidFrom is a GENERATED ALWAYS period column - naming it in the column list with a real value fails with Msg 13536 before any row is written.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>INSERT INTO dbo.Widget (Id, Code) VALUES (1, &#x27;ABC&#x27;);</code></pre></div>
+  <p class="example-explanation">Leaving ValidFrom/ValidTo out of the column list lets the engine populate both period columns itself.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

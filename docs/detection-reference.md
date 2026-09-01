@@ -992,3 +992,25 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
   unaffected branch is a no-op on the resulting `WriteState`), and adding a
   hook solely for it would have outweighed the benefit. Watch for it if this
   scanner shows up in a profile on a large procedure body.
+
+* **`GeneratedAlwaysColumnExplicitInsertRuleId`/`GeneratedAlwaysColumnExplicitUpdateRuleId`
+  — shipped.** Oracle-confirmed (Docker SQL Server 2022) a system-versioned
+  temporal table's `GENERATED ALWAYS AS ROW START`/`ROW END` period columns:
+  an `INSERT` (or MERGE `WHEN NOT MATCHED THEN INSERT`) naming a period
+  column in its column list with anything but `DEFAULT` fails with Msg
+  13536; an `UPDATE`/MERGE `WHEN MATCHED THEN UPDATE` `SET` clause naming a
+  period column fails with Msg 13537 unconditionally — `DEFAULT` is not an
+  escape on the UPDATE side, only on INSERT. Confirmed the fully-implicit
+  `INSERT INTO t VALUES (...)` form (no column list) is held to the same
+  rule at the period column's own physical ordinal position. Confirmed a
+  `SELECT`/`EXEC` row source naming a period column in its column list
+  always fails (13536) regardless of the selected value, since neither can
+  supply `DEFAULT`. One surprise worth recording: SQL Server checks this
+  restriction at `CREATE PROCEDURE` compile time, not only at execution —
+  a procedure whose body contains a non-`DEFAULT` explicit assignment to an
+  already-existing period column fails to compile at all (this is *not*
+  deferred name resolution's usual "objects can not-yet-exist" leniency).
+  That ruled out testing this rule via stored procedures the way most other
+  Oracle test fixtures do (`CREATE PROCEDURE` in the fixture's own DDL would
+  itself fail to deploy) — its Oracle tests instead parse/execute each
+  scenario as ad-hoc SQL text against a live-read catalog.

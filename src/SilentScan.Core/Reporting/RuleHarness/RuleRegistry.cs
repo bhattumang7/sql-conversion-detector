@@ -22,6 +22,7 @@ public static class RuleRegistry
         new NotInNullableSubqueryRule(),
         new NonUniqueUpdateSourceRule(),
         new CheckConstraintPredicateContradictionRule(),
+        new GeneratedAlwaysColumnAssignmentRule(),
         new FloatEqualityPredicateRule(),
         new FloatOrderDependentAggregateRule(),
         new AlwaysEncryptedOrderByRule(),

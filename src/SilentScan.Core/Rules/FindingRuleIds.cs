@@ -226,6 +226,8 @@ public static class FindingRuleIds
     public const string NonPersistedComputedColumnRuleId = "silentscan/catalog/non-persisted-computed-column";
     public const string SelfReferencingDmlRuleId = "silentscan/dml/self-referencing";
     public const string TemporalTableHistoryIndexGapRuleId = "silentscan/catalog/temporal-history-index-gap";
+    public const string GeneratedAlwaysColumnExplicitInsertRuleId = "silentscan/catalog/generated-always-column-explicit-insert";
+    public const string GeneratedAlwaysColumnExplicitUpdateRuleId = "silentscan/catalog/generated-always-column-explicit-update";
     public const string CheckConstraintNullNotHandledRuleId = "silentscan/catalog/check-constraint-null-not-handled";
     public const string CheckConstraintOnIdentityColumnRuleId = "silentscan/catalog/check-constraint-on-identity-column";
     public const string DefaultNullableConstraintRuleId = "silentscan/catalog/default-constraint-on-nullable-column";
@@ -574,6 +576,12 @@ public static class FindingRuleIds
         CheckConstraintPredicateContradictionKind.CheckConstraintInterval => CheckConstraintPredicateContradictionIntervalRuleId,
         CheckConstraintPredicateContradictionKind.NotNullConstraint => NotNullPredicateContradictionRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled CheckConstraintPredicateContradictionKind."),
+    };
+    public static string GeneratedAlwaysColumnAssignmentRuleId(GeneratedAlwaysColumnAssignmentKind kind) => kind switch
+    {
+        GeneratedAlwaysColumnAssignmentKind.ExplicitInsertValue => GeneratedAlwaysColumnExplicitInsertRuleId,
+        GeneratedAlwaysColumnAssignmentKind.ExplicitUpdateValue => GeneratedAlwaysColumnExplicitUpdateRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled GeneratedAlwaysColumnAssignmentKind."),
     };
     public static string TvfFenceRuleId(TvfFenceFindingKind kind) => kind switch
     {

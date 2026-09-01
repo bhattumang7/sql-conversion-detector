@@ -19,13 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`INSERT`/`UPDATE` explicitly assigns a `GENERATED ALWAYS` (temporal
-      period) column.** A DML target list explicitly assigning a value to a
-      catalog-identified generated-always column is a hard compile/runtime
-      error — clean catalog join (generated-always column metadata
-      intersected with the DML target list), same shape as the shipped
-      oracle-confirmed hard-error rules.
-
 - [ ] **`TemporalTableHistoryIndexGapRuleId` sibling: history-table column-
       mapping mismatch.** A system-versioned table's history table with an
       incompatible column mapping against the current table (ordinal, type,

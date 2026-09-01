@@ -1370,7 +1370,8 @@ public static class CatalogBuilder
             EncryptionType: ResolveEncryptionType(columnDefinition.Encryption),
             EnclaveSupport: ResolveEnclaveSupport(columnDefinition.Encryption, context.Catalog),
             IsMasked: columnDefinition.IsMasked,
-            MaskingFunctionName: MaskingFunctionNameNormalizer.Normalize(columnDefinition.MaskingFunction?.Value));
+            MaskingFunctionName: MaskingFunctionNameNormalizer.Normalize(columnDefinition.MaskingFunction?.Value),
+            IsGeneratedAlwaysPeriod: columnDefinition.GeneratedAlways is GeneratedAlwaysType.RowStart or GeneratedAlwaysType.RowEnd);
     }
 
     private static ColumnEncryptionEnclaveSupport ResolveEnclaveSupport(ColumnEncryptionDefinition? encryption, DatabaseCatalog? catalog) =>
