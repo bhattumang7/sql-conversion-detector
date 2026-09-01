@@ -93,7 +93,7 @@ public static class CartesianJoinScanner
         {
             foreach (var top in topLevel)
             {
-                foreach (var unqualified in FlattenUnqualifiedJoins(top))
+                foreach (var unqualified in PredicateTreeWalker.FlattenUnqualifiedJoins(top))
                 {
                     if (unqualified.UnqualifiedJoinType != UnqualifiedJoinType.CrossJoin)
                     {
@@ -200,47 +200,6 @@ public static class CartesianJoinScanner
 
                 default:
                     yield return expression;
-                    break;
-            }
-        }
-
-        private static IEnumerable<UnqualifiedJoin> FlattenUnqualifiedJoins(TableReference tableReference)
-        {
-            switch (tableReference)
-            {
-                case UnqualifiedJoin join:
-                    foreach (var t in FlattenUnqualifiedJoins(join.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenUnqualifiedJoins(join.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    yield return join;
-                    break;
-
-                case QualifiedJoin qualified:
-                    foreach (var t in FlattenUnqualifiedJoins(qualified.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenUnqualifiedJoins(qualified.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-
-                case JoinParenthesisTableReference parenthesis:
-                    foreach (var t in FlattenUnqualifiedJoins(parenthesis.Join))
-                    {
-                        yield return t;
-                    }
-
                     break;
             }
         }

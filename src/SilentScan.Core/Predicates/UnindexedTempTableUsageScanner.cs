@@ -87,11 +87,39 @@ public static class UnindexedTempTableUsageScanner
 
         public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker)
         {
-            if (node.WhereClause is { } where
-                && node.FromClause?.TableReferences is [NamedTableReference { SchemaObject.BaseIdentifier.Value: var name }]
-                && name.StartsWith('#'))
+            var tableReferences = node.FromClause?.TableReferences;
+            if (tableReferences is null)
             {
-                Usages.Add(new Usage(name, walker.CurrentProcScope, UnindexedTempTableUsageKind.FilteredInWhere, where.StartLine, where.StartColumn));
+                return;
+            }
+
+            if (node.WhereClause is { } where
+                && tableReferences is [NamedTableReference { SchemaObject.BaseIdentifier.Value: var soloName }]
+                && soloName.StartsWith('#'))
+            {
+                Usages.Add(new Usage(soloName, walker.CurrentProcScope, UnindexedTempTableUsageKind.FilteredInWhere, where.StartLine, where.StartColumn));
+            }
+
+            if (tableReferences.Count >= 2)
+            {
+                foreach (var reference in tableReferences)
+                {
+                    TryRecordJoinOperand(reference, reference, walker);
+                }
+            }
+
+            foreach (var reference in tableReferences)
+            {
+                foreach (var unqualified in PredicateTreeWalker.FlattenUnqualifiedJoins(reference))
+                {
+                    if (unqualified.UnqualifiedJoinType != UnqualifiedJoinType.CrossJoin)
+                    {
+                        continue;
+                    }
+
+                    TryRecordJoinOperand(unqualified.FirstTableReference, unqualified, walker);
+                    TryRecordJoinOperand(unqualified.SecondTableReference, unqualified, walker);
+                }
             }
         }
 

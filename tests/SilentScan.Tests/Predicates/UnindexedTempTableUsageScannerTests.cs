@@ -46,6 +46,51 @@ public sealed class UnindexedTempTableUsageScannerTests
     }
 
     [Fact]
+    public void SelectIntoThenCommaJoin_NoIndex_Fires()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.usp_Foo AS
+            BEGIN
+                SELECT Id, Code INTO #t FROM dbo.Source WHERE Flag = 1;
+                SELECT s.* FROM dbo.Source2 s, #t t WHERE s.Code = t.Code;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(UnindexedTempTableUsageKind.JoinOperand, finding.Kind);
+    }
+
+    [Fact]
+    public void SelectIntoThenExplicitCrossJoin_NoIndex_Fires()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.usp_Foo AS
+            BEGIN
+                SELECT Id, Code INTO #t FROM dbo.Source WHERE Flag = 1;
+                SELECT s.* FROM dbo.Source2 s CROSS JOIN #t t WHERE s.Code = t.Code;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(UnindexedTempTableUsageKind.JoinOperand, finding.Kind);
+    }
+
+    [Fact]
+    public void SelectIntoThenCommaJoin_WithIndexCreated_NeverFires()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.usp_Foo AS
+            BEGIN
+                SELECT Id, Code INTO #t FROM dbo.Source WHERE Flag = 1;
+                CREATE INDEX IX_t_Code ON #t (Code);
+                SELECT s.* FROM dbo.Source2 s, #t t WHERE s.Code = t.Code;
+            END
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void SelectIntoThenJoin_WithIndexCreated_NeverFires()
     {
         var findings = Scan("""

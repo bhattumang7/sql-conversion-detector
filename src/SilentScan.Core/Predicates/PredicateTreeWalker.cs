@@ -66,6 +66,47 @@ internal static class PredicateTreeWalker
         }
     }
 
+    public static IEnumerable<UnqualifiedJoin> FlattenUnqualifiedJoins(TableReference tableReference)
+    {
+        switch (tableReference)
+        {
+            case UnqualifiedJoin join:
+                foreach (var t in FlattenUnqualifiedJoins(join.FirstTableReference))
+                {
+                    yield return t;
+                }
+
+                foreach (var t in FlattenUnqualifiedJoins(join.SecondTableReference))
+                {
+                    yield return t;
+                }
+
+                yield return join;
+                break;
+
+            case QualifiedJoin qualified:
+                foreach (var t in FlattenUnqualifiedJoins(qualified.FirstTableReference))
+                {
+                    yield return t;
+                }
+
+                foreach (var t in FlattenUnqualifiedJoins(qualified.SecondTableReference))
+                {
+                    yield return t;
+                }
+
+                break;
+
+            case JoinParenthesisTableReference parenthesis:
+                foreach (var t in FlattenUnqualifiedJoins(parenthesis.Join))
+                {
+                    yield return t;
+                }
+
+                break;
+        }
+    }
+
     public static IEnumerable<NamedTableReference> FlattenNamedTables(TableReference tableReference)
     {
         switch (tableReference)

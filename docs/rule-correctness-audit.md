@@ -15,31 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 4 remain open below.
+correctness bugs found; 3 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`UnindexedTempTableUsageScanner` never flags a temp table joined via
-      an old-style comma join or an explicit `CROSS JOIN`, even though that
-      shape is squarely inside the rule's own stated scope ("used later as
-      a JOIN operand").**
-      (`src/SilentScan.Core/Predicates/UnindexedTempTableUsageScanner.cs:82-86`,
-      `OnEnterJoinSearchCondition` only fires for `QualifiedJoin`
-      (ANSI-92 `INNER/LEFT/RIGHT/FULL ... ON`) nodes; the `FilteredInWhere`
-      path at lines 88-96 only matches a single-element
-      `FromClause.TableReferences` list.) For `FROM #t, dbo.Other WHERE
-      #t.Id = Other.Id` or `FROM #t CROSS JOIN dbo.Other WHERE #t.Id =
-      Other.Id`, ScriptDom represents the FROM clause as a 2-element
-      `TableReferences` list with no wrapping `QualifiedJoin` node at all —
-      an AST shape this same codebase's own `CartesianJoinScanner`
-      explicitly detects and handles as a distinct join-shape family,
-      confirming it's real and reachable. Neither of `UnindexedTempTableUsageScanner`'s
-      two match patterns covers it, so a `#temp` table joined this way and
-      filtered by a WHERE-based join predicate is never reported at all —
-      false negative for a real, still-valid, semantically identical join
-      shape. Not covered by the existing test suite.
 
 - [ ] **`WindowFrameScanner` reports `ImplicitDefaultRangeFrame` for
       ranking, offset, and distribution window functions
