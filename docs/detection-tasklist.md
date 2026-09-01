@@ -19,14 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`STATISTICS_NORECOMPUTE` index option is a distinct staleness gap
-      from `MissingStatisticsScanner`.** The shipped rule catches "no
-      statistic exists and auto-create is off." An index built `WITH
-      (STATISTICS_NORECOMPUTE = ON)` has a statistic that exists but is
-      pinned - it is never auto-refreshed regardless of the database's
-      `AUTO_UPDATE_STATISTICS` setting. Same downstream symptom (stale
-      cardinality estimate), different DDL surface, currently zero coverage.
-
 - [ ] **`CURSOR_CLOSE_ON_COMMIT` - zero coverage, narrow blast radius.**
       When `ON`, any open cursor is silently closed by the next
       `COMMIT`/`ROLLBACK` - a script that opens a cursor, commits mid-flow,

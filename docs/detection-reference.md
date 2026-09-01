@@ -450,6 +450,16 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`IndexDesignFindingKind.NoRecomputeStatistics` already covers `CREATE
+  INDEX`/`ALTER INDEX ... REBUILD WITH (STATISTICS_NORECOMPUTE = ON)`, not
+  just `CREATE`/`UPDATE STATISTICS ... WITH NORECOMPUTE`.** Oracle-confirmed
+  (Docker, SQL Server): `sys.stats.no_recompute` is set to `1` identically
+  regardless of which DDL surface set it, and the index-backed statistics
+  object it produces has `auto_created = 0`, same as any other index stat.
+  `LiveCatalogReader` reads `sys.stats` directly, so `CatalogStatisticsInfo.NoRecompute`
+  already carries this fact for every DDL origin without any code change -
+  don't re-propose this as a distinct gap.
+
 * **Dynamic Data Masking: shipped as `DynamicDataMaskingScanner`, two finding
   kinds.** `PredicateExposure` - a masked column used as a direct operand of
   a comparison/`BETWEEN`/`LIKE`/`IN`/`GROUP BY`/`ORDER BY` - oracle-confirmed
