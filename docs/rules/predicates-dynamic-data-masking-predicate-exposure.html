@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dynamic Data Masking Predicate Exposure - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Dynamic Data Masking Predicate Exposure</h1>
+  <p class="rule-key"><code>silentscan/predicates/dynamic-data-masking-predicate-exposure</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A Dynamic Data Masking column is used as a direct operand of a comparison, BETWEEN, LIKE, IN, GROUP BY, or ORDER BY - oracle-confirmed the engine evaluates these against the real underlying value regardless of the caller&#x27;s UNMASK permission, so a caller who never sees the real value in output can still infer it (equality/range probing, or directly through GROUP BY&#x27;s distinct-group count or ORDER BY&#x27;s relative row order) - masking protects displayed output only, never predicate/sort/group evaluation.</p>
+  <p class="rationale">Dynamic Data Masking (`MASKED WITH (FUNCTION = ...)`) rewrites a masked column&#x27;s displayed value for any caller who lacks the `UNMASK` permission - a `default()`-masked `INT` shows `0`, a masked `DATETIME` shows `1900-01-01`, `email()` shows an obfuscated address, and so on. That substitution happens only when the column&#x27;s value is returned as output. It has no effect on how the engine evaluates a predicate, an `ORDER BY` key, or a `GROUP BY` key: those always compare the real, unmasked stored value, oracle-confirmed directly against the engine - `WHERE MaskedColumn = @guess` matches or fails to match based on the real value even though the same query&#x27;s `SELECT MaskedColumn` would have displayed the sentinel, and `GROUP BY MaskedColumn` produces one group per distinct real value even though every group&#x27;s displayed key looks identical.</p>
+  <p class="rationale">This turns masking into a boolean- or ranking-oracle: a caller with no `UNMASK` grant can still recover the real value of a masked column by probing it in a `WHERE`/`JOIN ON`/ `HAVING` predicate and observing which rows come back, by counting `GROUP BY` groups, or by reading relative row order from `ORDER BY` - all without ever seeing the real value in an output column. Nothing about the query&#x27;s shape looks unusual, and nothing errors.</p>
+  <h2>How can I fix it?</h2>
+  <p class="fix">Do not filter, join, group, or sort on a masked column for principals that must not see its real value - move the check behind a view or computed flag that does not itself leak the real value, or grant UNMASK only to principals who are already trusted with the real data.</p>
+  <h3>A WHERE-clause equality check silently exposes the real value</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Customers&#xA;(&#xA;    CustomerId INT NOT NULL PRIMARY KEY,&#xA;    Ssn        VARCHAR(11) MASKED WITH (FUNCTION = &#x27;default()&#x27;) NOT NULL&#xA;);&#xA;&#xA;SELECT CustomerId FROM dbo.Customers WHERE Ssn = @candidateSsn;</code></pre></div>
+  <p class="example-explanation">A caller without UNMASK sees only the default() sentinel from any SELECT Ssn, but this predicate is evaluated against the real stored value - repeating the query with different @candidateSsn values lets that caller recover the real SSN one guess at a time, entirely through which rows come back.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TABLE dbo.Customers&#xA;(&#xA;    CustomerId INT NOT NULL PRIMARY KEY,&#xA;    Ssn        VARCHAR(11) MASKED WITH (FUNCTION = &#x27;default()&#x27;) NOT NULL&#xA;);&#xA;&#xA;SELECT CustomerId FROM dbo.Customers WHERE CustomerId = @customerId;</code></pre></div>
+  <p class="example-explanation">The predicate no longer touches the masked column at all, so a caller without UNMASK cannot use this query to probe the real Ssn value.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

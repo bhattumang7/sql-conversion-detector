@@ -118,6 +118,17 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
             baseColumn.Type?.Collation?.GuaranteesDistinctLiteralsAreUnequal);
     }
 
+    public (string TableQualifiedName, CatalogColumn Column)? ResolveCatalogColumn(ColumnReferenceExpression columnRef, ScopeChain scopeChain)
+    {
+        if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, _sourcePath, ledger: null, _catalog) is not ColumnProvenance.BaseColumn baseColumn)
+        {
+            return null;
+        }
+
+        var catalogColumn = _catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.FindColumn(baseColumn.ColumnName, _catalog.IdentifierComparer);
+        return catalogColumn is null ? null : (baseColumn.TableQualifiedName, catalogColumn);
+    }
+
     public static void InspectJoinOnClauses(
         IList<TableReference>? tableReferences,
         ScopeChain scopeChain,

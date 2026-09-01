@@ -19,18 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **Dynamic Data Masking has zero coverage as a feature area** - not one
-      missing case, no references anywhere in Core at all (no check for
-      masked-column arithmetic/comparison exposure, no check for
-      `default()`'s per-type sentinel values e.g. `1900-01-01` for
-      `DATETIME`, oracle-confirmed). Scope, not a single bug: needs its own
-      pass to decide what's decidable and worth the precision bar, not a
-      quick patch. Separately, oracle-confirmed the engine recognizes an
-      undocumented fifth masking function name, `datetime()` (parses,
-      arity-checked, distinct from the four publicly documented functions
-      `default`/`email`/`random`/`partial`) - noted here so it isn't
-      rediscovered from scratch if this area gets scoped later.
-
 - [ ] **`ALLOW_ROW_LOCKS`/`ALLOW_PAGE_LOCKS = OFF` is a hidden concurrency
       hazard, zero coverage.** Both are plain DDL-declared/catalog-visible
       facts (`sys.indexes.allow_row_locks`/`allow_page_locks`), fully

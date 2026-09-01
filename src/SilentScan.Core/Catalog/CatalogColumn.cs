@@ -14,4 +14,6 @@ public sealed record CatalogColumn(
     decimal? IdentityIncrement = null,
     decimal? IdentityCurrentValue = null,
     ColumnEncryptionType EncryptionType = ColumnEncryptionType.None,
-    ColumnEncryptionEnclaveSupport EnclaveSupport = ColumnEncryptionEnclaveSupport.Unknown);
+    ColumnEncryptionEnclaveSupport EnclaveSupport = ColumnEncryptionEnclaveSupport.Unknown,
+    bool IsMasked = false,
+    string? MaskingFunctionName = null);

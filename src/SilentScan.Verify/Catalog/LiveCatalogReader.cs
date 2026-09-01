@@ -775,13 +775,15 @@ public sealed class LiveCatalogReader
                    ty.name AS type_name, c.max_length, c.precision, c.scale, c.collation_name,
                    c.is_nullable, c.is_identity, c.is_computed, cc.is_persisted, c.is_ansi_padded,
                    CONVERT(decimal(38,0), idc.seed_value), CONVERT(decimal(38,0), idc.increment_value),
-                   CONVERT(decimal(38,0), idc.last_value), c.encryption_type
+                   CONVERT(decimal(38,0), idc.last_value), c.encryption_type,
+                   c.is_masked, mc.masking_function
             FROM sys.columns c
             JOIN sys.types ty ON ty.user_type_id = c.user_type_id
             JOIN sys.tables t ON t.object_id = c.object_id
             JOIN sys.schemas s ON s.schema_id = t.schema_id
             LEFT JOIN sys.computed_columns cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
             LEFT JOIN sys.identity_columns idc ON idc.object_id = c.object_id AND idc.column_id = c.column_id
+            LEFT JOIN sys.masked_columns mc ON mc.object_id = c.object_id AND mc.column_id = c.column_id
             WHERE t.is_ms_shipped = 0
             ORDER BY c.object_id, c.column_id;
             """;
@@ -824,12 +826,17 @@ public sealed class LiveCatalogReader
         }
 
         var encryptionType = await ReadEncryptionTypeAsync(reader, cancellationToken);
+        var isMasked = reader.GetBoolean(18);
+        var maskingFunctionName = MaskingFunctionNameNormalizer.Normalize(await ReadNullableStringAsync(reader, 19, cancellationToken));
         var column = new CatalogColumn(
             columnName, type, reader.GetBoolean(9), reader.GetBoolean(10), reader.GetBoolean(11),
             !await reader.IsDBNullAsync(12, cancellationToken) && reader.GetBoolean(12), reader.GetBoolean(13),
             await ReadNullableDecimalAsync(reader, 14, cancellationToken),
             await ReadNullableDecimalAsync(reader, 15, cancellationToken),
-            await ReadNullableDecimalAsync(reader, 16, cancellationToken), encryptionType);
+            await ReadNullableDecimalAsync(reader, 16, cancellationToken), encryptionType,
+            EnclaveSupport: ColumnEncryptionEnclaveSupport.Unknown,
+            IsMasked: isMasked,
+            MaskingFunctionName: maskingFunctionName);
         return (objectId, column);
     }
 

@@ -26,6 +26,7 @@ public static class RuleRegistry
         new IndexCoverageRule(),
         new SelfReferencingDmlRule(),
         new TransactionHygieneRule(),
+        new DynamicDataMaskingRule(),
 
         new ModuleCompileFlagRule(),
         new WindowFrameRule(),

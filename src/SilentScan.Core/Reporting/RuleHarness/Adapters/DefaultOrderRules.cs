@@ -163,3 +163,11 @@ internal sealed class TransactionHygieneRule : IPerFileRule
     public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => TransactionHygieneScanner.CreateRule(parseResult.SourcePath);
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => TransactionHygieneScanner.Harvest((TransactionHygieneScanner.Rule)moduleRule);
 }
+
+internal sealed class DynamicDataMaskingRule : IPerFileRule
+{
+    public string Id => "DynamicDataMaskingScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => DynamicDataMaskingScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => DynamicDataMaskingScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => DynamicDataMaskingScanner.Harvest((DynamicDataMaskingScanner.Rule)moduleRule);
+}

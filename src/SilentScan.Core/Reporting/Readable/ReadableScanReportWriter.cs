@@ -137,6 +137,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(IdentityRange(report, headingLevel, pathBase));
         blocks.AddRange(FloatEquality(report, headingLevel, pathBase));
         blocks.AddRange(FloatOrderDependentAggregate(report, headingLevel, pathBase));
+        blocks.AddRange(DynamicDataMasking(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedOrderBy(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedKeyColumn(report, headingLevel, pathBase));
         blocks.AddRange(AlterColumnSafety(report, headingLevel, pathBase));
@@ -231,6 +232,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Identity/sequence range signals", report.Find<IdentityRangeFinding>(nameof(IdentityRangeScanner)).Count);
         AddCount(counts, "Float/real equality predicates", report.Find<FloatEqualityFinding>(nameof(FloatEqualityPredicateScanner)).Count);
         AddCount(counts, "Float/real columns in order-dependent aggregates", report.Find<FloatOrderDependentAggregateFinding>(nameof(FloatOrderDependentAggregateScanner)).Count);
+        AddCount(counts, "Dynamic Data Masking silently defeated", report.Find<DynamicDataMaskingFinding>(nameof(DynamicDataMaskingScanner)).Count);
         AddCount(counts, "Always Encrypted ORDER BY", report.Find<AlwaysEncryptedOrderByFinding>(nameof(AlwaysEncryptedOrderByScanner)).Count);
         AddCount(counts, "Always Encrypted non-enclave key column", report.Find<AlwaysEncryptedKeyColumnFinding>(nameof(AlwaysEncryptedKeyColumnScanner)).Count);
         AddCount(counts, "ALTER COLUMN safety", report.Find<AlterColumnSafetyFinding>(nameof(AlterColumnSafetyScanner)).Count);
@@ -1514,6 +1516,32 @@ public static class ReadableScanReportWriter
                 f.TypeDisplay,
                 f.AggregateFunctionName,
                 $"Aggregated at line {f.Line}, column {f.Column}.",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> DynamicDataMasking(ScanReport report, int level, string? pathBase)
+    {
+        var findings = report.Find<DynamicDataMaskingFinding>(nameof(DynamicDataMaskingScanner));
+        if (findings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Dynamic Data Masking silently defeated ({findings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A masked column is used in a predicate/ordering/grouping context, where the engine evaluates against the real underlying value regardless of masking, or is used inside a computed SELECT-list expression, where the engine silently replaces the whole expression's result with the masking function's fixed sentinel instead of a real computed value - either way, masking's intended protection is defeated with no error and no visible sign at the call site.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.DynamicDataMaskingRuleId(DynamicDataMaskingFindingKind.PredicateExposure)));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Masking function", "Kind", "Context", DetailHeader],
+            [.. findings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.MaskingFunctionName,
+                f.Kind == DynamicDataMaskingFindingKind.PredicateExposure ? "Real-value exposure" : "Sentinel collapse",
+                f.ContextDescription,
+                $"Referenced at line {f.Line}, column {f.Column}.",
             })]);
     }
 

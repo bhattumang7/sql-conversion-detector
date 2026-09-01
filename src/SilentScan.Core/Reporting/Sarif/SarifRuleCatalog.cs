@@ -35,6 +35,7 @@ public static class SarifRuleCatalog
     public static string MaxTypedColumnRuleId(NonIndexableColumnFindingKind kind) => FindingRuleIds.MaxTypedColumnRuleId(kind);
     public const string ColumnstoreUnsupportedColumnTypeRuleId = FindingRuleIds.ColumnstoreUnsupportedColumnTypeRuleId;
     public static string SelectiveXmlIndexValueColumnRuleId(SelectiveXmlIndexValueColumnFindingKind kind) => FindingRuleIds.SelectiveXmlIndexValueColumnRuleId(kind);
+    public static string DynamicDataMaskingRuleId(DynamicDataMaskingFindingKind kind) => FindingRuleIds.DynamicDataMaskingRuleId(kind);
     public const string FloatEqualityRuleId = FindingRuleIds.FloatEqualityRuleId;
     public const string FloatOrderDependentAggregateRuleId = FindingRuleIds.FloatOrderDependentAggregateRuleId;
     public const string AlwaysEncryptedOrderByRuleId = FindingRuleIds.AlwaysEncryptedOrderByRuleId;

@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">284 rules. 197 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">286 rules. 199 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -415,6 +415,8 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/predicates-always-encrypted-order-by.html">Always Encrypted Order By</a> <code class="rule-key">silentscan/predicates/always-encrypted-order-by</code><span class="snippet">An ORDER BY clause references an Always Encrypted column.</span></li>
       <li><a class="id" href="rules/predicates-ansi-padding-mismatch.html">ANSI Padding Mismatch</a> <code class="rule-key">silentscan/predicates/ansi-padding-mismatch</code><span class="snippet">A LIKE predicate compares a non-ANSI-padded varchar/varbinary column against a literal pattern with significant trailing whitespace.</span></li>
       <li><a class="id" href="rules/predicates-catch-all-parameter.html">Catch All Parameter</a> <code class="rule-key">silentscan/predicates/catch-all-parameter</code><span class="snippet">A predicate of the shape (Col = @p OR @p IS NULL).</span></li>
+      <li><a class="id" href="rules/predicates-dynamic-data-masking-computed-expression-collapse.html">Dynamic Data Masking Computed Expression Collapse</a> <code class="rule-key">silentscan/predicates/dynamic-data-masking-computed-expression-collapse</code><span class="snippet">A Dynamic Data Masking column is used inside a non-trivial SELECT-list expression (arithmetic, CAST/CONVERT, string concatenation, a scalar function call, or an aggregate) rather than being selected directly.</span></li>
+      <li><a class="id" href="rules/predicates-dynamic-data-masking-predicate-exposure.html">Dynamic Data Masking Predicate Exposure</a> <code class="rule-key">silentscan/predicates/dynamic-data-masking-predicate-exposure</code><span class="snippet">A Dynamic Data Masking column is used as a direct operand of a comparison, BETWEEN, LIKE, IN, GROUP BY, or ORDER BY.</span></li>
       <li><a class="id" href="rules/predicates-filtered-index-parameter-mismatch.html">Filtered Index Parameter Mismatch</a> <code class="rule-key">silentscan/predicates/filtered-index-parameter-mismatch</code><span class="snippet">A predicate compares a column against a parameter or local variable, but that same column carries a filtered index whose own filter is a literal-equality restatement of this exact comparison.</span></li>
       <li><a class="id" href="rules/predicates-float-equality.html">Float Equality</a> <code class="rule-key">silentscan/predicates/float-equality</code><span class="snippet">A WHERE/ON equality or inequality predicate (= or &lt;&gt;) compares a float/real (approximate, IEEE-754) column.</span></li>
       <li><a class="id" href="rules/predicates-float-order-dependent-aggregate.html">Float Order Dependent Aggregate</a> <code class="rule-key">silentscan/predicates/float-order-dependent-aggregate</code><span class="snippet">SUM/AVG/VAR/VARP/STDEV/STDEVP is applied to a float/real (approximate, IEEE-754) column.</span></li>

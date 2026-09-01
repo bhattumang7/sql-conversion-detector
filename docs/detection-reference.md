@@ -450,6 +450,31 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **Dynamic Data Masking: shipped as `DynamicDataMaskingScanner`, two finding
+  kinds.** `PredicateExposure` - a masked column used as a direct operand of
+  a comparison/`BETWEEN`/`LIKE`/`IN`/`GROUP BY`/`ORDER BY` - oracle-confirmed
+  the engine evaluates all of these against the real stored value regardless
+  of the caller's `UNMASK` permission (`WHERE`, `JOIN ON`, `HAVING`, `CASE
+  WHEN` conditions, `GROUP BY` distinct-group count, `ORDER BY` row order all
+  leak the real value this way; `IS NULL` deliberately excluded - masking
+  never changes a value's null-ness, oracle-confirmed, so it leaks nothing).
+  `ComputedExpressionCollapse` - a masked column wrapped in any non-bare
+  expression in a SELECT-list position (arithmetic, `CAST`/`CONVERT`,
+  `DATEADD`, string concatenation, `ISNULL`, an aggregate) - oracle-confirmed
+  the whole expression's result collapses to the masking function's fixed
+  sentinel for the expression's own output type, not a value computed from
+  the underlying data, on both SQL Server 2022 and 2025. Two additional
+  oracle-confirmed facts feed the rule but aren't separately modeled: `ALTER
+  TABLE ... ALTER COLUMN <any DataType clause>` unconditionally drops masking
+  from that column (even re-declaring the identical type), so
+  `CatalogBuilder.VisitAlterColumn`'s type-changing branch clears
+  `IsMasked`/`MaskingFunctionName` rather than carrying them forward; and the
+  engine recognizes a fifth, undocumented masking function name, `datetime()`
+  (parses, arity-checked, distinct from the four public functions
+  `default`/`email`/`random`/`partial`) - not given special handling since
+  the scanner treats the masking function name as an opaque catalog fact, not
+  a fixed enum.
+
 * **`RemovedSecurityStoredProcedureNames` diffed against `sys.dm_os_performance_counters`
   `'Deprecated Features'` (oracle-confirmed).** `sp_change_users_login` and
   `sp_changedbowner` are tracked and now in the set. `sp_dropalias`,

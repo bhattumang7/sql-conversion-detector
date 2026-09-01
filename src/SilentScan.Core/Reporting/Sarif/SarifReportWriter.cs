@@ -96,6 +96,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<IdentityRangeFinding>("IdentityRangeScanner").Select(ToResult));
         results.AddRange(report.Find<FloatEqualityFinding>("FloatEqualityPredicateScanner").Select(ToResult));
         results.AddRange(report.Find<FloatOrderDependentAggregateFinding>("FloatOrderDependentAggregateScanner").Select(ToResult));
+        results.AddRange(report.Find<DynamicDataMaskingFinding>(nameof(DynamicDataMaskingScanner)).Select(ToResult));
         results.AddRange(report.Find<AlwaysEncryptedOrderByFinding>("AlwaysEncryptedOrderByScanner").Select(ToResult));
         results.AddRange(report.Find<AlwaysEncryptedKeyColumnFinding>("AlwaysEncryptedKeyColumnScanner").Select(ToResult));
         results.AddRange(report.Find<AlterColumnSafetyFinding>("AlterColumnSafetyScanner").Select(ToResult));
@@ -1250,6 +1251,17 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FloatOrderDependentAggregateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TypeDisplay}) is passed to {finding.AggregateFunctionName}() - this aggregate's running result accumulates in an order that depends on plan shape, so the identical aggregate over identical data can return a different bit pattern across runs.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(DynamicDataMaskingFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DynamicDataMaskingRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = finding.Kind == DynamicDataMaskingFindingKind.PredicateExposure
+            ? $"'{finding.TableQualifiedName}.{finding.ColumnName}' (masked with {finding.MaskingFunctionName}()) is used in a {finding.ContextDescription} - the engine evaluates this against the real underlying value regardless of masking, letting a caller without UNMASK infer the real value through the result."
+            : $"'{finding.TableQualifiedName}.{finding.ColumnName}' (masked with {finding.MaskingFunctionName}()) is used inside a {finding.ContextDescription} - for a caller without UNMASK the whole expression's result silently collapses to the masking function's fixed sentinel instead of a real computed value.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

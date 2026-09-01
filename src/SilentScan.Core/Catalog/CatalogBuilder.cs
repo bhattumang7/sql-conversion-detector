@@ -1046,21 +1046,47 @@ public static class CatalogBuilder
                 return;
             }
 
-            var newType = SqlTypeReferenceResolver.Resolve(alterColumn.DataType, alterColumn.Collation, catalog.TypeAliases);
-            if (newType is { IsStringFamily: true, Collation: null } && catalog.DefaultCollation is not null)
+            List<CatalogColumn> updatedColumns;
+            if (alterColumn.DataType is null)
             {
-                newType = newType with { Collation = catalog.DefaultCollation };
+                updatedColumns = existing.Columns
+                    .Select(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
+                        ? ApplyAlterColumnOption(c, alterColumn.AlterTableAlterColumnOption, alterColumn.MaskingFunction)
+                        : c)
+                    .ToList();
             }
+            else
+            {
+                var newType = SqlTypeReferenceResolver.Resolve(alterColumn.DataType, alterColumn.Collation, catalog.TypeAliases);
+                if (newType is { IsStringFamily: true, Collation: null } && catalog.DefaultCollation is not null)
+                {
+                    newType = newType with { Collation = catalog.DefaultCollation };
+                }
 
-            catalog.AddAlterColumnEvent(new CatalogAlterColumnEvent(
-                qualifiedName, columnName, existingColumn.Type, newType, sourcePath, alterColumn.StartLine));
+                catalog.AddAlterColumnEvent(new CatalogAlterColumnEvent(
+                    qualifiedName, columnName, existingColumn.Type, newType, sourcePath, alterColumn.StartLine));
 
-            var updatedColumns = existing.Columns
-                .Select(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase) ? c with { Type = newType } : c)
-                .ToList();
+                updatedColumns = existing.Columns
+                    .Select(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
+                        ? c with { Type = newType, IsMasked = false, MaskingFunctionName = null }
+                        : c)
+                    .ToList();
+            }
 
             catalog.AddOrReplace(existing with { Columns = updatedColumns }, writeScope);
         }
+
+        private static CatalogColumn ApplyAlterColumnOption(
+            CatalogColumn column, AlterTableAlterColumnOption option, StringLiteral? maskingFunction) => option switch
+        {
+            AlterTableAlterColumnOption.AddMaskingFunction => column with
+            {
+                IsMasked = true,
+                MaskingFunctionName = MaskingFunctionNameNormalizer.Normalize(maskingFunction?.Value),
+            },
+            AlterTableAlterColumnOption.DropMaskingFunction => column with { IsMasked = false, MaskingFunctionName = null },
+            _ => column,
+        };
 
         private void VisitDropTableElements(AlterTableDropTableElementStatement dropStatement)
         {
@@ -1340,7 +1366,9 @@ public static class CatalogBuilder
             IsComputed: columnDefinition.ComputedColumnExpression is not null,
             IsPersisted: columnDefinition.IsPersisted,
             EncryptionType: ResolveEncryptionType(columnDefinition.Encryption),
-            EnclaveSupport: ResolveEnclaveSupport(columnDefinition.Encryption, context.Catalog));
+            EnclaveSupport: ResolveEnclaveSupport(columnDefinition.Encryption, context.Catalog),
+            IsMasked: columnDefinition.IsMasked,
+            MaskingFunctionName: MaskingFunctionNameNormalizer.Normalize(columnDefinition.MaskingFunction?.Value));
     }
 
     private static ColumnEncryptionEnclaveSupport ResolveEnclaveSupport(ColumnEncryptionDefinition? encryption, DatabaseCatalog? catalog) =>

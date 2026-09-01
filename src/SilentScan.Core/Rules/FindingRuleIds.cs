@@ -43,6 +43,12 @@ public static class FindingRuleIds
         SelectiveXmlIndexValueColumnFindingKind.LargeObject => "silentscan/catalog/selective-xml-index-value-column-large-object",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SelectiveXmlIndexValueColumnFindingKind."),
     };
+    public static string DynamicDataMaskingRuleId(DynamicDataMaskingFindingKind kind) => kind switch
+    {
+        DynamicDataMaskingFindingKind.PredicateExposure => "silentscan/predicates/dynamic-data-masking-predicate-exposure",
+        DynamicDataMaskingFindingKind.ComputedExpressionCollapse => "silentscan/predicates/dynamic-data-masking-computed-expression-collapse",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DynamicDataMaskingFindingKind."),
+    };
     public const string FloatEqualityRuleId = "silentscan/predicates/float-equality";
     public const string FloatOrderDependentAggregateRuleId = "silentscan/predicates/float-order-dependent-aggregate";
     public const string AlwaysEncryptedOrderByRuleId = "silentscan/predicates/always-encrypted-order-by";

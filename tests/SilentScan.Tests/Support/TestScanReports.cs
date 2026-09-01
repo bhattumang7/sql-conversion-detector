@@ -101,6 +101,7 @@ public static class TestScanReports
         IReadOnlyList<WindowFunctionArgumentFinding>? WindowFunctionArgumentFindings = null,
         IReadOnlyList<SelectiveXmlIndexValueColumnFinding>? SelectiveXmlIndexValueColumnFindings = null,
         IReadOnlyList<FloatOrderDependentAggregateFinding>? FloatOrderDependentAggregateFindings = null,
+        IReadOnlyList<DynamicDataMaskingFinding>? DynamicDataMaskingFindings = null,
         IReadOnlyList<AlwaysEncryptedKeyColumnFinding>? AlwaysEncryptedKeyColumnFindings = null,
         IReadOnlyList<AlterColumnSafetyFinding>? AlterColumnSafetyFindings = null,
         IReadOnlyList<SpExecuteSqlParameterMismatchFinding>? SpExecuteSqlParameterMismatchFindings = null,
@@ -208,6 +209,7 @@ public static class TestScanReports
         Set("WindowFunctionArgumentScanner", WindowFunctionArgumentFindings);
         Set("SelectiveXmlIndexValueColumnScanner", SelectiveXmlIndexValueColumnFindings);
         Set("FloatOrderDependentAggregateScanner", FloatOrderDependentAggregateFindings);
+        Set(nameof(DynamicDataMaskingScanner), DynamicDataMaskingFindings);
         Set("AlwaysEncryptedKeyColumnScanner", AlwaysEncryptedKeyColumnFindings);
         Set("AlterColumnSafetyScanner", AlterColumnSafetyFindings);
         Set("SpExecuteSqlParameterMismatchScanner", SpExecuteSqlParameterMismatchFindings);
