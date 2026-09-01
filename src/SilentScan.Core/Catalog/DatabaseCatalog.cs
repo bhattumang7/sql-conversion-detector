@@ -44,6 +44,10 @@ public sealed class DatabaseCatalog
 
     private Dictionary<string, IReadOnlyList<string>> _viewCompiledColumnsByQualifiedName;
 
+    private Dictionary<string, string> _viewDefinitionTextByQualifiedName;
+
+    private Dictionary<string, PartitionFunctionSignature> _partitionFunctionSignatureBySchemeName;
+
     private Dictionary<string, bool> _moduleUsesQuotedIdentifierByQualifiedName;
 
     private Dictionary<string, bool> _moduleUsesAnsiNullsByQualifiedName;
@@ -76,6 +80,8 @@ public sealed class DatabaseCatalog
         _indexedViewIndexesByQualifiedName = new(_identifierComparer);
         _indexedViewsByBaseTableQualifiedName = new(_identifierComparer);
         _viewCompiledColumnsByQualifiedName = new(_identifierComparer);
+        _viewDefinitionTextByQualifiedName = new(_identifierComparer);
+        _partitionFunctionSignatureBySchemeName = new(_identifierComparer);
         _moduleUsesQuotedIdentifierByQualifiedName = new(_identifierComparer);
         _moduleUsesAnsiNullsByQualifiedName = new(_identifierComparer);
         _moduleIsRecompiledByQualifiedName = new(_identifierComparer);
@@ -199,6 +205,18 @@ public sealed class DatabaseCatalog
 
     public bool TryGetViewCompiledColumns(string qualifiedName, out IReadOnlyList<string> columnNames) =>
         _viewCompiledColumnsByQualifiedName.TryGetValue(qualifiedName, out columnNames!);
+
+    public void AddViewDefinitionText(string qualifiedName, string definitionText) =>
+        _viewDefinitionTextByQualifiedName[qualifiedName] = definitionText;
+
+    public bool TryGetViewDefinitionText(string qualifiedName, out string definitionText) =>
+        _viewDefinitionTextByQualifiedName.TryGetValue(qualifiedName, out definitionText!);
+
+    public void AddPartitionFunctionSignature(string schemeName, PartitionFunctionSignature signature) =>
+        _partitionFunctionSignatureBySchemeName[schemeName] = signature;
+
+    public bool TryGetPartitionFunctionSignature(string schemeName, out PartitionFunctionSignature signature) =>
+        _partitionFunctionSignatureBySchemeName.TryGetValue(schemeName, out signature!);
 
     public void AddModuleUsesQuotedIdentifier(string qualifiedName, bool usesQuotedIdentifier) =>
         _moduleUsesQuotedIdentifierByQualifiedName[qualifiedName] = usesQuotedIdentifier;

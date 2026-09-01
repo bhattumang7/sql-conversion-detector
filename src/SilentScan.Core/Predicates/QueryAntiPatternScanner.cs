@@ -859,6 +859,18 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
+            if (InspectIndexedViewPartitioningColumnAlignment(node, sourceQualifiedName, targetQualifiedName, sourceQualifiedName, source)
+                || InspectIndexedViewPartitioningColumnAlignment(node, sourceQualifiedName, targetQualifiedName, targetQualifiedName, target))
+            {
+                return;
+            }
+
+            if (InspectIndexedViewPartitionFunctionEquivalence(node, sourceQualifiedName, targetQualifiedName, sourceQualifiedName, source)
+                || InspectIndexedViewPartitionFunctionEquivalence(node, sourceQualifiedName, targetQualifiedName, targetQualifiedName, target))
+            {
+                return;
+            }
+
             var sourceViewCount = CountActiveIndexedViews(sourceQualifiedName);
             var targetViewCount = CountActiveIndexedViews(targetQualifiedName);
             if (targetViewCount <= sourceViewCount)
@@ -893,6 +905,79 @@ public static class QueryAntiPatternScanner
                     QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment, sourcePath,
                     node.StartLine, node.StartColumn,
                     $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - table '{tableQualifiedName}' is partitioned on scheme '{table.PartitionSchemeName}', but its indexed view '{viewQualifiedName}' has a clustered index that is not partitioned (error 11401); this statement will fail at execution.",
+                    FindingConfidence.High));
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool InspectIndexedViewPartitioningColumnAlignment(
+            AlterTableSwitchStatement node, string sourceQualifiedName, string targetQualifiedName, string tableQualifiedName, CatalogTable table)
+        {
+            var tableClusteredIndex = table.Indexes.FirstOrDefault(i => i.IsClustered && !i.IsColumnstore);
+            if (tableClusteredIndex?.PartitionSchemeName is null || tableClusteredIndex.PartitioningColumnName is not { } tablePartitioningColumnName)
+            {
+                return false;
+            }
+
+            foreach (var viewQualifiedName in catalog.GetIndexedViewsReferencing(tableQualifiedName))
+            {
+                var clusteredIndex = ActiveClusteredIndexOf(viewQualifiedName);
+                if (clusteredIndex is not { PartitionSchemeName: not null, PartitioningColumnName: { } viewPartitioningColumnName })
+                {
+                    continue;
+                }
+
+                var alignment = IndexedViewPartitioningColumnMatcher.Resolve(
+                    catalog, viewQualifiedName, viewPartitioningColumnName, tablePartitioningColumnName);
+                if (alignment is IndexedViewPartitioningColumnAlignment.Aligned or IndexedViewPartitioningColumnAlignment.Unknown)
+                {
+                    continue;
+                }
+
+                var detail = alignment == IndexedViewPartitioningColumnAlignment.DerivedExpression
+                    ? $"its partitioning column '{viewPartitioningColumnName}' calculates its value from an expression rather than directly selecting table partitioning column '{tablePartitioningColumnName}' (error 11403)"
+                    : $"its partitioning column '{viewPartitioningColumnName}' is directly selected from a different column than table partitioning column '{tablePartitioningColumnName}' (error 11405)";
+
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - indexed view '{viewQualifiedName}' is not aligned with table '{tableQualifiedName}': {detail}; this statement will fail at execution.",
+                    FindingConfidence.High));
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool InspectIndexedViewPartitionFunctionEquivalence(
+            AlterTableSwitchStatement node, string sourceQualifiedName, string targetQualifiedName, string tableQualifiedName, CatalogTable table)
+        {
+            if (table.PartitionSchemeName is not { } tableSchemeName
+                || !catalog.TryGetPartitionFunctionSignature(tableSchemeName, out var tableFunction))
+            {
+                return false;
+            }
+
+            foreach (var viewQualifiedName in catalog.GetIndexedViewsReferencing(tableQualifiedName))
+            {
+                var clusteredIndex = ActiveClusteredIndexOf(viewQualifiedName);
+                if (clusteredIndex?.PartitionSchemeName is not { } viewSchemeName
+                    || !catalog.TryGetPartitionFunctionSignature(viewSchemeName, out var viewFunction))
+                {
+                    continue;
+                }
+
+                if (viewFunction.IsEquivalentTo(tableFunction, catalog.IdentifierComparer))
+                {
+                    continue;
+                }
+
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - index '{clusteredIndex.Name ?? "(unnamed)"}' on indexed view '{viewQualifiedName}' uses partition function '{viewFunction.FunctionName}', but table '{tableQualifiedName}' uses non-equivalent partition function '{tableFunction.FunctionName}' (error 11400); this statement will fail at execution.",
                     FindingConfidence.High));
                 return true;
             }

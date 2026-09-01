@@ -166,6 +166,16 @@ public sealed class LiveCatalogReader
             catalog.AddViewCompiledColumns(qualifiedName, columnNames);
         }
 
+        foreach (var (qualifiedName, definitionText) in await ReadViewDefinitionTextAsync(connection, cancellationToken))
+        {
+            catalog.AddViewDefinitionText(qualifiedName, definitionText);
+        }
+
+        foreach (var (schemeName, signature) in await ReadPartitionSchemeFunctionSignaturesAsync(connection, cancellationToken))
+        {
+            catalog.AddPartitionFunctionSignature(schemeName, signature);
+        }
+
         foreach (var pair in await ReadTemporalTablePairsAsync(connection, cancellationToken))
         {
             catalog.AddTemporalTablePair(pair);
@@ -1329,13 +1339,15 @@ public sealed class LiveCatalogReader
             SELECT s.name AS schema_name, v.name AS view_name, i.index_id, i.name AS index_name, i.type_desc, i.is_unique,
                    i.is_primary_key, i.is_unique_constraint, i.has_filter, i.is_disabled,
                    ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name,
-                   ps.name AS partition_scheme_name
+                   ps.name AS partition_scheme_name, pc.name AS partitioning_column_name
             FROM sys.indexes i
             JOIN sys.views v ON v.object_id = i.object_id
             JOIN sys.schemas s ON s.schema_id = v.schema_id
             JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
             JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
             LEFT JOIN sys.partition_schemes ps ON ps.data_space_id = i.data_space_id
+            LEFT JOIN sys.index_columns pic ON pic.object_id = i.object_id AND pic.index_id = i.index_id AND pic.partition_ordinal = 1
+            LEFT JOIN sys.columns pc ON pc.object_id = pic.object_id AND pc.column_id = pic.column_id
             WHERE v.is_ms_shipped = 0 AND i.type_desc <> 'HEAP'
             ORDER BY s.name, v.name, i.index_id, ic.index_column_id;
             """;
@@ -1355,6 +1367,7 @@ public sealed class LiveCatalogReader
                 var indexName = await reader.IsDBNullAsync(3, cancellationToken) ? null : reader.GetString(3);
                 var typeDesc = reader.GetString(4);
                 var partitionSchemeName = await reader.IsDBNullAsync(14, cancellationToken) ? null : reader.GetString(14);
+                var partitioningColumnName = await reader.IsDBNullAsync(15, cancellationToken) ? null : reader.GetString(15);
                 row = new IndexRow(
                     Name: indexName,
                     TypeDesc: typeDesc,
@@ -1365,7 +1378,8 @@ public sealed class LiveCatalogReader
                     IsDisabled: reader.GetBoolean(9),
                     KeyColumns: [],
                     IncludedColumns: [],
-                    PartitionSchemeName: partitionSchemeName);
+                    PartitionSchemeName: partitionSchemeName,
+                    PartitioningColumnName: partitioningColumnName);
                 rowsByIndex[key] = row;
             }
 
@@ -1395,7 +1409,8 @@ public sealed class LiveCatalogReader
                 IsColumnstore: kv.Value.TypeDesc.Contains("COLUMNSTORE", StringComparison.OrdinalIgnoreCase),
                 IsDisabled: kv.Value.IsDisabled,
                 IsClustered: kv.Value.TypeDesc.StartsWith("CLUSTERED", StringComparison.OrdinalIgnoreCase),
-                PartitionSchemeName: kv.Value.PartitionSchemeName))];
+                PartitionSchemeName: kv.Value.PartitionSchemeName,
+                PartitioningColumnName: kv.Value.PartitioningColumnName))];
         }
 
         return indexesByView;
@@ -1466,5 +1481,93 @@ public sealed class LiveCatalogReader
         }
 
         return [.. byView.Values];
+    }
+
+    private static async Task<List<(string QualifiedName, string DefinitionText)>> ReadViewDefinitionTextAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, v.name AS view_name, m.definition
+            FROM sys.views v
+            JOIN sys.schemas s ON s.schema_id = v.schema_id
+            JOIN sys.sql_modules m ON m.object_id = v.object_id
+            WHERE v.is_ms_shipped = 0 AND m.definition IS NOT NULL;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var definitions = new List<(string, string)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var qualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+            definitions.Add((qualifiedName, reader.GetString(2)));
+        }
+
+        return definitions;
+    }
+
+    private static async Task<List<(string SchemeName, PartitionFunctionSignature Signature)>> ReadPartitionSchemeFunctionSignaturesAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string schemesSql = """
+            SELECT ps.name AS scheme_name, pf.name AS function_name, pf.boundary_value_on_right,
+                   ISNULL(t.name, N'') AS parameter_type_name
+            FROM sys.partition_schemes ps
+            JOIN sys.partition_functions pf ON pf.function_id = ps.function_id
+            OUTER APPLY (
+                SELECT TOP (1) ty.name
+                FROM sys.partition_parameters pp
+                JOIN sys.types ty ON ty.user_type_id = pp.user_type_id
+                WHERE pp.function_id = pf.function_id
+                ORDER BY pp.parameter_id
+            ) t;
+            """;
+
+        const string boundariesSql = """
+            SELECT pf.name AS function_name, prv.boundary_id, CONVERT(NVARCHAR(4000), prv.value) AS value_text
+            FROM sys.partition_functions pf
+            JOIN sys.partition_range_values prv ON prv.function_id = pf.function_id
+            ORDER BY pf.name, prv.boundary_id;
+            """;
+
+        var boundaryValuesByFunction = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        await using (var command = connection.CreateReadOnlyCommand(boundariesSql))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var functionName = reader.GetString(0);
+                var valueText = await reader.IsDBNullAsync(2, cancellationToken) ? "NULL" : reader.GetString(2);
+
+                if (!boundaryValuesByFunction.TryGetValue(functionName, out var values))
+                {
+                    values = [];
+                    boundaryValuesByFunction[functionName] = values;
+                }
+
+                values.Add(valueText);
+            }
+        }
+
+        var signatures = new List<(string, PartitionFunctionSignature)>();
+        await using (var command = connection.CreateReadOnlyCommand(schemesSql))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var schemeName = reader.GetString(0);
+                var functionName = reader.GetString(1);
+                var isRangeRight = reader.GetBoolean(2);
+                var parameterTypeName = reader.GetString(3);
+                var boundaryValues = boundaryValuesByFunction.TryGetValue(functionName, out var values)
+                    ? (IReadOnlyList<string>)values
+                    : [];
+
+                signatures.Add((schemeName, new PartitionFunctionSignature(functionName, isRangeRight, parameterTypeName, boundaryValues)));
+            }
+        }
+
+        return signatures;
     }
 }
