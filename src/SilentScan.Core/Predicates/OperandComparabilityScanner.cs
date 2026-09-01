@@ -88,7 +88,7 @@ public static class OperandComparabilityScanner
 
             foreach (var inPredicate in collector.InPredicates)
             {
-                InspectMembership(inPredicate.Expression, scopeChain, OperandComparabilityContext.In);
+                InspectIn(inPredicate, scopeChain);
             }
 
             foreach (var between in collector.Betweens)
@@ -99,6 +99,28 @@ public static class OperandComparabilityScanner
             foreach (var nullIf in collector.NullIfs)
             {
                 InspectNullIf(nullIf, scopeChain);
+            }
+        }
+
+        private void InspectIn(
+            InPredicate inPredicate,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        {
+            if (TryClassify(inPredicate.Expression, scopeChain) is { } match)
+            {
+                Add(match, OperandComparabilityContext.In, operatorText: null, inPredicate.StartLine, inPredicate.StartColumn);
+                return;
+            }
+
+            foreach (var value in inPredicate.Values)
+            {
+                if (TryClassify(value, scopeChain) is not { } valueMatch)
+                {
+                    continue;
+                }
+
+                Add(valueMatch, OperandComparabilityContext.In, operatorText: null, inPredicate.StartLine, inPredicate.StartColumn);
+                return;
             }
         }
 

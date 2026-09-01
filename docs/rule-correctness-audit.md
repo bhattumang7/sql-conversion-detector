@@ -15,26 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 15 remain open below.
+correctness bugs found; 14 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`OperandComparabilityScanner`'s `IN` handling only inspects the
-      tested (left-hand) expression, never the value list, so an XML/legacy-
-      large-object value appearing as a member of the `IN (...)` list is
-      never flagged.**
-      (`src/SilentScan.Core/Predicates/OperandComparabilityScanner.cs:89-92`
-      calls `InspectMembership(inPredicate.Expression, ...)` and never
-      inspects `InPredicate.Values`.) Oracle-confirmed (SQL Server 2025):
-      `WHERE Name IN (XmlColumn)` (an ordinary `varchar` column being
-      compared against an `xml` value inside the list) raises `Msg 402, The
-      data types varchar and xml are incompatible in the equal to operator`
-      — exactly the "used in an IN list" shape `RuleCatalog.cs:69-70`
-      already claims to cover — but goes unflagged because only the tested
-      `varchar` expression is ever classified, not the `xml` member of the
-      list.
 
 - [ ] **`OutputParameterScanner` treats `SELECT @p = col FROM t WHERE ...`
       (a non-aggregate variable-assignment SELECT) as an unconditional

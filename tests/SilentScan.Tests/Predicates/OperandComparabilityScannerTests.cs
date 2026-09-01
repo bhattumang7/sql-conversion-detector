@@ -52,6 +52,50 @@ public sealed class OperandComparabilityScannerTests
     }
 
     [Fact]
+    public void InPredicate_XmlValueListMember_Fires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Document WHERE Name IN (Payload);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Xml, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.In, finding.Context);
+    }
+
+    [Fact]
+    public void InPredicate_JsonValueListMember_Fires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Ticket WHERE Name IN (Payload);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(OperandComparabilityFindingKind.Json, finding.Kind);
+        Assert.Equal(OperandComparabilityContext.In, finding.Context);
+    }
+
+    [Fact]
+    public void InPredicate_OrdinaryTestedExpressionWithTwoXmlValueListMembers_FiresOnce()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Document WHERE Name IN (Payload, Template);");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void InPredicate_XmlTestedExpressionAndXmlValueListMember_FiresOnce()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Document WHERE Payload IN (Template);");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void InPredicate_OrdinaryTestedExpressionAndOrdinaryValueList_NeverFires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Document WHERE Name IN ('a', 'b');");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void BetweenAgainstXmlColumn_Fires()
     {
         var findings = Scan("SELECT Id FROM dbo.Document WHERE Payload BETWEEN Template AND Template;");
