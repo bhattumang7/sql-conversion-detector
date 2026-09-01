@@ -15,30 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 12 remain open below.
+correctness bugs found; 11 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`SchemaDependencyScanner` never detects a scalar UDF referenced
-      inside a table-level `DEFAULT` constraint added via `ALTER TABLE ...
-      ADD CONSTRAINT df DEFAULT dbo.fn() FOR col`, despite that shape being
-      squarely inside the rule's own documented scope.**
-      (`src/SilentScan.Core/Catalog/SchemaExpressionCollector.cs:38-50`,
-      `CollectCheckConstraints` only matches `CheckConstraintDefinition` in
-      a table's `TableConstraints` list; a table-level
-      `DefaultConstraintDefinition` lands in the exact same list for this
-      syntax form and is silently skipped — `DefaultConstraintDefinition`
-      isn't referenced anywhere else in `Catalog/`.) Confirmed the syntax is
-      real, standard, and works today (SQL Server 2025): `ALTER TABLE dbo.T
-      ADD CONSTRAINT DF_Col DEFAULT dbo.fn_Stamp() FOR Col` succeeds and the
-      function runs on every insert that omits the column. The equivalent
-      inline column-level form (`Col INT DEFAULT dbo.fn()` inside `CREATE
-      TABLE`) is correctly caught via a separate code path — the gap is
-      specific to the table-level/`ALTER TABLE ADD CONSTRAINT` form, which
-      `RuleCatalog.cs:49`'s "A computed column, DEFAULT, or CHECK constraint
-      definition calls a scalar UDF" claim already covers in principle.
 
 - [ ] **`SpExecuteSqlParameterMismatchScanner` never records a parameter
       binding for a positional `sp_executesql` call — only named

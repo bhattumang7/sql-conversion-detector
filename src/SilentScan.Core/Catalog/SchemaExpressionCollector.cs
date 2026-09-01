@@ -33,6 +33,11 @@ internal static class SchemaExpressionCollector
         {
             yield return reference;
         }
+
+        foreach (var reference in CollectDefaultConstraints(definition.TableConstraints, tableQualifiedName, sourcePath))
+        {
+            yield return reference;
+        }
     }
 
     private static IEnumerable<SchemaExpressionReference> CollectCheckConstraints(
@@ -45,6 +50,20 @@ internal static class SchemaExpressionCollector
                 yield return new SchemaExpressionReference(
                     SchemaDependencyKind.CheckConstraint, tableQualifiedName, columnName,
                     FragmentTextRenderer.Render(condition), sourcePath, check.StartLine);
+            }
+        }
+    }
+
+    private static IEnumerable<SchemaExpressionReference> CollectDefaultConstraints(
+        IList<ConstraintDefinition> constraints, string tableQualifiedName, string sourcePath)
+    {
+        foreach (var constraint in constraints)
+        {
+            if (constraint is DefaultConstraintDefinition { Expression: { } defaultExpression } defaultConstraint)
+            {
+                yield return new SchemaExpressionReference(
+                    SchemaDependencyKind.DefaultConstraint, tableQualifiedName, defaultConstraint.Column?.Value,
+                    FragmentTextRenderer.Render(defaultExpression), sourcePath, defaultConstraint.StartLine);
             }
         }
     }

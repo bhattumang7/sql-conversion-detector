@@ -176,4 +176,49 @@ public sealed class SchemaDependencyScannerTests
         var finding = Assert.Single(findings);
         Assert.Equal(SchemaDependencyKind.ComputedColumn, finding.SchemaDependencyKind);
     }
+
+    [Fact]
+    public void TableLevelDefaultConstraintViaAlterTableAddConstraint_CallingScalarUdf_Fires()
+    {
+        var findings = ScanSql("""
+            CREATE FUNCTION dbo.fn_Stamp() RETURNS INT AS BEGIN RETURN 42; END;
+            GO
+            CREATE TABLE dbo.T (Id INT NOT NULL, Code INT NULL);
+            GO
+            ALTER TABLE dbo.T ADD CONSTRAINT DF_Code DEFAULT dbo.fn_Stamp() FOR Code;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SchemaDependencyKind.DefaultConstraint, finding.SchemaDependencyKind);
+        Assert.Equal("dbo.fn_Stamp", finding.FunctionQualifiedName);
+        Assert.Equal("dbo.T", finding.ReferencedObjectQualifiedName);
+    }
+
+    [Fact]
+    public void TableLevelDefaultConstraintViaAlterTableAddConstraint_ConstantLiteral_DoesNotFire()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.T (Id INT NOT NULL, Code INT NULL);
+            GO
+            ALTER TABLE dbo.T ADD CONSTRAINT DF_Code DEFAULT (0) FOR Code;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void TableLevelCheckConstraintViaAlterTableAddConstraint_CallingScalarUdf_Fires()
+    {
+        var findings = ScanSql("""
+            CREATE FUNCTION dbo.fn_IsValid(@x INT) RETURNS BIT AS BEGIN RETURN 1; END;
+            GO
+            CREATE TABLE dbo.T (Id INT NOT NULL);
+            GO
+            ALTER TABLE dbo.T ADD CONSTRAINT CK_T CHECK (dbo.fn_IsValid(Id) = 1);
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SchemaDependencyKind.CheckConstraint, finding.SchemaDependencyKind);
+        Assert.Equal("dbo.fn_IsValid", finding.FunctionQualifiedName);
+    }
 }
