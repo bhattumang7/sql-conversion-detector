@@ -15,32 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 6 remain open below.
+correctness bugs found; 5 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`TruncateSwallowedScanner` fires a duplicate finding for a nested
-      TRY/CATCH around a swallowed `TRUNCATE`, one copy of which
-      misattributes the swallow to an outer CATCH block that never actually
-      runs for that error.**
-      (`src/SilentScan.Core/Predicates/TruncateSwallowedScanner.cs:34-48`,
-      `OnEnterTryCatchStatement` runs a full-subtree search for the
-      `TRUNCATE` and for a propagating statement independently for *every*
-      `TryCatchStatement` node, nested ones included, since the visitor
-      recurses into every descendant unconditionally.) For `BEGIN TRY BEGIN
-      TRY TRUNCATE TABLE dbo.Foo; END TRY BEGIN CATCH END CATCH; END TRY
-      BEGIN CATCH END CATCH;`, T-SQL routes the error to the *nearest*
-      enclosing CATCH — the inner one — so the inner `TryCatchStatement`
-      finding is correct, but the outer node is also visited: its
-      full-subtree search finds the same `TRUNCATE` (seeing through the
-      inner TRY) and its own empty CATCH, producing a second, identical
-      finding at the same source location whose implicit claim ("this
-      block's CATCH lets the failure continue silently") is false — the
-      outer CATCH never executes for this error at all. Not covered by the
-      existing test suite, which only has flat, single-level TRY/CATCH
-      cases.
 
 - [ ] **`TryCastComputedColumnPredicateScanner` false-negatives for any
       database reporting a compatibility level below 110 (including

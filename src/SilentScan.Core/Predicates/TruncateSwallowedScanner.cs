@@ -56,7 +56,7 @@ public static class TruncateSwallowedScanner
                 return [];
             }
 
-            var collector = new NodeCollector<TruncateTableStatement>();
+            var collector = new TruncateVisibilityCollector();
             fragment.Accept(collector);
             return collector.Nodes;
         }
@@ -93,6 +93,29 @@ public static class TruncateSwallowedScanner
                 }
 
                 base.Visit(fragment);
+            }
+        }
+
+        private sealed class TruncateVisibilityCollector : TSqlFragmentVisitor
+        {
+            public List<TruncateTableStatement> Nodes { get; } = [];
+
+            public override void Visit(TSqlFragment fragment)
+            {
+                if (fragment is TruncateTableStatement match)
+                {
+                    Nodes.Add(match);
+                }
+            }
+
+            public override void ExplicitVisit(TryCatchStatement node)
+            {
+                node.CatchStatements?.Accept(this);
+
+                if (ContainsPropagatingStatement(node.CatchStatements))
+                {
+                    node.TryStatements?.Accept(this);
+                }
             }
         }
     }

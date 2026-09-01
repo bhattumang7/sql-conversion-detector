@@ -110,4 +110,106 @@ public sealed class TruncateSwallowedScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void NestedEmptyCatches_FiresOnceForInnerOnly()
+    {
+        var findings = Scan("""
+            BEGIN TRY
+                BEGIN TRY
+                    TRUNCATE TABLE dbo.Foo;
+                END TRY
+                BEGIN CATCH
+                END CATCH;
+            END TRY
+            BEGIN CATCH
+            END CATCH;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(3, finding.Line);
+    }
+
+    [Fact]
+    public void TripleNestedEmptyCatches_FiresOnceForInnermostOnly()
+    {
+        var findings = Scan("""
+            BEGIN TRY
+                BEGIN TRY
+                    BEGIN TRY
+                        TRUNCATE TABLE dbo.Foo;
+                    END TRY
+                    BEGIN CATCH
+                    END CATCH;
+                END TRY
+                BEGIN CATCH
+                END CATCH;
+            END TRY
+            BEGIN CATCH
+            END CATCH;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(4, finding.Line);
+    }
+
+    [Fact]
+    public void NestedInnerCatchRethrows_FiresOnceForOuterOnly()
+    {
+        var findings = Scan("""
+            BEGIN TRY
+                BEGIN TRY
+                    TRUNCATE TABLE dbo.Foo;
+                END TRY
+                BEGIN CATCH
+                    THROW;
+                END CATCH;
+            END TRY
+            BEGIN CATCH
+            END CATCH;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(3, finding.Line);
+    }
+
+    [Fact]
+    public void NestedInnerCatchRaisesError_FiresOnceForOuterOnly()
+    {
+        var findings = Scan("""
+            BEGIN TRY
+                BEGIN TRY
+                    TRUNCATE TABLE dbo.Foo;
+                END TRY
+                BEGIN CATCH
+                    RAISERROR('failed', 16, 1);
+                END CATCH;
+            END TRY
+            BEGIN CATCH
+            END CATCH;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(3, finding.Line);
+    }
+
+    [Fact]
+    public void NestedBothCatchesPropagate_NeverFires()
+    {
+        var findings = Scan("""
+            BEGIN TRY
+                BEGIN TRY
+                    TRUNCATE TABLE dbo.Foo;
+                END TRY
+                BEGIN CATCH
+                    THROW;
+                END CATCH;
+            END TRY
+            BEGIN CATCH
+                THROW;
+            END CATCH;
+            """);
+
+        Assert.Empty(findings);
+    }
 }
