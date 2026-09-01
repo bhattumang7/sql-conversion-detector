@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">291 rules. 203 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">292 rules. 204 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -451,6 +451,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/query-count-star-variable-existence-check.html">Count Star Variable Existence Check</a> <code class="rule-key">silentscan/query/count-star-variable-existence-check</code><span class="snippet">COUNT(*) is assigned to a variable and the very next statement compares that variable only to zero.</span></li>
       <li><a class="id" href="rules/query-distinct-masking-join-fanout.html">Distinct Masking Join Fanout</a> <code class="rule-key">silentscan/query/distinct-masking-join-fanout</code><span class="snippet">A SELECT DISTINCT joins a table whose own join columns are not backed by a unique index.</span></li>
       <li><a class="id" href="rules/query-global-cursor-declaration.html">Global Cursor Declaration</a> <code class="rule-key">silentscan/query/global-cursor-declaration</code><span class="snippet">A cursor is declared without LOCAL, defaulting to GLOBAL.</span></li>
+      <li><a class="id" href="rules/query-grouping-argument-not-in-group-by-list.html">Grouping Argument Not In Group By List</a> <code class="rule-key">silentscan/query/grouping-argument-not-in-group-by-list</code><span class="snippet">A GROUPING or GROUPING_ID call&#x27;s own column argument does not match any expression in its query&#x27;s own GROUP BY clause.</span></li>
       <li><a class="id" href="rules/query-grouping-sets-cardinality-limit-exceeded.html">Grouping Sets Cardinality Limit Exceeded</a> <code class="rule-key">silentscan/query/grouping-sets-cardinality-limit-exceeded</code><span class="snippet">A GROUP BY clause&#x27;s CUBE, ROLLUP, or explicit GROUPING SETS exceeds a fixed, purely syntactic compile-time ceiling.</span></li>
       <li><a class="id" href="rules/query-linked-server-or-cross-database-reference.html">Linked Server Or Cross Database Reference</a> <code class="rule-key">silentscan/query/linked-server-or-cross-database-reference</code><span class="snippet">A table reference names a remote linked server (4-part name) or a different database than the one this scan connected to (3-part name).</span></li>
       <li><a class="id" href="rules/query-merge-missing-holdlock.html">MERGE Missing Holdlock</a> <code class="rule-key">silentscan/query/merge-missing-holdlock</code><span class="snippet">A MERGE target carries no WITH (HOLDLOCK)/SERIALIZABLE hint.</span></li>

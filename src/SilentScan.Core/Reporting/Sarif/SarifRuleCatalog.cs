@@ -77,6 +77,7 @@ public static class SarifRuleCatalog
     public const string QueryAntiPatternAlterTableSwitchPartitionFilegroupMismatchRuleId = FindingRuleIds.QueryAntiPatternAlterTableSwitchPartitionFilegroupMismatchRuleId;
     public const string QueryAntiPatternAlterTableSwitchFullTextIndexRestrictionRuleId = FindingRuleIds.QueryAntiPatternAlterTableSwitchFullTextIndexRestrictionRuleId;
     public const string QueryAntiPatternGroupingSetsCardinalityLimitExceededRuleId = FindingRuleIds.QueryAntiPatternGroupingSetsCardinalityLimitExceededRuleId;
+    public const string QueryAntiPatternGroupingArgumentNotInGroupByListRuleId = FindingRuleIds.QueryAntiPatternGroupingArgumentNotInGroupByListRuleId;
     public const string IndexCoverageKeyLookupProneIndexRuleId = FindingRuleIds.IndexCoverageKeyLookupProneIndexRuleId;
     public const string TriggerCorrectnessMultiRowUnsafeSingleRowAssignmentRuleId = FindingRuleIds.TriggerCorrectnessMultiRowUnsafeSingleRowAssignmentRuleId;
     public const string TriggerCorrectnessMultiRowUnsafeKeyedDmlRuleId = FindingRuleIds.TriggerCorrectnessMultiRowUnsafeKeyedDmlRuleId;

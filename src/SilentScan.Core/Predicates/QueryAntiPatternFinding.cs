@@ -61,6 +61,8 @@ public enum QueryAntiPatternFindingKind
     AlterTableSwitchFullTextIndexRestriction,
 
     GroupingSetsCardinalityLimitExceeded,
+
+    GroupingArgumentNotInGroupByList,
 }
 
 public sealed record QueryAntiPatternFinding(

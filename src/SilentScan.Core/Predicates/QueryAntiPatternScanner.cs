@@ -21,6 +21,11 @@ public static class QueryAntiPatternScanner
         "CHECKSUM_AGG", "GROUPING", "GROUPING_ID", "STDEV", "STDEVP", "STRING_AGG", "VAR", "VARP",
     };
 
+    private static readonly HashSet<string> GroupingFunctionNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "GROUPING", "GROUPING_ID",
+    };
+
     public static IReadOnlyList<QueryAntiPatternFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         var rule = CreateRule(parseResult, catalog);
@@ -181,6 +186,7 @@ public static class QueryAntiPatternScanner
             InspectHaving(node, scopeChain, walker);
             InspectDistinctJoinFanout(node, byAlias, scopeChain, walker);
             InspectGroupBySetsCardinality(node.GroupByClause);
+            InspectGroupingArgumentAgainstGroupBy(node);
         }
 
         public void OnEnterBinaryQueryExpression(BinaryQueryExpression node, ModuleWalker walker)
@@ -1070,6 +1076,77 @@ public static class QueryAntiPatternScanner
                     }
 
                     break;
+            }
+        }
+
+        private void InspectGroupingArgumentAgainstGroupBy(QuerySpecification node)
+        {
+            var groupByColumnNames = new HashSet<string>(catalog.IdentifierComparer);
+            if (node.GroupByClause is { } groupBy)
+            {
+                var groupByColumns = new ColumnAliasHelpers.RawColumnReferenceCollector();
+                groupBy.Accept(groupByColumns);
+                foreach (var columnRef in groupByColumns.References)
+                {
+                    groupByColumnNames.Add(columnRef.MultiPartIdentifier.Identifiers[^1].Value);
+                }
+            }
+
+            var calls = new List<FunctionCall>();
+            foreach (var element in node.SelectElements)
+            {
+                element.Accept(new GroupingCallCollector(calls));
+            }
+
+            if (node.HavingClause is { } having)
+            {
+                having.Accept(new GroupingCallCollector(calls));
+            }
+
+            if (node.OrderByClause is { } orderBy)
+            {
+                orderBy.Accept(new GroupingCallCollector(calls));
+            }
+
+            foreach (var call in calls)
+            {
+                foreach (var argument in call.Parameters)
+                {
+                    if (argument is not ColumnReferenceExpression columnRef)
+                    {
+                        continue;
+                    }
+
+                    var name = columnRef.MultiPartIdentifier.Identifiers[^1].Value;
+                    if (groupByColumnNames.Contains(name))
+                    {
+                        continue;
+                    }
+
+                    Findings.Add(new QueryAntiPatternFinding(
+                        QueryAntiPatternFindingKind.GroupingArgumentNotInGroupByList, sourcePath,
+                        argument.StartLine, argument.StartColumn,
+                        $"{call.FunctionName.Value}('{name}') does not match any expression in this query's own GROUP BY clause - the statement does not compile (Msg 8161, \"Argument N of the {call.FunctionName.Value} function does not match any of the expressions in the GROUP BY clause.\").",
+                        FindingConfidence.High));
+                }
+            }
+        }
+
+        private sealed class GroupingCallCollector(List<FunctionCall> sink) : TSqlFragmentVisitor
+        {
+            public override void ExplicitVisit(FunctionCall node)
+            {
+                if (GroupingFunctionNames.Contains(node.FunctionName.Value))
+                {
+                    sink.Add(node);
+                }
+
+                base.ExplicitVisit(node);
+            }
+
+            public override void ExplicitVisit(QuerySpecification node)
+            {
+                _ = node;
             }
         }
 

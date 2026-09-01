@@ -1405,6 +1405,7 @@ public static class SarifReportWriter
             QueryAntiPatternFindingKind.MergeNonUniqueUsingSource => LevelError,
             QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion => LevelError,
             QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded => LevelError,
+            QueryAntiPatternFindingKind.GroupingArgumentNotInGroupByList => LevelError,
             _ => LevelWarning,
         };
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.QueryAntiPatternRuleId(finding.Kind), finding.Confidence);

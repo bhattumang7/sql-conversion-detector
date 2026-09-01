@@ -113,6 +113,7 @@ public static class FindingRuleIds
     public const string QueryAntiPatternAlterTableSwitchPartitionFilegroupMismatchRuleId = "silentscan/query/alter-table-switch-partition-filegroup-mismatch";
     public const string QueryAntiPatternAlterTableSwitchFullTextIndexRestrictionRuleId = "silentscan/query/alter-table-switch-full-text-index-restriction";
     public const string QueryAntiPatternGroupingSetsCardinalityLimitExceededRuleId = "silentscan/query/grouping-sets-cardinality-limit-exceeded";
+    public const string QueryAntiPatternGroupingArgumentNotInGroupByListRuleId = "silentscan/query/grouping-argument-not-in-group-by-list";
     public const string IndexCoverageKeyLookupProneIndexRuleId = "silentscan/index/key-lookup-prone";
     public const string TriggerCorrectnessMultiRowUnsafeSingleRowAssignmentRuleId = "silentscan/trigger/multi-row-unsafe-single-row-assignment";
     public const string TriggerCorrectnessMultiRowUnsafeKeyedDmlRuleId = "silentscan/trigger/multi-row-unsafe-keyed-dml";
@@ -525,6 +526,7 @@ public static class FindingRuleIds
         QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch => QueryAntiPatternAlterTableSwitchPartitionFilegroupMismatchRuleId,
         QueryAntiPatternFindingKind.AlterTableSwitchFullTextIndexRestriction => QueryAntiPatternAlterTableSwitchFullTextIndexRestrictionRuleId,
         QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded => QueryAntiPatternGroupingSetsCardinalityLimitExceededRuleId,
+        QueryAntiPatternFindingKind.GroupingArgumentNotInGroupByList => QueryAntiPatternGroupingArgumentNotInGroupByListRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled QueryAntiPatternFindingKind."),
     };
     public static string IndexCoverageRuleId(IndexCoverageFindingKind kind) => kind switch

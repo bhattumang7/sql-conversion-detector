@@ -19,10 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`GROUPING`/`GROUPING_ID` argument absent from the query's own
-      `GROUP BY` list.** Pure syntactic fact provable from the parse tree,
-      no catalog dependency.
-
 - [ ] **Recursive CTE anchor/recursive branch type disagreement.** A
       recursive CTE column whose resolved type disagrees between the anchor
       and recursive branches is decidable by reusing
