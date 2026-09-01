@@ -27,6 +27,8 @@ public sealed class DatabaseCatalog
     private readonly List<CatalogCheckConstraint> _checkConstraints = [];
     private readonly List<CatalogTriggerEvent> _triggerEvents = [];
     private readonly List<CatalogAlterColumnEvent> _alterColumnEvents = [];
+    private readonly List<CatalogDropSchemaEvent> _dropSchemaEvents = [];
+    private readonly List<CatalogDropRoleEvent> _dropRoleEvents = [];
 
     private readonly List<CatalogSecurityPredicate> _securityPredicates = [];
 
@@ -161,6 +163,35 @@ public sealed class DatabaseCatalog
     public void AddAlterColumnEvent(CatalogAlterColumnEvent alterColumnEvent) => _alterColumnEvents.Add(alterColumnEvent);
 
     public IReadOnlyList<CatalogAlterColumnEvent> AlterColumnEvents => _alterColumnEvents;
+
+    public void AddDropSchemaEvent(CatalogDropSchemaEvent dropSchemaEvent) => _dropSchemaEvents.Add(dropSchemaEvent);
+
+    public IReadOnlyList<CatalogDropSchemaEvent> DropSchemaEvents => _dropSchemaEvents;
+
+    public void AddDropRoleEvent(CatalogDropRoleEvent dropRoleEvent) => _dropRoleEvents.Add(dropRoleEvent);
+
+    public IReadOnlyList<CatalogDropRoleEvent> DropRoleEvents => _dropRoleEvents;
+
+    public bool SchemaOwnsAnyKnownObject(string schemaName)
+    {
+        if (_tablesByQualifiedName.Values.Any(t => t.SchemaName is { } s && _identifierComparer.Equals(s, schemaName)))
+        {
+            return true;
+        }
+
+        return AnyQualifiedNameInSchema(_procedureParametersByQualifiedName.Keys, schemaName)
+            || AnyQualifiedNameInSchema(_scalarFunctionReturnTypesByQualifiedName.Keys, schemaName)
+            || AnyQualifiedNameInSchema(_tableValuedFunctionKindsByQualifiedName.Keys, schemaName)
+            || AnyQualifiedNameInSchema(_viewDefinitionTextByQualifiedName.Keys, schemaName)
+            || AnyQualifiedNameInSchema(_synonymTargetsByQualifiedName.Keys, schemaName);
+    }
+
+    private bool AnyQualifiedNameInSchema(IEnumerable<string> qualifiedNames, string schemaName) =>
+        qualifiedNames.Any(name =>
+        {
+            var separator = name.IndexOf('.');
+            return separator >= 0 && _identifierComparer.Equals(name[..separator], schemaName);
+        });
 
     public void AddTemporalTablePair(TemporalTablePair pair) => _temporalTablePairs.Add(pair);
 

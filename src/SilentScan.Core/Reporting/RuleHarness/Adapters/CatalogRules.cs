@@ -90,6 +90,12 @@ internal sealed class AlterColumnSafetyRule : ICatalogRule
     public IReadOnlyList<IFinding> Scan(RuleContext context) => AlterColumnSafetyScanner.Scan(context.Catalog);
 }
 
+internal sealed class DropProtectedObjectRule : ICatalogRule
+{
+    public string Id => "DropProtectedObjectScanner";
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => DropProtectedObjectScanner.Scan(context.Catalog);
+}
+
 internal sealed class MemoryOptimizedForeignKeyRule : ICatalogRule
 {
     public string Id => "MemoryOptimizedForeignKeyScanner";

@@ -234,6 +234,26 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
+        public override void ExplicitVisit(DropSchemaStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.AddDropSchemaEvent(new CatalogDropSchemaEvent(node.Schema.BaseIdentifier.Value, sourcePath, node.StartLine, node.StartColumn));
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(DropRoleStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.AddDropRoleEvent(new CatalogDropRoleEvent(node.Name.Value, sourcePath, node.StartLine, node.StartColumn));
+            }
+
+            node.AcceptChildren(this);
+        }
+
         public override void ExplicitVisit(CreateAssemblyStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)

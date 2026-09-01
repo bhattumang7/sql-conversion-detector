@@ -108,6 +108,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<AlwaysEncryptedOrderByFinding>("AlwaysEncryptedOrderByScanner").Select(ToResult));
         results.AddRange(report.Find<AlwaysEncryptedKeyColumnFinding>("AlwaysEncryptedKeyColumnScanner").Select(ToResult));
         results.AddRange(report.Find<AlterColumnSafetyFinding>("AlterColumnSafetyScanner").Select(ToResult));
+        results.AddRange(report.Find<DropProtectedObjectFinding>("DropProtectedObjectScanner").Select(ToResult));
         results.AddRange(report.Find<OperandComparabilityFinding>("OperandComparabilityScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>("MemoryOptimizedUnsupportedColumnTypeScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUnsupportedIndexOptionFinding>("MemoryOptimizedUnsupportedIndexOptionScanner").Select(ToResult));
@@ -1409,6 +1410,21 @@ public static class SarifReportWriter
         };
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(DropProtectedObjectFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DropProtectedObjectRuleId(finding.Kind), finding.Confidence);
+        var message = finding.Kind switch
+        {
+            DropProtectedObjectKind.SchemaNotEmpty =>
+                $"DROP SCHEMA '{finding.ObjectName}' fails (Msg 3729) because at least one object still references the schema - every object in the schema must be dropped or moved first.",
+            DropProtectedObjectKind.FixedDatabaseRole =>
+                $"DROP ROLE '{finding.ObjectName}' fails (Msg 15150) because it names one of the engine's fixed database roles, which can never be dropped.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled DropProtectedObjectKind."),
+        };
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, finding.Column);
     }
 
     private static SarifResult ToResult(OperandComparabilityFinding finding)

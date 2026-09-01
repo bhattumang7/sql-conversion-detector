@@ -71,6 +71,12 @@ public static class FindingRuleIds
         OperandComparabilityFindingKind.Spatial => "silentscan/predicates/spatial-operand-not-comparable",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled OperandComparabilityFindingKind."),
     };
+    public static string DropProtectedObjectRuleId(DropProtectedObjectKind kind) => kind switch
+    {
+        DropProtectedObjectKind.SchemaNotEmpty => "silentscan/catalog/drop-schema-not-empty",
+        DropProtectedObjectKind.FixedDatabaseRole => "silentscan/catalog/drop-fixed-database-role",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DropProtectedObjectKind."),
+    };
     public const string MemoryOptimizedUnsupportedColumnTypeRuleId = "silentscan/catalog/memory-optimized-unsupported-column-type";
     public static string MemoryOptimizedUnsupportedIndexOptionRuleId(MemoryOptimizedUnsupportedIndexOptionKind kind) => kind switch
     {

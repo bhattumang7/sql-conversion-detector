@@ -153,6 +153,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(AlwaysEncryptedOrderBy(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedKeyColumn(report, headingLevel, pathBase));
         blocks.AddRange(AlterColumnSafety(report, headingLevel, pathBase));
+        blocks.AddRange(DropProtectedObject(report, headingLevel, pathBase));
         blocks.AddRange(OperandComparability(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
         blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
@@ -250,6 +251,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Always Encrypted ORDER BY", report.Find<AlwaysEncryptedOrderByFinding>(nameof(AlwaysEncryptedOrderByScanner)).Count);
         AddCount(counts, "Always Encrypted non-enclave key column", report.Find<AlwaysEncryptedKeyColumnFinding>(nameof(AlwaysEncryptedKeyColumnScanner)).Count);
         AddCount(counts, "ALTER COLUMN safety", report.Find<AlterColumnSafetyFinding>(nameof(AlterColumnSafetyScanner)).Count);
+        AddCount(counts, "DROP against a protected object", report.Find<DropProtectedObjectFinding>(nameof(DropProtectedObjectScanner)).Count);
         AddCount(counts, "Operand not comparable (xml/json/legacy large object/spatial)", report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count);
         AddCount(counts, "Query anti-patterns", report.Find<QueryAntiPatternFinding>(nameof(QueryAntiPatternScanner)).Count);
         AddCount(counts, "Index-coverage shapes", report.Find<IndexCoverageFinding>(nameof(IndexCoverageScanner)).Count);
@@ -1700,6 +1702,39 @@ public static class ReadableScanReportWriter
         AlterColumnSafetyKind.PrecisionOrScaleNarrowing => "Precision/scale narrowing",
         AlterColumnSafetyKind.IncompatibleFamilyConversion => "Incompatible family conversion",
         AlterColumnSafetyKind.TemporalOffsetDropped => "Temporal offset dropped",
+        _ => "Unknown",
+    };
+
+    private static IEnumerable<ReadableBlock> DropProtectedObject(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<DropProtectedObjectFinding>(nameof(DropProtectedObjectScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"DROP against a protected object ({report.Find<DropProtectedObjectFinding>(nameof(DropProtectedObjectScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A DROP SCHEMA statement targets a schema this scan also saw own at least one object, or a DROP ROLE statement names one of the engine's fixed database roles - both always fail at deploy time.");
+
+        foreach (var group in report.Find<DropProtectedObjectFinding>(nameof(DropProtectedObjectScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{DropProtectedObjectTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.DropProtectedObjectRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Object"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.ObjectName,
+                })]);
+        }
+    }
+
+    private static string DropProtectedObjectTitle(DropProtectedObjectKind kind) => kind switch
+    {
+        DropProtectedObjectKind.SchemaNotEmpty => "Schema not empty",
+        DropProtectedObjectKind.FixedDatabaseRole => "Fixed database role",
         _ => "Unknown",
     };
 

@@ -496,6 +496,26 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`DropProtectedObjectRuleId` — shipped for `DROP SCHEMA` non-empty (Msg
+  3729) and `DROP ROLE` against a fixed database role (Msg 15150).**
+  Oracle-confirmed (Docker): `DROP SCHEMA` fails unconditionally while any
+  table, view, procedure, function, table-valued function, or synonym this
+  scan also saw defined in that schema still exists - `IF EXISTS` on the
+  `DROP SCHEMA` statement does not suppress this, since it only guards
+  against the schema itself not existing, not against it being non-empty.
+  Decidable from the same-scan catalog: `DatabaseCatalog.SchemaOwnsAnyKnownObject`
+  checks tables/views/table-valued functions/procedures/synonyms recorded
+  under that schema name. `DROP ROLE` against any of the nine fixed database
+  roles (`db_owner`, `db_accessadmin`, `db_securityadmin`, `db_ddladmin`,
+  `db_backupoperator`, `db_datareader`, `db_datawriter`, `db_denydatareader`,
+  `db_denydatawriter`) always fails, unconditionally - oracle-confirmed via
+  `sys.database_principals.is_fixed_role`; a closed, engine-fixed name list
+  needing no catalog lookup at all. `DROP ROLE public` is not a reachable
+  shape - `public` is a reserved keyword there and the statement itself is a
+  parse error (Msg 156), not a semantic rejection. The remaining sibling leg
+  (`DROP EXTERNAL DATA SOURCE`/`DROP EXTERNAL FILE FORMAT` blocked by a
+  dependent external table) is still open - see `detection-tasklist.md`.
+
 * **`AlterTableSwitchIndexedViewAlignmentRuleId` — shipped for
   Msg 11400/11401/11402/11403/11404/11405.**
   Oracle-confirmed (Docker, SQL Server 2025): if either side of an

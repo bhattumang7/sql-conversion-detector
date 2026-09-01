@@ -44,6 +44,7 @@ public static class SarifRuleCatalog
     public const string AlwaysEncryptedKeyColumnRuleId = FindingRuleIds.AlwaysEncryptedKeyColumnRuleId;
     public const string TriggerOrderRuleId = FindingRuleIds.TriggerOrderRuleId;
     public static string AlterColumnSafetyRuleId(AlterColumnSafetyKind kind) => FindingRuleIds.AlterColumnSafetyRuleId(kind);
+    public static string DropProtectedObjectRuleId(DropProtectedObjectKind kind) => FindingRuleIds.DropProtectedObjectRuleId(kind);
     public static string OperandComparabilityRuleId(OperandComparabilityFindingKind kind) => FindingRuleIds.OperandComparabilityRuleId(kind);
     public const string MemoryOptimizedUnsupportedColumnTypeRuleId = FindingRuleIds.MemoryOptimizedUnsupportedColumnTypeRuleId;
     public static string MemoryOptimizedUnsupportedIndexOptionRuleId(MemoryOptimizedUnsupportedIndexOptionKind kind) => FindingRuleIds.MemoryOptimizedUnsupportedIndexOptionRuleId(kind);

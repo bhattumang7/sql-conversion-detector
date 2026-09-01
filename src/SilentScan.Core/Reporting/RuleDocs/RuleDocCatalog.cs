@@ -136,6 +136,8 @@ public static class RuleDocCatalog
         [Predicates.AlterColumnPrecisionScaleNarrowing.RuleId] = Predicates.AlterColumnPrecisionScaleNarrowing.Content,
         [Predicates.AlterColumnIncompatibleFamilyConversion.RuleId] = Predicates.AlterColumnIncompatibleFamilyConversion.Content,
         [Predicates.AlterColumnTemporalOffsetDropped.RuleId] = Predicates.AlterColumnTemporalOffsetDropped.Content,
+        [Predicates.DropSchemaNotEmpty.RuleId] = Predicates.DropSchemaNotEmpty.Content,
+        [Predicates.DropFixedDatabaseRole.RuleId] = Predicates.DropFixedDatabaseRole.Content,
         [Predicates.XmlOperandNotComparable.RuleId] = Predicates.XmlOperandNotComparable.Content,
         [Predicates.LegacyLobOperandNotComparable.RuleId] = Predicates.LegacyLobOperandNotComparable.Content,
         [Predicates.JsonOperandNotComparable.RuleId] = Predicates.JsonOperandNotComparable.Content,

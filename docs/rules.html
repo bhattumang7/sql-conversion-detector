@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">308 rules. 220 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">310 rules. 222 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -113,6 +113,8 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/catalog-cross-table-fk-type-drift.html">Cross Table FK Type Drift</a> <code class="rule-key">silentscan/catalog/cross-table-fk-type-drift</code><span class="snippet">A foreign-key column pair&#x27;s declared types and/or collations genuinely differ.</span></li>
       <li><a class="id" href="rules/catalog-dangling-object-reference.html">Dangling Object Reference</a> <code class="rule-key">silentscan/catalog/dangling-object-reference</code><span class="snippet">A stored procedure, view, function, or trigger names a table/view/synonym the engine&#x27;s own binder cannot resolve to a real object right now.</span></li>
       <li><a class="id" href="rules/catalog-default-constraint-on-nullable-column.html">Default Constraint On Nullable Column</a> <code class="rule-key">silentscan/catalog/default-constraint-on-nullable-column</code><span class="snippet">A column carries a DEFAULT constraint but is still nullable.</span></li>
+      <li><a class="id" href="rules/catalog-drop-fixed-database-role.html">Drop Fixed Database Role</a> <code class="rule-key">silentscan/catalog/drop-fixed-database-role</code><span class="snippet">A DROP ROLE statement names one of the engine&#x27;s own fixed database roles (db_owner, db_accessadmin, db_securityadmin, db_ddladmin, db_backupoperator, db_datareader, db_datawriter, db_denydatareader, db_denydatawriter).</span></li>
+      <li><a class="id" href="rules/catalog-drop-schema-not-empty.html">Drop Schema Not Empty</a> <code class="rule-key">silentscan/catalog/drop-schema-not-empty</code><span class="snippet">A DROP SCHEMA statement targets a schema this scan also saw own at least one table, view, procedure, or function.</span></li>
       <li><a class="id" href="rules/catalog-generated-always-column-explicit-insert.html">Generated Always Column Explicit Insert</a> <code class="rule-key">silentscan/catalog/generated-always-column-explicit-insert</code><span class="snippet">An INSERT (or a MERGE .</span></li>
       <li><a class="id" href="rules/catalog-generated-always-column-explicit-update.html">Generated Always Column Explicit Update</a> <code class="rule-key">silentscan/catalog/generated-always-column-explicit-update</code><span class="snippet">An UPDATE (or a MERGE .</span></li>
       <li><a class="id" href="rules/catalog-legacy-large-object-column.html">Legacy Large Object Column</a> <code class="rule-key">silentscan/catalog/legacy-large-object-column</code><span class="snippet">A column is declared TEXT/NTEXT/IMAGE (legacy large-object types).</span></li>

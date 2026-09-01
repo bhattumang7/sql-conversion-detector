@@ -75,6 +75,7 @@ public static class RuleRegistry
         new MemoryOptimizedUnsupportedIndexOptionRule(),
         new AlwaysEncryptedKeyColumnRule(),
         new AlterColumnSafetyRule(),
+        new DropProtectedObjectRule(),
         new MemoryOptimizedForeignKeyRule(),
         new MemoryOptimizedSchemaOnlyDurabilityRule(),
         new NonPersistedComputedColumnRule(),

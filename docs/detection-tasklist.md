@@ -64,14 +64,6 @@ Competitor tools are referred to generically; real identities are in
         family. `sql_variant = xml` (item 3) remains the one confirmed
         "cannot implicit-convert at all" case; encryption-state and
         legacy-LOB legs still unverified.
-      5. `ProcCallArgumentMismatchRuleId`: the reverse direction — a
-        callee's `OUTPUT` parameter's real assigned value marshalled back
-        into the caller's receiving variable — is currently uncovered;
-        mechanism needs pinning down before scoping. **FINDING: confirmed
-        real and silent.** A proc's `varchar(100) OUTPUT` param assigning a
-        50-char value, received into a caller's `varchar(3)` variable,
-        truncates to `'xxx'` with no error and no warning. Same
-        silent-data-loss shape as the shipped forward-direction rule.
       6. New family: online DDL blocked by column type. `ALTER COLUMN`/
         `ALTER TABLE`/`ALTER INDEX ... REBUILD`/`DROP INDEX` with `ONLINE`,
         and a whole-table online rebuild, are all documented to reject a
@@ -377,18 +369,11 @@ Competitor tools are referred to generically; real identities are in
       51. A typed XML variable resolving to a different/missing schema
         collection than its type metadata records — rare in normal
         authoring. **FINDING:** not tested this pass.
-      52. New consolidated family, sibling to `DanglingObjectReferenceRuleId`:
-        an object protected from `DROP` by dependents or protection state —
-        `DROP ROLE` targeting a protected fixed role while protection is
-        active, `DROP SCHEMA` on a non-empty schema, `DROP EXTERNAL DATA
-        SOURCE`/`DROP EXTERNAL FILE FORMAT` blocked by a dependent external
-        table/stream. **FINDING: the two forms tested are confirmed real.**
-        `DROP SCHEMA` on a schema still owning a table fails ("referenced
-        by object..."); `DROP ROLE db_owner` fails ("Cannot drop the role
-        'db_owner'"), confirming fixed database roles are drop-protected
-        unconditionally. `DROP EXTERNAL DATA SOURCE`/`DROP EXTERNAL FILE
-        FORMAT` blocked by a dependent external table wasn't tested (no
-        PolyBase/external-table setup in this pass).
+      52. Remaining leg of the `DropProtectedObjectRuleId` family (`DROP
+        SCHEMA` non-empty, `DROP ROLE` fixed role — shipped): `DROP EXTERNAL
+        DATA SOURCE`/`DROP EXTERNAL FILE FORMAT` blocked by a dependent
+        external table/stream. **FINDING:** not tested this pass (no
+        PolyBase/external-table setup available).
       53. Ledger tables restrict which `ALTER COLUMN` shapes are legal
         (`sys.tables.is_ledger_on` plus before/after column shape) — narrow
         feature. **FINDING: not confirmed — appears less restrictive than

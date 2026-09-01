@@ -111,6 +111,7 @@ public static class TestScanReports
         IReadOnlyList<DynamicDataMaskingFinding>? DynamicDataMaskingFindings = null,
         IReadOnlyList<AlwaysEncryptedKeyColumnFinding>? AlwaysEncryptedKeyColumnFindings = null,
         IReadOnlyList<AlterColumnSafetyFinding>? AlterColumnSafetyFindings = null,
+        IReadOnlyList<DropProtectedObjectFinding>? DropProtectedObjectFindings = null,
         IReadOnlyList<SpExecuteSqlParameterMismatchFinding>? SpExecuteSqlParameterMismatchFindings = null,
         IReadOnlyList<SkippedConstruct>? SkippedConstructs = null,
         SkippedConstructSummary? SkippedConstructSummary = null,
@@ -226,6 +227,7 @@ public static class TestScanReports
         Set(nameof(DynamicDataMaskingScanner), DynamicDataMaskingFindings);
         Set("AlwaysEncryptedKeyColumnScanner", AlwaysEncryptedKeyColumnFindings);
         Set("AlterColumnSafetyScanner", AlterColumnSafetyFindings);
+        Set("DropProtectedObjectScanner", DropProtectedObjectFindings);
         Set("SpExecuteSqlParameterMismatchScanner", SpExecuteSqlParameterMismatchFindings);
 
         return new ScanReport(
