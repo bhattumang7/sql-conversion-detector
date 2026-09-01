@@ -391,11 +391,25 @@ public static class QueryAntiPatternScanner
                         FindingConfidence.High));
                     return;
                 }
+
+                if (HasCollationMismatch(sourceColumn.Type, targetColumn.Type))
+                {
+                    Findings.Add(new QueryAntiPatternFinding(
+                        QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch, sourcePath,
+                        node.StartLine, node.StartColumn,
+                        $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - column '{sourceColumn.Name}' has collation {sourceColumn.Type!.Collation!.Name} in the source table which is different from its collation {targetColumn.Type!.Collation!.Name} in the target table (error 4945); this statement will fail at execution.",
+                        FindingConfidence.High));
+                    return;
+                }
             }
         }
 
         private static bool HasSameShape(SqlType a, SqlType b) =>
             a.Category == b.Category && a.Length == b.Length && a.Precision == b.Precision && a.Scale == b.Scale && a.IsMax == b.IsMax;
+
+        private static bool HasCollationMismatch(SqlType? a, SqlType? b) =>
+            a is { IsStringFamily: true, Collation: { } collationA } && b is { IsStringFamily: true, Collation: { } collationB }
+            && !string.Equals(collationA.Name, collationB.Name, StringComparison.OrdinalIgnoreCase);
 
         private void InspectAlterTableSwitchIndexMismatch(AlterTableSwitchStatement node)
         {

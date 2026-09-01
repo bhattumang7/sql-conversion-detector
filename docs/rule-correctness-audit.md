@@ -15,31 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 13 remain open below.
+correctness bugs found; 12 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`QueryAntiPatternScanner`'s `AlterTableSwitchColumnMismatch` shape
-      check omits collation, missing a real, distinct engine error that's
-      squarely inside the rule's own stated scope.**
-      (`src/SilentScan.Core/Predicates/QueryAntiPatternScanner.cs:397-398`,
-      `HasSameShape` compares `Category`/`Length`/`Precision`/`Scale`/
-      `IsMax` but never `SqlType.Collation`, even though `Collation` is
-      already populated on both sides.) Oracle-confirmed (SQL Server 2025):
-      a partitioned target column declared `VARCHAR(10) COLLATE
-      Latin1_General_CI_AS` against a source staging column declared
-      `VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS` — identical in
-      every field `HasSameShape` checks — raises `Msg 4945, ALTER TABLE
-      SWITCH statement failed because column 'Col' does not have the same
-      collation` on `ALTER TABLE ... SWITCH TO ... PARTITION`, a distinct
-      error from the Msg 4944 type/length/precision/scale mismatch this
-      rule already documents. Neither `RuleCatalog.cs` nor the published
-      rule doc discloses collation as excluded, and the rule's own
-      column-pair walk already exists for exactly this purpose — false
-      negative. (IDENTITY mismatch was separately confirmed correct as a
-      non-blocker, so the gap is specifically collation.)
 
 - [ ] **`SchemaDependencyScanner` never detects a scalar UDF referenced
       inside a table-level `DEFAULT` constraint added via `ALTER TABLE ...
