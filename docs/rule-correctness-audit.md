@@ -15,29 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 2 remain open below.
+correctness bugs found; 1 remains open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`WaitForScanner` resets its open-transaction tracker at every batch
-      boundary (`GO`), so a `WAITFOR` in a later batch after a `BEGIN
-      TRANSACTION` in an earlier batch of the same script is never
-      recognized as being inside a transaction.**
-      (`src/SilentScan.Core/Predicates/WaitForScanner.cs:36`,
-      `OnEnterTSqlBatch` unconditionally zeroes `_openTransactionDepth` at
-      the start of every `TSqlBatch`.) `GO` is purely a client-side batch
-      separator — a transaction opened in one batch stays open into the
-      next batch of the same session. Oracle-confirmed (SQL Server 2025):
-      `BEGIN TRANSACTION; GO SELECT @@TRANCOUNT; WAITFOR DELAY '00:00:01';
-      SELECT @@TRANCOUNT; ROLLBACK; GO` shows `@@TRANCOUNT = 1` on both
-      sides of the `GO` and both sides of the `WAITFOR` — the transaction
-      genuinely holds locks through the batch boundary and through the
-      `WAITFOR`. The scanner reports `IsInsideTransaction = false` for this
-      exact shape, missing precisely the more serious variant the rule's
-      own doc calls out ("a WAITFOR inside a transaction extends that
-      transaction's lock hold duration").
 
 - [ ] **`ViewOrderingScanner` misses a top-level `UNION`/`EXCEPT`/
       `INTERSECT` query whose `ORDER BY`/`OFFSET...FETCH` sits directly on

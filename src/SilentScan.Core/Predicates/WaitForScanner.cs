@@ -33,7 +33,13 @@ public static class WaitForScanner
 
         private int _openTransactionDepth;
 
-        public void OnEnterTSqlBatch(TSqlBatch node, ModuleWalker walker) => _openTransactionDepth = 0;
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker) => _openTransactionDepth = 0;
+
+        public void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker) => _openTransactionDepth = 0;
+
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) => _openTransactionDepth = 0;
+
+        public void OnLeaveTriggerBody(TriggerStatementBody node, ModuleWalker walker) => _openTransactionDepth = 0;
 
         public void OnEnterBeginTransactionStatement(BeginTransactionStatement node, ModuleWalker walker) => _openTransactionDepth++;
 
