@@ -48,6 +48,13 @@ public sealed record CatalogTable(
             && comparer.Equals(i.KeyColumns[0], columnName));
     }
 
+    public bool IsColumnStoredInAnIndex(string columnName, StringComparer? identifierComparer = null)
+    {
+        var comparer = identifierComparer ?? StringComparer.OrdinalIgnoreCase;
+        return Indexes.Any(i => !i.IsFiltered && !i.IsColumnstore && !i.IsDisabled && !i.IsHypothetical
+            && (i.KeyColumns.Any(c => comparer.Equals(c, columnName)) || i.IncludedColumns.Any(c => comparer.Equals(c, columnName))));
+    }
+
     public bool HasSameShapeAs(CatalogTable other) =>
         Kind == other.Kind && Columns.SequenceEqual(other.Columns);
 }

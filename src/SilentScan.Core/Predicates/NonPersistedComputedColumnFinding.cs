@@ -7,6 +7,7 @@ public sealed record NonPersistedComputedColumnFinding(
     string TableQualifiedName,
     string ColumnName,
     string DefinitionText,
+    bool IsCoveredByIndex,
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
     FindingConfidence Confidence = FindingConfidence.High) : IFinding

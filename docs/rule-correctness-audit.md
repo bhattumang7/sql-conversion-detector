@@ -15,32 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 18 remain open below.
+correctness bugs found; 17 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`NonPersistedComputedColumnScanner` claims a non-persisted computed
-      column "recalculates its own expression from the base row every
-      single time a query touches it," unconditionally — false whenever the
-      column is covered by an index.**
-      (`src/SilentScan.Core/Predicates/NonPersistedComputedColumnScanner.cs:17-22`
-      fires for `IsComputed && !IsPersisted` with no indexing check;
-      `RuleCatalog.cs:145` and
-      `Reporting/RuleDocs/Catalog/NonPersistedComputedColumn.cs:10-28`
-      explicitly frame the "recomputes on every read" claim as
-      "definitionally true... not something that needs confirming against a
-      real engine," regardless of indexing.) Oracle-confirmed (SQL Server
-      2025): a non-persisted computed column (`Sum AS (A + B)`, no
-      `PERSISTED`) covered by a nonclustered index (`CREATE INDEX ... ON
-      T1(Sum)`) — `SELECT Sum FROM T1 WHERE Sum = 12345` plans to an `Index
-      Seek` on that index, with the plan's `Compute Scalar` operator doing a
-      pure pass-through of the already-materialized `Sum` column, not an
-      `A+B` re-evaluation. The index itself stores the computed value; no
-      base-row recompute happens for reads served from it. The finding's own
-      premise that no oracle confirmation is needed is the bug — the claim
-      is only true in the unindexed case.
 
 - [ ] **`NonSargablePredicateScanner`'s computed-column match for
       `YEAR`/`MONTH`/`DAY` predicates compares the canonicalized `DATEPART`

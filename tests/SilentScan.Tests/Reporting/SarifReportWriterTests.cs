@@ -456,4 +456,40 @@ public sealed class SarifReportWriterTests
             n.GetProperty("message").GetProperty("text").GetString()!.Contains("could not be resolved to a seek/scan verdict", StringComparison.Ordinal)
             && n.GetProperty("level").GetString() == "note");
     }
+
+    [Fact]
+    public void Write_NonPersistedComputedColumnCoveredByIndex_HedgesRecomputeClaim()
+    {
+        var report = TestScanReports.Build(NonPersistedComputedColumnFindings:
+        [
+            new NonPersistedComputedColumnFinding("dbo.Orders", "Total", "Qty * Price", IsCoveredByIndex: true, "test.sql", 1),
+        ]);
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+        var results = document.RootElement.GetProperty("runs")[0].GetProperty("results").EnumerateArray().ToList();
+
+        var result = Assert.Single(results);
+        var message = result.GetProperty("message").GetProperty("text").GetString()!;
+        Assert.Contains("avoid the recompute", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("on every read that touches it", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Write_NonPersistedComputedColumnNotCoveredByIndex_KeepsUnconditionalRecomputeClaim()
+    {
+        var report = TestScanReports.Build(NonPersistedComputedColumnFindings:
+        [
+            new NonPersistedComputedColumnFinding("dbo.Orders", "Total", "Qty * Price", IsCoveredByIndex: false, "test.sql", 1),
+        ]);
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+        var results = document.RootElement.GetProperty("runs")[0].GetProperty("results").EnumerateArray().ToList();
+
+        var result = Assert.Single(results);
+        var message = result.GetProperty("message").GetProperty("text").GetString()!;
+        Assert.Contains("on every read that touches it", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("avoid the recompute", message, StringComparison.Ordinal);
+    }
 }

@@ -940,16 +940,17 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Non-persisted computed columns ({report.Find<NonPersistedComputedColumnFinding>(nameof(NonPersistedComputedColumnScanner)).Count})");
         yield return new ReadableBlock.Paragraph(
-            "A structural catalog fact (sys.computed_columns.is_persisted = 0): the column's definition is recomputed from the base row on every read that touches it, independent of whether that definition calls a UDF - never fires on a PERSISTED computed column, regardless of whether it's also indexed.");
+            "A structural catalog fact (sys.computed_columns.is_persisted = 0): the column's definition is recomputed from the base row on every read served from the base table, independent of whether that definition calls a UDF - never fires on a PERSISTED computed column, regardless of whether it's also indexed. When an index already stores the column's value, reads served through that specific index avoid the recompute; reads that don't use it still pay it.");
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NonPersistedComputedColumnRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Definition"],
+            [WhereHeader, ColumnHeader, "Definition", "Covered by an index"],
             [.. report.Find<NonPersistedComputedColumnFinding>(nameof(NonPersistedComputedColumnScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.DefinitionText,
+                f.IsCoveredByIndex ? "Yes" : "No",
             })]);
     }
 

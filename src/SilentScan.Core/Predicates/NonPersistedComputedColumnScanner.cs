@@ -27,6 +27,7 @@ public static class NonPersistedComputedColumnScanner
                     table.QualifiedName,
                     column.Name,
                     definition?.DefinitionText ?? string.Empty,
+                    table.IsColumnStoredInAnIndex(column.Name, catalog.IdentifierComparer),
                     definition?.SourcePath ?? table.SourcePath,
                     definition?.Line ?? table.SourceLine));
             }

@@ -24,6 +24,60 @@ public sealed class NonPersistedComputedColumnScannerTests
         Assert.Equal("dbo.Orders", finding.TableQualifiedName);
         Assert.Equal("Total", finding.ColumnName);
         Assert.Contains("Qty", finding.DefinitionText);
+        Assert.False(finding.IsCoveredByIndex);
+    }
+
+    [Fact]
+    public void NonPersistedComputedColumn_CoveredByIndexKeyColumn_StillFiresButFlagsCoverage()
+    {
+        var findings = Scan(
+            """
+            CREATE TABLE dbo.Orders (Qty INT NOT NULL, Price MONEY NOT NULL, Total AS (Qty * Price));
+            CREATE INDEX IX_Orders_Total ON dbo.Orders (Total);
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.True(finding.IsCoveredByIndex);
+    }
+
+    [Fact]
+    public void NonPersistedComputedColumn_CoveredByIndexIncludedColumn_StillFiresButFlagsCoverage()
+    {
+        var findings = Scan(
+            """
+            CREATE TABLE dbo.Orders (Qty INT NOT NULL, Price MONEY NOT NULL, Total AS (Qty * Price));
+            CREATE INDEX IX_Orders_Qty ON dbo.Orders (Qty) INCLUDE (Total);
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.True(finding.IsCoveredByIndex);
+    }
+
+    [Fact]
+    public void NonPersistedComputedColumn_FilteredIndexOnly_NotTreatedAsCovered()
+    {
+        var findings = Scan(
+            """
+            CREATE TABLE dbo.Orders (Qty INT NOT NULL, Price MONEY NOT NULL, Total AS (Qty * Price));
+            CREATE INDEX IX_Orders_Total ON dbo.Orders (Total) WHERE Total > 0;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.False(finding.IsCoveredByIndex);
+    }
+
+    [Fact]
+    public void NonPersistedComputedColumn_DisabledIndexOnly_NotTreatedAsCovered()
+    {
+        var findings = Scan(
+            """
+            CREATE TABLE dbo.Orders (Qty INT NOT NULL, Price MONEY NOT NULL, Total AS (Qty * Price));
+            CREATE INDEX IX_Orders_Total ON dbo.Orders (Total);
+            ALTER INDEX IX_Orders_Total ON dbo.Orders DISABLE;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.False(finding.IsCoveredByIndex);
     }
 
     [Fact]
