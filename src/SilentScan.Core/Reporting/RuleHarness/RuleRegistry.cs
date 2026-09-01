@@ -51,6 +51,7 @@ public static class RuleRegistry
         new TryCastComputedColumnPredicateRule(),
         new StatementShapeRule(),
         new MultiReferencedCteRule(),
+        new RecursiveCteAnchorTypeMismatchRule(),
         new PostExpansionJoinWidthRule(),
         new SelectStarViewRule(),
         new OutputParameterRule(),

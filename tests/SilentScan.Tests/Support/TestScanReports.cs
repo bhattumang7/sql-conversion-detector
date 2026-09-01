@@ -42,6 +42,7 @@ public static class TestScanReports
         IReadOnlyList<UntrustedConstraintFinding>? UntrustedConstraintFindings = null,
         IReadOnlyList<CascadingForeignKeyFinding>? CascadingForeignKeyFindings = null,
         IReadOnlyList<MultiReferencedCteFinding>? MultiReferencedCteFindings = null,
+        IReadOnlyList<RecursiveCteAnchorTypeMismatchFinding>? RecursiveCteAnchorTypeMismatchFindings = null,
         IReadOnlyList<NestedViewDepthFinding>? NestedViewDepthFindings = null,
         IReadOnlyList<PostExpansionJoinWidthFinding>? PostExpansionJoinWidthFindings = null,
         IReadOnlyList<SelectStarViewFinding>? SelectStarViewFindings = null,
@@ -156,6 +157,7 @@ public static class TestScanReports
         Set("UntrustedConstraintScanner", UntrustedConstraintFindings);
         Set("CascadingForeignKeyScanner", CascadingForeignKeyFindings);
         Set("MultiReferencedCteScanner", MultiReferencedCteFindings);
+        Set("RecursiveCteAnchorTypeMismatchScanner", RecursiveCteAnchorTypeMismatchFindings);
         Set("NestedViewDepthScanner", NestedViewDepthFindings);
         Set("PostExpansionJoinWidthScanner", PostExpansionJoinWidthFindings);
         Set("SelectStarViewScanner", SelectStarViewFindings);

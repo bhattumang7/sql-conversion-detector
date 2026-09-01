@@ -124,6 +124,34 @@ internal sealed class MultiReferencedCteRule : IPerFileRule
     });
 }
 
+internal sealed class RecursiveCteAnchorTypeMismatchRule : IPerFileRule
+{
+    public string Id => "RecursiveCteAnchorTypeMismatchScanner";
+
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) =>
+        RecursiveCteAnchorTypeMismatchScanner.Scan(parseResult, context.Catalog, context.Lineage.AllRelations);
+
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) =>
+        RecursiveCteAnchorTypeMismatchScanner.CreateRule(parseResult.SourcePath, context.Catalog, context.Lineage.AllRelations);
+
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) =>
+        RecursiveCteAnchorTypeMismatchScanner.Harvest((RecursiveCteAnchorTypeMismatchScanner.Rule)moduleRule);
+
+    public IComparer<IFinding>? Comparer => Comparer<IFinding>.Create((x, y) =>
+    {
+        var a = (RecursiveCteAnchorTypeMismatchFinding)x;
+        var b = (RecursiveCteAnchorTypeMismatchFinding)y;
+        var cmp = string.CompareOrdinal(a.SourcePath, b.SourcePath);
+        if (cmp != 0)
+        {
+            return cmp;
+        }
+
+        cmp = a.Line.CompareTo(b.Line);
+        return cmp != 0 ? cmp : a.Column.CompareTo(b.Column);
+    });
+}
+
 internal sealed class PostExpansionJoinWidthRule : IPerFileRule
 {
     public string Id => "PostExpansionJoinWidthScanner";

@@ -59,6 +59,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<UntrustedConstraintFinding>("UntrustedConstraintScanner").Select(ToResult));
         results.AddRange(report.Find<CascadingForeignKeyFinding>("CascadingForeignKeyScanner").Select(ToResult));
         results.AddRange(report.Find<MultiReferencedCteFinding>("MultiReferencedCteScanner").Select(ToResult));
+        results.AddRange(report.Find<RecursiveCteAnchorTypeMismatchFinding>(nameof(RecursiveCteAnchorTypeMismatchScanner)).Select(ToResult));
         results.AddRange(report.Find<NestedViewDepthFinding>("NestedViewDepthScanner").Select(ToResult));
         results.AddRange(report.Find<PostExpansionJoinWidthFinding>("PostExpansionJoinWidthScanner").Select(ToResult));
         results.AddRange(report.Find<SelectStarViewFinding>("SelectStarViewScanner").Select(ToResult));
@@ -1200,6 +1201,15 @@ public static class SarifReportWriter
         var message = $"CTE '{finding.CteName}' is referenced {finding.ReferenceCount} times downstream of its own WITH clause - each reference independently re-runs the CTE's own defining query, SQL Server does not materialize it once and reuse it.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(RecursiveCteAnchorTypeMismatchFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.RecursiveCteAnchorTypeMismatchRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"Recursive CTE '{finding.CteName}' column '{finding.ColumnName}' resolves to {finding.RecursiveTypeDisplay} in the recursive member but {finding.AnchorTypeDisplay} in the anchor member - SQL Server rejects this at compile time (Msg 240).";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
 
     private static SarifResult ToResult(NestedViewDepthFinding finding)

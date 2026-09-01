@@ -19,12 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **Recursive CTE anchor/recursive branch type disagreement.** A
-      recursive CTE column whose resolved type disagrees between the anchor
-      and recursive branches is decidable by reusing
-      `ExpressionTypeInferencer` across both branches — a genuine
-      compile-time defect, not currently checked.
-
 - [ ] **`VariableLengthKeyColumnExceedsKeyLimit` sibling: table in-row row
       size exceeds the engine's fixed limit.** A table whose summed maximum
       in-row column widths (catalog + type metadata) exceed SQL Server's

@@ -175,6 +175,7 @@ public static class SarifRuleCatalog
     public const string UntrustedCheckConstraintRuleId = FindingRuleIds.UntrustedCheckConstraintRuleId;
     public const string CascadingForeignKeyRuleId = FindingRuleIds.CascadingForeignKeyRuleId;
     public const string MultiReferencedCteRuleId = FindingRuleIds.MultiReferencedCteRuleId;
+    public const string RecursiveCteAnchorTypeMismatchRuleId = FindingRuleIds.RecursiveCteAnchorTypeMismatchRuleId;
     public const string NestedViewDepthRuleId = FindingRuleIds.NestedViewDepthRuleId;
     public const string PostExpansionJoinWidthRuleId = FindingRuleIds.PostExpansionJoinWidthRuleId;
     public const string SelectStarViewRuleId = FindingRuleIds.SelectStarViewRuleId;

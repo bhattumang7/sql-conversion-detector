@@ -194,6 +194,7 @@ public static class RuleDocCatalog
 
         [Lineage.ExpressionDerivedColumn.RuleId] = Lineage.ExpressionDerivedColumn.Content,
         [Lineage.MultiReferencedCte.RuleId] = Lineage.MultiReferencedCte.Content,
+        [Lineage.RecursiveCteAnchorTypeMismatch.RuleId] = Lineage.RecursiveCteAnchorTypeMismatch.Content,
         [Lineage.NestedViewDepth.RuleId] = Lineage.NestedViewDepth.Content,
         [Lineage.PostExpansionJoinWidth.RuleId] = Lineage.PostExpansionJoinWidth.Content,
         [Lineage.SelectStarView.RuleId] = Lineage.SelectStarView.Content,

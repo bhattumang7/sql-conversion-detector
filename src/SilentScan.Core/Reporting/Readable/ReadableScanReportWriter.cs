@@ -100,6 +100,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(UntrustedConstraint(report, headingLevel, pathBase));
         blocks.AddRange(CascadingForeignKey(report, headingLevel, pathBase));
         blocks.AddRange(MultiReferencedCte(report, headingLevel, pathBase));
+        blocks.AddRange(RecursiveCteAnchorTypeMismatch(report, headingLevel, pathBase));
         blocks.AddRange(NestedViewDepth(report, headingLevel, pathBase));
         blocks.AddRange(PostExpansionJoinWidth(report, headingLevel, pathBase));
         blocks.AddRange(SelectStarView(report, headingLevel, pathBase));
@@ -263,6 +264,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Untrusted FK/CHECK constraints", report.Find<UntrustedConstraintFinding>(nameof(UntrustedConstraintScanner)).Count);
         AddCount(counts, "Foreign keys with a cascading ON DELETE/UPDATE action", report.Find<CascadingForeignKeyFinding>(nameof(CascadingForeignKeyScanner)).Count);
         AddCount(counts, "CTEs referenced 2+ times downstream of their own WITH clause", report.Find<MultiReferencedCteFinding>(nameof(MultiReferencedCteScanner)).Count);
+        AddCount(counts, "Recursive CTE anchor/recursive member column type disagreements", report.Find<RecursiveCteAnchorTypeMismatchFinding>(nameof(RecursiveCteAnchorTypeMismatchScanner)).Count);
         AddCount(counts, "Views/inline TVFs nested 2+ view/TVF layers deep", report.Find<NestedViewDepthFinding>(nameof(NestedViewDepthScanner)).Count);
         AddCount(counts, "Queries whose expanded join width exceeds their written FROM/JOIN count", report.Find<PostExpansionJoinWidthFinding>(nameof(PostExpansionJoinWidthScanner)).Count);
         AddCount(counts, "Consumers narrowing a nested SELECT * view's frozen column list", report.Find<SelectStarViewFinding>(nameof(SelectStarViewScanner)).Count);
@@ -2205,6 +2207,30 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.CteName,
                 f.ReferenceCount.ToString(CultureInfo.InvariantCulture),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> RecursiveCteAnchorTypeMismatch(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<RecursiveCteAnchorTypeMismatchFinding>(nameof(RecursiveCteAnchorTypeMismatchScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Recursive CTE anchor/recursive member type mismatches ({report.Find<RecursiveCteAnchorTypeMismatchFinding>(nameof(RecursiveCteAnchorTypeMismatchScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "T-SQL requires a recursive CTE's recursive member to resolve each column to exactly the anchor member's own type - oracle-confirmed as a hard compile-time error (Msg 240, \"Types don't match between the anchor and the recursive part\") that blocks even CREATE PROCEDURE/CREATE VIEW from succeeding.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.RecursiveCteAnchorTypeMismatchRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "CTE", "Column", "Anchor type", "Recursive member type"],
+            [.. report.Find<RecursiveCteAnchorTypeMismatchFinding>(nameof(RecursiveCteAnchorTypeMismatchScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.CteName,
+                f.ColumnName,
+                f.AnchorTypeDisplay,
+                f.RecursiveTypeDisplay,
             })]);
     }
 

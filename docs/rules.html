@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">292 rules. 204 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">293 rules. 205 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -376,6 +376,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/lineage-multi-referenced-cte.html">Multi Referenced CTE</a> <code class="rule-key">silentscan/lineage/multi-referenced-cte</code><span class="snippet">A CTE referenced 2&#x2B; times downstream of its own WITH clause.</span></li>
       <li><a class="id" href="rules/lineage-nested-view-depth.html">Nested View Depth</a> <code class="rule-key">silentscan/lineage/nested-view-depth</code><span class="snippet">A view/inline TVF nested 2&#x2B; view/TVF layers deep before reaching a base table.</span></li>
       <li><a class="id" href="rules/lineage-post-expansion-join-width.html">Post Expansion Join Width</a> <code class="rule-key">silentscan/lineage/post-expansion-join-width</code><span class="snippet">A query whose written FROM/JOIN table count meaningfully understates how many base tables it actually touches once every view/inline-TVF reference is expanded transitively.</span></li>
+      <li><a class="id" href="rules/lineage-recursive-cte-anchor-type-mismatch.html">Recursive CTE Anchor Type Mismatch</a> <code class="rule-key">silentscan/lineage/recursive-cte-anchor-type-mismatch</code><span class="snippet">A recursive CTE&#x27;s recursive member resolves a column to a type (category, length/MAX, precision/scale, or collation) that disagrees with the anchor member&#x27;s own resolved type for that column.</span></li>
       <li><a class="id" href="rules/lineage-select-star-view.html">Select Star View</a> <code class="rule-key">silentscan/lineage/select-star-view</code><span class="snippet">A view/inline TVF nested 1&#x2B; view/TVF layers deep whose own outermost SELECT is a bare or qualified *.</span></li>
     </ul>
   </section>

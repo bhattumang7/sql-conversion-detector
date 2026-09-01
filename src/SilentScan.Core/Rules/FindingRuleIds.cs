@@ -211,6 +211,7 @@ public static class FindingRuleIds
     public const string UntrustedCheckConstraintRuleId = "silentscan/catalog/untrusted-check-constraint";
     public const string CascadingForeignKeyRuleId = "silentscan/catalog/cascading-foreign-key";
     public const string MultiReferencedCteRuleId = "silentscan/lineage/multi-referenced-cte";
+    public const string RecursiveCteAnchorTypeMismatchRuleId = "silentscan/lineage/recursive-cte-anchor-type-mismatch";
     public const string NestedViewDepthRuleId = "silentscan/lineage/nested-view-depth";
     public const string PostExpansionJoinWidthRuleId = "silentscan/lineage/post-expansion-join-width";
     public const string SelectStarViewRuleId = "silentscan/lineage/select-star-view";
