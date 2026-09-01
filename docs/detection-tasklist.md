@@ -352,28 +352,21 @@ Competitor tools are referred to generically; real identities are in
         SOURCE`/`DROP EXTERNAL FILE FORMAT` blocked by a dependent external
         table/stream. **FINDING:** not tested this pass.
 
-- [ ] **ALTER TABLE SWITCH: indexed-view partitioning-column alignment (Msg
-      11400/11403/11404/11405).** The reference-count and view-own-
-      partitioning slices of this family shipped as
-      `AlterTableSwitchIndexedViewAlignmentRuleId` (11401/11402 - see
-      `detection-reference.md` Settled). What's left needs actual
-      column-level provenance through the view definition: (a) whether the
-      indexed view's partitioning column is a DIRECT selection of the base
-      table's partitioning column, not an expression/derived one (11403/
-      11405 - the same kind of analysis `ComputedColumnMatcher`/lineage-layer
-      resolvers already do elsewhere, but not yet wired to this question),
-      and (b) whether two partition schemes are built on an EQUIVALENT
-      partition function, not just the same scheme name (11400 - oracle-
-      confirmed `IndexDesignScanner.ScanNonAlignedPartitionedIndex`'s
-      same-scheme-name proxy is the right check only when comparing indexes
-      on the SAME table; a base table and an indexed view can each pick
-      their own scheme name over the same function, so that proxy doesn't
-      carry over here - needs a real scheme -> function mapping in the
-      catalog). Getting either "equivalent partition function" or "directly
-      selected column" subtly wrong risks a false positive, which this
-      project's precision discipline treats as worse than a missed true
-      positive - deliberately not attempted in the same pass as the
-      reference-count slice above.
+- [ ] **ALTER TABLE SWITCH: indexed-view correspondence (Msg 11404).** The
+      reference-count, view-own-partitioning, direct-selection, and
+      partition-function-equivalence slices of this family all shipped as
+      `AlterTableSwitchIndexedViewAlignmentRuleId` (11401/11402/11403/11405/
+      11400 - see `detection-reference.md` Settled). What's left: oracle-
+      confirmed that even when source and target reference EQUAL counts of
+      (non-disabled) indexed views, the engine still requires each target
+      view to have a "matching" source view beyond raw count - two views
+      that are each individually aligned and partitioned the same way can
+      still fail with 11404 if they don't otherwise correspond (reproduced:
+      one view selecting a differing non-key column than its counterpart on
+      the other side). Needs the actual correspondence rule pinned down
+      (likely the views' full column/expression sets, not just their
+      partitioning column) before it can be implemented without risking a
+      false positive.
 
 ---
 

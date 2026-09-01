@@ -497,8 +497,9 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 ## Settled (do not re-propose)
 
 * **`AlterTableSwitchIndexedViewAlignmentRuleId` — shipped for the
-  reference-count and view-own-partitioning slices only (Msg 11401/11402);
-  the column-provenance slice (11400/11403/11404/11405) is still open.**
+  reference-count, view-own-partitioning, direct-selection, and
+  partition-function-equivalence slices (Msg 11401/11402/11403/11405/
+  11400); the view-correspondence slice (11404) is still open.**
   Oracle-confirmed (Docker, SQL Server 2025): if either side of an
   `ALTER TABLE ... SWITCH` is partitioned and is referenced by a
   schema-bound indexed view whose own clustered index is NOT itself
@@ -513,11 +514,23 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
   toward this check on either side (oracle-confirmed: a target-only
   disabled indexed view does not block the SWITCH) - the scanner filters
   `IsDisabled` indexes out of both the not-partitioned check and the
-  reference count. When source and target reference EQUAL counts of
-  (non-disabled) indexed views, the engine still checks whether the views
-  actually correspond (11404) and whether each one's partitioning column is
-  directly selected vs. equivalent-partition-function (11400/11403/11405) -
-  deliberately not attempted; see `detection-tasklist.md` for what's left.
+  reference count. Beyond that, an indexed view referencing a partitioned
+  table must directly select the table's own partitioning column - not an
+  expression derived from it (11403) and not a direct selection of some
+  other column (11405) - resolved by parsing the view's own definition text
+  and matching its select-list expression, restricted to the single-table,
+  no-join case for precision. And the view's clustered index must sit on a
+  partition scheme built on a partition function structurally equivalent to
+  the table's own (same range direction, parameter type, and ordered
+  boundary values) - oracle-confirmed this is NOT a same-scheme-name check:
+  a base table and its indexed view can pick differently-named schemes over
+  the same function and still switch cleanly (11400). What's still open:
+  when source and target reference EQUAL counts of (non-disabled) indexed
+  views, the engine additionally requires each target view to have a
+  "matching" source view beyond raw count (11404) - oracle-confirmed two
+  views that are each individually aligned and correctly partitioned can
+  still fail this way if they don't otherwise correspond; see
+  `detection-tasklist.md` for what's left.
 
 
 
