@@ -11,13 +11,16 @@ internal static class TempTableExecShapeColumnCountMismatch
             `INSERT INTO #temp EXEC OtherProc` binds the executed procedure's result set into the
             temp table's own columns purely by POSITION - never by name. That's an implicit
             assumption every such statement makes: that `OtherProc`'s actual, engine-described
-            result set matches `#temp`'s own declared columns one-for-one in order. When the
-            executed procedure's real column COUNT differs from the temp table's declared column
-            count, T-SQL raises a hard, immediate runtime error (Msg 213 or 8164, "column name or
-            number of supplied values does not match table definition") the instant the statement
-            executes - live-verified directly against `sys.dm_exec_describe_first_result_set`
-            (compile-only), the same real, engine-authoritative result-set description this tool's
-            other live-catalog facts already rely on.
+            result set matches the INSERT's own target column list one-for-one in order - `#temp`'s
+            full declared columns, or a narrower explicit `INSERT INTO #temp (col, ...) EXEC` column
+            list when the statement names one (any declared column left out of that list, DEFAULT
+            or nullable, is simply not touched and needs no matching described column at all). When
+            the executed procedure's real column COUNT differs from that target column count,
+            T-SQL raises a hard, immediate runtime error (Msg 213 or 8164, "column name or number of
+            supplied values does not match table definition") the instant the statement executes -
+            live-verified directly against `sys.dm_exec_describe_first_result_set` (compile-only),
+            the same real, engine-authoritative result-set description this tool's other
+            live-catalog facts already rely on.
 
             Unlike the sibling `insert-exec-temp-table-column-type-mismatch` finding, this is not
             itself a SILENT defect - the engine fails loudly, every time. It's still worth reporting,
@@ -26,8 +29,9 @@ internal static class TempTableExecShapeColumnCountMismatch
             runtime behavior at all.
             """,
         HowToFixIt: """
-            Make #temp's declared column list match the executed procedure's real result-set column
-            count exactly - INSERT ... EXEC binds purely by position.
+            Make the INSERT's own target column count - #temp's declared column list, or its own
+            explicit column list - match the executed procedure's real result-set column count
+            exactly. INSERT ... EXEC binds purely by position.
             """,
         Examples:
         [

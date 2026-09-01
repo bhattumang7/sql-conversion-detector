@@ -1398,7 +1398,7 @@ public static class SarifReportWriter
         {
 
             var level = FloorLevelForConfidence(LevelError, finding.Confidence);
-            var message = $"INSERT INTO {finding.TempTableQualifiedName} EXEC {finding.ExecutedProcQualifiedName}: the temp table declares {finding.TempTableDeclaredColumnCount} column(s) but the executed proc's real result set describes {finding.DescribedColumnCount} - this raises a hard error (Msg 213/8164) every time it runs.";
+            var message = $"INSERT INTO {finding.TempTableQualifiedName} EXEC {finding.ExecutedProcQualifiedName}: the INSERT targets {finding.TempTableDeclaredColumnCount} column(s) but the executed proc's real result set describes {finding.DescribedColumnCount} - this raises a hard error (Msg 213/8164) every time it runs.";
             return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
         }
 

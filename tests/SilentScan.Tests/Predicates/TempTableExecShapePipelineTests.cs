@@ -33,6 +33,72 @@ public sealed class TempTableExecShapePipelineTests
     }
 
     [Fact]
+    public async Task ColumnCountMismatch_ExplicitColumnListNarrowerThanDeclared_DefaultTakesOmittedColumn_NeverFires()
+    {
+        const string sql = """
+            CREATE PROCEDURE dbo.usp_Callee AS
+            BEGIN
+                SELECT CAST(1 AS INT) AS Col1, CAST(2 AS INT) AS Col2;
+            END
+            GO
+            CREATE PROCEDURE dbo.usp_Caller AS
+            BEGIN
+                CREATE TABLE #Results (Col1 INT NOT NULL, Col2 INT NOT NULL, Col3 INT NOT NULL DEFAULT 99);
+                INSERT INTO #Results (Col1, Col2) EXEC dbo.usp_Callee;
+            END
+            """;
+
+        var report = await EngineAuthoritativeScan.ScanAsync(sql);
+
+        Assert.Empty(report.Find<TempTableExecShapeFinding>("TempTableExecShapeScanner"));
+    }
+
+    [Fact]
+    public async Task ColumnCountMismatch_ExplicitColumnListStillNarrowerThanDescribed_Fires()
+    {
+        const string sql = """
+            CREATE PROCEDURE dbo.usp_Callee AS
+            BEGIN
+                SELECT CAST(1 AS INT) AS Col1, CAST(2 AS INT) AS Col2, CAST(3 AS INT) AS Col3;
+            END
+            GO
+            CREATE PROCEDURE dbo.usp_Caller AS
+            BEGIN
+                CREATE TABLE #Results (Col1 INT NOT NULL, Col2 INT NOT NULL, Col3 INT NOT NULL DEFAULT 99);
+                INSERT INTO #Results (Col1, Col2) EXEC dbo.usp_Callee;
+            END
+            """;
+
+        var report = await EngineAuthoritativeScan.ScanAsync(sql);
+
+        var finding = Assert.Single(report.Find<TempTableExecShapeFinding>("TempTableExecShapeScanner"));
+        Assert.Equal(TempTableExecShapeFindingKind.ColumnCountMismatch, finding.Kind);
+        Assert.Equal(2, finding.TempTableDeclaredColumnCount);
+        Assert.Equal(3, finding.DescribedColumnCount);
+    }
+
+    [Fact]
+    public async Task ColumnTypeMismatch_ExplicitColumnListReordered_MatchesByNameNotPosition()
+    {
+        const string sql = """
+            CREATE PROCEDURE dbo.usp_Callee AS
+            BEGIN
+                SELECT CAST('x' AS VARCHAR(50)) AS Col2, CAST(1 AS INT) AS Col1;
+            END
+            GO
+            CREATE PROCEDURE dbo.usp_Caller AS
+            BEGIN
+                CREATE TABLE #Results (Col1 INT NOT NULL, Col2 VARCHAR(50) NOT NULL);
+                INSERT INTO #Results (Col2, Col1) EXEC dbo.usp_Callee;
+            END
+            """;
+
+        var report = await EngineAuthoritativeScan.ScanAsync(sql);
+
+        Assert.Empty(report.Find<TempTableExecShapeFinding>("TempTableExecShapeScanner"));
+    }
+
+    [Fact]
     public async Task ColumnTypeMismatch_UnicodeIntoNonUnicode_Fires()
     {
         const string sql = """

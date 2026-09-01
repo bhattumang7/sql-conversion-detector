@@ -10,6 +10,7 @@ public sealed class TempTableExecShapeCheckerClassifyTests
     private static readonly TempTableExecShapeCandidate Candidate = new(
         TempTableQualifiedName: "#Results",
         TempTableColumns: null,
+        ExplicitColumnNames: null,
         ExecutedProcQualifiedName: "dbo.usp_Callee",
         CallerScopeQualifiedName: "dbo.usp_Caller",
         SourcePath: "dbo.usp_Caller",

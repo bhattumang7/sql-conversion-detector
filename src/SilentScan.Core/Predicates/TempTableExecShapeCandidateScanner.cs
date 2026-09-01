@@ -40,9 +40,15 @@ public static class TempTableExecShapeCandidateScanner
                 var tempQualifiedName = SchemaObjectNameHelper.Qualify(targetSchemaObject);
                 var temp = catalog.Find(tempQualifiedName, walker.CurrentProcScope);
 
+                var explicitColumnNames = node.InsertSpecification.Columns.Count > 0
+                    ? (IReadOnlyList<string>)[.. node.InsertSpecification.Columns
+                        .Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)]
+                    : null;
+
                 Candidates.Add(new TempTableExecShapeCandidate(
                     TempTableQualifiedName: tempQualifiedName,
                     TempTableColumns: temp?.Columns,
+                    ExplicitColumnNames: explicitColumnNames,
                     ExecutedProcQualifiedName: catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(procedureName)),
                     CallerScopeQualifiedName: walker.CurrentProcScope,
                     SourcePath: sourcePath,
@@ -56,6 +62,7 @@ public static class TempTableExecShapeCandidateScanner
 public readonly record struct TempTableExecShapeCandidate(
     string TempTableQualifiedName,
     IReadOnlyList<CatalogColumn>? TempTableColumns,
+    IReadOnlyList<string>? ExplicitColumnNames,
     string ExecutedProcQualifiedName,
     string? CallerScopeQualifiedName,
     string SourcePath,

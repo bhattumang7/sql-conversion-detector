@@ -432,7 +432,7 @@ public sealed class SarifReportWriterCoverageTests
 
         var result = FirstResult(report);
         Assert.Equal("error", result.GetProperty("level").GetString());
-        Assert.Contains("declares 3 column(s) but the executed proc's real result set describes 2", result.GetProperty("message").GetProperty("text").GetString());
+        Assert.Contains("targets 3 column(s) but the executed proc's real result set describes 2", result.GetProperty("message").GetProperty("text").GetString());
     }
 
     [Fact]

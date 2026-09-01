@@ -15,35 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 7 remain open below.
+correctness bugs found; 6 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`TempTableExecShapeCandidateScanner`'s `ColumnCountMismatch` ignores
-      an explicit column list on `INSERT INTO #temp (<cols>) EXEC proc`,
-      comparing the executed proc's described column count against the temp
-      table's *full* declared column count instead — so a narrower explicit
-      column list produces a false "always raises a hard runtime error"
-      claim.**
-      (`src/SilentScan.Core/Predicates/TempTableExecShapeCandidateScanner.cs:25-52`
-      never reads `InsertSpecification.Columns`, always using the temp
-      table's complete catalog-declared columns;
-      `src/SilentScan.Live/Catalog/TempTableExecShapeChecker.cs:83-92`
-      compares that full count against the proc's described result-set
-      column count with no way to know a partial list was present;
-      `RuleCatalog.cs:180` claims "this always raises a hard runtime error
-      (Msg 213/8164) every time the statement executes.") Oracle-confirmed
-      (SQL Server 2025): `#Results` declared with 3 columns
-      (`Col1`/`Col2`/`Col3 DEFAULT 99`), executed proc's real result set has
-      2 columns — `INSERT INTO #Results (Col1, Col2) EXEC proc` runs with
-      **no error**, `Col3` taking its default. The scanner, comparing 3
-      declared columns against 2 described columns while ignoring the
-      explicit `(Col1, Col2)` list, would report a guaranteed failure that
-      provably does not occur. Not covered by the existing test suite,
-      which has no case with an explicit column list narrower than the temp
-      table's full column set.
 
 - [ ] **`TruncateSwallowedScanner` fires a duplicate finding for a nested
       TRY/CATCH around a swallowed `TRUNCATE`, one copy of which

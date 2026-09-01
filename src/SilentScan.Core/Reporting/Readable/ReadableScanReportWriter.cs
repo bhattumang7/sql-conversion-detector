@@ -2223,7 +2223,7 @@ public static class ReadableScanReportWriter
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                     f.Kind == TempTableExecShapeFindingKind.ColumnCountMismatch
-                        ? $"{f.TempTableQualifiedName} declares {f.TempTableDeclaredColumnCount} column(s); {f.ExecutedProcQualifiedName} describes {f.DescribedColumnCount}"
+                        ? $"{f.TempTableQualifiedName} INSERT targets {f.TempTableDeclaredColumnCount} column(s); {f.ExecutedProcQualifiedName} describes {f.DescribedColumnCount}"
                         : $"{f.TempTableQualifiedName} position {f.ColumnPosition} ('{f.ColumnName}', {f.TempColumnTypeDisplay}) <- {f.ExecutedProcQualifiedName} ({f.DescribedColumnTypeDisplay}): {f.WriteLoss}",
                 })]);
         }

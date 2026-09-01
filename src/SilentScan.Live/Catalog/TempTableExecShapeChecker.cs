@@ -83,20 +83,38 @@ public sealed class TempTableExecShapeChecker
         IReadOnlyList<DescribedResultColumn> describedColumns,
         List<TempTableExecShapeFinding> findings)
     {
-        if (tempColumns.Count != describedColumns.Count)
+        var effectiveColumns = tempColumns;
+        if (candidate.ExplicitColumnNames is { } explicitColumnNames)
+        {
+            var resolved = new List<CatalogColumn>(explicitColumnNames.Count);
+            foreach (var explicitColumnName in explicitColumnNames)
+            {
+                var match = tempColumns.FirstOrDefault(c => string.Equals(c.Name, explicitColumnName, StringComparison.OrdinalIgnoreCase));
+                if (match is null)
+                {
+                    return;
+                }
+
+                resolved.Add(match);
+            }
+
+            effectiveColumns = resolved;
+        }
+
+        if (effectiveColumns.Count != describedColumns.Count)
         {
             findings.Add(new TempTableExecShapeFinding(
                 TempTableExecShapeFindingKind.ColumnCountMismatch,
                 candidate.TempTableQualifiedName, candidate.ExecutedProcQualifiedName,
-                tempColumns.Count, describedColumns.Count,
+                effectiveColumns.Count, describedColumns.Count,
                 ColumnName: null, ColumnPosition: null, TempColumnTypeDisplay: null, DescribedColumnTypeDisplay: null, WriteLoss: null,
                 candidate.CallerScopeQualifiedName, candidate.SourcePath, candidate.Line, candidate.Column));
             return;
         }
 
-        for (var i = 0; i < tempColumns.Count; i++)
+        for (var i = 0; i < effectiveColumns.Count; i++)
         {
-            var tempColumn = tempColumns[i];
+            var tempColumn = effectiveColumns[i];
             var describedType = LiveTypeMapper.BuildType(
                 describedColumns[i].Column.TypeName, describedColumns[i].Column.MaxLength,
                 describedColumns[i].Column.Precision, describedColumns[i].Column.Scale, describedColumns[i].Column.CollationName);
