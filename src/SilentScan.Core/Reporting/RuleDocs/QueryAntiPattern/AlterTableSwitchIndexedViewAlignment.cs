@@ -30,6 +30,14 @@ internal static class AlterTableSwitchIndexedViewAlignment
             function - equivalent by structure (range direction, parameter type, and boundary
             values), not merely by scheme name, since a view and its base table are free to pick
             different scheme names over the same function (error 11400).
+
+            Matching the raw reference count isn't enough on its own, either. Even when the
+            source and target tables carry an equal number of indexed views, every indexed view
+            on the target table must have at least one "matching" indexed view on the source
+            table - the engine compares each view pair's own SELECT list (same columns, same
+            order, same output names) and WHERE clause, not just how many views exist on each
+            side. A target-side view with no structurally identical counterpart on the source
+            side fails with error 11404, even if every other check above already passes.
             """,
         HowToFixIt: """
             Give every indexed view that references a partitioned table its own partitioned
@@ -37,7 +45,9 @@ internal static class AlterTableSwitchIndexedViewAlignment
             built on an equivalent partition function), keyed on a column that's a direct
             selection of the table's own partitioning column. And before switching a partition
             into a table that's referenced by one or more indexed views, make sure the source
-            table is referenced by at least as many indexed views as the target table.
+            table is referenced by at least as many indexed views as the target table, and that
+            each target-side view has a source-side view with an identical SELECT list and WHERE
+            clause.
             """,
         Examples:
         [
@@ -115,5 +125,34 @@ internal static class AlterTableSwitchIndexedViewAlignment
                     ALTER TABLE dbo.OrdersSource SWITCH PARTITION 2 TO dbo.OrdersTarget PARTITION 2;
                     """,
                 CompliantExplanation: "PsOrdersViewAlias is a differently-named scheme, but it's built on the same partition function (PfOrders) as the table's own scheme, so the two are equivalent and this check passes."),
+            new RuleDocExample(
+                Title: "Equal indexed-view counts but the views don't correspond",
+                NoncompliantSql: """
+                    -- dbo.OrdersSource and dbo.OrdersTarget each carry exactly one indexed view.
+                    CREATE VIEW dbo.OrdersSourceTotals WITH SCHEMABINDING AS
+                    SELECT Grp, Id, ValA FROM dbo.OrdersSource;
+                    CREATE UNIQUE CLUSTERED INDEX IX_OrdersSourceTotals ON dbo.OrdersSourceTotals(Grp, Id) ON PsOrders(Grp);
+
+                    CREATE VIEW dbo.OrdersTargetTotals WITH SCHEMABINDING AS
+                    SELECT Grp, Id, ValB FROM dbo.OrdersTarget;
+                    CREATE UNIQUE CLUSTERED INDEX IX_OrdersTargetTotals ON dbo.OrdersTargetTotals(Grp, Id) ON PsOrders(Grp);
+
+                    ALTER TABLE dbo.OrdersSource SWITCH PARTITION 2 TO dbo.OrdersTarget PARTITION 2;
+                    -- Msg 11404: Target table 'OrdersTarget' is referenced by 1 indexed view(s), but
+                    -- source table 'OrdersSource' is only referenced by 0 matching indexed view(s).
+                    """,
+                NoncompliantExplanation: "Both tables are referenced by exactly one indexed view, so the raw count check (11402) passes - but OrdersSourceTotals selects ValA while OrdersTargetTotals selects ValB, so the two views don't correspond, and the engine still refuses the SWITCH.",
+                CompliantSql: """
+                    CREATE VIEW dbo.OrdersSourceTotals WITH SCHEMABINDING AS
+                    SELECT Grp, Id, ValA FROM dbo.OrdersSource;
+                    CREATE UNIQUE CLUSTERED INDEX IX_OrdersSourceTotals ON dbo.OrdersSourceTotals(Grp, Id) ON PsOrders(Grp);
+
+                    CREATE VIEW dbo.OrdersTargetTotals WITH SCHEMABINDING AS
+                    SELECT Grp, Id, ValA FROM dbo.OrdersTarget;
+                    CREATE UNIQUE CLUSTERED INDEX IX_OrdersTargetTotals ON dbo.OrdersTargetTotals(Grp, Id) ON PsOrders(Grp);
+
+                    ALTER TABLE dbo.OrdersSource SWITCH PARTITION 2 TO dbo.OrdersTarget PARTITION 2;
+                    """,
+                CompliantExplanation: "Both views now select the same column (ValA) in the same position with the same output name, so they correspond and this check passes."),
         ]);
 }

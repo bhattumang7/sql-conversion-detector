@@ -496,10 +496,8 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
-* **`AlterTableSwitchIndexedViewAlignmentRuleId` — shipped for the
-  reference-count, view-own-partitioning, direct-selection, and
-  partition-function-equivalence slices (Msg 11401/11402/11403/11405/
-  11400); the view-correspondence slice (11404) is still open.**
+* **`AlterTableSwitchIndexedViewAlignmentRuleId` — shipped for
+  Msg 11400/11401/11402/11403/11404/11405.**
   Oracle-confirmed (Docker, SQL Server 2025): if either side of an
   `ALTER TABLE ... SWITCH` is partitioned and is referenced by a
   schema-bound indexed view whose own clustered index is NOT itself
@@ -524,13 +522,24 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
   the table's own (same range direction, parameter type, and ordered
   boundary values) - oracle-confirmed this is NOT a same-scheme-name check:
   a base table and its indexed view can pick differently-named schemes over
-  the same function and still switch cleanly (11400). What's still open:
-  when source and target reference EQUAL counts of (non-disabled) indexed
-  views, the engine additionally requires each target view to have a
-  "matching" source view beyond raw count (11404) - oracle-confirmed two
-  views that are each individually aligned and correctly partitioned can
-  still fail this way if they don't otherwise correspond; see
-  `detection-tasklist.md` for what's left.
+  the same function and still switch cleanly (11400). Finally, even when
+  source and target reference EQUAL counts of (non-disabled) indexed views,
+  the engine additionally requires each target view to have a "matching"
+  source view beyond raw count (11404) - oracle-confirmed two views that are
+  each individually aligned and correctly partitioned can still fail this
+  way if they don't otherwise correspond (own error text: "... but source
+  table ... is only referenced by N matching indexed view(s)"). Oracle
+  probing pinned "matching" down to: the same number of SELECT-list items,
+  in the same order, each a structurally identical expression (bare column
+  reference or literal - anything else is left undetected) with the same
+  output name, plus a structurally identical WHERE clause (or none on
+  either side) - column/expression order, output aliasing, and the WHERE
+  predicate itself all independently break the match even when the
+  partitioning column lines up fine. Resolved by parsing both views'
+  definition text and comparing their query specifications structurally
+  (`IndexedViewCorrespondenceMatcher`), restricted to the single-table,
+  no-join, no-GROUP-BY/HAVING/TOP/DISTINCT/ORDER-BY case for precision; any
+  unsupported shape resolves Unknown rather than risking a false 11404.
 
 
 

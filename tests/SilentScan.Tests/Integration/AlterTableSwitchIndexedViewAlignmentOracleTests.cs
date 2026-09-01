@@ -158,6 +158,77 @@ public sealed class AlterTableSwitchIndexedViewAlignmentOracleTests : OracleTest
         SELECT Grp, Id, Val FROM dbo.FunctionEquivalentTarget;
         GO
         CREATE UNIQUE CLUSTERED INDEX IX_FunctionEquivalentTargetView ON dbo.FunctionEquivalentTargetView(Grp, Id) ON PsFunctionMismatch(Grp);
+        GO
+
+        CREATE PARTITION FUNCTION PfCorrespondence (int) AS RANGE LEFT FOR VALUES (10, 20, 30);
+        GO
+        CREATE PARTITION SCHEME PsCorrespondence AS PARTITION PfCorrespondence ALL TO ([PRIMARY]);
+        GO
+        CREATE TABLE dbo.CorrespondenceMismatchSource (Id INT NOT NULL, Grp INT NOT NULL, ValA INT NOT NULL, ValB INT NOT NULL) ON PsCorrespondence(Grp);
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceMismatchSource ON dbo.CorrespondenceMismatchSource(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+        CREATE TABLE dbo.CorrespondenceMismatchTarget (Id INT NOT NULL, Grp INT NOT NULL, ValA INT NOT NULL, ValB INT NOT NULL) ON PsCorrespondence(Grp);
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceMismatchTarget ON dbo.CorrespondenceMismatchTarget(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+        CREATE VIEW dbo.CorrespondenceMismatchSourceView WITH SCHEMABINDING AS
+        SELECT Grp, Id, ValA FROM dbo.CorrespondenceMismatchSource;
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceMismatchSourceView ON dbo.CorrespondenceMismatchSourceView(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+        CREATE VIEW dbo.CorrespondenceMismatchTargetView WITH SCHEMABINDING AS
+        SELECT Grp, Id, ValB FROM dbo.CorrespondenceMismatchTarget;
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceMismatchTargetView ON dbo.CorrespondenceMismatchTargetView(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+
+        CREATE TABLE dbo.CorrespondenceMultiSource (Id INT NOT NULL, Grp INT NOT NULL, ValA INT NOT NULL, ValB INT NOT NULL) ON PsCorrespondence(Grp);
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceMultiSource ON dbo.CorrespondenceMultiSource(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+        CREATE TABLE dbo.CorrespondenceMultiTarget (Id INT NOT NULL, Grp INT NOT NULL, ValA INT NOT NULL, ValB INT NOT NULL) ON PsCorrespondence(Grp);
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceMultiTarget ON dbo.CorrespondenceMultiTarget(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+        CREATE VIEW dbo.CorrespondenceMultiSourceView1 WITH SCHEMABINDING AS
+        SELECT Grp, Id, ValA FROM dbo.CorrespondenceMultiSource;
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceMultiSourceView1 ON dbo.CorrespondenceMultiSourceView1(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+        CREATE VIEW dbo.CorrespondenceMultiSourceView2 WITH SCHEMABINDING AS
+        SELECT Grp, Id, ValA FROM dbo.CorrespondenceMultiSource;
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceMultiSourceView2 ON dbo.CorrespondenceMultiSourceView2(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+        CREATE VIEW dbo.CorrespondenceMultiTargetView1 WITH SCHEMABINDING AS
+        SELECT Grp, Id, ValA FROM dbo.CorrespondenceMultiTarget;
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceMultiTargetView1 ON dbo.CorrespondenceMultiTargetView1(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+        CREATE VIEW dbo.CorrespondenceMultiTargetView2 WITH SCHEMABINDING AS
+        SELECT Grp, Id, ValB FROM dbo.CorrespondenceMultiTarget;
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceMultiTargetView2 ON dbo.CorrespondenceMultiTargetView2(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+
+        CREATE TABLE dbo.CorrespondenceWhereSource (Id INT NOT NULL, Grp INT NOT NULL, ValA INT NOT NULL) ON PsCorrespondence(Grp);
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceWhereSource ON dbo.CorrespondenceWhereSource(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+        CREATE TABLE dbo.CorrespondenceWhereTarget (Id INT NOT NULL, Grp INT NOT NULL, ValA INT NOT NULL) ON PsCorrespondence(Grp);
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceWhereTarget ON dbo.CorrespondenceWhereTarget(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+        CREATE VIEW dbo.CorrespondenceWhereSourceView WITH SCHEMABINDING AS
+        SELECT Grp, Id, ValA FROM dbo.CorrespondenceWhereSource WHERE ValA > 0;
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceWhereSourceView ON dbo.CorrespondenceWhereSourceView(Grp, Id) ON PsCorrespondence(Grp);
+        GO
+        CREATE VIEW dbo.CorrespondenceWhereTargetView WITH SCHEMABINDING AS
+        SELECT Grp, Id, ValA FROM dbo.CorrespondenceWhereTarget WHERE ValA > 100;
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_CorrespondenceWhereTargetView ON dbo.CorrespondenceWhereTargetView(Grp, Id) ON PsCorrespondence(Grp);
         """;
 
     [Fact]
@@ -334,6 +405,75 @@ public sealed class AlterTableSwitchIndexedViewAlignmentOracleTests : OracleTest
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         Assert.DoesNotContain(
             QueryAntiPatternScanner.Scan(result, catalog), f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment);
+    }
+
+    [Fact]
+    public async Task EqualViewCountsButDifferentNonKeyColumnSelected_BlocksSwitchWith11404()
+    {
+        var exception = await Assert.ThrowsAsync<SqlException>(
+            () => ExecuteAsync("ALTER TABLE dbo.CorrespondenceMismatchSource SWITCH PARTITION 2 TO dbo.CorrespondenceMismatchTarget PARTITION 2;"));
+
+        Assert.Equal(11404, exception.Number);
+    }
+
+    [Fact]
+    public async Task LiveCatalogAndScanner_ReportTheNonCorrespondingIndexedView()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+        var result = SqlScriptParser.ParseText(
+            "test.sql", "ALTER TABLE dbo.CorrespondenceMismatchSource SWITCH PARTITION 2 TO dbo.CorrespondenceMismatchTarget PARTITION 2;");
+
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var finding = Assert.Single(
+            QueryAntiPatternScanner.Scan(result, catalog), f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("11404", finding.DetailText);
+    }
+
+    [Fact]
+    public async Task OneOfTwoTargetViewsHasNoMatchDespiteEqualTotalCounts_BlocksSwitchWith11404()
+    {
+        var exception = await Assert.ThrowsAsync<SqlException>(
+            () => ExecuteAsync("ALTER TABLE dbo.CorrespondenceMultiSource SWITCH PARTITION 2 TO dbo.CorrespondenceMultiTarget PARTITION 2;"));
+
+        Assert.Equal(11404, exception.Number);
+    }
+
+    [Fact]
+    public async Task LiveCatalogAndScanner_ReportTheUnmatchedViewAmongMultipleCandidates()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+        var result = SqlScriptParser.ParseText(
+            "test.sql", "ALTER TABLE dbo.CorrespondenceMultiSource SWITCH PARTITION 2 TO dbo.CorrespondenceMultiTarget PARTITION 2;");
+
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var finding = Assert.Single(
+            QueryAntiPatternScanner.Scan(result, catalog), f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("11404", finding.DetailText);
+    }
+
+    [Fact]
+    public async Task SameSelectListButDifferentWhereClause_BlocksSwitchWith11404()
+    {
+        var exception = await Assert.ThrowsAsync<SqlException>(
+            () => ExecuteAsync("ALTER TABLE dbo.CorrespondenceWhereSource SWITCH PARTITION 2 TO dbo.CorrespondenceWhereTarget PARTITION 2;"));
+
+        Assert.Equal(11404, exception.Number);
+    }
+
+    [Fact]
+    public async Task LiveCatalogAndScanner_ReportTheDifferingWhereClause()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+        var result = SqlScriptParser.ParseText(
+            "test.sql", "ALTER TABLE dbo.CorrespondenceWhereSource SWITCH PARTITION 2 TO dbo.CorrespondenceWhereTarget PARTITION 2;");
+
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var finding = Assert.Single(
+            QueryAntiPatternScanner.Scan(result, catalog), f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("11404", finding.DetailText);
     }
 
     private async Task ExecuteAsync(string sql)

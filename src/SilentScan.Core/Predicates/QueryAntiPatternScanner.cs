@@ -873,16 +873,61 @@ public static class QueryAntiPatternScanner
 
             var sourceViewCount = CountActiveIndexedViews(sourceQualifiedName);
             var targetViewCount = CountActiveIndexedViews(targetQualifiedName);
-            if (targetViewCount <= sourceViewCount)
+            if (targetViewCount > sourceViewCount)
             {
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - target table is referenced by {targetViewCount} indexed view(s) but source table is only referenced by {sourceViewCount} indexed view(s) (error 11402); every indexed view on the target table must have at least one matching indexed view on the source table, so this statement will fail at execution.",
+                    FindingConfidence.High));
                 return;
             }
 
-            Findings.Add(new QueryAntiPatternFinding(
-                QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment, sourcePath,
-                node.StartLine, node.StartColumn,
-                $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - target table is referenced by {targetViewCount} indexed view(s) but source table is only referenced by {sourceViewCount} indexed view(s) (error 11402); every indexed view on the target table must have at least one matching indexed view on the source table, so this statement will fail at execution.",
-                FindingConfidence.High));
+            InspectIndexedViewCorrespondence(node, sourceQualifiedName, targetQualifiedName);
+        }
+
+        private void InspectIndexedViewCorrespondence(AlterTableSwitchStatement node, string sourceQualifiedName, string targetQualifiedName)
+        {
+            var sourceViews = catalog.GetIndexedViewsReferencing(sourceQualifiedName)
+                .Where(viewQualifiedName => ActiveClusteredIndexOf(viewQualifiedName) is not null)
+                .ToList();
+
+            foreach (var targetViewQualifiedName in catalog.GetIndexedViewsReferencing(targetQualifiedName))
+            {
+                if (ActiveClusteredIndexOf(targetViewQualifiedName) is null)
+                {
+                    continue;
+                }
+
+                var hasMatch = false;
+                var hasUnknown = false;
+                foreach (var sourceViewQualifiedName in sourceViews)
+                {
+                    var correspondence = IndexedViewCorrespondenceMatcher.Resolve(catalog, sourceViewQualifiedName, targetViewQualifiedName);
+                    if (correspondence == IndexedViewCorrespondence.Matches)
+                    {
+                        hasMatch = true;
+                        break;
+                    }
+
+                    if (correspondence == IndexedViewCorrespondence.Unknown)
+                    {
+                        hasUnknown = true;
+                    }
+                }
+
+                if (hasMatch || hasUnknown)
+                {
+                    continue;
+                }
+
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - indexed view '{targetViewQualifiedName}' on target table '{targetQualifiedName}' has no corresponding indexed view on source table '{sourceQualifiedName}' (error 11404); this statement will fail at execution.",
+                    FindingConfidence.High));
+                return;
+            }
         }
 
         private bool InspectIndexedViewNotPartitioned(
