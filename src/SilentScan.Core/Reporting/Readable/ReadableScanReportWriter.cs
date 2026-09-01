@@ -114,6 +114,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(WindowFrame(report, headingLevel, pathBase));
         blocks.AddRange(WindowFunctionArgument(report, headingLevel, pathBase));
         blocks.AddRange(StringSplitArgument(report, headingLevel, pathBase));
+        blocks.AddRange(BoundedStringBuiltinTruncation(report, headingLevel, pathBase));
         blocks.AddRange(WaitFor(report, headingLevel, pathBase));
         blocks.AddRange(CursorCloseOnCommit(report, headingLevel, pathBase));
         blocks.AddRange(ViewOrdering(report, headingLevel, pathBase));
@@ -278,6 +279,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "RANGE window-function frames", report.Find<WindowFrameFinding>(nameof(WindowFrameScanner)).Count);
         AddCount(counts, "LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC out-of-range constant arguments", report.Find<WindowFunctionArgumentFinding>(nameof(WindowFunctionArgumentScanner)).Count);
         AddCount(counts, "STRING_SPLIT separator arguments not exactly one character", report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).Count);
+        AddCount(counts, "REPLICATE/REPLACE/SPACE constant-provable result truncation", report.Find<BoundedStringBuiltinTruncationFinding>(nameof(BoundedStringBuiltinTruncationScanner)).Count);
         AddCount(counts, "WAITFOR DELAY/TIME", report.Find<WaitForFinding>(nameof(WaitForScanner)).Count);
         AddCount(counts, "Cursors silently closed by CURSOR_CLOSE_ON_COMMIT then fetched", report.Find<CursorCloseOnCommitFinding>(nameof(CursorCloseOnCommitScanner)).Count);
         AddCount(counts, "View/inline TVF ordering not guaranteed", report.Find<ViewOrderingFinding>(nameof(ViewOrderingScanner)).Count);
@@ -2515,6 +2517,34 @@ public static class ReadableScanReportWriter
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                     f.SeparatorText,
+                })]);
+        }
+    }
+
+    private static IEnumerable<ReadableBlock> BoundedStringBuiltinTruncation(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<BoundedStringBuiltinTruncationFinding>(nameof(BoundedStringBuiltinTruncationScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"REPLICATE/REPLACE/SPACE constant-provable result truncation ({report.Find<BoundedStringBuiltinTruncationFinding>(nameof(BoundedStringBuiltinTruncationScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A REPLICATE/REPLACE call's non-MAX-typed first argument, or a SPACE call's requested count, constant-folds to a result over the function's fixed byte cap (8000 for VARCHAR, 4000 for NVARCHAR) - oracle-confirmed the excess is silently truncated away, with no error.");
+
+        foreach (var group in report.Find<BoundedStringBuiltinTruncationFinding>(nameof(BoundedStringBuiltinTruncationScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.BoundedStringBuiltinTruncationRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Function", "Computed length", "Cap"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.FunctionName,
+                    f.ComputedLength.ToString(CultureInfo.InvariantCulture),
+                    f.CapBytes.ToString(CultureInfo.InvariantCulture),
                 })]);
         }
     }

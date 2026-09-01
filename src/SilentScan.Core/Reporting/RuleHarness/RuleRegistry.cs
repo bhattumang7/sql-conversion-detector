@@ -33,6 +33,7 @@ public static class RuleRegistry
         new WindowFrameRule(),
         new WindowFunctionArgumentRule(),
         new StringSplitArgumentRule(),
+        new BoundedStringBuiltinTruncationRule(),
         new ViewOrderingRule(),
         new IndexHintRule(),
         new CodeMetricRule(),

@@ -256,6 +256,13 @@ public static class FindingRuleIds
         StringSplitArgumentFindingKind.SeparatorNotSingleCharacter => "silentscan/string-tvf/string-split-separator-length",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
+    public static string BoundedStringBuiltinTruncationRuleId(BoundedStringBuiltinTruncationFindingKind kind) => kind switch
+    {
+        BoundedStringBuiltinTruncationFindingKind.ReplicateResultTruncated => "silentscan/string-builtin/replicate-truncated",
+        BoundedStringBuiltinTruncationFindingKind.ReplaceResultTruncated => "silentscan/string-builtin/replace-truncated",
+        BoundedStringBuiltinTruncationFindingKind.SpaceResultTruncated => "silentscan/string-builtin/space-truncated",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
     public const string WaitForRuleId = "silentscan/control-flow/waitfor";
     public const string CursorCloseOnCommitRuleId = "silentscan/control-flow/cursor-close-on-commit";
     public static string TransactionHygieneRuleId(TransactionHygieneFindingKind kind) => kind switch

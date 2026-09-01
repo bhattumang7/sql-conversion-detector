@@ -19,39 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`VariableLengthKeyColumnExceedsKeyLimit` sibling: table in-row row
-      size exceeds the engine's fixed limit.** A table whose summed maximum
-      in-row column widths (catalog + type metadata) exceed SQL Server's
-      fixed in-row row-size limit is a pure catalog computation, the
-      row-level analogue of the shipped index-key-length rule.
-
-- [ ] **CLR table-valued function signature drift.** A CLR TVF's declared
-      SQL signature disagreeing with its referenced assembly method's real
-      signature (`sys.assembly_modules`/`sys.assembly_parameters`) after an
-      independent code change on either side is a real, decidable staleness
-      check with no shipped equivalent.
-
-- [ ] **New rule family: system-versioned temporal period-column contract
-      violations.** Distinct from the shipped `TemporalTableHistoryIndexGapRuleId`
-      (which only checks index mirroring): a `SYSTEM_TIME` or SQL:2011
-      `BUSINESS_TIME` (application-time) period declaration with a missing,
-      non-`GENERATED ALWAYS`, or precision/collation-mismatched period
-      column violates the engine's own period-column contract at DDL time.
-      Ships as one family covering both period kinds.
-
-- [ ] **`StringConcatNullRuleId` sibling: XML generation NULL coercion.**
-      `FOR XML`/`.value()`-style XML generation silently coercing a nullable
-      source to empty string, with no explicit NULL policy, is the same
-      class of silent-NULL-handling divergence as the shipped
-      `StringConcatNullRuleId` — reuse its nullability-analysis approach.
-
-- [ ] **New rule family: `REGEXP_INSTR`/`REGEXP_REPLACE`/`REGEXP_LIKE`/
-      `REGEXP_SUBSTR` reject a MAX-typed argument at bind time.** A
-      `VARCHAR(MAX)`/`NVARCHAR(MAX)` argument to any of the four `REGEXP_*`
-      functions is a clean, statically decidable compile-error fact from
-      argument types alone — same shape as `MaxTypedColumnRuleId` but for
-      this function family. Ships as one rule covering all four.
-
 - [ ] **New rule family: bounded string builtins with constant-provable
       truncation (`REPLICATE`/`REPLACE`/`SPACE`/`TRANSLATE`).** Each
       function's non-MAX-typed result is capped at 8000 bytes; when every

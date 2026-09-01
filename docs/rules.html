@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">293 rules. 205 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">296 rules. 208 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -527,6 +527,15 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <h2>statistics</h2>
     <ul class="rule-list">
       <li><a class="id" href="rules/statistics-no-applicable-statistic-auto-create-disabled.html">No Applicable Statistic Auto Create Disabled</a> <code class="rule-key">silentscan/statistics/no-applicable-statistic-auto-create-disabled</code><span class="snippet">A predicate resolves to a real base table column that no statistic (single-column, or a multi-column statistic with this column as its own leading key) covers, while the connected database has automatic statistics creation turned off.</span></li>
+    </ul>
+  </section>
+
+  <section class="family-section">
+    <h2>string-builtin</h2>
+    <ul class="rule-list">
+      <li><a class="id" href="rules/string-builtin-replace-truncated.html">Replace Truncated</a> <code class="rule-key">silentscan/string-builtin/replace-truncated</code><span class="snippet">REPLACE&#x27;s first (input) argument is a literal not typed VARCHAR(MAX)/NVARCHAR(MAX), so its return type is capped at VARCHAR(8000)/NVARCHAR(4000).</span></li>
+      <li><a class="id" href="rules/string-builtin-replicate-truncated.html">Replicate Truncated</a> <code class="rule-key">silentscan/string-builtin/replicate-truncated</code><span class="snippet">REPLICATE&#x27;s first argument is a literal not typed VARCHAR(MAX)/NVARCHAR(MAX), so its return type is capped at VARCHAR(8000)/NVARCHAR(4000) regardless of the actual repeated length.</span></li>
+      <li><a class="id" href="rules/string-builtin-space-truncated.html">Space Truncated</a> <code class="rule-key">silentscan/string-builtin/space-truncated</code><span class="snippet">SPACE always returns VARCHAR, capped at 8000 bytes regardless of the requested count.</span></li>
     </ul>
   </section>
 

@@ -74,6 +74,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<WindowFrameFinding>("WindowFrameScanner").Select(ToResult));
         results.AddRange(report.Find<WindowFunctionArgumentFinding>("WindowFunctionArgumentScanner").Select(ToResult));
         results.AddRange(report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner").Select(ToResult));
+        results.AddRange(report.Find<BoundedStringBuiltinTruncationFinding>("BoundedStringBuiltinTruncationScanner").Select(ToResult));
         results.AddRange(report.Find<WaitForFinding>("WaitForScanner").Select(ToResult));
         results.AddRange(report.Find<CursorCloseOnCommitFinding>("CursorCloseOnCommitScanner").Select(ToResult));
         results.AddRange(report.Find<ViewOrderingFinding>("ViewOrderingScanner").Select(ToResult));
@@ -998,6 +999,24 @@ public static class SarifReportWriter
         {
             StringSplitArgumentFindingKind.SeparatorNotSingleCharacter =>
                 $"STRING_SPLIT's separator argument '{finding.SeparatorText}' is not exactly one character - oracle-confirmed (Msg 214) this call fails at compile/bind time.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(BoundedStringBuiltinTruncationFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.BoundedStringBuiltinTruncationRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            BoundedStringBuiltinTruncationFindingKind.ReplicateResultTruncated =>
+                $"REPLICATE's result constant-folds to {finding.ComputedLength} bytes, over the non-MAX-typed result's {finding.CapBytes}-byte cap - oracle-confirmed the excess is silently truncated away, with no error.",
+            BoundedStringBuiltinTruncationFindingKind.ReplaceResultTruncated =>
+                $"REPLACE's result constant-folds to {finding.ComputedLength} bytes, over the non-MAX-typed result's {finding.CapBytes}-byte cap - oracle-confirmed the excess is silently truncated away, with no error.",
+            BoundedStringBuiltinTruncationFindingKind.SpaceResultTruncated =>
+                $"SPACE's requested {finding.ComputedLength}-character result is over its fixed {finding.CapBytes}-byte cap - oracle-confirmed the excess is silently truncated away, with no error.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
         };
 

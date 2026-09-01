@@ -450,6 +450,124 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`REGEXP_INSTR`/`REGEXP_REPLACE`/`REGEXP_LIKE`/`REGEXP_SUBSTR` MAX-typed
+  argument rejection — killed, the premise is false on the shipping
+  engine.** Oracle-confirmed (Docker, SQL Server 2025 RTM-CU8): none of the
+  four `REGEXP_*` functions reject a `VARCHAR(MAX)`/`NVARCHAR(MAX)` argument
+  at bind time or any other time. All four were exercised against a
+  genuinely-MAX (16003-byte, built from `CAST(... AS VARCHAR(MAX))`
+  concatenation, not a constant-folded `REPLICATE` that would itself silently
+  cap at 8000) source string and all returned correct results:
+  `REGEXP_INSTR` found the match at position 16001, `REGEXP_REPLACE` and
+  `REGEXP_SUBSTR` operated correctly across the full 16003-byte input, and
+  `REGEXP_LIKE` (a predicate, only usable in a boolean context like `WHERE`,
+  not a directly `SELECT`-able scalar) matched correctly. No compile error,
+  no truncation, no silent misbehavior at any tested length. Not a design
+  gap — a false premise; there is nothing here to detect on the current
+  engine.
+
+* **`StringConcatNullRuleId` sibling for XML generation NULL coercion —
+  killed as originally framed; the generation direction doesn't coerce at
+  all.** Oracle-confirmed (Docker, SQL Server 2022): `FOR XML PATH` (element
+  form, attribute form via `[@Name]`, and the `FOR XML PATH('')` string-
+  concatenation idiom) never coerces a NULL source to empty string — a NULL
+  column value's element/attribute is omitted from the output entirely by
+  default, and `ELEMENTS XSINIL` makes that omission explicit as
+  `xsi:nil="true"` rather than emitting an empty tag. The actual coercion
+  lives one step later and on the read side only: `.value()` extracting a
+  node that is present but marked `xsi:nil="true"` returns an empty string,
+  not `NULL` (confirmed: `LEN(...)` on the extracted result is `0` and
+  `IS NULL` is false) — genuinely silent, but a fact about the runtime XML
+  *instance data* (does this particular document's node actually carry
+  `xsi:nil`), not about the code or catalog; a `.value()` call against an
+  untyped `xml` column can't be scored without inspecting stored document
+  content, which is out of this tool's decidability bar. The one variant
+  that stays within catalog+code (no data content needed) — a `.value()`
+  call whose target element/attribute is declared `nillable="true"` in a
+  `CREATE XML SCHEMA COLLECTION` that the source column is bound to — would
+  need XML Schema Collection/XSD `nillable` modeling in the catalog builder
+  that does not exist today (no `CREATE XML SCHEMA COLLECTION` modeling
+  anywhere in the codebase), and hand-authored schema-bound typed `xml`
+  columns are rare. Not re-proposed as scoped; a future schema-collection
+  modeling effort could revisit the narrow nillable-element case.
+
+* **System-versioned temporal period-column contract violations — killed,
+  engine-guaranteed unreachable (and half the premise doesn't exist).**
+  Oracle-confirmed (Docker, SQL Server 2022): SQL Server does not implement
+  SQL:2011 `BUSINESS_TIME` (application-time) periods at all —
+  `PERIOD FOR BUSINESS_TIME (...)` is a plain parser error (Msg 102,
+  "Incorrect syntax near 'BUSINESS_TIME'"), not a DDL-time semantic
+  rejection; there is no such T-SQL construct for a scanner to ever see, in
+  a live catalog or otherwise. The `SYSTEM_TIME` half fares no better as a
+  live-catalog finding: every contract violation named — a missing period
+  column (Msg 13507, end/start column name not matching the
+  `GENERATED ALWAYS AS ROW START/END` column), a period column not declared
+  `GENERATED ALWAYS AS ROW START/END` (Msg 13504, "definition missing"), and
+  a start/end precision mismatch (Msg 13513, "period columns cannot have
+  different datatype precision") — is a synchronous `CREATE TABLE` hard
+  failure, confirmed independently for all three. (Collation is not a
+  distinct axis here: `SYSTEM_TIME` period columns are constrained to
+  `DATETIME2`, which carries no collation.) No live catalog can ever contain
+  a system-versioned table with a contract-violating period column, and no
+  live catalog can ever contain a `BUSINESS_TIME` period at all — not a
+  design gap, a false premise on both counts.
+
+* **CLR table-valued function signature drift — killed, engine-guaranteed
+  unreachable.** Oracle-confirmed (Docker, SQL Server 2022, `clr strict
+  security` off): every path that could let a CLR TVF's declared SQL
+  signature disagree with its assembly method's real signature is a
+  synchronous hard failure, on both sides of the boundary. `CREATE FUNCTION
+  ... EXTERNAL NAME` itself validates the declared T-SQL parameter types
+  against the CLR method's real parameter types at creation (Msg 6552,
+  "T-SQL and CLR types for parameter ... do not match") — the function is
+  never created if they disagree, so the "declared signature drifts from a
+  pre-existing correct binding" premise can't even get started this way.
+  For the "assembly changes under an existing function" direction:
+  `ALTER ASSEMBLY ... FROM <new bytes>` re-validates every dependent CLR
+  routine's method signature against the new assembly and hard-fails (Msg
+  6270, "the required method ... was not found with the same signature in
+  the updated assembly") if a parameter type changed — confirmed with
+  `WITH UNCHECKED DATA` too (that option does not relax method-signature
+  checking, only UDT serialization-format checking). The same ALTER ASSEMBLY
+  validation also covers a TVF's `FillRowMethodName` callback independently
+  of the main method's own parameters — changing only the fill-row method's
+  output parameter type is caught with the identical Msg 6270. There is no
+  `DROP ASSEMBLY`-without-dropping-dependents path either (the engine
+  refuses to drop an assembly while a function still references it). Since
+  creation, assembly replacement, and the TVF's own row-shape callback are
+  all synchronously checked and any mismatch is rejected outright, no live
+  catalog can ever contain a CLR TVF whose declared signature disagrees with
+  its assembly's real method signature — not a design gap, a false premise.
+
+* **`VariableLengthKeyColumnExceedsKeyLimit` sibling for table in-row row
+  size — killed, engine-guaranteed unreachable.** Oracle-confirmed (Docker,
+  SQL Server 2022): unlike the index-key-length case (`CREATE INDEX` only
+  warns, deferring the real failure to a later `INSERT`/`UPDATE`), the
+  table-row-size boundary is enforced synchronously at DDL time and never
+  produces a live catalog defect to find. A table built only from types that
+  cannot be pushed off-row (fixed-length `char`/`binary`/numeric/date columns)
+  hard-fails `CREATE TABLE`/`ALTER TABLE ADD COLUMN`/`ALTER COLUMN` the
+  moment the minimum row size (fixed-column bytes + row header + null bitmap
+  + per-variable-length-column 2-byte offset overhead, all variable columns
+  assumed empty) exceeds 8060 bytes (Msg 1701, "Creating or altering table
+  ... failed because the minimum row size would be N ... This exceeds the
+  maximum allowable table row size of 8060 bytes") — confirmed for both
+  `CREATE TABLE` and a subsequent `ALTER TABLE ADD COLUMN` against an
+  already-live table (the `ALTER` is rejected outright and the table is left
+  unchanged, not partially applied). For tables whose declared width comes
+  from variable-length (`varchar`/`nvarchar`/`varbinary`, non-MAX) columns,
+  there is no failure and no warning at all, at either `CREATE TABLE` time or
+  at `INSERT` time with data that actually fills every column to its
+  declared max (confirmed: a two-column `varchar(4000)`/`varchar(4060)`
+  table accepted a full-width insert with no error) — SQL Server's
+  row-overflow storage (in place since SQL Server 2005) silently pushes
+  variable-length column data off-row as needed, so the declared-max-sum
+  arithmetic that drives the shipped key-limit rule has no analogous defect
+  to report here. Because every path that could create or widen a
+  minimum-row-size violation is a synchronous hard failure, no table with
+  this shape can ever exist in a scanned live catalog — not a design gap,
+  a false premise for this tool's live-catalog scan model.
+
 * **`sys.columns.is_ansi_padded` is not scoped to string/binary types, and
   `ALTER COLUMN` (not just `CREATE TABLE`/`ADD COLUMN`) resets it in place.**
   Oracle-confirmed (Docker, SQL Server 2022): every column created while
