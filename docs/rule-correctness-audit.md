@@ -15,33 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 1 remains open below.
+correctness bugs found; 0 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`ViewOrderingScanner` misses a top-level `UNION`/`EXCEPT`/
-      `INTERSECT` query whose `ORDER BY`/`OFFSET...FETCH` sits directly on
-      the set operation itself, rather than nested inside one branch.**
-      (`src/SilentScan.Core/Predicates/ViewOrderingScanner.cs:90-96`,
-      `OutermostQuerySpecification` only unwraps `QueryParenthesisExpression`
-      and matches `QuerySpecification`; any other `QueryExpression` —
-      including a `UNION`/`EXCEPT`/`INTERSECT` `BinaryQueryExpression` —
-      falls through to `null`, and `Inspect` returns immediately without
-      ever looking at that node's own `OrderByClause`/`OffsetClause`.) In
-      ScriptDom, `OrderByClause`/`OffsetClause` are declared on the
-      abstract `QueryExpression` base class itself, shared by both
-      `QuerySpecification` and `BinaryQueryExpression` — a top-level `SELECT
-      ... UNION ALL SELECT ... ORDER BY ... OFFSET ... FETCH ...` genuinely
-      carries its own ORDER BY/OFFSET on the union node, not buried inside
-      either branch. Oracle-confirmed this deploys and runs as valid view
-      SQL on SQL Server 2025. False negative squarely inside the rule's own
-      stated scope ("the view/inline TVF's own outermost query uses a
-      genuinely row-limiting TOP(N) or OFFSET...FETCH together with ORDER
-      BY") — distinct from the existing test's intentionally-declined case,
-      where the ORDER BY is nested inside one UNION branch's own
-      parentheses rather than attached to the union itself.
 
 ---
 

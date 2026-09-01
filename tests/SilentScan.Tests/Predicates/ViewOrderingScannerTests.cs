@@ -140,4 +140,31 @@ public sealed class ViewOrderingScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void ViewWithUnionTopLevel_OwnOrderByOffsetFetch_FiresAsNotGuaranteed()
+    {
+        var findings = Scan("CREATE VIEW dbo.v1 AS SELECT Id FROM dbo.T UNION ALL SELECT Id FROM dbo.U ORDER BY Id OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(ViewOrderingFindingKind.OrderByNotGuaranteedToConsumer, finding.Kind);
+        Assert.Equal(FindingConfidence.Low, finding.Confidence);
+    }
+
+    [Fact]
+    public void ViewWithExceptTopLevel_OwnOrderByOffsetFetch_FiresAsNotGuaranteed()
+    {
+        var findings = Scan("CREATE VIEW dbo.v1 AS SELECT Id FROM dbo.T EXCEPT SELECT Id FROM dbo.U ORDER BY Id OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(ViewOrderingFindingKind.OrderByNotGuaranteedToConsumer, finding.Kind);
+    }
+
+    [Fact]
+    public void ViewWithUnionTopLevel_LastBranchOwnTopWithTrailingOrderBy_DeclinesRatherThanGuessing()
+    {
+        var findings = Scan("CREATE VIEW dbo.v1 AS SELECT Id FROM dbo.T UNION ALL SELECT TOP (1) Id FROM dbo.U ORDER BY Id;");
+
+        Assert.Empty(findings);
+    }
 }

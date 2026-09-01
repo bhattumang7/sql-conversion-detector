@@ -56,44 +56,54 @@ public static class ViewOrderingScanner
 
         private void Inspect(string qualifiedName, QueryExpression queryExpression)
         {
-            var spec = OutermostQuerySpecification(queryExpression);
-            if (spec is null || spec.OrderByClause is null)
+            var outer = OutermostQueryExpression(queryExpression);
+            var target = outer is BinaryQueryExpression binary ? TrailingOrderedQueryExpression(binary) : outer;
+            if (target is null || target.OrderByClause is null)
             {
                 return;
             }
 
-            if (spec.TopRowFilter is { } top)
+            if (ReferenceEquals(target, outer) && target is QuerySpecification { TopRowFilter: { } top })
             {
                 var isHundredPercent = top.Percent && IsHundredPercentLiteral(top.Expression);
                 if (isHundredPercent)
                 {
                     Findings.Add(new ViewOrderingFinding(
                         ViewOrderingFindingKind.TopPercentOrderByNeverLimits, qualifiedName, sourcePath,
-                        spec.StartLine, spec.StartColumn, FindingConfidence.High));
+                        target.StartLine, target.StartColumn, FindingConfidence.High));
                 }
                 else
                 {
                     Findings.Add(new ViewOrderingFinding(
                         ViewOrderingFindingKind.OrderByNotGuaranteedToConsumer, qualifiedName, sourcePath,
-                        spec.StartLine, spec.StartColumn, FindingConfidence.Low));
+                        target.StartLine, target.StartColumn, FindingConfidence.Low));
                 }
             }
-            else if (spec.OffsetClause is not null)
+            else if (target.OffsetClause is not null)
             {
                 Findings.Add(new ViewOrderingFinding(
                     ViewOrderingFindingKind.OrderByNotGuaranteedToConsumer, qualifiedName, sourcePath,
-                    spec.StartLine, spec.StartColumn, FindingConfidence.Low));
+                    target.StartLine, target.StartColumn, FindingConfidence.Low));
             }
 
         }
 
-        private static QuerySpecification? OutermostQuerySpecification(QueryExpression queryExpression) =>
-            queryExpression switch
+        private static QueryExpression OutermostQueryExpression(QueryExpression queryExpression) =>
+            queryExpression is QueryParenthesisExpression parenthesis
+                ? OutermostQueryExpression(parenthesis.QueryExpression)
+                : queryExpression;
+
+        private static QueryExpression? TrailingOrderedQueryExpression(QueryExpression queryExpression)
+        {
+            if (queryExpression.OrderByClause is not null)
             {
-                QueryParenthesisExpression parenthesis => OutermostQuerySpecification(parenthesis.QueryExpression),
-                QuerySpecification spec => spec,
-                _ => null,
-            };
+                return queryExpression;
+            }
+
+            return queryExpression is BinaryQueryExpression binary
+                ? TrailingOrderedQueryExpression(binary.SecondQueryExpression)
+                : null;
+        }
 
         private static bool IsHundredPercentLiteral(ScalarExpression expression) =>
             Unwrap(expression) switch

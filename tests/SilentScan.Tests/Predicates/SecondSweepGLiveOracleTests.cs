@@ -76,6 +76,68 @@ public sealed class SecondSweepGLiveOracleTests
     }
 
     [Fact]
+    public async Task LiveDeployment_ViewUnionTopLevelOrderByOffsetFetch_Fires()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            CREATE TABLE dbo.ViewOrderingUnionA (Id INT NOT NULL PRIMARY KEY, Amt INT NOT NULL);
+            GO
+            CREATE TABLE dbo.ViewOrderingUnionB (Id INT NOT NULL PRIMARY KEY, Amt INT NOT NULL);
+            GO
+            CREATE VIEW dbo.v_ViewOrderingUnionTopLevel AS
+            SELECT Id, Amt FROM dbo.ViewOrderingUnionA
+            UNION ALL
+            SELECT Id, Amt FROM dbo.ViewOrderingUnionB
+            ORDER BY Amt DESC
+            OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;
+            """,
+            minimumConfidence: FindingConfidence.Low);
+
+        var finding = Assert.Single(report.Find<ViewOrderingFinding>("ViewOrderingScanner"));
+        Assert.Equal(ViewOrderingFindingKind.OrderByNotGuaranteedToConsumer, finding.Kind);
+        Assert.Equal(FindingConfidence.Low, finding.Confidence);
+    }
+
+    [Fact]
+    public async Task LiveDeployment_ViewUnionOrderByNestedInsideOneBranch_DeclinesRatherThanGuessing()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            CREATE TABLE dbo.ViewOrderingUnionNestedA (Id INT NOT NULL PRIMARY KEY, Amt INT NOT NULL);
+            GO
+            CREATE TABLE dbo.ViewOrderingUnionNestedB (Id INT NOT NULL PRIMARY KEY, Amt INT NOT NULL);
+            GO
+            CREATE VIEW dbo.v_ViewOrderingUnionNested AS
+            (SELECT TOP (100) PERCENT Id, Amt FROM dbo.ViewOrderingUnionNestedA ORDER BY Amt)
+            UNION ALL
+            SELECT Id, Amt FROM dbo.ViewOrderingUnionNestedB;
+            """,
+            minimumConfidence: FindingConfidence.Low);
+
+        Assert.Empty(report.Find<ViewOrderingFinding>("ViewOrderingScanner"));
+    }
+
+    [Fact]
+    public async Task LiveDeployment_ViewUnionLastBranchOwnTopWithTrailingOrderBy_DeclinesRatherThanGuessing()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            CREATE TABLE dbo.ViewOrderingUnionBranchTopA (Id INT NOT NULL PRIMARY KEY, Amt INT NOT NULL);
+            GO
+            CREATE TABLE dbo.ViewOrderingUnionBranchTopB (Id INT NOT NULL PRIMARY KEY, Amt INT NOT NULL);
+            GO
+            CREATE VIEW dbo.v_ViewOrderingUnionBranchTop AS
+            SELECT Id, Amt FROM dbo.ViewOrderingUnionBranchTopA
+            UNION ALL
+            SELECT TOP (1) Id, Amt FROM dbo.ViewOrderingUnionBranchTopB
+            ORDER BY Amt DESC;
+            """,
+            minimumConfidence: FindingConfidence.Low);
+
+        Assert.Empty(report.Find<ViewOrderingFinding>("ViewOrderingScanner"));
+    }
+
+    [Fact]
     public async Task LiveDeployment_StringConcatNull_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(
