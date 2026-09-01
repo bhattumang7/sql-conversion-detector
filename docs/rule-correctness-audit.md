@@ -15,37 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 11 remain open below.
+correctness bugs found; 10 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`SpExecuteSqlParameterMismatchScanner` never records a parameter
-      binding for a positional `sp_executesql` call — only named
-      (`@Param = value`) syntax is recognized — so the rule silently never
-      fires for one of the two standard `sp_executesql` calling
-      conventions, regardless of any real type-narrowing mismatch.**
-      (`src/SilentScan.Core/Predicates/ProcCallGraphBuilder.cs:210-229`,
-      `TryRecordSpExecuteSqlParameterBindings`: the binding loop only
-      matches when `actual.Variable is { } namedFormal` and looks it up by
-      name; ScriptDom's `ExecuteParameter.Variable` is null for a plain
-      positional actual argument, so a positional call produces zero
-      bindings.) Oracle-confirmed (SQL Server 2025): `EXEC sp_executesql
-      @sql, N'@SkuCode VARCHAR(10), @out VARCHAR(20) OUTPUT', @sku,
-      @result OUTPUT` — with `@sku` declared `VARCHAR(20)` holding a
-      22-character value — silently truncates to 10 characters
-      (`@result = 'WIDGET-202'`, `LEN = 10`), the exact narrowing scenario
-      the rule's own doc example describes, reproduced with positional
-      instead of named syntax. The scanner's own regular-EXEC call-folding
-      path in the same file already handles positional arguments correctly
-      (`MatchFoldedArguments`), so this is specifically an
-      `sp_executesql`-binding-path omission, not a parser limitation.
-      Positional `sp_executesql` calls are a real, commonly used calling
-      convention (this repo's own test fixtures for other scanners use it),
-      not a contrived edge case, and every existing test for this
-      scanner/binder exclusively uses named syntax, so the gap was never
-      exercised.
 
 - [ ] **`StatementShapeScanner`'s `TableWithNoPrimaryKey` claims "no
       engine-enforced row uniqueness" for any table lacking a `PRIMARY KEY`,

@@ -207,11 +207,12 @@ public static class ProcCallGraphBuilder
 
             var byName = declaredParameters.ToDictionary(p => p.Name, catalog.IdentifierComparer);
             var bindings = new List<SpExecuteSqlParameterBinding>();
+            var positionalCursor = 0;
 
             for (var i = 2; i < parameters.Count; i++)
             {
                 var actual = parameters[i];
-                if (actual.Variable is not { } namedFormal || !byName.TryGetValue(namedFormal.Name, out var declared))
+                if (ResolveFormalParameter(actual, byName, declaredParameters, ref positionalCursor) is not { } declared)
                 {
                     continue;
                 }
@@ -254,6 +255,27 @@ public static class ProcCallGraphBuilder
             return true;
         }
 
+        private static ProcedureParameterInfo? ResolveFormalParameter(
+            ExecuteParameter actual,
+            Dictionary<string, ProcedureParameterInfo> byName,
+            IReadOnlyList<ProcedureParameterInfo> formalParameters,
+            ref int positionalCursor)
+        {
+            if (actual.Variable is { } namedFormal)
+            {
+                return byName.TryGetValue(namedFormal.Name, out var byNameFormal) ? byNameFormal : null;
+            }
+
+            if (positionalCursor < formalParameters.Count)
+            {
+                var formal = formalParameters[positionalCursor];
+                positionalCursor++;
+                return formal;
+            }
+
+            return null;
+        }
+
         private List<ProcCallArgument> MatchFoldedArguments(
             IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, DynamicSqlSegmentMap segmentMap)
         {
@@ -263,18 +285,7 @@ public static class ProcCallGraphBuilder
 
             foreach (var actual in actualParameters)
             {
-                ProcedureParameterInfo? formal = null;
-                if (actual.Variable is { } namedFormal && byName.TryGetValue(namedFormal.Name, out var byNameFormal))
-                {
-                    formal = byNameFormal;
-                }
-                else if (actual.Variable is null && positionalCursor < formalParameters.Count)
-                {
-                    formal = formalParameters[positionalCursor];
-                    positionalCursor++;
-                }
-
-                if (formal is null)
+                if (ResolveFormalParameter(actual, byName, formalParameters, ref positionalCursor) is not { } formal)
                 {
                     continue;
                 }
