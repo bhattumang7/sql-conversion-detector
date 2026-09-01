@@ -292,7 +292,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Predicate columns with no applicable statistic and auto-create disabled", report.Find<MissingStatisticsFinding>(nameof(MissingStatisticsScanner)).Count);
         AddCount(counts, "INDEX hints naming a nonexistent or non-seekable index", report.Find<IndexHintFinding>(nameof(IndexHintScanner)).Count);
         AddCount(counts, "SET DATEFORMAT/DATEFIRST mid-module", report.Find<SessionDateSettingFinding>(nameof(SessionDateSettingScanner)).Count);
-        AddCount(counts, "True cartesian joins", report.Find<CartesianJoinFinding>(nameof(CartesianJoinScanner)).Count);
+        AddCount(counts, "Cartesian and always-false joins", report.Find<CartesianJoinFinding>(nameof(CartesianJoinScanner)).Count);
         AddCount(counts, "TRUNCATE swallowed by an empty/non-rethrowing CATCH", report.Find<TruncateSwallowedFinding>(nameof(TruncateSwallowedScanner)).Count);
         AddCount(counts, "Unindexed SELECT INTO temp table usage", report.Find<UnindexedTempTableUsageFinding>(nameof(UnindexedTempTableUsageScanner)).Count);
         AddCount(counts, "Unassigned OUTPUT parameters", report.Find<OutputParameterFinding>(nameof(OutputParameterScanner)).Count);
@@ -2802,14 +2802,19 @@ public static class ReadableScanReportWriter
             yield break;
         }
 
-        yield return new ReadableBlock.Heading(level, $"True cartesian joins ({report.Find<CartesianJoinFinding>(nameof(CartesianJoinScanner)).Count})");
+        yield return new ReadableBlock.Heading(level, $"Cartesian and always-false joins ({report.Find<CartesianJoinFinding>(nameof(CartesianJoinScanner)).Count})");
         yield return new ReadableBlock.Paragraph(
-            "A comma-join or explicit CROSS JOIN with no predicate anywhere in the statement - no ON clause, no WHERE clause - connecting the two tables at all: a true cartesian product, distinct from the shipped partial-composite-FK-join rule (which fires when a join predicate exists but is incomplete).");
+            "A comma-join or explicit CROSS JOIN with no predicate anywhere in the statement - no ON clause, no WHERE clause - connecting the two tables at all is a true cartesian product, distinct from the shipped partial-composite-FK-join rule (which fires when a join predicate exists but is incomplete). An INNER JOIN whose own ON predicate provably never evaluates to TRUE is the complementary defect: instead of matching too many rows, the join can never match any.");
 
         foreach (var group in report.Find<CartesianJoinFinding>(nameof(CartesianJoinScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
         {
             var ordered = group.ToList();
-            var title = group.Key == CartesianJoinKind.ExplicitCrossJoin ? "Explicit CROSS JOIN" : "Legacy comma-join";
+            var title = group.Key switch
+            {
+                CartesianJoinKind.ExplicitCrossJoin => "Explicit CROSS JOIN",
+                CartesianJoinKind.AlwaysFalseInnerJoinPredicate => "INNER JOIN with an always-false ON predicate",
+                _ => "Legacy comma-join",
+            };
             yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.CartesianJoinRuleId(group.Key)));
             yield return new ReadableBlock.Table(

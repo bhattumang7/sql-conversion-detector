@@ -294,6 +294,7 @@ public static class FindingRuleIds
     {
         CartesianJoinKind.CommaJoin => "silentscan/join/cartesian-comma-join",
         CartesianJoinKind.ExplicitCrossJoin => "silentscan/join/cartesian-cross-join",
+        CartesianJoinKind.AlwaysFalseInnerJoinPredicate => "silentscan/join/always-false-inner-join-predicate",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
     public const string TruncateSwallowedRuleId = "silentscan/control-flow/truncate-swallowed-by-catch";

@@ -3,6 +3,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
+using SilentScan.Core.Predicates.Normalization;
 
 namespace SilentScan.Core.Predicates;
 
@@ -36,13 +37,15 @@ public static class CartesianJoinScanner
         {
             if (node.FromClause is { } from)
             {
-                AnalyzeFromClause(from, node.WhereClause);
+                AnalyzeFromClause(from, node.WhereClause, scopeChain, walker);
             }
         }
 
-        private void AnalyzeFromClause(FromClause from, WhereClause? whereClause)
+        private void AnalyzeFromClause(FromClause from, WhereClause? whereClause, ScopeChain scopeChain, ModuleWalker walker)
         {
             var topLevel = from.TableReferences;
+
+            ReportAlwaysFalseInnerJoinPredicates(topLevel, scopeChain, walker, sourcePath);
             var allNamed = topLevel.SelectMany(PredicateTreeWalker.FlattenNamedTables).ToList();
             if (allNamed.Count < 2)
             {
@@ -86,6 +89,31 @@ public static class CartesianJoinScanner
             }
 
             return unionFind;
+        }
+
+        private void ReportAlwaysFalseInnerJoinPredicates(
+            IList<TableReference> topLevel, ScopeChain scopeChain, ModuleWalker walker, string sourcePath)
+        {
+            foreach (var join in topLevel.SelectMany(PredicateTreeWalker.FlattenJoinNodes))
+            {
+                if (join.QualifiedJoinType != QualifiedJoinType.Inner
+                    || join.SearchCondition is not { } condition
+                    || join.FirstTableReference is not NamedTableReference first
+                    || join.SecondTableReference is not NamedTableReference second)
+                {
+                    continue;
+                }
+
+                if (PredicateSurvivalAnalyzer.IsUnsatisfiable(condition, columnRef => walker.ResolveColumnFacts(columnRef, scopeChain)))
+                {
+                    Findings.Add(new CartesianJoinFinding(
+                        CartesianJoinKind.AlwaysFalseInnerJoinPredicate,
+                        SchemaObjectNameHelper.Qualify(first.SchemaObject),
+                        SchemaObjectNameHelper.Qualify(second.SchemaObject),
+                        sourcePath, condition.StartLine, condition.StartColumn,
+                        FindingConfidence.High));
+                }
+            }
         }
 
         private void ReportExplicitCrossJoinGaps(

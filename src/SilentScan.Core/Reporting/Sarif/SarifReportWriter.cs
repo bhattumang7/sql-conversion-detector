@@ -1190,8 +1190,15 @@ public static class SarifReportWriter
     private static SarifResult ToResult(CartesianJoinFinding finding)
     {
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CartesianJoinRuleId(finding.Kind), finding.Confidence);
-        var kindText = finding.Kind == CartesianJoinKind.ExplicitCrossJoin ? "CROSS JOIN" : "comma-join";
-        var message = $"{finding.FirstTableQualifiedName} and {finding.SecondTableQualifiedName} are combined via a {kindText} with no predicate anywhere in the statement connecting the two - a true cartesian product.";
+        var message = finding.Kind switch
+        {
+            CartesianJoinKind.AlwaysFalseInnerJoinPredicate =>
+                $"The INNER JOIN between {finding.FirstTableQualifiedName} and {finding.SecondTableQualifiedName} has an ON predicate that provably never evaluates to TRUE - this join can never match any row.",
+            CartesianJoinKind.ExplicitCrossJoin =>
+                $"{finding.FirstTableQualifiedName} and {finding.SecondTableQualifiedName} are combined via a CROSS JOIN with no predicate anywhere in the statement connecting the two - a true cartesian product.",
+            _ =>
+                $"{finding.FirstTableQualifiedName} and {finding.SecondTableQualifiedName} are combined via a comma-join with no predicate anywhere in the statement connecting the two - a true cartesian product.",
+        };
         return BuildResult(ruleId, FloorLevelForConfidence(LevelWarning, finding.Confidence), message, finding.SourcePath, finding.Line, finding.Column);
     }
 

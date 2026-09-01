@@ -7,6 +7,7 @@ public enum CartesianJoinKind
 {
     CommaJoin,
     ExplicitCrossJoin,
+    AlwaysFalseInnerJoinPredicate,
 }
 
 public sealed record CartesianJoinFinding(

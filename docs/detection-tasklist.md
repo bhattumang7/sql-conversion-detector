@@ -19,13 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`CartesianJoinRuleId` sibling: `INNER JOIN` `ON` predicate provably
-      `FALSE`.** The complementary case to the shipped cartesian-join
-      family (always-`TRUE`/no-predicate): an `INNER JOIN`'s `ON` predicate
-      that folds from constants and fixed engine semantics to `FALSE` can
-      never produce a row — same constant-foldable-condition mechanism the
-      shipped cartesian rules already use.
-
 - [ ] **`INSERT`/`UPDATE` explicitly assigns a `GENERATED ALWAYS` (temporal
       period) column.** A DML target list explicitly assigning a value to a
       catalog-identified generated-always column is a hard compile/runtime

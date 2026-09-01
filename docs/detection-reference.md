@@ -496,6 +496,21 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`CartesianJoinRuleId(AlwaysFalseInnerJoinPredicate)` — shipped.**
+  Oracle-confirmed (Docker, SQL Server): an `INNER JOIN` whose own `ON`
+  predicate the shipped `PredicateSurvivalAnalyzer.IsUnsatisfiable` classifies
+  as never-true (constant-literal contradiction, or a single-column literal
+  contradiction the same algebra already proves for `WHERE`/`CHECK`) compiles
+  and runs, but the join contributes zero rows every time regardless of the
+  tables' real data. Confirmed the same always-false predicate on a `LEFT`/
+  `RIGHT`/`FULL OUTER JOIN` does NOT collapse anything — the preserved side's
+  rows still survive, null-extended — so the rule is `INNER JOIN`-only by
+  design, not an oversight. Scoped to both join operands being a direct
+  `NamedTableReference` (same precision-first restriction the shipped
+  no-predicate cartesian-join gap detection already applies to its own
+  cross-join case) — a nested/derived-table operand on either side declines
+  rather than guesses a display name.
+
 * **`OuterJoinPredicateCollapseRuleId` — shipped, scoped to the WHERE clause
   only, and to AND-conjuncts that are not themselves wrapped in an OR.**
   Oracle-confirmed (Docker, SQL Server 2025) with self-contained
