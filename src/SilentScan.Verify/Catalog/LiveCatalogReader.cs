@@ -156,6 +156,11 @@ public sealed class LiveCatalogReader
             catalog.AddIndexedView(qualifiedName, indexes);
         }
 
+        foreach (var (viewQualifiedName, baseTableQualifiedNames) in await ReadIndexedViewBaseTablesAsync(connection, cancellationToken))
+        {
+            catalog.AddIndexedViewBaseTables(viewQualifiedName, baseTableQualifiedNames);
+        }
+
         foreach (var (qualifiedName, columnNames) in await ReadViewCompiledColumnsAsync(connection, cancellationToken))
         {
             catalog.AddViewCompiledColumns(qualifiedName, columnNames);
@@ -1323,12 +1328,14 @@ public sealed class LiveCatalogReader
         const string sql = """
             SELECT s.name AS schema_name, v.name AS view_name, i.index_id, i.name AS index_name, i.type_desc, i.is_unique,
                    i.is_primary_key, i.is_unique_constraint, i.has_filter, i.is_disabled,
-                   ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name
+                   ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name,
+                   ps.name AS partition_scheme_name
             FROM sys.indexes i
             JOIN sys.views v ON v.object_id = i.object_id
             JOIN sys.schemas s ON s.schema_id = v.schema_id
             JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
             JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+            LEFT JOIN sys.partition_schemes ps ON ps.data_space_id = i.data_space_id
             WHERE v.is_ms_shipped = 0 AND i.type_desc <> 'HEAP'
             ORDER BY s.name, v.name, i.index_id, ic.index_column_id;
             """;
@@ -1346,16 +1353,19 @@ public sealed class LiveCatalogReader
             if (!rowsByIndex.TryGetValue(key, out var row))
             {
                 var indexName = await reader.IsDBNullAsync(3, cancellationToken) ? null : reader.GetString(3);
+                var typeDesc = reader.GetString(4);
+                var partitionSchemeName = await reader.IsDBNullAsync(14, cancellationToken) ? null : reader.GetString(14);
                 row = new IndexRow(
                     Name: indexName,
-                    TypeDesc: reader.GetString(4),
+                    TypeDesc: typeDesc,
                     IsUnique: reader.GetBoolean(5),
                     IsPrimaryKey: reader.GetBoolean(6),
                     IsUniqueConstraint: reader.GetBoolean(7),
                     HasFilter: reader.GetBoolean(8),
                     IsDisabled: reader.GetBoolean(9),
                     KeyColumns: [],
-                    IncludedColumns: []);
+                    IncludedColumns: [],
+                    PartitionSchemeName: partitionSchemeName);
                 rowsByIndex[key] = row;
             }
 
@@ -1383,10 +1393,46 @@ public sealed class LiveCatalogReader
                 IncludedColumns: kv.Value.IncludedColumns,
                 IsFiltered: kv.Value.HasFilter,
                 IsColumnstore: kv.Value.TypeDesc.Contains("COLUMNSTORE", StringComparison.OrdinalIgnoreCase),
-                IsDisabled: kv.Value.IsDisabled))];
+                IsDisabled: kv.Value.IsDisabled,
+                IsClustered: kv.Value.TypeDesc.StartsWith("CLUSTERED", StringComparison.OrdinalIgnoreCase),
+                PartitionSchemeName: kv.Value.PartitionSchemeName))];
         }
 
         return indexesByView;
+    }
+
+    private static async Task<Dictionary<string, IReadOnlyList<string>>> ReadIndexedViewBaseTablesAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT DISTINCT vs.name AS view_schema, v.name AS view_name, ts.name AS table_schema, t.name AS table_name
+            FROM sys.sql_expression_dependencies d
+            JOIN sys.views v ON v.object_id = d.referencing_id
+            JOIN sys.schemas vs ON vs.schema_id = v.schema_id
+            JOIN sys.tables t ON t.object_id = d.referenced_id
+            JOIN sys.schemas ts ON ts.schema_id = t.schema_id
+            WHERE v.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var baseTablesByView = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var viewQualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+            var tableQualifiedName = $"{reader.GetString(2)}.{reader.GetString(3)}";
+
+            if (!baseTablesByView.TryGetValue(viewQualifiedName, out var tables))
+            {
+                tables = [];
+                baseTablesByView[viewQualifiedName] = tables;
+            }
+
+            tables.Add(tableQualifiedName);
+        }
+
+        return baseTablesByView.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value, StringComparer.OrdinalIgnoreCase);
     }
 
     private static async Task<List<(string QualifiedName, List<string> ColumnNames)>> ReadViewCompiledColumnsAsync(

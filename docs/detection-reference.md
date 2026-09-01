@@ -496,6 +496,31 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`AlterTableSwitchIndexedViewAlignmentRuleId` — shipped for the
+  reference-count and view-own-partitioning slices only (Msg 11401/11402);
+  the column-provenance slice (11400/11403/11404/11405) is still open.**
+  Oracle-confirmed (Docker, SQL Server 2025): if either side of an
+  `ALTER TABLE ... SWITCH` is partitioned and is referenced by a
+  schema-bound indexed view whose own clustered index is NOT itself
+  partitioned, the SWITCH fails unconditionally (11401) - true for the
+  source side and the target side alike, and true even when the other side
+  of the SWITCH isn't partitioned at all. Separately, if the target table
+  is referenced by more (non-disabled) indexed views than the source table,
+  the SWITCH fails unconditionally (11402) - this is a raw count compare
+  that runs before the engine ever checks whether any of those views'
+  partitioning actually lines up, so it's decidable without column-level
+  provenance. A DISABLED indexed view's clustered index does not count
+  toward this check on either side (oracle-confirmed: a target-only
+  disabled indexed view does not block the SWITCH) - the scanner filters
+  `IsDisabled` indexes out of both the not-partitioned check and the
+  reference count. When source and target reference EQUAL counts of
+  (non-disabled) indexed views, the engine still checks whether the views
+  actually correspond (11404) and whether each one's partitioning column is
+  directly selected vs. equivalent-partition-function (11400/11403/11405) -
+  deliberately not attempted; see `detection-tasklist.md` for what's left.
+
+
+
 * **`TemporalTableHistoryIndexGapRuleId` column-mapping sibling — killed,
   the premise doesn't hold.** A system-versioned table's schema and its
   history table's schema were hypothesized to be able to drift apart

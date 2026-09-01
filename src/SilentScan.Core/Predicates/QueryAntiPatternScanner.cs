@@ -144,6 +144,7 @@ public static class QueryAntiPatternScanner
             InspectAlterTableSwitchCdcPartitionSwitch(node);
             InspectAlterTableSwitchPartitionFilegroupMismatch(node);
             InspectAlterTableSwitchFullTextIndexRestriction(node);
+            InspectAlterTableSwitchIndexedViewAlignment(node);
         }
 
         public void OnEnterAlterSchemaStatement(AlterSchemaStatement node, ModuleWalker walker) =>
@@ -840,6 +841,72 @@ public static class QueryAntiPatternScanner
                 $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - table '{offendingName}' has a full-text index on it (error 4918); this statement will fail at execution.",
                 FindingConfidence.High));
         }
+
+        private void InspectAlterTableSwitchIndexedViewAlignment(AlterTableSwitchStatement node)
+        {
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
+            var source = catalog.Find(sourceQualifiedName);
+            var target = catalog.Find(targetQualifiedName);
+            if (source is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            if (InspectIndexedViewNotPartitioned(node, sourceQualifiedName, targetQualifiedName, sourceQualifiedName, source)
+                || InspectIndexedViewNotPartitioned(node, sourceQualifiedName, targetQualifiedName, targetQualifiedName, target))
+            {
+                return;
+            }
+
+            var sourceViewCount = CountActiveIndexedViews(sourceQualifiedName);
+            var targetViewCount = CountActiveIndexedViews(targetQualifiedName);
+            if (targetViewCount <= sourceViewCount)
+            {
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment, sourcePath,
+                node.StartLine, node.StartColumn,
+                $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - target table is referenced by {targetViewCount} indexed view(s) but source table is only referenced by {sourceViewCount} indexed view(s) (error 11402); every indexed view on the target table must have at least one matching indexed view on the source table, so this statement will fail at execution.",
+                FindingConfidence.High));
+        }
+
+        private bool InspectIndexedViewNotPartitioned(
+            AlterTableSwitchStatement node, string sourceQualifiedName, string targetQualifiedName, string tableQualifiedName, CatalogTable table)
+        {
+            if (table.PartitionSchemeName is null)
+            {
+                return false;
+            }
+
+            foreach (var viewQualifiedName in catalog.GetIndexedViewsReferencing(tableQualifiedName))
+            {
+                var clusteredIndex = ActiveClusteredIndexOf(viewQualifiedName);
+                if (clusteredIndex is not { PartitionSchemeName: null })
+                {
+                    continue;
+                }
+
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - table '{tableQualifiedName}' is partitioned on scheme '{table.PartitionSchemeName}', but its indexed view '{viewQualifiedName}' has a clustered index that is not partitioned (error 11401); this statement will fail at execution.",
+                    FindingConfidence.High));
+                return true;
+            }
+
+            return false;
+        }
+
+        private int CountActiveIndexedViews(string tableQualifiedName) =>
+            catalog.GetIndexedViewsReferencing(tableQualifiedName).Count(viewQualifiedName => ActiveClusteredIndexOf(viewQualifiedName) is not null);
+
+        private CatalogIndex? ActiveClusteredIndexOf(string viewQualifiedName) =>
+            catalog.TryGetIndexedViewIndexes(viewQualifiedName, out var indexes)
+                ? indexes.FirstOrDefault(ix => ix.IsClustered && !ix.IsDisabled)
+                : null;
 
         private void InspectAlterSchemaTransferMsShippedObject(AlterSchemaStatement node)
         {

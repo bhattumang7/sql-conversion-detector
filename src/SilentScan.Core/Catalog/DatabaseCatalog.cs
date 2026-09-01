@@ -40,6 +40,8 @@ public sealed class DatabaseCatalog
 
     private Dictionary<string, IReadOnlyList<CatalogIndex>> _indexedViewIndexesByQualifiedName;
 
+    private Dictionary<string, List<string>> _indexedViewsByBaseTableQualifiedName;
+
     private Dictionary<string, IReadOnlyList<string>> _viewCompiledColumnsByQualifiedName;
 
     private Dictionary<string, bool> _moduleUsesQuotedIdentifierByQualifiedName;
@@ -72,6 +74,7 @@ public sealed class DatabaseCatalog
         _tableValuedFunctionKindsByQualifiedName = new(_identifierComparer);
         _scalarUdfInfoByQualifiedName = new(_identifierComparer);
         _indexedViewIndexesByQualifiedName = new(_identifierComparer);
+        _indexedViewsByBaseTableQualifiedName = new(_identifierComparer);
         _viewCompiledColumnsByQualifiedName = new(_identifierComparer);
         _moduleUsesQuotedIdentifierByQualifiedName = new(_identifierComparer);
         _moduleUsesAnsiNullsByQualifiedName = new(_identifierComparer);
@@ -167,6 +170,29 @@ public sealed class DatabaseCatalog
         _indexedViewIndexesByQualifiedName[qualifiedName] = indexes;
 
     public bool IsIndexedView(string qualifiedName) => _indexedViewIndexesByQualifiedName.ContainsKey(qualifiedName);
+
+    public bool TryGetIndexedViewIndexes(string qualifiedName, out IReadOnlyList<CatalogIndex> indexes) =>
+        _indexedViewIndexesByQualifiedName.TryGetValue(qualifiedName, out indexes!);
+
+    public void AddIndexedViewBaseTables(string viewQualifiedName, IReadOnlyList<string> baseTableQualifiedNames)
+    {
+        foreach (var baseTableQualifiedName in baseTableQualifiedNames)
+        {
+            if (!_indexedViewsByBaseTableQualifiedName.TryGetValue(baseTableQualifiedName, out var views))
+            {
+                views = [];
+                _indexedViewsByBaseTableQualifiedName[baseTableQualifiedName] = views;
+            }
+
+            if (!views.Contains(viewQualifiedName, _identifierComparer))
+            {
+                views.Add(viewQualifiedName);
+            }
+        }
+    }
+
+    public IReadOnlyList<string> GetIndexedViewsReferencing(string tableQualifiedName) =>
+        _indexedViewsByBaseTableQualifiedName.TryGetValue(tableQualifiedName, out var views) ? views : [];
 
     public void AddViewCompiledColumns(string qualifiedName, IReadOnlyList<string> columnNames) =>
         _viewCompiledColumnsByQualifiedName[qualifiedName] = columnNames;
@@ -343,6 +369,7 @@ public sealed class DatabaseCatalog
         _tableValuedFunctionKindsByQualifiedName = new(_tableValuedFunctionKindsByQualifiedName, comparer);
         _scalarUdfInfoByQualifiedName = new(_scalarUdfInfoByQualifiedName, comparer);
         _indexedViewIndexesByQualifiedName = new(_indexedViewIndexesByQualifiedName, comparer);
+        _indexedViewsByBaseTableQualifiedName = new(_indexedViewsByBaseTableQualifiedName, comparer);
         _viewCompiledColumnsByQualifiedName = new(_viewCompiledColumnsByQualifiedName, comparer);
         _moduleUsesQuotedIdentifierByQualifiedName = new(_moduleUsesQuotedIdentifierByQualifiedName, comparer);
         _moduleUsesAnsiNullsByQualifiedName = new(_moduleUsesAnsiNullsByQualifiedName, comparer);

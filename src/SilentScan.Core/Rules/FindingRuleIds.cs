@@ -112,6 +112,7 @@ public static class FindingRuleIds
     public const string QueryAntiPatternAlterTableSwitchCdcPartitionSwitchRuleId = "silentscan/query/alter-table-switch-cdc-partition-switch";
     public const string QueryAntiPatternAlterTableSwitchPartitionFilegroupMismatchRuleId = "silentscan/query/alter-table-switch-partition-filegroup-mismatch";
     public const string QueryAntiPatternAlterTableSwitchFullTextIndexRestrictionRuleId = "silentscan/query/alter-table-switch-full-text-index-restriction";
+    public const string QueryAntiPatternAlterTableSwitchIndexedViewAlignmentRuleId = "silentscan/query/alter-table-switch-indexed-view-alignment";
     public const string QueryAntiPatternAlterSchemaTransferMsShippedObjectRuleId = "silentscan/query/alter-schema-transfer-ms-shipped-object";
     public const string QueryAntiPatternGroupingSetsCardinalityLimitExceededRuleId = "silentscan/query/grouping-sets-cardinality-limit-exceeded";
     public const string QueryAntiPatternGroupingArgumentNotInGroupByListRuleId = "silentscan/query/grouping-argument-not-in-group-by-list";
@@ -548,6 +549,7 @@ public static class FindingRuleIds
         QueryAntiPatternFindingKind.AlterTableSwitchCdcPartitionSwitch => QueryAntiPatternAlterTableSwitchCdcPartitionSwitchRuleId,
         QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch => QueryAntiPatternAlterTableSwitchPartitionFilegroupMismatchRuleId,
         QueryAntiPatternFindingKind.AlterTableSwitchFullTextIndexRestriction => QueryAntiPatternAlterTableSwitchFullTextIndexRestrictionRuleId,
+        QueryAntiPatternFindingKind.AlterTableSwitchIndexedViewAlignment => QueryAntiPatternAlterTableSwitchIndexedViewAlignmentRuleId,
         QueryAntiPatternFindingKind.AlterSchemaTransferMsShippedObject => QueryAntiPatternAlterSchemaTransferMsShippedObjectRuleId,
         QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded => QueryAntiPatternGroupingSetsCardinalityLimitExceededRuleId,
         QueryAntiPatternFindingKind.GroupingArgumentNotInGroupByList => QueryAntiPatternGroupingArgumentNotInGroupByListRuleId,

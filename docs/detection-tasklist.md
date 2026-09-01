@@ -247,28 +247,28 @@ Competitor tools are referred to generically; real identities are in
         SOURCE`/`DROP EXTERNAL FILE FORMAT` blocked by a dependent external
         table/stream.
 
-- [ ] **ALTER TABLE SWITCH: indexed-view alignment (Msg 11400-11405).**
-      Catalog-decidable in principle (all facts live in `sys.indexes`/
-      `sys.views`/the view's own definition text - no execution required),
-      but genuinely more work than every other item in this family: needs (a)
-      a base-table -> indexed-view REVERSE lookup (today's
-      `_indexedViewIndexesByQualifiedName` is keyed by the view's own name,
-      not which base table(s) it references - that direction doesn't exist
-      yet), (b) whether the indexed view is "aligned" with a table's own
-      partitioning (same partition function, and the view's partitioning
-      column must be a DIRECT selection of the table's partitioning column,
-      not an expression/derived one - provenance through the view definition,
-      the same kind of analysis `ComputedColumnMatcher`/lineage-layer
-      resolvers already do elsewhere, but not yet wired to this specific
-      question), and (c) requiring the source table to have a MATCHING
-      indexed view (by the same alignment test) for every one the target has.
-      Getting "equivalent partition function" or "directly selected column"
-      subtly wrong risks a false positive, which this project's precision
-      discipline treats as worse than a missed true positive - deliberately
-      not attempted in the same pass as the rest of this family. Scope
-      properly (probably 2-3 oracle probes: direct-vs-expression partitioning
-      column, non-equivalent partition function, reference-count mismatch)
-      before implementing.
+- [ ] **ALTER TABLE SWITCH: indexed-view partitioning-column alignment (Msg
+      11400/11403/11404/11405).** The reference-count and view-own-
+      partitioning slices of this family shipped as
+      `AlterTableSwitchIndexedViewAlignmentRuleId` (11401/11402 - see
+      `detection-reference.md` Settled). What's left needs actual
+      column-level provenance through the view definition: (a) whether the
+      indexed view's partitioning column is a DIRECT selection of the base
+      table's partitioning column, not an expression/derived one (11403/
+      11405 - the same kind of analysis `ComputedColumnMatcher`/lineage-layer
+      resolvers already do elsewhere, but not yet wired to this question),
+      and (b) whether two partition schemes are built on an EQUIVALENT
+      partition function, not just the same scheme name (11400 - oracle-
+      confirmed `IndexDesignScanner.ScanNonAlignedPartitionedIndex`'s
+      same-scheme-name proxy is the right check only when comparing indexes
+      on the SAME table; a base table and an indexed view can each pick
+      their own scheme name over the same function, so that proxy doesn't
+      carry over here - needs a real scheme -> function mapping in the
+      catalog). Getting either "equivalent partition function" or "directly
+      selected column" subtly wrong risks a false positive, which this
+      project's precision discipline treats as worse than a missed true
+      positive - deliberately not attempted in the same pass as the
+      reference-count slice above.
 
 ---
 
