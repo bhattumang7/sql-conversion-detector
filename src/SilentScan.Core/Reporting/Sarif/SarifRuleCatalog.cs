@@ -190,6 +190,8 @@ public static class SarifRuleCatalog
     public const string ExecStringConcatenatesParameterizableValueRuleId = FindingRuleIds.ExecStringConcatenatesParameterizableValueRuleId;
     public const string TempTableExecShapeColumnCountMismatchRuleId = FindingRuleIds.TempTableExecShapeColumnCountMismatchRuleId;
     public const string TempTableExecShapeColumnTypeMismatchRuleId = FindingRuleIds.TempTableExecShapeColumnTypeMismatchRuleId;
+    public const string ExecResultSetsShapeColumnCountMismatchRuleId = FindingRuleIds.ExecResultSetsShapeColumnCountMismatchRuleId;
+    public const string ExecResultSetsShapeColumnTypeMismatchRuleId = FindingRuleIds.ExecResultSetsShapeColumnTypeMismatchRuleId;
     public const string NonPersistedComputedColumnRuleId = FindingRuleIds.NonPersistedComputedColumnRuleId;
     public const string SelfReferencingDmlRuleId = FindingRuleIds.SelfReferencingDmlRuleId;
     public const string TemporalTableHistoryIndexGapRuleId = FindingRuleIds.TemporalTableHistoryIndexGapRuleId;
@@ -228,6 +230,7 @@ public static class SarifRuleCatalog
     public static string SetOptionRuleId(SetOptionFindingKind kind) => FindingRuleIds.SetOptionRuleId(kind);
     public static string UnparameterizedDynamicSqlRuleId(UnparameterizedDynamicSqlFindingKind kind) => FindingRuleIds.UnparameterizedDynamicSqlRuleId(kind);
     public static string TempTableExecShapeRuleId(TempTableExecShapeFindingKind kind) => FindingRuleIds.TempTableExecShapeRuleId(kind);
+    public static string ExecResultSetsShapeRuleId(ExecResultSetsShapeFindingKind kind) => FindingRuleIds.ExecResultSetsShapeRuleId(kind);
     public static string ForcedSerialRuleId(ForcedSerialFindingKind kind) => FindingRuleIds.ForcedSerialRuleId(kind);
     public static string CodeMetricRuleId(CodeMetricFindingKind kind) => FindingRuleIds.CodeMetricRuleId(kind);
     public static string FormattingRuleId(FormattingFindingKind kind) => FindingRuleIds.FormattingRuleId(kind);

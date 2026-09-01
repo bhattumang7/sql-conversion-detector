@@ -19,14 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`TempTableExecShapeColumnTypeMismatchRuleId` sibling:
-      `EXEC ... WITH RESULT SETS` shape mismatch.** A statically resolved
-      `WITH RESULT SETS` clause whose declared column count/types disagree
-      with the procedure's real, engine-described result-set shape
-      (`sys.dm_exec_describe_first_result_set`, same technique the shipped
-      `INSERT INTO #temp EXEC` rules already use) is the `WITH RESULT SETS`
-      analogue of that shipped family.
-
 - [ ] **Lower-confidence/niche backlog from the 2026-08-22 gap survey — one
       line each, group before scoping.** These didn't clear the bar for a
       full write-up above (medium/low survey confidence, a narrower feature

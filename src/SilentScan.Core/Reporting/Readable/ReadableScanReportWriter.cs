@@ -42,6 +42,8 @@ public static class ReadableScanReportWriter
 
     private const string TempTableExecShapeRuleId = "TempTableExecShapeScanner";
 
+    private const string ExecResultSetsShapeRuleId = "ExecResultSetsShapeScanner";
+
     public static string Write(ScanReport report, string title, ReadableStyle style, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief) =>
         ReadableDocumentRenderer.Render(BuildDocument(report, title, pathBase, verbosity), style);
 
@@ -110,6 +112,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(UnparameterizedDynamicSql(report, headingLevel, pathBase));
         blocks.AddRange(TempTableExecShape(report, headingLevel, pathBase));
+        blocks.AddRange(ExecResultSetsShape(report, headingLevel, pathBase));
         blocks.AddRange(SelfReferencingDml(report, headingLevel, pathBase));
         blocks.AddRange(TemporalTableHistoryIndexGap(report, headingLevel, pathBase));
         blocks.AddRange(GeneratedAlwaysColumnAssignment(report, headingLevel, pathBase));
@@ -278,6 +281,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.Find<SetOptionFinding>(nameof(SetOptionScanner)).Count);
         AddCount(counts, "Dynamic SQL call sites concatenating a proven-constant value instead of parameterizing it", report.Find<UnparameterizedDynamicSqlFinding>(DynamicSqlRuleId).Count);
         AddCount(counts, "INSERT INTO #temp EXEC proc shape mismatches", report.Find<TempTableExecShapeFinding>(TempTableExecShapeRuleId).Count);
+        AddCount(counts, "EXEC ... WITH RESULT SETS shape mismatches", report.Find<ExecResultSetsShapeFinding>(ExecResultSetsShapeRuleId).Count);
         AddCount(counts, "Self-referencing DML (Halloween Protection risk)", report.Find<SelfReferencingDmlFinding>(nameof(SelfReferencingDmlScanner)).Count);
         AddCount(counts, "Temporal table history-side index gaps", report.Find<TemporalTableHistoryIndexGapFinding>(nameof(TemporalTableHistoryIndexGapScanner)).Count);
         AddCount(counts, "Explicit assignments to a GENERATED ALWAYS temporal period column", report.Find<GeneratedAlwaysColumnAssignmentFinding>(nameof(GeneratedAlwaysColumnAssignmentScanner)).Count);
@@ -2395,6 +2399,35 @@ public static class ReadableScanReportWriter
                     f.Kind == TempTableExecShapeFindingKind.ColumnCountMismatch
                         ? $"{f.TempTableQualifiedName} INSERT targets {f.TempTableDeclaredColumnCount} column(s); {f.ExecutedProcQualifiedName} describes {f.DescribedColumnCount}"
                         : $"{f.TempTableQualifiedName} position {f.ColumnPosition} ('{f.ColumnName}', {f.TempColumnTypeDisplay}) <- {f.ExecutedProcQualifiedName} ({f.DescribedColumnTypeDisplay}): {f.WriteLoss}",
+                })]);
+        }
+    }
+
+    private static IEnumerable<ReadableBlock> ExecResultSetsShape(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<ExecResultSetsShapeFinding>(ExecResultSetsShapeRuleId).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"EXEC ... WITH RESULT SETS shape mismatches ({report.Find<ExecResultSetsShapeFinding>(ExecResultSetsShapeRuleId).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "EXEC OtherProc WITH RESULT SETS ((...)) binds the executed proc's result set to the clause's own declared columns purely by POSITION, live-verified against the executed proc's real, engine-described shape (sys.dm_exec_describe_first_result_set, compile-only). A column-count mismatch raises a hard runtime error (Msg 11537) every time the statement runs. A column-type mismatch at a matching position risks the same class of silent data loss WriteLossFinding already reports for INSERT/UPDATE assignments - live-mode only, since the verdict depends on a real database round trip.");
+
+        foreach (var group in report.Find<ExecResultSetsShapeFinding>(ExecResultSetsShapeRuleId).GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key == ExecResultSetsShapeFindingKind.ColumnCountMismatch ? "Column count mismatch" : "Column type mismatch";
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ExecResultSetsShapeRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, DetailHeader],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.Kind == ExecResultSetsShapeFindingKind.ColumnCountMismatch
+                        ? $"{f.ExecutedProcQualifiedName} WITH RESULT SETS declares {f.DeclaredColumnCount} column(s); describes {f.DescribedColumnCount}"
+                        : $"{f.ExecutedProcQualifiedName} WITH RESULT SETS position {f.ColumnPosition} ('{f.ColumnName}', {f.DeclaredColumnTypeDisplay}) <- described ({f.DescribedColumnTypeDisplay}): {f.WriteLoss}",
                 })]);
         }
     }

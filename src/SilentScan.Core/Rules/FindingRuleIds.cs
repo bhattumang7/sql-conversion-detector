@@ -224,6 +224,8 @@ public static class FindingRuleIds
     public const string ExecStringConcatenatesParameterizableValueRuleId = "silentscan/dynamic-sql/exec-string-concatenates-parameterizable-value";
     public const string TempTableExecShapeColumnCountMismatchRuleId = "silentscan/dynamic-sql/insert-exec-temp-table-column-count-mismatch";
     public const string TempTableExecShapeColumnTypeMismatchRuleId = "silentscan/dynamic-sql/insert-exec-temp-table-column-type-mismatch";
+    public const string ExecResultSetsShapeColumnCountMismatchRuleId = "silentscan/dynamic-sql/exec-with-result-sets-column-count-mismatch";
+    public const string ExecResultSetsShapeColumnTypeMismatchRuleId = "silentscan/dynamic-sql/exec-with-result-sets-column-type-mismatch";
     public const string NonPersistedComputedColumnRuleId = "silentscan/catalog/non-persisted-computed-column";
     public const string SelfReferencingDmlRuleId = "silentscan/dml/self-referencing";
     public const string TemporalTableHistoryIndexGapRuleId = "silentscan/catalog/temporal-history-index-gap";
@@ -400,6 +402,12 @@ public static class FindingRuleIds
         TempTableExecShapeFindingKind.ColumnCountMismatch => TempTableExecShapeColumnCountMismatchRuleId,
         TempTableExecShapeFindingKind.ColumnTypeMismatch => TempTableExecShapeColumnTypeMismatchRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled TempTableExecShapeFindingKind."),
+    };
+    public static string ExecResultSetsShapeRuleId(ExecResultSetsShapeFindingKind kind) => kind switch
+    {
+        ExecResultSetsShapeFindingKind.ColumnCountMismatch => ExecResultSetsShapeColumnCountMismatchRuleId,
+        ExecResultSetsShapeFindingKind.ColumnTypeMismatch => ExecResultSetsShapeColumnTypeMismatchRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled ExecResultSetsShapeFindingKind."),
     };
     public static string ForcedSerialRuleId(ForcedSerialFindingKind kind) => kind switch
     {

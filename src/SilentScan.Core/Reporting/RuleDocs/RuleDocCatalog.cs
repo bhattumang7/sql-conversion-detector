@@ -215,6 +215,8 @@ public static class RuleDocCatalog
         [DynamicSql.ExecStringConcatenatesParameterizableValue.RuleId] = DynamicSql.ExecStringConcatenatesParameterizableValue.Content,
         [DynamicSql.TempTableExecShapeColumnCountMismatch.RuleId] = DynamicSql.TempTableExecShapeColumnCountMismatch.Content,
         [DynamicSql.TempTableExecShapeColumnTypeMismatch.RuleId] = DynamicSql.TempTableExecShapeColumnTypeMismatch.Content,
+        [DynamicSql.ExecResultSetsShapeColumnCountMismatch.RuleId] = DynamicSql.ExecResultSetsShapeColumnCountMismatch.Content,
+        [DynamicSql.ExecResultSetsShapeColumnTypeMismatch.RuleId] = DynamicSql.ExecResultSetsShapeColumnTypeMismatch.Content,
 
         [Catalog.CascadingForeignKey.RuleId] = Catalog.CascadingForeignKey.Content,
         [Catalog.NonPersistedComputedColumn.RuleId] = Catalog.NonPersistedComputedColumn.Content,

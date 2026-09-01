@@ -66,6 +66,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<UnparameterizedDynamicSqlFinding>("DynamicSqlScanner").Select(ToResult));
         results.AddRange(report.Find<NonPersistedComputedColumnFinding>("NonPersistedComputedColumnScanner").Select(ToResult));
         results.AddRange(report.Find<TempTableExecShapeFinding>("TempTableExecShapeScanner").Select(ToResult));
+        results.AddRange(report.Find<ExecResultSetsShapeFinding>("ExecResultSetsShapeScanner").Select(ToResult));
         results.AddRange(report.Find<SelfReferencingDmlFinding>("SelfReferencingDmlScanner").Select(ToResult));
         results.AddRange(report.Find<PartialCompositeForeignKeyJoinFinding>("PartialCompositeForeignKeyJoinScanner").Select(ToResult));
         results.AddRange(report.Find<OuterJoinPredicateCollapseFinding>(nameof(OuterJoinPredicateCollapseScanner)).Select(ToResult));
@@ -1537,6 +1538,23 @@ public static class SarifReportWriter
 
         var typeLevel = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var typeMessage = $"INSERT INTO {finding.TempTableQualifiedName} EXEC {finding.ExecutedProcQualifiedName}: position {finding.ColumnPosition} ('{finding.ColumnName}', {finding.TempColumnTypeDisplay}) receives {finding.DescribedColumnTypeDisplay} from the executed proc's real result set - {DescribeWriteLossKind(finding.WriteLoss!.Value)}.";
+        return BuildResult(ruleId, typeLevel, typeMessage, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(ExecResultSetsShapeFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ExecResultSetsShapeRuleId(finding.Kind), finding.Confidence);
+
+        if (finding.Kind == ExecResultSetsShapeFindingKind.ColumnCountMismatch)
+        {
+
+            var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+            var message = $"EXEC {finding.ExecutedProcQualifiedName} WITH RESULT SETS declares {finding.DeclaredColumnCount} column(s) but the executed proc's real result set describes {finding.DescribedColumnCount} - this raises a hard error (Msg 11537) every time it runs.";
+            return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+        }
+
+        var typeLevel = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var typeMessage = $"EXEC {finding.ExecutedProcQualifiedName} WITH RESULT SETS: position {finding.ColumnPosition} ('{finding.ColumnName}', {finding.DeclaredColumnTypeDisplay}) receives {finding.DescribedColumnTypeDisplay} from the executed proc's real result set - {DescribeWriteLossKind(finding.WriteLoss!.Value)}.";
         return BuildResult(ruleId, typeLevel, typeMessage, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 

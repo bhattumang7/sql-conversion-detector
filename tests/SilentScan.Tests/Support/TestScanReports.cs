@@ -49,6 +49,7 @@ public static class TestScanReports
         IReadOnlyList<UnparameterizedDynamicSqlFinding>? UnparameterizedDynamicSqlFindings = null,
         IReadOnlyList<NonPersistedComputedColumnFinding>? NonPersistedComputedColumnFindings = null,
         IReadOnlyList<TempTableExecShapeFinding>? TempTableExecShapeFindings = null,
+        IReadOnlyList<ExecResultSetsShapeFinding>? ExecResultSetsShapeFindings = null,
         IReadOnlyList<SelfReferencingDmlFinding>? SelfReferencingDmlFindings = null,
         IReadOnlyList<TemporalTableHistoryIndexGapFinding>? TemporalTableHistoryIndexGapFindings = null,
         IReadOnlyList<ModuleCompileFlagFinding>? ModuleCompileFlagFindings = null,
@@ -164,6 +165,7 @@ public static class TestScanReports
         Set("SelectStarViewScanner", SelectStarViewFindings);
         Set("NonPersistedComputedColumnScanner", NonPersistedComputedColumnFindings);
         Set("TempTableExecShapeScanner", TempTableExecShapeFindings);
+        Set("ExecResultSetsShapeScanner", ExecResultSetsShapeFindings);
         Set("SelfReferencingDmlScanner", SelfReferencingDmlFindings);
         Set("TemporalTableHistoryIndexGapScanner", TemporalTableHistoryIndexGapFindings);
         Set("ModuleCompileFlagScanner", ModuleCompileFlagFindings);

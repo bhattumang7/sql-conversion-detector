@@ -133,6 +133,23 @@ public static class LiveScanRunner
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        ExecResultSetsShapeReport execResultSetsShape;
+        using (var execResultSetsStage = progress.Begin("checking EXEC...WITH RESULT SETS shapes"))
+        {
+            var candidates = parseResultSource(execResultSetsStage)
+                .SelectMany(r =>
+                {
+                    execResultSetsStage.Advance(currentItem: r.SourcePath);
+                    return ExecResultSetsShapeCandidateScanner.Scan(r, catalog);
+                })
+                .ToList();
+            execResultSetsShape = await new ExecResultSetsShapeChecker(connectionString).CheckAsync(candidates, execResultSetsStage, cancellationToken);
+            var filteredExecResultSetsFindings = execResultSetsShape.Findings.Where(f => f.Confidence <= minimumConfidence).ToList();
+            report = report.WithFindings("ExecResultSetsShapeScanner", filteredExecResultSetsFindings);
+            execResultSetsStage.Complete($"{filteredExecResultSetsFindings.Count:N0} findings, {execResultSetsShape.Unanalyzed.Count:N0} unanalyzed");
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         using (var databaseConfigStage = progress.Begin("reading database-level configuration flags"))
         {
             var databaseConfigFindings = (await new DatabaseConfigurationReader(connectionString).ReadAsync(cancellationToken))
@@ -202,7 +219,7 @@ public static class LiveScanRunner
 
         return new LiveScanResult(
             report, LiveCatalogSummary.From(catalog), moduleCount, parity,
-            unanalyzable, planCacheEvidence, rankedFindings, workloadFindings, tempTableExecShape);
+            unanalyzable, planCacheEvidence, rankedFindings, workloadFindings, tempTableExecShape, execResultSetsShape);
     }
 
     private static List<RankedFinding> RankByPlanCacheEvidence(
@@ -230,7 +247,8 @@ public sealed record LiveScanResult(
     PlanCacheEvidenceResult? PlanCacheEvidence,
     IReadOnlyList<RankedFinding> RankedFindings,
     IReadOnlyList<WorkloadFinding> WorkloadFindings,
-    TempTableExecShapeReport TempTableExecShape);
+    TempTableExecShapeReport TempTableExecShape,
+    ExecResultSetsShapeReport ExecResultSetsShape);
 
 public sealed record RankedFinding(TypedPredicateFinding Finding, bool ObservedInLivePlanCache, long ObservedExecutionCount);
 

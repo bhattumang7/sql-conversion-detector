@@ -30,7 +30,7 @@ public sealed class ReadableLiveScanWriterTests
         new(await EmptyReport(), Catalog, ModulesAnalyzed: 7,
             new LiveLineageParityReport(mismatches ?? [], stale ?? [], uncompilable ?? [], unverified ?? []),
             unanalyzable ?? [], planCacheEvidence, rankedFindings ?? [], workloadFindings ?? [],
-            TempTableExecShapeReport.Empty);
+            TempTableExecShapeReport.Empty, ExecResultSetsShapeReport.Empty);
 
     private static RankedFinding Finding(string table, string column, string sourcePath, int line, bool observed, long executionCount) =>
         new(
