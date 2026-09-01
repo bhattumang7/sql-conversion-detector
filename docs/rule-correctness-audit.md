@@ -15,34 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 3 remain open below.
+correctness bugs found; 2 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`WindowFrameScanner` reports `ImplicitDefaultRangeFrame` for
-      ranking, offset, and distribution window functions
-      (`ROW_NUMBER`/`RANK`/`DENSE_RANK`/`NTILE`/`LAG`/`LEAD`/
-      `PERCENT_RANK`/`CUME_DIST`) that don't support a window frame at
-      all — a fabricated finding on one of the most common window-function
-      patterns in real T-SQL code.**
-      (`src/SilentScan.Core/Predicates/WindowFrameScanner.cs:35-51`,
-      `OnEnterOverClause` fires for any `OverClause` with an `ORDER BY` and
-      no explicit frame clause, with no check for which function the
-      `OVER` belongs to.) Oracle-confirmed (SQL Server 2025): attaching an
-      explicit frame to any of `RANK`, `ROW_NUMBER`, `DENSE_RANK`, `NTILE`,
-      `LAG`, `PERCENT_RANK`, `CUME_DIST` is a hard compile error, `Msg
-      10752, The function '<name>' may not have a window frame` — proving
-      no frame, implicit or explicit, is ever computed for them, unlike a
-      true window-aggregate function (`FIRST_VALUE` with an explicit frame
-      executed successfully in the same test). The claim itself —
-      "T-SQL silently defaults this to RANGE BETWEEN UNBOUNDED PRECEDING
-      AND CURRENT ROW" with "the exact same measured cost" as an explicit
-      RANGE frame — is false for every one of these functions, since no
-      frame concept applies to them. The shipped test
-      `RowNumberWithOrderByNoFrame_FiresAsImplicitDefaultRange` locks in
-      exactly this wrong behavior.
 
 - [ ] **`WaitForScanner` resets its open-transaction tracker at every batch
       boundary (`GO`), so a `WAITFOR` in a later batch after a `BEGIN

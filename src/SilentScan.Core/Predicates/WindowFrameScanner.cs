@@ -28,25 +28,40 @@ public static class WindowFrameScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
+    private static readonly HashSet<string> FrameIncapableFunctions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ROW_NUMBER",
+        "RANK",
+        "DENSE_RANK",
+        "NTILE",
+        "LAG",
+        "LEAD",
+        "PERCENT_RANK",
+        "CUME_DIST",
+    };
+
     internal sealed class Rule(string sourcePath) : IModuleRule
     {
         public List<WindowFrameFinding> Findings { get; } = [];
 
-        public void OnEnterOverClause(OverClause node, ModuleWalker walker)
+        public void OnEnterFunctionCall(FunctionCall node, ModuleWalker walker)
         {
-            if (node.OrderByClause is not null)
+            if (node.OverClause is not { OrderByClause: not null } overClause
+                || FrameIncapableFunctions.Contains(node.FunctionName?.Value ?? string.Empty))
             {
-                if (node.WindowFrameClause is null)
-                {
-                    Findings.Add(new WindowFrameFinding(
-                        WindowFrameFindingKind.ImplicitDefaultRangeFrame, sourcePath, node.StartLine, node.StartColumn));
-                }
-                else if (node.WindowFrameClause.WindowFrameType == WindowFrameType.Range)
-                {
-                    Findings.Add(new WindowFrameFinding(
-                        WindowFrameFindingKind.ExplicitRangeFrame, sourcePath,
-                        node.WindowFrameClause.StartLine, node.WindowFrameClause.StartColumn));
-                }
+                return;
+            }
+
+            if (overClause.WindowFrameClause is null)
+            {
+                Findings.Add(new WindowFrameFinding(
+                    WindowFrameFindingKind.ImplicitDefaultRangeFrame, sourcePath, overClause.StartLine, overClause.StartColumn));
+            }
+            else if (overClause.WindowFrameClause.WindowFrameType == WindowFrameType.Range)
+            {
+                Findings.Add(new WindowFrameFinding(
+                    WindowFrameFindingKind.ExplicitRangeFrame, sourcePath,
+                    overClause.WindowFrameClause.StartLine, overClause.WindowFrameClause.StartColumn));
             }
         }
     }

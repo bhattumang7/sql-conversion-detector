@@ -47,11 +47,26 @@ public sealed class WindowFrameScannerTests
         Assert.Empty(findings);
     }
 
-    [Fact]
-    public void RowNumberWithOrderByNoFrame_FiresAsImplicitDefaultRange()
+    [Theory]
+    [InlineData("ROW_NUMBER()")]
+    [InlineData("RANK()")]
+    [InlineData("DENSE_RANK()")]
+    [InlineData("NTILE(4)")]
+    [InlineData("LAG(Amt)")]
+    [InlineData("LEAD(Amt)")]
+    [InlineData("PERCENT_RANK()")]
+    [InlineData("CUME_DIST()")]
+    public void FrameIncapableFunctionWithOrderByNoFrame_NeverFires(string call)
     {
+        var findings = Scan($"SELECT {call} OVER (PARTITION BY GroupId ORDER BY D) FROM dbo.Sales;");
 
-        var findings = Scan("SELECT ROW_NUMBER() OVER (PARTITION BY GroupId ORDER BY D) FROM dbo.Sales;");
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void FirstValueWithOrderByNoFrame_FiresAsImplicitDefaultRange()
+    {
+        var findings = Scan("SELECT FIRST_VALUE(Amt) OVER (PARTITION BY GroupId ORDER BY D) FROM dbo.Sales;");
 
         var finding = Assert.Single(findings);
         Assert.Equal(WindowFrameFindingKind.ImplicitDefaultRangeFrame, finding.Kind);
