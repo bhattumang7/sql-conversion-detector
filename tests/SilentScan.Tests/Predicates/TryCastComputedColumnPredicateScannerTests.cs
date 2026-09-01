@@ -199,4 +199,26 @@ public sealed class TryCastComputedColumnPredicateScannerTests
 
         Assert.Empty(report.Find<TryCastComputedColumnPredicateFinding>("TryCastComputedColumnPredicateScanner"));
     }
+
+    [Fact]
+    public async Task LiveDeployment_AtCompatibilityLevelBelow110_TryCastComputedColumnInPredicate_StillFires()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            ALTER DATABASE CURRENT SET COMPATIBILITY_LEVEL = 100;
+            GO
+            CREATE TABLE dbo.TryCastPredicateCompat100 (Id INT NOT NULL PRIMARY KEY, RawDate VARCHAR(20) NULL);
+            GO
+            ALTER TABLE dbo.TryCastPredicateCompat100 ADD ParsedDate AS TRY_CAST(RawDate AS DATE);
+            GO
+            CREATE PROCEDURE dbo.usp_TryCastPredicateCompat100_Find AS
+            BEGIN
+                SELECT Id FROM dbo.TryCastPredicateCompat100 WHERE ParsedDate = '2024-01-01';
+            END
+            """);
+
+        var finding = Assert.Single(report.Find<TryCastComputedColumnPredicateFinding>("TryCastComputedColumnPredicateScanner"));
+        Assert.Equal("dbo.TryCastPredicateCompat100", finding.TableQualifiedName);
+        Assert.Equal("ParsedDate", finding.ColumnName);
+    }
 }

@@ -15,38 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 5 remain open below.
+correctness bugs found; 4 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`TryCastComputedColumnPredicateScanner` false-negatives for any
-      database reporting a compatibility level below 110 (including
-      currently-supported level 100), because it re-parses the computed
-      column's definition text using a parser grammar that has no
-      production for `TRY_CAST` syntax at all — even though `TRY_CAST`
-      itself is not actually gated by compatibility level on the real
-      engine.**
-      (`src/SilentScan.Core/Predicates/TryCastComputedColumnPredicateScanner.cs:41-52`,
-      `DefinesTryCast` calls `SqlScriptParser.ParseText(...,
-      compatibilityLevel: catalog.CompatibilityLevel)`;
-      `src/SilentScan.Core/Parsing/SqlScriptParser.cs:81-93` maps any
-      `compatibilityLevel < 110` to `TSql100Parser`, whose generated grammar
-      (confirmed against the exact ScriptDom package version this project
-      references) has zero references to `TryCastCall` anywhere, unlike
-      `TSql110Parser` and later.) Oracle-confirmed (SQL Server 2025, `SET
-      COMPATIBILITY_LEVEL = 100`): `TRY_CAST(...)` in a computed column
-      definition deploys and evaluates identically regardless of database
-      compatibility level — it is not a compat-level-gated feature at all.
-      For a database at compat < 110, the scanner's own re-parse of the
-      column's `TRY_CAST(...)` text fails to parse, `DefinesTryCast`
-      returns `false`, and the column is silently dropped as a candidate —
-      even though the real engine treats it exactly as the rule's own
-      rationale describes (session-`DATEFORMAT`-dependent, non-persistable,
-      non-indexable). Purely an internal parser-selection mistake:
-      compatibility level is not a valid proxy for which functions the
-      engine actually accepts.
 
 - [ ] **`UnindexedTempTableUsageScanner` never flags a temp table joined via
       an old-style comma join or an explicit `CROSS JOIN`, even though that
