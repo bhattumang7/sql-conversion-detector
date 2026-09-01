@@ -60,6 +60,7 @@ public static class RuleRegistry
         new CrossTableTypeDriftRule(),
         new TriggerOrderRule(),
         new ProcCallArgumentMismatchRule(),
+        new ProcCallTableValuedArgumentMismatchRule(),
         new SpExecuteSqlParameterMismatchRule(),
         new MaxTypedColumnRule(),
         new ColumnstoreUnsupportedColumnTypeRule(),

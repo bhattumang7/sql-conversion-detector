@@ -58,7 +58,7 @@ public static class LiveScanRunner
                     return SqlScriptParser.ParseText(m.QualifiedName, m.Definition, m.UsesQuotedIdentifier, catalog.CompatibilityLevel);
                 });
 
-        var knownPermanentTables = catalog.Tables.Where(t => t.Kind == CatalogTableKind.Table).ToList();
+        var knownPermanentTables = catalog.Tables.Where(t => t.Kind is CatalogTableKind.Table or CatalogTableKind.TableType).ToList();
         using (var extrasStage = progress.Begin("merging module-body catalog extras", moduleCount * 4))
         {
             catalog.MergeFileModeExtras(CatalogBuilder.Build(

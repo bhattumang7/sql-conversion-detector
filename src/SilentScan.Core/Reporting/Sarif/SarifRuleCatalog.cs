@@ -30,6 +30,7 @@ public static class SarifRuleCatalog
     public const string ColumnCollationDriftRuleId = FindingRuleIds.ColumnCollationDriftRuleId;
     public const string CrossTableTypeDriftRuleId = FindingRuleIds.CrossTableTypeDriftRuleId;
     public const string ProcCallArgumentMismatchRuleId = FindingRuleIds.ProcCallArgumentMismatchRuleId;
+    public const string ProcCallTableValuedArgumentMismatchRuleId = FindingRuleIds.ProcCallTableValuedArgumentMismatchRuleId;
     public const string SpExecuteSqlParameterMismatchRuleId = FindingRuleIds.SpExecuteSqlParameterMismatchRuleId;
     public const string TemporalBoundaryPrecisionRuleId = FindingRuleIds.TemporalBoundaryPrecisionRuleId;
     public static string MaxTypedColumnRuleId(NonIndexableColumnFindingKind kind) => FindingRuleIds.MaxTypedColumnRuleId(kind);

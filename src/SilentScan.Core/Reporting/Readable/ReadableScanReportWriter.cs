@@ -76,6 +76,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(CrossTableTypeDrift(report, headingLevel, pathBase));
         blocks.AddRange(TriggerOrder(report, headingLevel, pathBase));
         blocks.AddRange(ProcCallArgumentMismatch(report, headingLevel, pathBase));
+        blocks.AddRange(ProcCallTableValuedArgumentMismatch(report, headingLevel, pathBase));
         blocks.AddRange(SpExecuteSqlParameterMismatch(report, headingLevel, pathBase));
         blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
@@ -202,6 +203,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Foreign-key column pairs whose types/collations drift", report.Find<CrossTableTypeDriftFinding>(nameof(CrossTableTypeDriftScanner)).Count);
         AddCount(counts, "Tables with undefined AFTER trigger firing order", report.Find<TriggerOrderFinding>(nameof(TriggerOrderScanner)).Count);
         AddCount(counts, "EXEC call-site arguments risking silent data loss at the parameter boundary", report.Find<ProcCallArgumentMismatchFinding>(nameof(ProcCallArgumentMismatchScanner)).Count);
+        AddCount(counts, "EXEC call-site table-valued parameter columns risking silent data loss when their caller-side table variable was populated", report.Find<ProcCallTableValuedArgumentMismatchFinding>(nameof(ProcCallTableValuedArgumentMismatchScanner)).Count);
         AddCount(counts, "sp_executesql call-site arguments risking silent data loss against their own declared parameter type", report.Find<SpExecuteSqlParameterMismatchFinding>(nameof(SpExecuteSqlParameterMismatchScanner)).Count);
         AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.Find<TemporalBoundaryPrecisionFinding>(nameof(NonSargablePredicateScanner)).Count);
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.Find<MaxTypedColumnFinding>(nameof(MaxTypedColumnScanner)).Count(f => f.Kind == NonIndexableColumnFindingKind.MaxLength));
@@ -703,6 +705,33 @@ public static class ReadableScanReportWriter
                 f.CallerExpressionDisplay,
                 f.CallerTypeDisplay,
                 f.FormalParameterTypeDisplay,
+                DescribeWriteLossKind(f.Kind),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ProcCallTableValuedArgumentMismatch(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<ProcCallTableValuedArgumentMismatchFinding>(nameof(ProcCallTableValuedArgumentMismatchScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"EXEC call-site table-valued argument mismatches ({report.Find<ProcCallTableValuedArgumentMismatchFinding>(nameof(ProcCallTableValuedArgumentMismatchScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A real EXEC call site passes a table-valued parameter argument whose caller-side table variable was itself populated with a literal INSERT ... VALUES row that risks silent data loss against the table type's own declared column - the same assignment-shaped conversion as a scalar EXEC argument mismatch, but at the point the table variable's row data is written, since SQL Server's own table-type identity check at the call boundary is exact and cannot silently narrow.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ProcCallTableValuedArgumentMismatchRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Callee", ParameterHeader, "Column", "Caller-side expression", "Caller type", "Column type", "Risk"],
+            [.. report.Find<ProcCallTableValuedArgumentMismatchFinding>(nameof(ProcCallTableValuedArgumentMismatchScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.CalleeQualifiedName,
+                f.FormalParameterName,
+                f.ColumnName,
+                f.CallerExpressionDisplay,
+                f.CallerTypeDisplay,
+                f.ColumnTypeDisplay,
                 DescribeWriteLossKind(f.Kind),
             })]);
     }

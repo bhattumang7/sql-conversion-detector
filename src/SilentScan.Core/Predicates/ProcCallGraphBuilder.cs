@@ -544,7 +544,8 @@ public static class ProcCallGraphBuilder
                     : ScopeVariableFlowTracker.WasAssignedBeforeCall(context.CurrentScopeStatements, callerVariableName, context.CallSite);
                 matched.Add(new ProcCallArgument(
                     formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal, literalArgument,
-                    callerArgumentType, actual.IsOutput, actual.ParameterValue, assignmentFlow.Assigned, assignmentFlow.Approximate));
+                    callerArgumentType, actual.IsOutput, actual.ParameterValue, assignmentFlow.Assigned, assignmentFlow.Approximate,
+                    formal.TableTypeQualifiedName));
             }
 
             return matched;

@@ -40,6 +40,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<ColumnCollationDriftFinding>("ColumnCollationDriftScanner").Select(ToResult));
         results.AddRange(report.Find<CrossTableTypeDriftFinding>("CrossTableTypeDriftScanner").Select(ToResult));
         results.AddRange(report.Find<ProcCallArgumentMismatchFinding>("ProcCallArgumentMismatchScanner").Select(ToResult));
+        results.AddRange(report.Find<ProcCallTableValuedArgumentMismatchFinding>("ProcCallTableValuedArgumentMismatchScanner").Select(ToResult));
         results.AddRange(report.Find<SpExecuteSqlParameterMismatchFinding>("SpExecuteSqlParameterMismatchScanner").Select(ToResult));
         results.AddRange(report.Find<TemporalBoundaryPrecisionFinding>("NonSargablePredicateScanner").Select(ToResult));
         results.AddRange(report.Find<MaxTypedColumnFinding>("MaxTypedColumnScanner").Select(ToResult));
@@ -319,6 +320,17 @@ public static class SarifReportWriter
         var message = finding.IsOutputWriteback
             ? $"EXEC '{finding.CalleeQualifiedName}': OUTPUT parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) writes its final value back into '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) in {callerLabel} - {DescribeWriteLossKind(finding.Kind)}."
             : $"EXEC '{finding.CalleeQualifiedName}': parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) receives '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) from {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(ProcCallTableValuedArgumentMismatchFinding finding)
+    {
+
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ProcCallTableValuedArgumentMismatchRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var callerLabel = finding.CallerScopeQualifiedName ?? "a top-level batch";
+        var message = $"EXEC '{finding.CalleeQualifiedName}': table-valued parameter '{finding.FormalParameterName}' ({finding.TableTypeQualifiedName}) column '{finding.ColumnName}' ({finding.ColumnTypeDisplay}) was populated with '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) in {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

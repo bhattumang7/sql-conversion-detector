@@ -107,6 +107,7 @@ public static class RuleDocCatalog
         [Catalog.ColumnCollationDrift.RuleId] = Catalog.ColumnCollationDrift.Content,
         [Catalog.CrossTableFkTypeDrift.RuleId] = Catalog.CrossTableFkTypeDrift.Content,
         [CallGraph.ArgumentTypeMismatch.RuleId] = CallGraph.ArgumentTypeMismatch.Content,
+        [CallGraph.TableValuedArgumentMismatch.RuleId] = CallGraph.TableValuedArgumentMismatch.Content,
         [CallGraph.SpExecuteSqlParameterMismatch.RuleId] = CallGraph.SpExecuteSqlParameterMismatch.Content,
         [Catalog.MaxTypedColumn.RuleId] = Catalog.MaxTypedColumn.Content,
         [Catalog.SelectiveXmlIndexValueColumn.RuleId] = Catalog.SelectiveXmlIndexValueColumn.Content,

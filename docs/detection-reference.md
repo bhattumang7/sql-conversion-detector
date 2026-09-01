@@ -450,6 +450,31 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`ProcCallArgumentMismatchRuleId` TVP sibling: the call-boundary type
+  itself can never mismatch by shape, only by identity, and identity
+  mismatches always hard-error.** Oracle-confirmed (SQL Server 2025, Docker):
+  a table-valued parameter argument must be a variable declared with the
+  exact same user-defined table type as the parameter - passing an
+  ad-hoc `DECLARE @t TABLE(...)` variable, or a variable typed with a
+  same-named-but-differently-defined type from another database, both fail
+  identically with `Operand type clash` at compile time regardless of
+  whether the column shapes actually agree, so there is no data-dependent
+  silent shape mismatch to catch at the boundary itself. The real silent
+  loss is one step earlier: an `INSERT ... VALUES` into the caller's typed
+  table variable is an ordinary assignment into the type's own declared
+  columns, and non-length narrowing (numeric scale rounding, Unicode-to-
+  non-Unicode `?` replacement, temporal precision/offset loss) is silent
+  there exactly like any other INSERT - oracle-confirmed on all three
+  kinds. String/binary length overflow is the one WriteLoss kind excluded:
+  unlike a scalar variable assignment, SQL Server raises a hard "String or
+  binary data would be truncated" error for a table variable, so it's never
+  silent (oracle-confirmed). Shipped as `ProcCallTableValuedArgumentMismatchScanner`,
+  scoped to `INSERT ... VALUES` population of a table variable later passed
+  as a TVP argument to a resolved EXEC call; `INSERT ... SELECT` population
+  is recorded to the skip ledger rather than guessed at, since resolving
+  arbitrary SELECT-list column types needs the full FROM-scope lineage
+  machinery this family doesn't otherwise depend on.
+
 * **`ColumnstoreUnsupportedColumnTypeScanner` widening: no feature-switch-
   gated type exists to widen further.** Msg 35343's type gate is now fully
   covered (`sql_variant`, `xml`, `hierarchyid`, `geometry`, `geography`,

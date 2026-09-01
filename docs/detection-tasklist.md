@@ -19,14 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`ProcCallArgumentMismatchRuleId` sibling: table-valued parameter
-      column-shape mismatch.** The shipped rule covers a scalar EXEC
-      argument marshalling mismatch; a statically resolved TVP call whose
-      supplied table variable/expression column metadata (type, length,
-      precision, scale, collation, nullability, by ordinal) differs from the
-      procedure's declared TVP type is the same silent-marshalling-mismatch
-      family, uncovered today.
-
 - [ ] **Partition function parameter type mismatch.** A partitioned object's
       partitioning column with a catalog type/precision/scale/length/
       collation that does not exactly match its partition function's own

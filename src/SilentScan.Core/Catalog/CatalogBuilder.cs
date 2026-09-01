@@ -567,10 +567,12 @@ public static class CatalogBuilder
             var registered = new List<ProcedureParameterInfo>(parameters.Count);
             foreach (var parameter in parameters)
             {
-                var isTableValued = parameter.DataType is UserDataTypeReference userType
-                    && catalog.Find(SchemaObjectNameHelper.Qualify(userType.Name)) is { Kind: CatalogTableKind.TableType };
-                var resolvedType = isTableValued ? null : SqlTypeReferenceResolver.Resolve(parameter.DataType, columnCollation: null, catalog.TypeAliases);
-                registered.Add(new ProcedureParameterInfo(parameter.VariableName.Value, resolvedType, parameter.Modifier == ParameterModifier.Output));
+                var tableTypeQualifiedName = parameter.DataType is UserDataTypeReference userType
+                    && catalog.Find(SchemaObjectNameHelper.Qualify(userType.Name)) is { Kind: CatalogTableKind.TableType }
+                    ? SchemaObjectNameHelper.Qualify(userType.Name)
+                    : null;
+                var resolvedType = tableTypeQualifiedName is not null ? null : SqlTypeReferenceResolver.Resolve(parameter.DataType, columnCollation: null, catalog.TypeAliases);
+                registered.Add(new ProcedureParameterInfo(parameter.VariableName.Value, resolvedType, parameter.Modifier == ParameterModifier.Output, tableTypeQualifiedName));
             }
 
             catalog.AddProcedureParameters(_currentScope!, registered);

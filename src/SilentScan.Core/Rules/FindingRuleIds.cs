@@ -28,6 +28,7 @@ public static class FindingRuleIds
     public const string ColumnCollationDriftRuleId = "silentscan/catalog/column-collation-drift";
     public const string CrossTableTypeDriftRuleId = "silentscan/catalog/cross-table-fk-type-drift";
     public const string ProcCallArgumentMismatchRuleId = "silentscan/call-graph/argument-type-mismatch";
+    public const string ProcCallTableValuedArgumentMismatchRuleId = "silentscan/call-graph/table-valued-argument-column-mismatch";
     public const string SpExecuteSqlParameterMismatchRuleId = "silentscan/call-graph/sp-executesql-parameter-type-mismatch";
     public const string TemporalBoundaryPrecisionRuleId = "silentscan/correctness/between-end-of-period-boundary";
     public static string MaxTypedColumnRuleId(NonIndexableColumnFindingKind kind) => kind switch

@@ -11,7 +11,7 @@ public sealed record ProcCallArgument(
     string? CallerVariableName, bool IsLiteral, ProcCallLiteralArgument? LiteralArgument = null,
     SqlType? CallerArgumentType = null, bool CallSiteHasOutputKeyword = true,
     ScalarExpression? CallerArgumentExpression = null, bool CallerVariableWasAssignedBeforeCall = true,
-    bool CallerFlowApproximate = false);
+    bool CallerFlowApproximate = false, string? FormalTableTypeQualifiedName = null);
 
 public sealed record ProcCallEdge(
     string? CallerScopeQualifiedName, string CalleeQualifiedName, SourceSpan CallSite, IReadOnlyList<ProcCallArgument> Arguments);

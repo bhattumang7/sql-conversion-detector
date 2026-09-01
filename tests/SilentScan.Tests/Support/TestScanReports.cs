@@ -24,6 +24,7 @@ public static class TestScanReports
         IReadOnlyList<ColumnCollationDriftFinding>? ColumnCollationDriftFindings = null,
         IReadOnlyList<CrossTableTypeDriftFinding>? CrossTableTypeDriftFindings = null,
         IReadOnlyList<ProcCallArgumentMismatchFinding>? ProcCallArgumentMismatchFindings = null,
+        IReadOnlyList<ProcCallTableValuedArgumentMismatchFinding>? ProcCallTableValuedArgumentMismatchFindings = null,
         IReadOnlyList<TemporalBoundaryPrecisionFinding>? TemporalBoundaryFindings = null,
         IReadOnlyList<MaxTypedColumnFinding>? MaxTypedColumnFindings = null,
         IReadOnlyList<OversizedParameterFinding>? OversizedParameterFindings = null,
@@ -142,6 +143,7 @@ public static class TestScanReports
         Set("ColumnCollationDriftScanner", ColumnCollationDriftFindings);
         Set("CrossTableTypeDriftScanner", CrossTableTypeDriftFindings);
         Set("ProcCallArgumentMismatchScanner", ProcCallArgumentMismatchFindings);
+        Set("ProcCallTableValuedArgumentMismatchScanner", ProcCallTableValuedArgumentMismatchFindings);
         Set("MaxTypedColumnScanner", MaxTypedColumnFindings);
         Set("PartialCompositeForeignKeyJoinScanner", PartialCompositeForeignKeyJoinFindings);
         Set("SetOptionScanner", SetOptionFindings);

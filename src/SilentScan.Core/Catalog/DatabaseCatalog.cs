@@ -4,7 +4,7 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Catalog;
 
-public sealed record ProcedureParameterInfo(string Name, SqlType? Type, bool IsOutput);
+public sealed record ProcedureParameterInfo(string Name, SqlType? Type, bool IsOutput, string? TableTypeQualifiedName = null);
 
 public sealed class DatabaseCatalog
 {

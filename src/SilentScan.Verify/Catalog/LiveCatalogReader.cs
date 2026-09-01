@@ -99,6 +99,18 @@ public sealed class LiveCatalogReader
             catalog.AddScalarFunctionReturnType(qualifiedName, returnType);
         }
 
+        foreach (var (schemaName, typeName, columns) in await ReadTableTypesAsync(connection, catalog.Skipped, cancellationToken))
+        {
+            catalog.AddOrReplace(new CatalogTable(
+                SchemaName: schemaName,
+                Name: typeName,
+                Kind: CatalogTableKind.TableType,
+                Columns: columns,
+                Indexes: [],
+                SourcePath: $"{schemaName}.{typeName}",
+                SourceLine: 0));
+        }
+
         foreach (var (qualifiedName, kind) in await ReadTableValuedFunctionKindsAsync(connection, cancellationToken))
         {
             catalog.AddTableValuedFunctionKind(qualifiedName, kind);
@@ -568,6 +580,58 @@ public sealed class LiveCatalogReader
         }
 
         return [.. byFunction.Values];
+    }
+
+    private static async Task<List<(string SchemaName, string TypeName, List<CatalogColumn> Columns)>> ReadTableTypesAsync(
+        SqlConnection connection, SkipLedger skipLedger, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT tt.user_type_id, s.name AS schema_name, tt.name AS type_name, c.name AS column_name,
+                   ty.name AS column_type_name, c.max_length, c.precision, c.scale, c.collation_name, c.is_nullable
+            FROM sys.table_types tt
+            JOIN sys.schemas s ON s.schema_id = tt.schema_id
+            JOIN sys.columns c ON c.object_id = tt.type_table_object_id
+            JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+            WHERE tt.is_user_defined = 1
+            ORDER BY tt.user_type_id, c.column_id;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var byType = new Dictionary<int, (string SchemaName, string TypeName, List<CatalogColumn> Columns)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var userTypeId = reader.GetInt32(0);
+            var schemaName = reader.GetString(1);
+            var typeName = reader.GetString(2);
+            var columnName = reader.GetString(3);
+            var columnTypeName = reader.GetString(4);
+            var maxLength = reader.GetInt16(5);
+            var precision = reader.GetByte(6);
+            var scale = reader.GetByte(7);
+            var collationName = await reader.IsDBNullAsync(8, cancellationToken) ? null : reader.GetString(8);
+            var isNullable = reader.GetBoolean(9);
+
+            var type = LiveTypeMapper.BuildType(columnTypeName, maxLength, precision, scale, collationName);
+            if (type is null)
+            {
+                skipLedger.Record(
+                    AnalysisPass.Catalog, $"{schemaName}.{typeName}", 0, 0,
+                    "live column type",
+                    $"'{columnName}' has sys.types name '{columnTypeName}', which this pass does not map to a scalar comparison type (CLR UDT, geography/geometry, hierarchyid, or similar) - type left UNKNOWN.");
+            }
+
+            if (!byType.TryGetValue(userTypeId, out var entry))
+            {
+                entry = (schemaName, typeName, []);
+                byType[userTypeId] = entry;
+            }
+
+            entry.Columns.Add(new CatalogColumn(columnName, type, isNullable, IsIdentity: false, IsComputed: false, IsPersisted: false));
+        }
+
+        return [.. byType.Values];
     }
 
     private static async Task<List<(string QualifiedName, SqlType? ReturnType)>> ReadClrScalarFunctionReturnTypesAsync(

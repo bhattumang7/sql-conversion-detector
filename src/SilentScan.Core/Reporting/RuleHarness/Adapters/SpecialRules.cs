@@ -22,6 +22,20 @@ internal sealed class PartialCompositeForeignKeyJoinRule : IPerFileRule
         PartialCompositeForeignKeyJoinScanner.Harvest((PartialCompositeForeignKeyJoinScanner.Rule)moduleRule);
 }
 
+internal sealed class ProcCallTableValuedArgumentMismatchRule : IPerFileRule
+{
+    public string Id => "ProcCallTableValuedArgumentMismatchScanner";
+
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) =>
+        ProcCallTableValuedArgumentMismatchScanner.Scan(parseResult, context.ProcCallGraph, context.Catalog, context.Ledger);
+
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) =>
+        ProcCallTableValuedArgumentMismatchScanner.CreateRule(parseResult.SourcePath, context.ProcCallGraph, context.Catalog, context.Ledger);
+
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) =>
+        ProcCallTableValuedArgumentMismatchScanner.Harvest((ProcCallTableValuedArgumentMismatchScanner.Rule)moduleRule);
+}
+
 internal sealed class TryCastComputedColumnPredicateRule : IPerFileRule
 {
     public string Id => "TryCastComputedColumnPredicateScanner";
