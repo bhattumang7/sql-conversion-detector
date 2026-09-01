@@ -52,6 +52,14 @@ internal sealed class CartesianJoinRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => CartesianJoinScanner.Harvest((CartesianJoinScanner.Rule)moduleRule);
 }
 
+internal sealed class OuterJoinPredicateCollapseRule : IPerFileRule
+{
+    public string Id => "OuterJoinPredicateCollapseScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => OuterJoinPredicateCollapseScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => OuterJoinPredicateCollapseScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => OuterJoinPredicateCollapseScanner.Harvest((OuterJoinPredicateCollapseScanner.Rule)moduleRule);
+}
+
 internal sealed class TruncateSwallowedRule : IPerFileRule
 {
     public string Id => "TruncateSwallowedScanner";

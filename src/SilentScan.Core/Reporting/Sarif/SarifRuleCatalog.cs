@@ -183,6 +183,7 @@ public static class SarifRuleCatalog
     public const string PostExpansionJoinWidthRuleId = FindingRuleIds.PostExpansionJoinWidthRuleId;
     public const string SelectStarViewRuleId = FindingRuleIds.SelectStarViewRuleId;
     public const string PartialCompositeForeignKeyJoinRuleId = FindingRuleIds.PartialCompositeForeignKeyJoinRuleId;
+    public const string OuterJoinPredicateCollapseRuleId = FindingRuleIds.OuterJoinPredicateCollapseRuleId;
     public const string ConcatenatedValueInConstantSqlRuleId = FindingRuleIds.ConcatenatedValueInConstantSqlRuleId;
     public const string ExecStringConcatenatesParameterizableValueRuleId = FindingRuleIds.ExecStringConcatenatesParameterizableValueRuleId;
     public const string TempTableExecShapeColumnCountMismatchRuleId = FindingRuleIds.TempTableExecShapeColumnCountMismatchRuleId;

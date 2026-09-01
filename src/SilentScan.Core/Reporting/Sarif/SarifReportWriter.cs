@@ -68,6 +68,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<TempTableExecShapeFinding>("TempTableExecShapeScanner").Select(ToResult));
         results.AddRange(report.Find<SelfReferencingDmlFinding>("SelfReferencingDmlScanner").Select(ToResult));
         results.AddRange(report.Find<PartialCompositeForeignKeyJoinFinding>("PartialCompositeForeignKeyJoinScanner").Select(ToResult));
+        results.AddRange(report.Find<OuterJoinPredicateCollapseFinding>(nameof(OuterJoinPredicateCollapseScanner)).Select(ToResult));
         results.AddRange(report.Find<SetOptionFinding>("SetOptionScanner").Select(ToResult));
         results.AddRange(report.Find<TemporalTableHistoryIndexGapFinding>("TemporalTableHistoryIndexGapScanner").Select(ToResult));
         results.AddRange(report.Find<ModuleCompileFlagFinding>("ModuleCompileFlagScanner").Select(ToResult));
@@ -470,6 +471,22 @@ public static class SarifReportWriter
         var matched = string.Join(", ", finding.MatchedColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}"));
         var missing = string.Join(", ", finding.MissingColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}"));
         var message = $"FK '{finding.ConstraintName}': join between '{finding.ParentTableQualifiedName}' and '{finding.ReferencedTableQualifiedName}' matches [{matched}] but omits [{missing}] - a parent row can match more than one child row than the declared relationship allows.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(OuterJoinPredicateCollapseFinding finding)
+    {
+
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.OuterJoinPredicateCollapseRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var kindText = finding.Kind switch
+        {
+            OuterJoinPredicateCollapseKind.LeftOuterJoin => "LEFT OUTER JOIN",
+            OuterJoinPredicateCollapseKind.RightOuterJoin => "RIGHT OUTER JOIN",
+            _ => "FULL OUTER JOIN",
+        };
+        var message = $"WHERE compares '{finding.NullSupplyingTableQualifiedName}.{finding.ColumnName}', the null-supplying side of a {kindText}, with no OR ... IS NULL guard - unmatched rows are discarded, silently turning the {kindText} into an INNER JOIN.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

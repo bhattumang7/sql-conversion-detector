@@ -12,6 +12,7 @@ public static class RuleRegistry
         new MissingStatisticsRule(),
         new SessionDateSettingRule(),
         new CartesianJoinRule(),
+        new OuterJoinPredicateCollapseRule(),
         new TruncateSwallowedRule(),
         new CatchAllPredicateRule(),
         new BareTopNoOrderByRule(),

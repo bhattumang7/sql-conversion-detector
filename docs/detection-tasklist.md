@@ -19,14 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`OUTER JOIN` predicate on the null-supplying side silently collapses
-      to an `INNER JOIN`.** A predicate that references an outer join's
-      null-supplying side and rejects `NULL` (no explicit `OR col IS NULL`
-      guard) makes the query equivalent to an `INNER JOIN`, defeating the
-      author's evident intent to preserve unmatched rows — a well-known,
-      statically decidable correctness footgun (predicate nullability
-      against join side) not currently caught by any shipped rule.
-
 - [ ] **`CartesianJoinRuleId` sibling: `INNER JOIN` `ON` predicate provably
       `FALSE`.** The complementary case to the shipped cartesian-join
       family (always-`TRUE`/no-predicate): an `INNER JOIN`'s `ON` predicate

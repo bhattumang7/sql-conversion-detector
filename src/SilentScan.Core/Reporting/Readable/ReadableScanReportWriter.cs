@@ -106,6 +106,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(PostExpansionJoinWidth(report, headingLevel, pathBase));
         blocks.AddRange(SelectStarView(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
+        blocks.AddRange(OuterJoinPredicateCollapse(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(UnparameterizedDynamicSql(report, headingLevel, pathBase));
         blocks.AddRange(TempTableExecShape(report, headingLevel, pathBase));
@@ -272,6 +273,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Queries whose expanded join width exceeds their written FROM/JOIN count", report.Find<PostExpansionJoinWidthFinding>(nameof(PostExpansionJoinWidthScanner)).Count);
         AddCount(counts, "Consumers narrowing a nested SELECT * view's frozen column list", report.Find<SelectStarViewFinding>(nameof(SelectStarViewScanner)).Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.Find<PartialCompositeForeignKeyJoinFinding>(nameof(PartialCompositeForeignKeyJoinScanner)).Count);
+        AddCount(counts, "OUTER JOIN predicates that silently collapse to an INNER JOIN", report.Find<OuterJoinPredicateCollapseFinding>(nameof(OuterJoinPredicateCollapseScanner)).Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.Find<SetOptionFinding>(nameof(SetOptionScanner)).Count);
         AddCount(counts, "Dynamic SQL call sites concatenating a proven-constant value instead of parameterizing it", report.Find<UnparameterizedDynamicSqlFinding>(DynamicSqlRuleId).Count);
         AddCount(counts, "INSERT INTO #temp EXEC proc shape mismatches", report.Find<TempTableExecShapeFinding>(TempTableExecShapeRuleId).Count);
@@ -2952,6 +2954,34 @@ public static class ReadableScanReportWriter
                 $"{f.ParentTableQualifiedName} -> {f.ReferencedTableQualifiedName}",
                 string.Join(", ", f.MatchedColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}")),
                 string.Join(", ", f.MissingColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}")),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> OuterJoinPredicateCollapse(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<OuterJoinPredicateCollapseFinding>(nameof(OuterJoinPredicateCollapseScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"OUTER JOIN predicates that collapse to an INNER JOIN ({report.Find<OuterJoinPredicateCollapseFinding>(nameof(OuterJoinPredicateCollapseScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A WHERE-clause predicate rejects NULL on a column from an OUTER JOIN's null-supplying side, with no OR ... IS NULL guard anywhere in the same AND-conjunct - every row where the join found no match has that column NULL, so the predicate discards it, silently making the OUTER JOIN behave exactly like an INNER JOIN.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.OuterJoinPredicateCollapseRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Join kind", "Table", "Column"],
+            [.. report.Find<OuterJoinPredicateCollapseFinding>(nameof(OuterJoinPredicateCollapseScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind switch
+                {
+                    OuterJoinPredicateCollapseKind.LeftOuterJoin => "LEFT OUTER JOIN",
+                    OuterJoinPredicateCollapseKind.RightOuterJoin => "RIGHT OUTER JOIN",
+                    _ => "FULL OUTER JOIN",
+                },
+                f.NullSupplyingTableQualifiedName,
+                f.ColumnName,
             })]);
     }
 

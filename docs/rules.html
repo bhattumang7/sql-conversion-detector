@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">298 rules. 210 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">299 rules. 211 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -367,6 +367,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <ul class="rule-list">
       <li><a class="id" href="rules/join-cartesian-comma-join.html">Cartesian Comma Join</a> <code class="rule-key">silentscan/join/cartesian-comma-join</code><span class="snippet">A legacy comma-join (FROM A, B) with no predicate anywhere in the statement.</span></li>
       <li><a class="id" href="rules/join-cartesian-cross-join.html">Cartesian Cross Join</a> <code class="rule-key">silentscan/join/cartesian-cross-join</code><span class="snippet">An explicit CROSS JOIN with no predicate anywhere in the statement connecting the two tables.</span></li>
+      <li><a class="id" href="rules/join-outer-join-predicate-collapse.html">Outer Join Predicate Collapse</a> <code class="rule-key">silentscan/join/outer-join-predicate-collapse</code><span class="snippet">A WHERE-clause predicate compares a column from an OUTER JOIN&#x27;s null-supplying side using a NULL-rejecting operator (=, &lt;&gt;, &lt;, &lt;=, &gt;, &gt;=, LIKE, IN, BETWEEN) with no OR .</span></li>
       <li><a class="id" href="rules/join-partial-composite-fk.html">Partial Composite FK</a> <code class="rule-key">silentscan/join/partial-composite-fk</code><span class="snippet">A JOIN equates some but not all of a real composite foreign key&#x27;s column pairs.</span></li>
     </ul>
   </section>

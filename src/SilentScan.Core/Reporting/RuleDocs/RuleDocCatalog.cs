@@ -33,6 +33,7 @@ public static class RuleDocCatalog
         [Join.PartialCompositeForeignKeyJoin.RuleId] = Join.PartialCompositeForeignKeyJoin.Content,
         [Join.CartesianCommaJoin.RuleId] = Join.CartesianCommaJoin.Content,
         [Join.CartesianCrossJoin.RuleId] = Join.CartesianCrossJoin.Content,
+        [Join.OuterJoinPredicateCollapse.RuleId] = Join.OuterJoinPredicateCollapse.Content,
         [Dml.SelfReferencingDml.RuleId] = Dml.SelfReferencingDml.Content,
         [Index.KeyLookupProneIndex.RuleId] = Index.KeyLookupProneIndex.Content,
         [Predicate.StringConcatNull.RuleId] = Predicate.StringConcatNull.Content,

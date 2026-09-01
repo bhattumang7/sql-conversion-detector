@@ -496,6 +496,43 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`OuterJoinPredicateCollapseRuleId` — shipped, scoped to the WHERE clause
+  only, and to AND-conjuncts that are not themselves wrapped in an OR.**
+  Oracle-confirmed (Docker, SQL Server 2025) with self-contained
+  `DECLARE @t TABLE`/`VALUES` queries: a `WHERE`-clause comparison, `LIKE`,
+  `IN`, or `BETWEEN` predicate against a bare column reference on an
+  `OUTER JOIN`'s null-supplying side discards every row where that join
+  found no match (three-valued logic: the predicate evaluates `NULL`, and
+  `WHERE` drops `NULL` the same as `FALSE`), for `LEFT OUTER JOIN`,
+  `RIGHT OUTER JOIN`, and `FULL OUTER JOIN` alike - confirmed to make the
+  query's actual row set identical to the equivalent `INNER JOIN`. Also
+  confirmed NOT to fire, and the scanner does not fire, when: the predicate
+  is `OR`-ed with a guard on any column of the same alias (`OR <col> IS
+  NULL`) — confirmed unmatched rows survive; the null-supplying column is
+  wrapped in a function (`ISNULL(...)`/`COALESCE(...)`) rather than referenced
+  bare, since the scanner only matches a direct `ColumnReferenceExpression`
+  operand; or the predicate lives in a *subsequent* join's own `ON` clause
+  rather than in `WHERE` — oracle-confirmed a predicate on an earlier join's
+  null-supplying alias inside a later join's `ON` clause does not eliminate
+  the earlier join's unmatched row (an `ON` clause failing only means no
+  match for that specific join, not exclusion of the row already produced
+  upstream), unlike the same predicate in `WHERE`.
+
+  Scope narrowed deliberately at the `OR` boundary: an `OR`-wrapped
+  conjunct can have an "escape hatch" disjunct unrelated to the
+  null-supplying side (oracle-confirmed: `WHERE b.status = 'active' OR
+  a.flag = 1` keeps the unmatched row alive when `a.flag = 1`, even with no
+  `IS NULL` guard on `b`), so proving collapse under `OR` requires proving
+  every disjunct fails for a null-extended row - not attempted in this pass.
+  Any conjunct that is itself an `OR` (after unwrapping parens) is skipped
+  entirely, including the guarded case, rather than risk a false positive by
+  reasoning about disjunct coverage. `NOT`-wrapped conjuncts are skipped for
+  the same reason. `HAVING` clauses and `ON` clauses of the join whose own
+  null-supplying side is referenced are out of scope for this rule (an
+  `ON`-clause predicate on the null-supplying side of its *own* `OUTER JOIN`
+  is the ordinary, correct way to write a conditional outer join and does
+  not collapse anything).
+
 * **`TRANSLATE` in the bounded-string-builtins truncation family — killed,
   the premise doesn't apply to this function.** `REPLICATE`/`REPLACE`/
   `SPACE` are already shipped (`BoundedStringBuiltinTruncationScanner`)

@@ -218,6 +218,7 @@ public static class FindingRuleIds
     public const string PostExpansionJoinWidthRuleId = "silentscan/lineage/post-expansion-join-width";
     public const string SelectStarViewRuleId = "silentscan/lineage/select-star-view";
     public const string PartialCompositeForeignKeyJoinRuleId = "silentscan/join/partial-composite-fk";
+    public const string OuterJoinPredicateCollapseRuleId = "silentscan/join/outer-join-predicate-collapse";
     public const string ConcatenatedValueInConstantSqlRuleId = "silentscan/dynamic-sql/concatenated-value-in-constant-sql";
     public const string ExecStringConcatenatesParameterizableValueRuleId = "silentscan/dynamic-sql/exec-string-concatenates-parameterizable-value";
     public const string TempTableExecShapeColumnCountMismatchRuleId = "silentscan/dynamic-sql/insert-exec-temp-table-column-count-mismatch";
