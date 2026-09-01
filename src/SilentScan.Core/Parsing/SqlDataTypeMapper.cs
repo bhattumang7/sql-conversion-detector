@@ -36,6 +36,7 @@ public static class SqlDataTypeMapper
         SqlDataTypeOption.DateTime2 => SqlTypeCategory.DateTime2,
         SqlDataTypeOption.DateTimeOffset => SqlTypeCategory.DateTimeOffset,
         SqlDataTypeOption.Json => SqlTypeCategory.Json,
+        SqlDataTypeOption.Vector => SqlTypeCategory.Vector,
 
         _ => null,
     };

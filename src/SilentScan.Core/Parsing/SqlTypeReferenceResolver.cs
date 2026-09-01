@@ -49,6 +49,7 @@ public static class SqlTypeReferenceResolver
         {
             SqlDataTypeOption.Decimal or SqlDataTypeOption.Numeric => ResolveDecimal(category.Value, sqlDataType),
             SqlDataTypeOption.Float => ResolveFloat(category.Value, sqlDataType),
+            SqlDataTypeOption.Vector => ResolveVector(sqlDataType),
             _ when IsStringOrBinaryFamily(category.Value) => ResolveStringOrBinary(category.Value, sqlDataType, collation, unsizedStringOrBinaryDefaultLength),
             _ when IsFractionalSecondsFamily(category.Value) => ResolveFractionalSeconds(category.Value, sqlDataType),
             _ => new SqlType(category.Value),
@@ -113,6 +114,15 @@ public static class SqlTypeReferenceResolver
             ? int.Parse(intLiteral.Value, CultureInfo.InvariantCulture)
             : unsizedDefaultLength;
         return new SqlType(category, Length: length, Collation: collation);
+    }
+
+    private static SqlType ResolveVector(SqlDataTypeReference sqlDataType)
+    {
+        var dimensions = sqlDataType.Parameters.Count > 0 && sqlDataType.Parameters[0] is IntegerLiteral d
+            ? int.Parse(d.Value, CultureInfo.InvariantCulture)
+            : (int?)null;
+
+        return new SqlType(SqlTypeCategory.Vector, Length: dimensions);
     }
 
     private static SqlType ResolveFloat(SqlTypeCategory category, SqlDataTypeReference sqlDataType)

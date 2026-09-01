@@ -96,7 +96,8 @@ public static class VerdictClassifier
 
     private static bool IsOutOfModelCategory(SqlTypeCategory category) =>
         category is SqlTypeCategory.SqlVariant or SqlTypeCategory.Xml or SqlTypeCategory.UserDefined
-            or SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image or SqlTypeCategory.Json;
+            or SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image or SqlTypeCategory.Json
+            or SqlTypeCategory.Vector;
 
     private static (Verdict Verdict, string? UnknownReason) ClassifySameCategory(SqlType columnType, SqlType otherType)
     {

@@ -19,15 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`VECTOR` is entirely unmodeled in the type system.** Oracle-confirmed
-      on SQL Server 2025: `VECTOR(n)` is a real, working scalar type
-      (`VECTOR_DISTANCE`, comparisons, casts all function normally), but
-      `SqlTypeCategory`/`SqlType` has no case for it at all. Every rule built
-      on type inference (sargability, write-loss, call-graph argument
-      matching) silently has no opinion on a `VECTOR` column - scope the
-      minimum needed (does it need its own category, or fold into an opaque
-      "unknown, never guess" bucket for now) before touching the type table.
-
 - [ ] **`TransactionHygieneScanner`'s transaction-state model has three
       distinct blind spots**, all confirmed live, best fixed as one
       redesign rather than three patches: (1) `SAVE TRANSACTION` /

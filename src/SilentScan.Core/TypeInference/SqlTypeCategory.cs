@@ -38,5 +38,6 @@ public enum SqlTypeCategory
     HierarchyId,
     Geometry,
     Geography,
+    Vector,
 }
 #pragma warning restore CA1720
