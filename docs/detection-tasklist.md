@@ -25,50 +25,96 @@ Competitor tools are referred to generically; real identities are in
       area, or "verify it isn't already covered" rather than a clean new
       gap) but are real enough not to drop silently. Each still needs its
       own oracle confirmation before design.
-      - Verify the shipped predicate-survival algebra already folds `LIKE`
+      1. Verify the shipped predicate-survival algebra already folds `LIKE`
         patterns into its interval model, and already flattens nested
         AND/OR trees (not just direct conjuncts/disjuncts) before treating
         those as closed — may already be covered by the recent commit.
-      - `ScalarUdfInlineabilityScanner`: the survey claims it covers only
+        **FINDING:** split verdict. `PredicateSurvivalAnalyzer.Flatten`
+        already recurses through nested same-type AND/OR trees and unwraps
+        parens — that half is already correct, not a gap. But the analyzer
+        has no `LIKE`/`BooleanLikeExpression` handling at all — patterns
+        are not folded into the interval model. Real, narrower gap: LIKE
+        folding only.
+      2. `ScalarUdfInlineabilityScanner`: the survey claims it covers only
         about half the engine's real inlineability checks; beyond the two
         gaps already written up above (compat-level gate, re-eval-count
         threshold), enumerate the remaining checks against the scanner's
         own visitor one at a time rather than acting on the vague aggregate
-        figure.
-      - `VerdictClassifier.IsOutOfModelCategory` returns `Unknown` (never an
+        figure. **FINDING:** attempted, inconclusive. `OBJECTPROPERTYEX(id,
+        'IsInlineable')` returned `NULL` for both a trivial function and a
+        non-inlineable one (using `ERROR_NUMBER()`) on SQL Server 2022 —
+        not a usable oracle signal as tried. Needs a different verification
+        method (e.g. checking actual plan inlining) before scoping.
+      3. `VerdictClassifier.IsOutOfModelCategory` returns `Unknown` (never an
         actionable finding) for XML/JSON/UDT/legacy-LOB comparisons where
         the engine's own comparability gate hard-rejects the comparison —
         check this against the oracle-probed type matrix; if real, these
         should reclassify as `OperandClash`, not stay `Unknown`.
-      - New family: an assignment (`SET`/`INSERT`/`UPDATE`) whose source
+        **FINDING: confirmed real** for XML and spatial (UDT). Oracle:
+        `CAST(x AS XML) = CAST(x AS XML)` → Msg 305; `sql_variant = xml`
+        assignment → Msg 206 (operand type clash); `geometry = geometry`
+        → Msg 403. All are hard compile-time rejects, not "unknown."
+        `VerdictClassifier.cs` lines 97-100 lump these into `Unknown`.
+        JSON and legacy-LOB (text/ntext/image) categories not individually
+        oracle-tested — check separately before folding them into the same
+        reclassification.
+      4. New family: an assignment (`SET`/`INSERT`/`UPDATE`) whose source
         type cannot legally implicit-convert to the target at all
         (encryption-state mismatch, illegal collation coercion, legacy-LOB
         ineligibility) is a compile-time reject, a stronger and distinct
         claim from `WriteLossFinding`'s "compiles but silently loses data".
-      - `ProcCallArgumentMismatchRuleId`: the reverse direction — a
+        **FINDING:** not tested. `sql_variant = xml` (item 3 above) is one
+        concrete instance of "cannot implicit-convert at all," but the
+        collation-coercion and encryption-state legs are unverified — a
+        collation-coercion probe hit a `DECLARE ... COLLATE` syntax issue
+        that wasn't chased down.
+      5. `ProcCallArgumentMismatchRuleId`: the reverse direction — a
         callee's `OUTPUT` parameter's real assigned value marshalled back
         into the caller's receiving variable — is currently uncovered;
-        mechanism needs pinning down before scoping.
-      - New family: online DDL blocked by column type. `ALTER COLUMN`/
+        mechanism needs pinning down before scoping. **FINDING: confirmed
+        real and silent.** A proc's `varchar(100) OUTPUT` param assigning a
+        50-char value, received into a caller's `varchar(3)` variable,
+        truncates to `'xxx'` with no error and no warning. Same
+        silent-data-loss shape as the shipped forward-direction rule.
+      6. New family: online DDL blocked by column type. `ALTER COLUMN`/
         `ALTER TABLE`/`ALTER INDEX ... REBUILD`/`DROP INDEX` with `ONLINE`,
         and a whole-table online rebuild, are all documented to reject a
         legacy-LOB/CLR-incompatible column type shape — one consolidated
-        rule, not four/five separate ones.
-      - New family: partition/filegroup DDL alignment siblings to the
+        rule, not four/five separate ones. **FINDING: confirmed real** for
+        the two forms tested. `ALTER TABLE ... REBUILD WITH (ONLINE=ON)`
+        and `ALTER INDEX ALL ... REBUILD WITH (ONLINE=ON)` both reject a
+        table with an `ntext` column, same catalog-decidable error message.
+        `ALTER COLUMN`/`DROP INDEX ONLINE` forms not individually tested.
+      7. New family: partition/filegroup DDL alignment siblings to the
         shipped `ALTER TABLE SWITCH` family — partition-`REBUILD` alignment
         mismatch, `DROP` against a non-updateable (read-only/offline)
         filegroup, FILESTREAM data-space compatibility mismatch, a
         partition scheme's columns disagreeing with the partitioning
         columns, and a compile-time-foldable partition number exceeding the
-        engine's 14999 ceiling.
-      - `CREATE TRIGGER` on a FILESTREAM-backed table failing at DDL time.
-      - `NonPersistedComputedColumnRuleId`/`TryCastComputedColumnPredicateRuleId`
+        engine's 14999 ceiling. **FINDING:** not tested this pass.
+      8. `CREATE TRIGGER` on a FILESTREAM-backed table failing at DDL time.
+        **FINDING:** not tested this pass — needs FILESTREAM enabled on a
+        throwaway database, out of scope for the VALUES-only probes used.
+      9. `NonPersistedComputedColumnRuleId`/`TryCastComputedColumnPredicateRuleId`
         sibling: the direct DDL-time hard failure when an indexed view or
         indexed computed column references a nondeterministic expression —
         check whether this boundary is already caught downstream.
-      - `UNPIVOT` mixing source columns with incompatible types
-        (`sys.columns`-decidable).
-      - Memory-optimized (Hekaton) natively compiled module restrictions
+        **FINDING: confirmed real, but likely unreachable as a new
+        rule.** Oracle: `CREATE UNIQUE CLUSTERED INDEX` on a schemabound
+        view selecting `NEWID()` → "yields nondeterministic results";
+        `CREATE INDEX` on a computed column using `NEWID()` → "cannot be
+        used in an index... because it is non-deterministic." Same shape
+        as the temporal gap closed as unreachable in a recent commit — SQL
+        Server refuses to *create* the index at all, so a scanner reading
+        only the live catalog would never observe the bad state.
+      10. `UNPIVOT` mixing source columns with incompatible types
+        (`sys.columns`-decidable). **FINDING: confirmed real, and
+        stricter than the bullet implies.** `int` vs `xml` errors as
+        expected (Msg 8167), but so does `int` vs `bigint` — UNPIVOT
+        requires *exact* type match, not just implicit-convertibility.
+        Decidable directly from `sys.columns` type equality; scope the
+        rule as exact-type-mismatch, not "incompatible types."
+      11. Memory-optimized (Hekaton) natively compiled module restrictions
         distinct from the shipped table-level family (unsupported column
         type, unsupported index option, cross-storage/CASCADE foreign key):
         the fixed row-size ceiling for a memory-optimized table, CLR UDT/
@@ -79,173 +125,232 @@ Competitor tools are referred to generically; real identities are in
         each needs its own oracle confirmation; likely higher-effort than
         the shipped catalog-only family since a module body's own
         expressions have to be walked, not just the table's own catalog
-        shape.
-      - `WITH SCHEMABINDING` referencing an alias user type (or an invalid
-        parsed type name) is a documented restriction.
-      - Full-text index DDL validation (unsupported column type, invalid
+        shape. **FINDING:** not tested this pass — needs a
+        MEMORY_OPTIMIZED_DATA filegroup set up on a throwaway database.
+      12. `WITH SCHEMABINDING` referencing an alias user type (or an invalid
+        parsed type name) is a documented restriction. **FINDING:** not
+        tested this pass.
+      13. Full-text index DDL validation (unsupported column type, invalid
         language id, nondeterministic computed column, >1024 indexed
         columns) — real but needs new full-text-index modeling in the
-        catalog builder that doesn't exist today.
-      - Always Encrypted per-type restrictions beyond the comparison/index
+        catalog builder that doesn't exist today. **FINDING:** not tested
+        this pass, despite an FTS-enabled container being available
+        locally — deprioritized given the catalog-builder prerequisite
+        called out in the bullet itself.
+      14. Always Encrypted per-type restrictions beyond the comparison/index
         family already written up — a column type the engine's own
-        encryption-support rules reject outright.
-      - `TemporalTableHistoryIndexGapRuleId`-family sibling: current/history
+        encryption-support rules reject outright. **FINDING:** not tested
+        this pass.
+      15. `TemporalTableHistoryIndexGapRuleId`-family sibling: current/history
         table schema divergence (type/precision/scale/collation/encryption)
         blocking temporal validation, distinct from the column-mapping gap
-        already written up.
-      - Sparse column type/compression restrictions (`sys.columns.is_sparse`
+        already written up. **FINDING:** not tested this pass.
+      16. Sparse column type/compression restrictions (`sys.columns.is_sparse`
         plus table compression state) — allow-list is version-dependent.
-      - Legacy LOB type (`text`/`ntext`/`image`) paired with a surrogate-
-        aware or UTF-8 collation.
-      - New family: `STRING_SPLIT`/`REGEXP_MATCHES`-style string TVF
+        **FINDING:** not tested this pass.
+      17. Legacy LOB type (`text`/`ntext`/`image`) paired with a surrogate-
+        aware or UTF-8 collation. **FINDING:** not tested this pass.
+      18. New family: `STRING_SPLIT`/`REGEXP_MATCHES`-style string TVF
         argument-type and MAX-width validation, and `STRING_SPLIT`'s
         3-argument ordinality form being version-gated — fold together
         with the shipped-candidate `REGEXP_*` MAX-argument family above
-        into one string-TVF argument-validation rule.
-      - Semantic Search TVFs (`SEMANTICKEYPHRASETABLE` etc.) requiring a
+        into one string-TVF argument-validation rule. **FINDING:** not
+        tested this pass.
+      19. Semantic Search TVFs (`SEMANTICKEYPHRASETABLE` etc.) requiring a
         qualifying full-text semantic index — legacy/rarely used feature.
-      - New family (SQL Server 2025): `JSON_VALUE(...RETURNING...)`/
+        **FINDING:** not tested this pass.
+      20. New family (SQL Server 2025): `JSON_VALUE(...RETURNING...)`/
         `JSON_CONTAINS` exact-match predicate shapes eligible for a JSON
         index rewrite — the JSON-index sargability counterpart to the
         shipped `IndexCoverageKeyLookupProneIndexRuleId` family; needs an
         oracle matrix for what "exact match" precisely means on a brand-new
-        feature.
-      - `CollationConflictRuleId`: confirm `GREATEST`/`LEAST` (2022+)
+        feature. **FINDING:** not tested this pass, despite the 2025
+        container being available locally.
+      21. `CollationConflictRuleId`: confirm `GREATEST`/`LEAST` (2022+)
         arguments are actually walked by the existing collation-conflict
         predicate walker — genuinely incompatible collations there should
-        already report but may not.
-      - Broaden the float-non-determinism family (aggregate argument,
+        already report but may not. **FINDING: engine side confirmed
+        real** — `GREATEST('a' COLLATE Latin1_General_CI_AS, 'b' COLLATE
+        French_CI_AS)` errors with Msg 468 (collation conflict). Whether
+        the scanner's own predicate walker visits `GREATEST`/`LEAST` calls
+        was not checked (source-code side of this item still open).
+      22. Broaden the float-non-determinism family (aggregate argument,
         already written up) to float-typed arithmetic operands generally
         and float constants in precision-sensitive expressions — likely one
-        rule, not three.
-      - `REVERT WITH COOKIE = @x` requiring `@x` to be a fixed-size
+        rule, not three. **FINDING:** not tested this pass.
+      23. `REVERT WITH COOKIE = @x` requiring `@x` to be a fixed-size
         `varbinary` matching the engine's cookie type/size is decidable
-        from the variable's own declaration.
-      - Broaden the `LAG`/`LEAD`/`PERCENTILE_*` constant-argument-validation
+        from the variable's own declaration. **FINDING: confirmed real.**
+        A `varbinary(10)` cookie is rejected with Msg 15533 ("Invalid data
+        type is supplied in the 'Revert' statement"); the engine requires
+        the fixed `varbinary(100)` shape produced by `CREATE USER ...
+        WITH... COOKIE INTO`. Decidable from the variable's declared type.
+      24. Broaden the `LAG`/`LEAD`/`PERCENTILE_*` constant-argument-validation
         family (already written up) to cover any compile-time-constant
         percent-like argument outside the inclusive 0-100 range (e.g.
-        `TABLESAMPLE PERCENT`) — same mechanism, one family.
-      - `FOR XML` forbidden option combinations (e.g. `EXPLICIT` with inline
+        `TABLESAMPLE PERCENT`) — same mechanism, one family. **FINDING:
+        confirmed real** for the `TABLESAMPLE PERCENT` case — a literal
+        `150 PERCENT` is rejected with Msg 476 ("must be between 0 and
+        100"). Supports folding it into the same family.
+      25. `FOR XML` forbidden option combinations (e.g. `EXPLICIT` with inline
         XSD) — decidable purely from the statement's own option list, no
-        catalog access needed.
-      - New `SecurityFindingKind`: `sp_invoke_external_rest_endpoint` is a
+        catalog access needed. **FINDING: real, but as an unimplemented
+        feature, not a documented "forbidden combination."** `FOR XML
+        EXPLICIT, XMLSCHEMA` fails with "'Inline XSD for FOR XML EXPLICIT'
+        is not yet implemented" — still a real, decidable compile-time
+        reject, just frame the rationale accordingly.
+      26. New `SecurityFindingKind`: `sp_invoke_external_rest_endpoint` is a
         real outbound-network call surface distinct from the shipped
-        hardcoded-IP-address finding.
-      - `sp_execute_external_script`'s `WITH RESULT SETS`-style column
+        hardcoded-IP-address finding. **FINDING:** not tested this pass.
+      27. `sp_execute_external_script`'s `WITH RESULT SETS`-style column
         declaration reusing a name, omitting a required type binding, or
-        declaring a rejected type.
-      - `OPENJSON WITH` schema projecting a native `json`-typed column
-        while the enabling feature switch is off.
-      - `VECTOR_DISTANCE`-family calls with a large-object-typed operand
-        (SQL Server 2025 vector feature).
-      - `OPENXML`/`OPENROWSET WITH` schema resolving a column to a type the
+        declaring a rejected type. **FINDING:** not tested this pass.
+      28. `OPENJSON WITH` schema projecting a native `json`-typed column
+        while the enabling feature switch is off. **FINDING:** not tested
+        this pass.
+      29. `VECTOR_DISTANCE`-family calls with a large-object-typed operand
+        (SQL Server 2025 vector feature). **FINDING:** not tested this
+        pass, despite the 2025 container being available locally.
+      30. `OPENXML`/`OPENROWSET WITH` schema resolving a column to a type the
         engine's fixed type gate rejects (`sql_variant`/spatial/legacy-LOB)
-        — one rule covering both clauses.
-      - `AnsiPaddingMismatchRuleId`: the shipped rule only covers `LIKE`
+        — one rule covering both clauses. **FINDING:** not tested this
+        pass.
+      31. `AnsiPaddingMismatchRuleId`: the shipped rule only covers `LIKE`
         trailing-whitespace matching; the same trim/no-trim boundary
         reportedly also affects join matching, equality, and persisted-
-        expression results more broadly.
-      - `EXECUTE AT DATA_SOURCE` (elastic query) with a large-object-typed
-        parameter.
-      - Informational, database-configuration tier: an active
+        expression results more broadly. **FINDING:** not tested this
+        pass.
+      32. `EXECUTE AT DATA_SOURCE` (elastic query) with a large-object-typed
+        parameter. **FINDING:** not tested this pass.
+      33. Informational, database-configuration tier: an active
         `sys.plan_guides` row whose hints alter optimization/parameterization
-        for in-scope application SQL.
-      - External file-format/data-export partition column type restrictions
+        for in-scope application SQL. **FINDING:** not tested this pass.
+      34. External file-format/data-export partition column type restrictions
         (PolyBase/CETAS external-table column-type and virtual-column
         allow-lists; data-export partition column resolving to a large
-        object or unsupported type) — real but niche.
-      - A statically-known boolean element inside a JSON literal converted
+        object or unsupported type) — real but niche. **FINDING:** not
+        tested this pass.
+      35. A statically-known boolean element inside a JSON literal converted
         to the native `VECTOR` type (SQL Server 2025 feature, narrow).
-      - A full-text predicate (`CONTAINS`/`FREETEXT`) used inside an
-        aggregate/`GROUP BY` scope the engine rejects.
-      - A window `PARTITION BY` expression resolving to a type SQL Server
-        cannot compare for partitioning (LOB/XML/spatial).
-      - New family: `CHANGE_TRACKING` restrictions — `ALTER TABLE ...
+        **FINDING:** not tested this pass.
+      36. A full-text predicate (`CONTAINS`/`FREETEXT`) used inside an
+        aggregate/`GROUP BY` scope the engine rejects. **FINDING:** not
+        tested this pass.
+      37. A window `PARTITION BY` expression resolving to a type SQL Server
+        cannot compare for partitioning (LOB/XML/spatial). **FINDING:** not
+        tested this pass — likely the same comparability gate as items 3
+        and 10 above, worth checking together.
+      38. New family: `CHANGE_TRACKING` restrictions — `ALTER TABLE ...
         ENABLE CHANGE_TRACKING` against a table carrying an Always Encrypted
         column, and change tracking already enabled on a table carrying a
         legacy LOB column (matches a real engine-emitted warning).
-      - `ProcCallArgumentMismatchRuleId` sibling: a streaming/inline TVF's
+        **FINDING:** not tested this pass.
+      39. `ProcCallArgumentMismatchRuleId` sibling: a streaming/inline TVF's
         own parameter boundary needing an implicit conversion, the same
         silent-marshalling family applied to a different call-site kind.
-      - `SessionDateSettingRuleId(DateFormat)` may be scoped too narrowly:
+        **FINDING:** not tested this pass.
+      40. `SessionDateSettingRuleId(DateFormat)` may be scoped too narrowly:
         the shipped rule only fires when the module's own body contains an
         explicit `SET DATEFORMAT`, but an ambiguous string-to-date
         conversion is reportedly session-format-dependent under
         compatibility level > 99 even with no `SET DATEFORMAT` present in
         the module — a real under-detection gap if confirmed, not just a
-        new rule.
-      - Fold into the bounded-string-builtins family already written up:
+        new rule. **FINDING:** not tested this pass.
+      41. Fold into the bounded-string-builtins family already written up:
         `STRING_AGG`'s result type is capped at `VARCHAR(8000)`/
         `NVARCHAR(4000)` when none of its operands are MAX-typed, regardless
         of row count — a structural type-level fact, not row-count-dependent.
-      - New family: `NVARCHAR` to a UTF-8-collation `VARCHAR` conversion (and
+        **FINDING: confirmed real.** `sys.dm_exec_describe_first_result_set`
+        against a `STRING_AGG(CAST(x AS varchar(10)), ',')` call with no
+        MAX-typed operand reports the result column as `varchar(8000)`
+        regardless of the input row count — a structural, not
+        row-count-dependent, fact as claimed. `NVARCHAR(4000)` leg not
+        separately tested.
+      42. New family: `NVARCHAR` to a UTF-8-collation `VARCHAR` conversion (and
         the reverse) can expand/contract byte length past the declared
         target's 8000-byte cap — distinct failure mode from
         `WriteLossUnicodeReplacementRuleId` (byte-length overflow, not
         codepage `?` replacement); needs an oracle pass on exact truncation
-        behavior.
-      - Explicit `INSERT`/`UPDATE`/`MERGE` assignment to a SQL Graph node/
-        edge table's own `$node_id`/`$edge_id` system column.
-      - Heavier-lift candidate: a joined table catalog-provably contributing
+        behavior. **FINDING:** not tested this pass.
+      43. Explicit `INSERT`/`UPDATE`/`MERGE` assignment to a SQL Graph node/
+        edge table's own `$node_id`/`$edge_id` system column. **FINDING:**
+        not tested this pass.
+      44. Heavier-lift candidate: a joined table catalog-provably contributing
         nothing (no projected columns/predicates/grouping/ordering, and
         FK/uniqueness/nullability prove it can't change multiplicity or
         null-extension) — real simplification finding, but the conservative
         multiplicity/null-extension proof is substantial engineering, not a
-        quick win.
-      - `QueryAntiPatternLinkedServerOrCrossDatabaseReferenceRuleId`:
+        quick win. **FINDING:** not tested this pass; this one is a design
+        question more than an oracle question.
+      45. `QueryAntiPatternLinkedServerOrCrossDatabaseReferenceRuleId`:
         sharpen the existing "close to a guess" framing — a linked-server/
         remote-query source reportedly gets a fixed exactly-1-row
         cardinality estimate, an oracle-confirmable mechanical fact rather
         than a vague warning, the same precision upgrade already done for
-        the table-variable-low-compat-estimate rule.
-      - `CheckConstraintNullNotHandledRuleId`-family sibling: a DML
+        the table-variable-low-compat-estimate rule. **FINDING:** not
+        tested this pass — needs a linked server configured, out of scope
+        for the VALUES-only probes used.
+      46. `CheckConstraintNullNotHandledRuleId`-family sibling: a DML
         statement against a `WITH CHECK OPTION` view whose inserted/updated
         values are provably contradicted by the view's own predicate —
         confidence is only medium/unverified; likely detectable for literal
-        values only in practice.
-      - `DeprecatedSyntaxDeprecatedSetRowcountRuleId` is scoped too
+        values only in practice. **FINDING:** not tested this pass.
+      47. `DeprecatedSyntaxDeprecatedSetRowcountRuleId` is scoped too
         narrowly: it only warns `SET ROWCOUNT` will stop being honored by
         DML in a future release, but a nonzero `SET ROWCOUNT` left active
         silently limits rows affected/returned by every subsequent
         statement right now — a present-tense correctness risk, not just a
-        future-deprecation one.
-      - `DBCC RULE ON/OFF` toggles the same legacy `CREATE RULE`/
+        future-deprecation one. **FINDING: confirmed real.** `SET ROWCOUNT
+        1` before a 3-row insert into a table variable makes a subsequent
+        `SELECT COUNT(*)` return `1`, not `3` — a live correctness risk
+        today, independent of the future-deprecation angle.
+      48. `DBCC RULE ON/OFF` toggles the same legacy `CREATE RULE`/
         `sp_bindrule` mechanism already flagged elsewhere as deprecated —
         using it at all is the same decidable deprecated-syntax fact.
-      - Ledger tables restrict which `ALTER COLUMN` shapes are legal
+        **FINDING: false — drop this item.** `DBCC RULE` is not a real
+        DBCC statement on either local instance: `DBCC HELP('RULE')`
+        returns "No help available for DBCC statement 'RULE'", and the
+        syntax itself doesn't parse. The premise is wrong.
+      49. Ledger tables restrict which `ALTER COLUMN` shapes are legal
         (`sys.tables.is_ledger_on` plus before/after column shape) — narrow
-        feature.
-      - `DanglingObjectReferenceRuleId` sibling: a CLR aggregate whose
+        feature. **FINDING:** not tested this pass.
+      50. `DanglingObjectReferenceRuleId` sibling: a CLR aggregate whose
         catalog-registered `Terminate`/`Accumulate` method can no longer be
         resolved after `ALTER ASSEMBLY` fails only on first invocation —
         same deferred-resolution shape, but CLR aggregates are rare.
-      - `CREATE`/`ALTER XML SCHEMA COLLECTION` binding a column to a
-        disallowed scalar type.
-      - New consolidated rule: CLR UDT catalog-metadata validity — two UDT
+        **FINDING:** not tested this pass.
+      51. `CREATE`/`ALTER XML SCHEMA COLLECTION` binding a column to a
+        disallowed scalar type. **FINDING:** not tested this pass.
+      52. New consolidated rule: CLR UDT catalog-metadata validity — two UDT
         signatures treated as interchangeable when they aren't, a
         referenced UDT method that can't be resolved, an incompatible CLR
         array conversion, a UDT participating in an operator its metadata
         doesn't support. Hand-authored CLR UDTs beyond the built-in spatial
-        types are rare, so low real-world hit rate.
-      - `sp_cursoropen`/`sp_cursorexecute` called with a literal scroll-
+        types are rare, so low real-world hit rate. **FINDING:** not
+        tested this pass.
+      53. `sp_cursoropen`/`sp_cursorexecute` called with a literal scroll-
         option bitmask or `paramdef` shape the engine rejects — usually
         client-driver-generated rather than hand-authored, low value.
-      - `BACKUP`/`RESTORE` and `CREATE DATABASE` forbidden option
+        **FINDING:** not tested this pass.
+      54. `BACKUP`/`RESTORE` and `CREATE DATABASE` forbidden option
         combinations, decidable purely from the statement's own option
         list — DBA-maintenance-script scope, not typical application SQL.
-      - `IndexDesignRuleId` sibling: an index definition repeating the same
-        column across its partition/key/include/order-by lists.
-      - PolyBase/Hadoop external-table column-type and virtual-column
+        **FINDING:** not tested this pass.
+      55. `IndexDesignRuleId` sibling: an index definition repeating the same
+        column across its partition/key/include/order-by lists. **FINDING:**
+        not tested this pass.
+      56. PolyBase/Hadoop external-table column-type and virtual-column
         restrictions — mainstream on-prem feature but low adoption.
-      - A typed XML variable resolving to a different/missing schema
+        **FINDING:** not tested this pass.
+      57. A typed XML variable resolving to a different/missing schema
         collection than its type metadata records — rare in normal
-        authoring.
-      - New consolidated family, sibling to `DanglingObjectReferenceRuleId`:
+        authoring. **FINDING:** not tested this pass.
+      58. New consolidated family, sibling to `DanglingObjectReferenceRuleId`:
         an object protected from `DROP` by dependents or protection state —
         `DROP ROLE` targeting a protected fixed role while protection is
         active, `DROP SCHEMA` on a non-empty schema, `DROP EXTERNAL DATA
         SOURCE`/`DROP EXTERNAL FILE FORMAT` blocked by a dependent external
-        table/stream.
+        table/stream. **FINDING:** not tested this pass.
 
 - [ ] **ALTER TABLE SWITCH: indexed-view partitioning-column alignment (Msg
       11400/11403/11404/11405).** The reference-count and view-own-
