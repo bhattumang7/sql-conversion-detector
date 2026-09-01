@@ -496,6 +496,26 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`TemporalTableHistoryIndexGapRuleId` column-mapping sibling — killed,
+  the premise doesn't hold.** A system-versioned table's schema and its
+  history table's schema were hypothesized to be able to drift apart
+  (ordinal, type, nullability, or generated-role mismatch) while both still
+  carry a live `sys.tables` pairing. Oracle-confirmed (Docker) this is not
+  reachable: `ALTER TABLE ... SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE =
+  ..., DATA_CONSISTENCY_CHECK = OFF))` still rejects column-count, ordinal/
+  name, type, nullability, and collation mismatches between the two tables
+  (Msg 13523/13524/13525/13526/13531) — `DATA_CONSISTENCY_CHECK` governs
+  only period-value data consistency, not schema shape, contrary to the
+  assumption that turning it off bypasses schema validation. A history
+  table also cannot itself carry `GENERATED ALWAYS AS ROW START/END`
+  columns without its own `PERIOD FOR SYSTEM_TIME` (Msg 13509), ruling out
+  the generated-role variant. And once versioning is ON, `ALTER TABLE` on
+  either side that would change the current table's or history table's
+  column shape is itself rejected (Msg 13548/13550/13552) — the pairing
+  cannot drift after the fact either. There is no DDL path that leaves a
+  live temporal pair schema-mismatched, so this sibling rule would never
+  fire on any deployable database.
+
 * **`CartesianJoinRuleId(AlwaysFalseInnerJoinPredicate)` — shipped.**
   Oracle-confirmed (Docker, SQL Server): an `INNER JOIN` whose own `ON`
   predicate the shipped `PredicateSurvivalAnalyzer.IsUnsatisfiable` classifies

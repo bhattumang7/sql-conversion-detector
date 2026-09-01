@@ -44,6 +44,11 @@ public sealed class LiveCatalogReader
             catalog.AddSynonym(qualifiedName, targetQualifiedName);
         }
 
+        foreach (var qualifiedName in await ReadMsShippedObjectNamesAsync(connection, cancellationToken))
+        {
+            catalog.AddMsShippedObject(qualifiedName);
+        }
+
         var tables = await ReadTablesAsync(connection, cancellationToken);
         var columnsByTable = await ReadColumnsAsync(connection, catalog.Skipped, cancellationToken);
         var indexesByTable = await ReadIndexesAsync(connection, cancellationToken);
@@ -501,6 +506,28 @@ public sealed class LiveCatalogReader
         }
 
         return predicates;
+    }
+
+    private static async Task<List<string>> ReadMsShippedObjectNamesAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, o.name AS object_name
+            FROM sys.objects o
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            WHERE o.is_ms_shipped = 1;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var names = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            names.Add($"{reader.GetString(0)}.{reader.GetString(1)}");
+        }
+
+        return names;
     }
 
     private static async Task<List<TemporalTablePair>> ReadTemporalTablePairsAsync(

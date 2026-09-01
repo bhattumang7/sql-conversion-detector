@@ -60,6 +60,8 @@ public enum QueryAntiPatternFindingKind
 
     AlterTableSwitchFullTextIndexRestriction,
 
+    AlterSchemaTransferMsShippedObject,
+
     GroupingSetsCardinalityLimitExceeded,
 
     GroupingArgumentNotInGroupByList,

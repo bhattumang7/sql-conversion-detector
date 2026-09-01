@@ -208,6 +208,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterAlterSchemaStatement(AlterSchemaStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterDeclareCursorStatement(DeclareCursorStatement node, ModuleWalker walker)
     {
     }

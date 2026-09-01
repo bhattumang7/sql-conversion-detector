@@ -146,6 +146,9 @@ public static class QueryAntiPatternScanner
             InspectAlterTableSwitchFullTextIndexRestriction(node);
         }
 
+        public void OnEnterAlterSchemaStatement(AlterSchemaStatement node, ModuleWalker walker) =>
+            InspectAlterSchemaTransferMsShippedObject(node);
+
         public void OnEnterSelectStatementScope(SelectStatement node, ModuleWalker walker) =>
             InspectRecursiveCteMaxRecursion(node);
 
@@ -835,6 +838,26 @@ public static class QueryAntiPatternScanner
                 QueryAntiPatternFindingKind.AlterTableSwitchFullTextIndexRestriction, sourcePath,
                 node.StartLine, node.StartColumn,
                 $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - table '{offendingName}' has a full-text index on it (error 4918); this statement will fail at execution.",
+                FindingConfidence.High));
+        }
+
+        private void InspectAlterSchemaTransferMsShippedObject(AlterSchemaStatement node)
+        {
+            if (node.ObjectKind is not (SecurityObjectKind.NotSpecified or SecurityObjectKind.Object))
+            {
+                return;
+            }
+
+            var objectQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.ObjectName));
+            if (!catalog.IsMsShippedObject(objectQualifiedName))
+            {
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.AlterSchemaTransferMsShippedObject, sourcePath,
+                node.StartLine, node.StartColumn,
+                $"ALTER SCHEMA {node.Name.Value} TRANSFER targets '{objectQualifiedName}', a Microsoft-shipped object (error 15349); this statement will fail at execution.",
                 FindingConfidence.High));
         }
 

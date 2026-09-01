@@ -19,19 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`TemporalTableHistoryIndexGapRuleId` sibling: history-table column-
-      mapping mismatch.** A system-versioned table's history table with an
-      incompatible column mapping against the current table (ordinal, type,
-      nullability, or generated-role mismatch) is a real, catalog-decidable
-      structural defect — the column-mapping sibling of the shipped
-      history-index-gap rule.
-
-- [ ] **`ALTER SCHEMA TRANSFER` against a system-shipped or protected
-      object.** Decidable purely from catalog (`is_ms_shipped`/object class)
-      at the transfer statement — the same "oracle-confirmed hard error
-      before any data-dependent check" shape as the shipped ALTER TABLE
-      SWITCH family.
-
 - [ ] **`TempTableExecShapeColumnTypeMismatchRuleId` sibling:
       `EXEC ... WITH RESULT SETS` shape mismatch.** A statically resolved
       `WITH RESULT SETS` clause whose declared column count/types disagree

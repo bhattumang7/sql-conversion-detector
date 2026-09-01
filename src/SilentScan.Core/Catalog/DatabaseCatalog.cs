@@ -60,6 +60,8 @@ public sealed class DatabaseCatalog
 
     private Dictionary<string, IReadOnlyList<string>> _columnEncryptionKeyMasterKeysByName;
 
+    private HashSet<string> _msShippedObjectNames;
+
     private const int MaxSynonymHops = 8;
 
     public DatabaseCatalog()
@@ -80,6 +82,7 @@ public sealed class DatabaseCatalog
         _procedureParametersByQualifiedName = new(_identifierComparer);
         _columnMasterKeyEnclaveSupportByName = new(_identifierComparer);
         _columnEncryptionKeyMasterKeysByName = new(_identifierComparer);
+        _msShippedObjectNames = new(_identifierComparer);
     }
 
     public StringComparer IdentifierComparer => _identifierComparer;
@@ -258,6 +261,10 @@ public sealed class DatabaseCatalog
         return supportsEnclave == true ? ColumnEncryptionEnclaveSupport.Enabled : ColumnEncryptionEnclaveSupport.Disabled;
     }
 
+    public void AddMsShippedObject(string qualifiedName) => _msShippedObjectNames.Add(qualifiedName);
+
+    public bool IsMsShippedObject(string qualifiedName) => _msShippedObjectNames.Contains(qualifiedName);
+
     public void AddSynonym(string qualifiedName, string targetQualifiedName) =>
         _synonymTargetsByQualifiedName[qualifiedName] = targetQualifiedName;
 
@@ -346,6 +353,7 @@ public sealed class DatabaseCatalog
         _procedureParametersByQualifiedName = new(_procedureParametersByQualifiedName, comparer);
         _columnMasterKeyEnclaveSupportByName = new(_columnMasterKeyEnclaveSupportByName, comparer);
         _columnEncryptionKeyMasterKeysByName = new(_columnEncryptionKeyMasterKeysByName, comparer);
+        _msShippedObjectNames = new(_msShippedObjectNames, comparer);
     }
 
     private sealed class TempScopedIdentifierComparer(StringComparer defaultComparer, StringComparer tempComparer) : StringComparer
