@@ -15,37 +15,11 @@ false-positive bug report the same way it treats a false-positive finding:
 worse than not reporting it at all.
 
 First full pass: all 78 rule scanner families audited, 35 confirmed
-correctness bugs found; 17 remain open below.
+correctness bugs found; 16 remain open below.
 
 ---
 
 ## Confirmed bugs (open)
-
-- [ ] **`NonSargablePredicateScanner`'s computed-column match for
-      `YEAR`/`MONTH`/`DAY` predicates compares the canonicalized `DATEPART`
-      unit argument with plain case-insensitive string equality, missing
-      T-SQL's standard datepart synonym spellings — so an indexed computed
-      column the real optimizer actually uses via an index seek still gets
-      reported as a forced scan.**
-      (`src/SilentScan.Core/Predicates/ComputedColumnMatcher.cs:59-104`,
-      `StructurallyEqual`/`TryAsCanonicalDatePart` — canonicalizes
-      `YEAR(x)`/`MONTH(x)`/`DAY(x)` to `DATEPART(<func-name>, x)` but then
-      compares the datepart-unit identifier literally, e.g. `"YEAR"` against
-      a computed column defined with `DATEPART(yy, ...)`, without
-      normalizing synonym spellings like `yy`/`yyyy`/`year`.)
-      Oracle-confirmed (SQL Server 2025): a computed column defined as
-      `DATEPART(yy, Col) PERSISTED` and indexed is matched by the real
-      optimizer to both `WHERE YEAR(Col) = 2024` and `WHERE DATEPART(year,
-      Col) = 2024` — both produce `Index Seek` in the plan. Because the
-      scanner's synonym comparison fails (`"YEAR"` ≠ `"yy"` as plain
-      strings), `HasIndexedMatchingComputedColumn` returns `false` and the
-      scanner reports `DateFunctionOnColumn`/non-sargable ("forcing a
-      scan") for a predicate the engine actually seeks on. False positive.
-      (Verified as correct in the same pass, not a bug: `ISNULL` suppression
-      on a known-not-null indexed column; `col + 0`/`col * 1`/`col - 0`
-      still forcing a scan, not simplified away by the optimizer;
-      `UPPER`/`LOWER` on a case-insensitive-collation indexed column still
-      forcing a scan.)
 
 - [ ] **`OperandComparabilityScanner`'s comparability gate never checks the
       native `json` type, so a `json`-typed operand in a comparison/IN/

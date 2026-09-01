@@ -87,12 +87,38 @@ internal static class ComputedColumnMatcher
                 && StructurallyEqual(converta.Style, convertb.Style, identifierComparer),
             (StringLiteral sa, StringLiteral sb) => string.Equals(sa.Value, sb.Value, StringComparison.Ordinal),
             (IntegerLiteral ia, IntegerLiteral ib) => string.Equals(ia.Value, ib.Value, StringComparison.Ordinal),
-            (IdentifierLiteral da, IdentifierLiteral db) => string.Equals(da.Value, db.Value, StringComparison.OrdinalIgnoreCase),
+            (IdentifierLiteral da, IdentifierLiteral db) => string.Equals(NormalizeDatePartUnit(da.Value), NormalizeDatePartUnit(db.Value), StringComparison.OrdinalIgnoreCase),
             _ => false,
         };
     }
 
     private static readonly HashSet<string> DatePartSugarFunctions = new(StringComparer.OrdinalIgnoreCase) { "YEAR", "MONTH", "DAY" };
+
+    private static readonly string[][] DatePartUnitSynonymGroups =
+    [
+        ["year", "yy", "yyyy"],
+        ["quarter", "qq", "q"],
+        ["month", "mm", "m"],
+        ["dayofyear", "dy", "y"],
+        ["day", "dd", "d"],
+        ["week", "wk", "ww"],
+        ["iso_week", "isowk", "isoww"],
+        ["weekday", "dw", "w"],
+        ["hour", "hh"],
+        ["minute", "mi", "n"],
+        ["second", "ss", "s"],
+        ["millisecond", "ms"],
+        ["microsecond", "mcs"],
+        ["nanosecond", "ns"],
+        ["tzoffset", "tz"],
+    ];
+
+    private static readonly Dictionary<string, string> DatePartUnitSynonyms = DatePartUnitSynonymGroups
+        .SelectMany(group => group.Select(synonym => (synonym, canonical: group[0])))
+        .ToDictionary(pair => pair.synonym, pair => pair.canonical, StringComparer.OrdinalIgnoreCase);
+
+    private static string NormalizeDatePartUnit(string value) =>
+        DatePartUnitSynonyms.TryGetValue(value, out var canonical) ? canonical : value;
 
     private static FunctionCall? TryAsCanonicalDatePart(ScalarExpression? expression) =>
         expression is FunctionCall { Parameters.Count: 1 } call && DatePartSugarFunctions.Contains(call.FunctionName.Value)
