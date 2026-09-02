@@ -224,6 +224,7 @@ public static class SarifRuleCatalog
     public const string WaitForRuleId = FindingRuleIds.WaitForRuleId;
     public const string BackupOptionConflictRuleId = FindingRuleIds.BackupOptionConflictRuleId;
     public const string RestoreOptionConflictRuleId = FindingRuleIds.RestoreOptionConflictRuleId;
+    public const string ViewCheckOptionContradictionRuleId = FindingRuleIds.ViewCheckOptionContradictionRuleId;
     public const string GraphPseudoColumnAssignmentRuleId = FindingRuleIds.GraphPseudoColumnAssignmentRuleId;
     public const string CursorCloseOnCommitRuleId = FindingRuleIds.CursorCloseOnCommitRuleId;
     public static string TransactionHygieneRuleId(TransactionHygieneFindingKind kind) => FindingRuleIds.TransactionHygieneRuleId(kind);

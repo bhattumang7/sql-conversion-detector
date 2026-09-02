@@ -125,6 +125,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(WaitFor(report, headingLevel, pathBase));
         blocks.AddRange(BackupOptionConflict(report, headingLevel, pathBase));
         blocks.AddRange(RestoreOptionConflict(report, headingLevel, pathBase));
+        blocks.AddRange(ViewCheckOptionContradiction(report, headingLevel, pathBase));
         blocks.AddRange(GraphPseudoColumnAssignment(report, headingLevel, pathBase));
         blocks.AddRange(CursorCloseOnCommit(report, headingLevel, pathBase));
         blocks.AddRange(ViewOrdering(report, headingLevel, pathBase));
@@ -317,6 +318,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "WAITFOR DELAY/TIME", report.Find<WaitForFinding>(nameof(WaitForScanner)).Count);
         AddCount(counts, "BACKUP DATABASE WITH DIFFERENTIAL, COPY_ONLY", report.Find<BackupOptionConflictFinding>(nameof(BackupOptionConflictScanner)).Count);
         AddCount(counts, "RESTORE WITH conflicting RECOVERY/NORECOVERY/STANDBY", report.Find<RestoreOptionConflictFinding>(nameof(RestoreOptionConflictScanner)).Count);
+        AddCount(counts, "WITH CHECK OPTION view write contradicted by a literal", report.Find<ViewCheckOptionContradictionFinding>(nameof(ViewCheckOptionContradictionScanner)).Count);
         AddCount(counts, "$node_id/$edge_id direct assignment", report.Find<GraphPseudoColumnAssignmentFinding>(nameof(GraphPseudoColumnAssignmentScanner)).Count);
         AddCount(counts, "Cursors silently closed by CURSOR_CLOSE_ON_COMMIT then fetched", report.Find<CursorCloseOnCommitFinding>(nameof(CursorCloseOnCommitScanner)).Count);
         AddCount(counts, "View/inline TVF ordering not guaranteed", report.Find<ViewOrderingFinding>(nameof(ViewOrderingScanner)).Count);
@@ -2992,6 +2994,28 @@ public static class ReadableScanReportWriter
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 DescribeRestoreOptionConflictKind(f.Kind),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ViewCheckOptionContradiction(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<ViewCheckOptionContradictionFinding>(nameof(ViewCheckOptionContradictionScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"WITH CHECK OPTION view write contradicted by a literal ({report.Find<ViewCheckOptionContradictionFinding>(nameof(ViewCheckOptionContradictionScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "The assigned literal falls outside the range the view's own WHERE clause allows - the view was created WITH CHECK OPTION, so the engine always rejects this row (Msg 550).");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ViewCheckOptionContradictionRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "View", "Column"],
+            [.. report.Find<ViewCheckOptionContradictionFinding>(nameof(ViewCheckOptionContradictionScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ViewQualifiedName,
+                f.ColumnName,
             })]);
     }
 

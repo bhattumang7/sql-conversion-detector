@@ -496,6 +496,22 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`ViewCheckOptionContradictionRuleId` — shipped.** Oracle-confirmed
+  (Docker): `CREATE VIEW dbo.V AS SELECT id, amt FROM dbo.T WHERE amt > 10
+  WITH CHECK OPTION` followed by `INSERT INTO dbo.V (id, amt) VALUES (1, 5)`
+  fails with Msg 550 regardless of the target table's own data — the
+  rejection is a property of the literal against the view's own `WHERE`
+  clause, not of runtime state. Scope: the view's `WHERE` clause must
+  reference exactly one column with a literal-comparable range (comparison/
+  `BETWEEN`/AND/OR, folded via the shared `CheckConstraintDomainFolder`),
+  the `INSERT` must carry an explicit column list (no default-order
+  guessing), and the assigned value must itself be a literal — a parameter
+  or expression is silently skipped rather than guessed at. `UPDATE ...
+  SET` is covered the same way; the statement's own `WHERE` clause is
+  irrelevant to whether the *written* value would qualify. A view without
+  `WITH CHECK OPTION` never fires even when its `WHERE` clause would be
+  violated by the same literal, since the engine doesn't enforce it there.
+
 * **`RestoreOptionConflictRuleId` — shipped for `RECOVERY`/`NORECOVERY`/
   `STANDBY` pairwise conflicts on `RESTORE`.** Oracle-confirmed (Docker):
   every pairing among the three always fails with Msg 3031 ("Option '...'

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>View Check Option Contradiction - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>View Check Option Contradiction</h1>
+  <p class="rule-key"><code>silentscan/correctness/view-check-option-contradiction</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">An INSERT ... VALUES or UPDATE ... SET against a view created WITH CHECK OPTION assigns a literal to a column the view&#x27;s own WHERE clause constrains to a single-column range, and the literal falls outside that range - oracle-confirmed the engine rejects such a row at execution (Msg 550, &quot;attempted insert or update failed because the target view either specifies WITH CHECK OPTION or spans a view that specifies WITH CHECK OPTION and one or more rows resulting from the operation did not qualify under the CHECK OPTION constraint&quot;), independent of whatever the statement&#x27;s own WHERE clause (for UPDATE) selects.</p>
+  <p class="rationale">`WITH CHECK OPTION` makes a view enforce its own `WHERE` clause on every row written through it: an `INSERT`/`UPDATE` that would produce a row failing that predicate is rejected at execution, not silently accepted. When the view&#x27;s `WHERE` clause constrains a single column to a literal-comparable range (a comparison, `BETWEEN`, or an AND/OR combination of those) and the statement itself assigns a literal for that column outside that range, the rejection is certain before the statement ever runs - it doesn&#x27;t depend on existing data, a trigger, or a concurrent writer.</p>
+  <p class="rationale">Oracle-confirmed (Docker SQL Server 2022): `CREATE VIEW dbo.V AS SELECT id, amt FROM dbo.T WHERE amt &gt; 10 WITH CHECK OPTION` followed by `INSERT INTO dbo.V (id, amt) VALUES (1, 5)` fails with Msg 550 (&quot;the target view either specifies WITH CHECK OPTION ... and one or more rows resulting from the operation did not qualify under the CHECK OPTION constraint&quot;).</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Correct the literal so the resulting row satisfies the view&#x27;s WHERE clause, or write the row through the underlying base table instead of the view.</p>
+  <h3>INSERT literal outside the view&#x27;s own WHERE range</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Amount INT NOT NULL);&#xA;CREATE VIEW dbo.ActiveOrders AS&#xA;    SELECT OrderId, Amount FROM dbo.Orders WHERE Amount &gt; 10&#xA;    WITH CHECK OPTION;&#xA;&#xA;INSERT INTO dbo.ActiveOrders (OrderId, Amount) VALUES (1, 5);</code></pre></div>
+  <p class="example-explanation">Amount = 5 can never satisfy the view&#x27;s own Amount &gt; 10 predicate, so this INSERT always fails with Msg 550.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>INSERT INTO dbo.ActiveOrders (OrderId, Amount) VALUES (1, 15);</code></pre></div>
+  <p class="example-explanation">Amount = 15 satisfies Amount &gt; 10, so the row qualifies under the view&#x27;s CHECK OPTION constraint.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

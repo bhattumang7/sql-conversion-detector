@@ -27,6 +27,14 @@ internal sealed class RestoreOptionConflictRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => RestoreOptionConflictScanner.Harvest((RestoreOptionConflictScanner.Rule)moduleRule);
 }
 
+internal sealed class ViewCheckOptionContradictionRule : IPerFileRule
+{
+    public string Id => "ViewCheckOptionContradictionScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => ViewCheckOptionContradictionScanner.Scan(parseResult, context.Catalog, context.ViewDefinitions);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => ViewCheckOptionContradictionScanner.CreateRule(parseResult.SourcePath, context.Catalog, context.ViewDefinitions);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => ViewCheckOptionContradictionScanner.Harvest((ViewCheckOptionContradictionScanner.Rule)moduleRule);
+}
+
 internal sealed class GraphPseudoColumnAssignmentRule : IPerFileRule
 {
     public string Id => "GraphPseudoColumnAssignmentScanner";

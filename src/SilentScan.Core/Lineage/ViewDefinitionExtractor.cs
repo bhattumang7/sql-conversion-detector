@@ -46,15 +46,15 @@ public static class ViewDefinitionExtractor
         switch (statement)
         {
             case CreateViewStatement createView:
-                UpsertView(viewsByName, createView.SchemaObjectName, createView.SelectStatement, createView.Columns, sourcePath, createView.StartLine);
+                UpsertView(viewsByName, createView.SchemaObjectName, createView.SelectStatement, createView.Columns, sourcePath, createView.StartLine, createView.WithCheckOption);
                 break;
 
             case AlterViewStatement alterView:
-                UpsertView(viewsByName, alterView.SchemaObjectName, alterView.SelectStatement, alterView.Columns, sourcePath, alterView.StartLine);
+                UpsertView(viewsByName, alterView.SchemaObjectName, alterView.SelectStatement, alterView.Columns, sourcePath, alterView.StartLine, alterView.WithCheckOption);
                 break;
 
             case CreateOrAlterViewStatement createOrAlterView:
-                UpsertView(viewsByName, createOrAlterView.SchemaObjectName, createOrAlterView.SelectStatement, createOrAlterView.Columns, sourcePath, createOrAlterView.StartLine);
+                UpsertView(viewsByName, createOrAlterView.SchemaObjectName, createOrAlterView.SelectStatement, createOrAlterView.Columns, sourcePath, createOrAlterView.StartLine, createOrAlterView.WithCheckOption);
                 break;
 
             case CreateFunctionStatement { ReturnType: SelectFunctionReturnType inlineReturn } createFunction:
@@ -102,11 +102,11 @@ public static class ViewDefinitionExtractor
     }
 
     private static void UpsertView(
-        Dictionary<string, ViewDefinition> viewsByName, SchemaObjectName name, SelectStatement selectStatement, IList<Identifier>? columns, string sourcePath, int startLine)
+        Dictionary<string, ViewDefinition> viewsByName, SchemaObjectName name, SelectStatement selectStatement, IList<Identifier>? columns, string sourcePath, int startLine, bool withCheckOption = false)
     {
         var qualifiedName = SchemaObjectNameHelper.Qualify(name);
         viewsByName[qualifiedName] = new ViewDefinition(
-            qualifiedName, selectStatement, columns is null ? null : ExplicitColumnNames(columns), sourcePath, startLine);
+            qualifiedName, selectStatement, columns is null ? null : ExplicitColumnNames(columns), sourcePath, startLine, withCheckOption);
     }
 
     private static void AddTvf(

@@ -231,6 +231,7 @@ public static class FindingRuleIds
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string CheckConstraintPredicateContradictionIntervalRuleId = "silentscan/correctness/check-constraint-predicate-contradiction";
     public const string NotNullPredicateContradictionRuleId = "silentscan/correctness/not-null-predicate-contradiction";
+    public const string ViewCheckOptionContradictionRuleId = "silentscan/correctness/view-check-option-contradiction";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
     public const string ForcedSerialFastForwardCursorRuleId = "silentscan/forced-serial/fast-forward-cursor";
     public const string ForcedSerialNonParallelizableIntrinsicRuleId = "silentscan/forced-serial/nonparallelizable-intrinsic";

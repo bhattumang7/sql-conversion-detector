@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">327 rules. 238 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">328 rules. 239 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>backup</h2>
@@ -187,6 +187,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/correctness-nonunique-update-source.html">Nonunique Update Source</a> <code class="rule-key">silentscan/correctness/nonunique-update-source</code><span class="snippet">UPDATE .</span></li>
       <li><a class="id" href="rules/correctness-not-in-nullable-subquery.html">Not In Nullable Subquery</a> <code class="rule-key">silentscan/correctness/not-in-nullable-subquery</code><span class="snippet">WHERE x NOT IN (SELECT y FROM t) where y is a nullable column.</span></li>
       <li><a class="id" href="rules/correctness-not-null-predicate-contradiction.html">Not Null Predicate Contradiction</a> <code class="rule-key">silentscan/correctness/not-null-predicate-contradiction</code><span class="snippet">A WHERE predicate tests IS NULL against a column the catalog declares NOT NULL (and, for an outer join&#x27;s null-supplying side, the join itself doesn&#x27;t reintroduce NULL).</span></li>
+      <li><a class="id" href="rules/correctness-view-check-option-contradiction.html">View Check Option Contradiction</a> <code class="rule-key">silentscan/correctness/view-check-option-contradiction</code><span class="snippet">An INSERT .</span></li>
     </ul>
   </section>
 

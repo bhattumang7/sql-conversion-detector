@@ -80,6 +80,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<BoundedStringBuiltinTruncationFinding>("BoundedStringBuiltinTruncationScanner").Select(ToResult));
         results.AddRange(report.Find<BackupOptionConflictFinding>("BackupOptionConflictScanner").Select(ToResult));
         results.AddRange(report.Find<RestoreOptionConflictFinding>("RestoreOptionConflictScanner").Select(ToResult));
+        results.AddRange(report.Find<ViewCheckOptionContradictionFinding>("ViewCheckOptionContradictionScanner").Select(ToResult));
         results.AddRange(report.Find<GraphPseudoColumnAssignmentFinding>("GraphPseudoColumnAssignmentScanner").Select(ToResult));
         results.AddRange(report.Find<WaitForFinding>("WaitForScanner").Select(ToResult));
         results.AddRange(report.Find<CursorCloseOnCommitFinding>("CursorCloseOnCommitScanner").Select(ToResult));
@@ -1081,6 +1082,15 @@ public static class SarifReportWriter
             RestoreOptionConflictKind.NoRecoveryAndStandby => "RESTORE with both NORECOVERY and STANDBY always fails - the two describe mutually exclusive end states for the database (Msg 3031).",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
         };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(ViewCheckOptionContradictionFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ViewCheckOptionContradictionRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"This value for '{finding.ColumnName}' falls outside the range view '{finding.ViewQualifiedName}' allows through its own WHERE clause - the view was created WITH CHECK OPTION, so the engine always rejects this row (Msg 550).";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }

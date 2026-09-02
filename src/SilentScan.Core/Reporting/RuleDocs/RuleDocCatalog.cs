@@ -29,6 +29,7 @@ public static class RuleDocCatalog
         [Correctness.NonUniqueUpdateSource.RuleId] = Correctness.NonUniqueUpdateSource.Content,
         [Correctness.CheckConstraintPredicateContradiction.RuleId] = Correctness.CheckConstraintPredicateContradiction.Content,
         [Correctness.NotNullPredicateContradiction.RuleId] = Correctness.NotNullPredicateContradiction.Content,
+        [Correctness.ViewCheckOptionContradiction.RuleId] = Correctness.ViewCheckOptionContradiction.Content,
         [Correctness.TemporalBoundaryPrecision.RuleId] = Correctness.TemporalBoundaryPrecision.Content,
         [Join.PartialCompositeForeignKeyJoin.RuleId] = Join.PartialCompositeForeignKeyJoin.Content,
         [Join.CartesianCommaJoin.RuleId] = Join.CartesianCommaJoin.Content,

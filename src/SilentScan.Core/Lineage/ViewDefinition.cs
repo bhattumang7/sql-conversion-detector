@@ -7,4 +7,5 @@ public sealed record ViewDefinition(
     SelectStatement SelectStatement,
     IReadOnlyList<string>? ExplicitColumnNames,
     string SourcePath,
-    int SourceLine);
+    int SourceLine,
+    bool WithCheckOption = false);

@@ -213,21 +213,6 @@ Competitor tools are referred to generically; real identities are in
         oracle confirmation of the cardinality-estimate claim itself is
         still open.
 
-      43. `CheckConstraintNullNotHandledRuleId`-family sibling: a DML
-        statement against a `WITH CHECK OPTION` view whose inserted/updated
-        values are provably contradicted by the view's own predicate —
-        confidence is only medium/unverified; likely detectable for literal
-        values only in practice. **FINDING: engine mechanism confirmed,
-        static detectability still open.** `INSERT INTO viewName (id, v)
-        VALUES (1, 5)` against a view defined `WHERE v > 10 WITH CHECK
-        OPTION` fails at runtime with the documented CHECK OPTION message
-        — the enforcement mechanism is real and well-known, nothing new
-        there. What's still unverified is the actual ask: statically
-        proving a *literal* `VALUES` row is contradicted by the view's own
-        predicate before running it. That's a design/implementation
-        question about the scanner's constant-folding reach, not an
-        oracle question — the oracle side of this item is done.
-
       45. `DanglingObjectReferenceRuleId` sibling: a CLR aggregate whose
         catalog-registered `Terminate`/`Accumulate` method can no longer be
         resolved after `ALTER ASSEMBLY` fails only on first invocation —
