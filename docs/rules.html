@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">341 rules. 252 carry fix guidance; 37 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">346 rules. 257 carry fix guidance; 37 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>backup</h2>
@@ -610,6 +610,11 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
   <section class="family-section">
     <h2>string-tvf</h2>
     <ul class="rule-list">
+      <li><a class="id" href="rules/string-tvf-string-split-argument-type.html">String Split Argument Type</a> <code class="rule-key">silentscan/string-tvf/string-split-argument-type</code><span class="snippet">STRING_SPLIT&#x27;s string or separator argument has a statically known declared type that is not a character type.</span></li>
+      <li><a class="id" href="rules/string-tvf-string-split-enable-ordinal-not-constant.html">String Split Enable Ordinal Not Constant</a> <code class="rule-key">silentscan/string-tvf/string-split-enable-ordinal-not-constant</code><span class="snippet">STRING_SPLIT&#x27;s optional enable_ordinal argument references a variable, parameter, or column.</span></li>
+      <li><a class="id" href="rules/string-tvf-string-split-enable-ordinal-type.html">String Split Enable Ordinal Type</a> <code class="rule-key">silentscan/string-tvf/string-split-enable-ordinal-type</code><span class="snippet">STRING_SPLIT&#x27;s optional enable_ordinal argument is a literal whose type is not int/bit.</span></li>
+      <li><a class="id" href="rules/string-tvf-string-split-enable-ordinal-value.html">String Split Enable Ordinal Value</a> <code class="rule-key">silentscan/string-tvf/string-split-enable-ordinal-value</code><span class="snippet">STRING_SPLIT&#x27;s optional enable_ordinal argument is a literal integer other than 0 or 1.</span></li>
+      <li><a class="id" href="rules/string-tvf-string-split-ordinality-engine-version.html">String Split Ordinality Engine Version</a> <code class="rule-key">silentscan/string-tvf/string-split-ordinality-engine-version</code><span class="snippet">STRING_SPLIT is called with its 3-argument (enable_ordinal) form against a connected engine instance whose own major version, read live from SERVERPROPERTY(&#x27;ProductMajorVersion&#x27;), is below 16.</span></li>
       <li><a class="id" href="rules/string-tvf-string-split-separator-length.html">String Split Separator Length</a> <code class="rule-key">silentscan/string-tvf/string-split-separator-length</code><span class="snippet">STRING_SPLIT&#x27;s separator argument is a literal (or constant-folded, or a literal NULL) whose length is not exactly one character.</span></li>
     </ul>
   </section>

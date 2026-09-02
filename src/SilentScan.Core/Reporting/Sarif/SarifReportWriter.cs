@@ -1125,7 +1125,17 @@ public static class SarifReportWriter
         var message = finding.Kind switch
         {
             StringSplitArgumentFindingKind.SeparatorNotSingleCharacter =>
-                $"STRING_SPLIT's separator argument '{finding.SeparatorText}' is not exactly one character - oracle-confirmed (Msg 214) this call fails at compile/bind time.",
+                $"STRING_SPLIT's separator argument '{finding.ArgumentText}' is not exactly one character - oracle-confirmed (Msg 214) this call fails at compile/bind time.",
+            StringSplitArgumentFindingKind.ArgumentTypeNotCharacter =>
+                $"STRING_SPLIT's argument '{finding.ArgumentText}' has type {finding.DetailText}, not a character type - oracle-confirmed (Msg 8116) this call fails at compile/bind time.",
+            StringSplitArgumentFindingKind.EnableOrdinalNotConstant =>
+                $"STRING_SPLIT's enable_ordinal argument '{finding.ArgumentText}' is not a constant - oracle-confirmed (Msg 8748) enable_ordinal only supports constant values, not variables or columns.",
+            StringSplitArgumentFindingKind.EnableOrdinalTypeNotInteger =>
+                $"STRING_SPLIT's enable_ordinal argument '{finding.ArgumentText}' has type {finding.DetailText}, not int/bit - oracle-confirmed (Msg 8116) this call fails at compile/bind time.",
+            StringSplitArgumentFindingKind.EnableOrdinalInvalidValue =>
+                $"STRING_SPLIT's enable_ordinal argument '{finding.ArgumentText}' is not 0 or 1 - oracle-confirmed (Msg 4199) this call fails at bind time.",
+            StringSplitArgumentFindingKind.ThreeArgumentFormRequiresNewerEngine =>
+                $"STRING_SPLIT's 3-argument ordinality form is used against a connected engine reporting major version {finding.DetailText} - oracle-confirmed (Msg 8144, SQL Server 2019) the 3-argument form only exists from SQL Server 2022 (major version 16) onward.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
         };
 

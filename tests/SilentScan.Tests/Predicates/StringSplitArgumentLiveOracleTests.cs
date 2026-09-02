@@ -21,7 +21,7 @@ public sealed class StringSplitArgumentLiveOracleTests
         var finding = Assert.Single(report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner"));
         Assert.Equal(StringSplitArgumentFindingKind.SeparatorNotSingleCharacter, finding.Kind);
         Assert.Equal(FindingConfidence.High, finding.Confidence);
-        Assert.Equal("',,'", finding.SeparatorText);
+        Assert.Equal("',,'", finding.ArgumentText);
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public sealed class StringSplitArgumentLiveOracleTests
 
         var finding = Assert.Single(report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner"));
         Assert.Equal(StringSplitArgumentFindingKind.SeparatorNotSingleCharacter, finding.Kind);
-        Assert.Equal("NULL", finding.SeparatorText);
+        Assert.Equal("NULL", finding.ArgumentText);
     }
 
     [Fact]
@@ -156,5 +156,68 @@ public sealed class StringSplitArgumentLiveOracleTests
             minimumConfidence: FindingConfidence.Low);
 
         Assert.Empty(report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner"));
+    }
+
+    [Fact]
+    public async Task LiveDeployment_VarcharVariableInputArgument_NeverFires()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            CREATE PROCEDURE dbo.usp_StringSplitVarcharInput AS
+            BEGIN
+                DECLARE @Input VARCHAR(50) = 'a,b';
+                SELECT value FROM STRING_SPLIT(@Input, ',');
+            END
+            """,
+            minimumConfidence: FindingConfidence.Low);
+
+        Assert.Empty(report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner"));
+    }
+
+    [Fact]
+    public async Task LiveDeployment_EnableOrdinalZeroOrOneLiteral_NeverFires()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            CREATE PROCEDURE dbo.usp_StringSplitOrdinalValid AS
+            BEGIN
+                SELECT value, ordinal FROM STRING_SPLIT('a,b', ',', 1);
+            END
+            """,
+            minimumConfidence: FindingConfidence.Low);
+
+        Assert.Empty(report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner"));
+    }
+
+    [Fact]
+    public async Task LiveDeployment_EnableOrdinalNullLiteral_NeverFires()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            CREATE PROCEDURE dbo.usp_StringSplitOrdinalNull AS
+            BEGIN
+                SELECT value FROM STRING_SPLIT('a,b', ',', NULL);
+            END
+            """,
+            minimumConfidence: FindingConfidence.Low);
+
+        Assert.Empty(report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner"));
+    }
+
+    [Fact]
+    public async Task LiveDeployment_ThreeArgumentFormAgainstSqlServer2022Engine_NeverFiresVersionGate()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            CREATE PROCEDURE dbo.usp_StringSplitOrdinalOnCurrentEngine AS
+            BEGIN
+                SELECT value, ordinal FROM STRING_SPLIT('a,b', ',', 1);
+            END
+            """,
+            minimumConfidence: FindingConfidence.Low);
+
+        Assert.DoesNotContain(
+            report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner"),
+            f => f.Kind == StringSplitArgumentFindingKind.ThreeArgumentFormRequiresNewerEngine);
     }
 }

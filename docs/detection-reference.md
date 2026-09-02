@@ -590,6 +590,40 @@ WITH NATIVE_COMPILATION` module.
 
 ## Settled (do not re-propose)
 
+* **`StringSplitArgumentRuleId` family broadened beyond separator length -
+  argument-type validation and 3-argument-form engine-version gate shipped;
+  the `REGEXP_*` MAX-argument fold-in stays killed.** Oracle-confirmed
+  (Docker, SQL Server 2022 and 2019): `STRING_SPLIT`'s first two arguments
+  (string, separator) only accept character-family types - a non-character
+  literal or a declared local variable/parameter of a non-character type in
+  either position raises Msg 8116 at compile/bind time, a declared-type
+  check independent of the argument's actual runtime value. The optional
+  third argument (`enable_ordinal`) only accepts a compile-time constant
+  (any variable or column reference anywhere in the expression raises Msg
+  8748, confirmed to fail even at `CREATE/ALTER PROCEDURE` time when the
+  reference is a procedure parameter); a constant literal whose type isn't
+  int/bit raises Msg 8116, and a constant int/bit value other than 0 or 1
+  raises Msg 4199. Separately, the 3-argument form itself does not exist
+  before SQL Server 2022: on a SQL Server 2019 engine, any call passing a
+  third argument at all - regardless of its value, including a literal 0,
+  1, or NULL - raises Msg 8144 ("too many arguments"), before any of the
+  other three checks would even apply. The gate is the connected engine
+  instance's own major version (`SERVERPROPERTY('ProductMajorVersion')`),
+  not the database's compatibility level - a SQL Server 2022 engine still
+  accepts the 3-argument form with the database's compatibility level
+  dropped to 150, oracle-confirmed. All four checks (argument type x2,
+  enable_ordinal constant-only, enable_ordinal type, enable_ordinal value,
+  engine-version gate) shipped as `StringSplitArgumentFindingKind` members
+  alongside the original `SeparatorNotSingleCharacter`. The `REGEXP_*`
+  MAX-argument fold-in from the original item was not attempted - that
+  family was already killed as a false premise on the shipping engine (see
+  the `REGEXP_INSTR`/`REGEXP_REPLACE`/`REGEXP_LIKE`/`REGEXP_SUBSTR` entry
+  above), so there is nothing left to fold in. The MAX-width validation leg
+  is the same false premise for `STRING_SPLIT` itself - oracle-confirmed a
+  genuinely-MAX (10000+ byte, `REPLICATE(CAST(... AS VARCHAR(MAX)), n)`)
+  input splits correctly with no truncation and no error, regardless of the
+  input or separator argument's declared width.
+
 * **`CreateDatabaseOptionConflictRuleId` — shipped for `CONTAINMENT = PARTIAL`
   + `CATALOG_COLLATION`; other `CREATE DATABASE` option pairs probed and
   found not to conflict.** Oracle-confirmed (Docker): `CREATE DATABASE db

@@ -300,6 +300,11 @@ public static class FindingRuleIds
     public static string StringSplitArgumentRuleId(StringSplitArgumentFindingKind kind) => kind switch
     {
         StringSplitArgumentFindingKind.SeparatorNotSingleCharacter => "silentscan/string-tvf/string-split-separator-length",
+        StringSplitArgumentFindingKind.ArgumentTypeNotCharacter => "silentscan/string-tvf/string-split-argument-type",
+        StringSplitArgumentFindingKind.EnableOrdinalNotConstant => "silentscan/string-tvf/string-split-enable-ordinal-not-constant",
+        StringSplitArgumentFindingKind.EnableOrdinalTypeNotInteger => "silentscan/string-tvf/string-split-enable-ordinal-type",
+        StringSplitArgumentFindingKind.EnableOrdinalInvalidValue => "silentscan/string-tvf/string-split-enable-ordinal-value",
+        StringSplitArgumentFindingKind.ThreeArgumentFormRequiresNewerEngine => "silentscan/string-tvf/string-split-ordinality-engine-version",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
     public static string BoundedStringBuiltinTruncationRuleId(BoundedStringBuiltinTruncationFindingKind kind) => kind switch

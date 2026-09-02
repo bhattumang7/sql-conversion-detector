@@ -6,11 +6,17 @@ namespace SilentScan.Core.Predicates;
 public enum StringSplitArgumentFindingKind
 {
     SeparatorNotSingleCharacter,
+    ArgumentTypeNotCharacter,
+    EnableOrdinalNotConstant,
+    EnableOrdinalTypeNotInteger,
+    EnableOrdinalInvalidValue,
+    ThreeArgumentFormRequiresNewerEngine,
 }
 
 public sealed record StringSplitArgumentFinding(
     StringSplitArgumentFindingKind Kind,
-    string SeparatorText,
+    string ArgumentText,
+    string? DetailText,
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
     [property: JsonIgnore] int Column,

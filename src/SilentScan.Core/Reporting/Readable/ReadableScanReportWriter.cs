@@ -331,7 +331,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Module compile flags (WITH RECOMPILE / TVF database-collation return)", report.Find<ModuleCompileFlagFinding>(nameof(ModuleCompileFlagScanner)).Count);
         AddCount(counts, "RANGE window-function frames", report.Find<WindowFrameFinding>(nameof(WindowFrameScanner)).Count);
         AddCount(counts, "LAG/LEAD/PERCENTILE_CONT/PERCENTILE_DISC/TABLESAMPLE out-of-range constant arguments", report.Find<WindowFunctionArgumentFinding>(nameof(WindowFunctionArgumentScanner)).Count);
-        AddCount(counts, "STRING_SPLIT separator arguments not exactly one character", report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).Count);
+        AddCount(counts, "STRING_SPLIT argument validation", report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).Count);
         AddCount(counts, "REPLICATE/REPLACE/SPACE constant-provable result truncation", report.Find<BoundedStringBuiltinTruncationFinding>(nameof(BoundedStringBuiltinTruncationScanner)).Count);
         AddCount(counts, "WAITFOR DELAY/TIME", report.Find<WaitForFinding>(nameof(WaitForScanner)).Count);
         AddCount(counts, "BACKUP DATABASE WITH DIFFERENTIAL, COPY_ONLY", report.Find<BackupOptionConflictFinding>(nameof(BackupOptionConflictScanner)).Count);
@@ -3154,9 +3154,9 @@ public static class ReadableScanReportWriter
             yield break;
         }
 
-        yield return new ReadableBlock.Heading(level, $"STRING_SPLIT separator arguments not exactly one character ({report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).Count})");
+        yield return new ReadableBlock.Heading(level, $"STRING_SPLIT argument validation ({report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).Count})");
         yield return new ReadableBlock.Paragraph(
-            "STRING_SPLIT's separator argument constant-folds to a literal (or literal NULL) whose length is not exactly one character - oracle-confirmed the call fails (Msg 214) at compile/bind time, before any row is read.");
+            "STRING_SPLIT is called with an argument that oracle-confirmed always fails at compile/bind time, before any row is read.");
 
         foreach (var group in report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
         {
@@ -3164,11 +3164,12 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.StringSplitArgumentRuleId(group.Key)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Separator"],
+                [WhereHeader, "Argument", "Detail"],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                    f.SeparatorText,
+                    f.ArgumentText,
+                    f.DetailText ?? string.Empty,
                 })]);
         }
     }

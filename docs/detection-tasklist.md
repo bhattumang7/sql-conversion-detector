@@ -85,22 +85,6 @@ Competitor tools are referred to generically; real identities are in
         FILESTREAM data-space mismatch, partition-scheme/partitioning-column
         disagreement) not tested this pass.
 
-      16. New family: `STRING_SPLIT`/`REGEXP_MATCHES`-style string TVF
-        argument-type and MAX-width validation, and `STRING_SPLIT`'s
-        3-argument ordinality form being version-gated — fold together
-        with the shipped-candidate `REGEXP_*` MAX-argument family above
-        into one string-TVF argument-validation rule. **FINDING: the
-        version-gating half needs a real gate check, not just a compat-
-        level flip.** The 3-arg ordinality form works fine at database
-        compatibility level 160 (SQL 2022 default) — expected, since it
-        shipped in SQL Server 2022. It *also* still worked after dropping
-        compatibility level to 150 on the same SQL 2022 engine, meaning
-        compat level alone doesn't gate it here (the gate is almost
-        certainly the engine's own version, not the database's compat
-        level) — don't scope a compat-level check for this, verify against
-        actual major version instead. Argument-type/MAX-width validation
-        legs not tested.
-
       17. Semantic Search TVFs (`SEMANTICKEYPHRASETABLE` etc.) requiring a
         qualifying full-text semantic index — legacy/rarely used feature.
         **FINDING:** not tested this pass.
