@@ -87,6 +87,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ColumnstoreUnsupportedColumnType(report, headingLevel, pathBase));
         blocks.AddRange(SelectiveXmlIndexValueColumn(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUnsupportedColumnType(report, headingLevel, pathBase));
+        blocks.AddRange(MemoryOptimizedUtf8Collation(report, headingLevel, pathBase));
+        blocks.AddRange(NativelyCompiledUnsupportedBuiltin(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUnsupportedIndexOption(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedForeignKey(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedSchemaOnlyDurability(report, headingLevel, pathBase));
@@ -238,6 +240,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Columnstore-unsupported-type columns participating in a columnstore index (does not deploy)", report.Find<ColumnstoreUnsupportedColumnTypeFinding>(nameof(ColumnstoreUnsupportedColumnTypeScanner)).Count);
         AddCount(counts, "Secondary selective XML indexes over an oversized/large-object value column (does not deploy)", report.Find<SelectiveXmlIndexValueColumnFinding>(nameof(SelectiveXmlIndexValueColumnScanner)).Count);
         AddCount(counts, "Unsupported column type on a memory-optimized table (does not deploy)", report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>(nameof(MemoryOptimizedUnsupportedColumnTypeScanner)).Count);
+        AddCount(counts, "UTF-8 collation on a memory-optimized table column (does not deploy)", report.Find<MemoryOptimizedUtf8CollationFinding>(nameof(MemoryOptimizedUtf8CollationScanner)).Count);
+        AddCount(counts, "Unsupported built-in function inside a natively compiled module (does not compile)", report.Find<NativelyCompiledUnsupportedBuiltinFinding>(nameof(NativelyCompiledUnsupportedBuiltinScanner)).Count);
         AddCount(counts, "Unsupported index option on a memory-optimized table (does not deploy)", report.Find<MemoryOptimizedUnsupportedIndexOptionFinding>(nameof(MemoryOptimizedUnsupportedIndexOptionScanner)).Count);
         AddCount(counts, "Unsupported memory-optimized foreign key (does not deploy)", report.Find<MemoryOptimizedForeignKeyFinding>(nameof(MemoryOptimizedForeignKeyScanner)).Count);
         AddCount(counts, "Memory-optimized table declared SCHEMA_ONLY durability (data lost on restart)", report.Find<MemoryOptimizedSchemaOnlyDurabilityFinding>(nameof(MemoryOptimizedSchemaOnlyDurabilityScanner)).Count);
@@ -990,6 +994,51 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.TypeDisplay,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> MemoryOptimizedUtf8Collation(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<MemoryOptimizedUtf8CollationFinding>(nameof(MemoryOptimizedUtf8CollationScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"UTF-8 collation on a memory-optimized table column ({report.Find<MemoryOptimizedUtf8CollationFinding>(nameof(MemoryOptimizedUtf8CollationScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A structural catalog fact, not a plan-shape claim: a char/varchar column carrying a UTF-8 collation is not supported on a memory-optimized table at all - oracle-confirmed real DDL execution fails with Msg 12356.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MemoryOptimizedUtf8CollationRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Type", "Collation"],
+            [.. report.Find<MemoryOptimizedUtf8CollationFinding>(nameof(MemoryOptimizedUtf8CollationScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.TypeDisplay,
+                f.CollationName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> NativelyCompiledUnsupportedBuiltin(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<NativelyCompiledUnsupportedBuiltinFinding>(nameof(NativelyCompiledUnsupportedBuiltinScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Unsupported built-in function inside a natively compiled module ({report.Find<NativelyCompiledUnsupportedBuiltinFinding>(nameof(NativelyCompiledUnsupportedBuiltinScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A natively compiled stored procedure or function calls a built-in function outside the documented supported surface for native modules - oracle-confirmed real compilation fails with Msg 10794.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NativelyCompiledUnsupportedBuiltinRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Module", "Function"],
+            [.. report.Find<NativelyCompiledUnsupportedBuiltinFinding>(nameof(NativelyCompiledUnsupportedBuiltinScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ModuleQualifiedName,
+                f.FunctionName,
             })]);
     }
 

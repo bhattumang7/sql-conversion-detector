@@ -94,6 +94,8 @@ public static class FindingRuleIds
     public const string SchemaboundAliasTypeRuleId = "silentscan/catalog/schemabound-alias-type";
     public const string SparseColumnDisallowedTypeRuleId = "silentscan/catalog/sparse-column-disallowed-type";
     public const string LegacyLobUtf8CollationRuleId = "silentscan/catalog/legacy-lob-utf8-collation";
+    public const string MemoryOptimizedUtf8CollationRuleId = "silentscan/catalog/memory-optimized-utf8-collation";
+    public const string NativelyCompiledUnsupportedBuiltinRuleId = "silentscan/predicate/natively-compiled-unsupported-builtin";
     public static string MemoryOptimizedUnsupportedIndexOptionRuleId(MemoryOptimizedUnsupportedIndexOptionKind kind) => kind switch
     {
         MemoryOptimizedUnsupportedIndexOptionKind.ClusteredIndex => "silentscan/catalog/memory-optimized-clustered-index",

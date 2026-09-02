@@ -122,6 +122,8 @@ public static class SarifReportWriter
         results.AddRange(report.Find<OnlineRebuildLegacyLobFinding>("OnlineRebuildLegacyLobScanner").Select(ToResult));
         results.AddRange(report.Find<OperandComparabilityFinding>("OperandComparabilityScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>("MemoryOptimizedUnsupportedColumnTypeScanner").Select(ToResult));
+        results.AddRange(report.Find<MemoryOptimizedUtf8CollationFinding>("MemoryOptimizedUtf8CollationScanner").Select(ToResult));
+        results.AddRange(report.Find<NativelyCompiledUnsupportedBuiltinFinding>("NativelyCompiledUnsupportedBuiltinScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUnsupportedIndexOptionFinding>("MemoryOptimizedUnsupportedIndexOptionScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedForeignKeyFinding>("MemoryOptimizedForeignKeyScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedSchemaOnlyDurabilityFinding>("MemoryOptimizedSchemaOnlyDurabilityScanner").Select(ToResult));
@@ -436,6 +438,24 @@ public static class SarifReportWriter
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} on memory-optimized table '{finding.TableQualifiedName}' - this type is not supported on a memory-optimized table at all (Msg 10794), so the statement does not deploy.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(MemoryOptimizedUtf8CollationFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MemoryOptimizedUtf8CollationRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} COLLATE {finding.CollationName} on memory-optimized table '{finding.TableQualifiedName}' - a UTF-8 collation on a char/varchar column is not supported on a memory-optimized table at all (Msg 12356), so the statement does not deploy.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(NativelyCompiledUnsupportedBuiltinFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NativelyCompiledUnsupportedBuiltinRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"Natively compiled module '{finding.ModuleQualifiedName}' calls {finding.FunctionName}(), which is not supported with natively compiled modules (Msg 10794), so the statement does not compile.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(MemoryOptimizedUnsupportedIndexOptionFinding finding)

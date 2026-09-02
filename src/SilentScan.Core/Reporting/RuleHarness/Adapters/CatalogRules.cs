@@ -64,6 +64,13 @@ internal sealed class MemoryOptimizedUnsupportedColumnTypeRule : ICatalogRule
     public IReadOnlyList<IFinding> Scan(RuleContext context) => MemoryOptimizedUnsupportedColumnTypeScanner.Scan(context.Catalog);
 }
 
+internal sealed class MemoryOptimizedUtf8CollationRule : ICatalogRule
+{
+    public string Id => "MemoryOptimizedUtf8CollationScanner";
+    public bool ApplyConfidenceFilter => false;
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => MemoryOptimizedUtf8CollationScanner.Scan(context.Catalog);
+}
+
 internal sealed class MemoryOptimizedUnsupportedIndexOptionRule : ICatalogRule
 {
     public string Id => "MemoryOptimizedUnsupportedIndexOptionScanner";

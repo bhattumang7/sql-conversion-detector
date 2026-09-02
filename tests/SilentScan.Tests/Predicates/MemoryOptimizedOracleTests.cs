@@ -153,4 +153,97 @@ public sealed class MemoryOptimizedOracleTests : OracleTestFixture
             ) WITH (MEMORY_OPTIMIZED = ON);
             """);
     }
+
+    [Theory]
+    [InlineData("VARCHAR(50)")]
+    [InlineData("CHAR(10)")]
+    public async Task Utf8Collation_OnMemoryOptimizedTableColumn_FailsToDeploy(string type)
+    {
+        var exception = await AssertDeployFailsAsync(
+            $"""
+            CREATE TABLE dbo.Widgets (Id INT NOT NULL PRIMARY KEY NONCLUSTERED, Tag {type} COLLATE Latin1_General_100_CI_AS_SC_UTF8 NULL) WITH (MEMORY_OPTIMIZED = ON);
+            """);
+
+        Assert.Equal(12356, exception.Number);
+    }
+
+    [Fact]
+    public async Task Utf8Collation_OnOrdinaryTableColumn_DeploysCleanly()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE TABLE dbo.Widgets (Id INT NOT NULL PRIMARY KEY, Tag VARCHAR(50) COLLATE Latin1_General_100_CI_AS_SC_UTF8 NULL);
+            """);
+    }
+
+    [Fact]
+    public async Task Utf8Collation_OnNvarcharMemoryOptimizedColumn_DeploysCleanly()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE TABLE dbo.Widgets (Id INT NOT NULL PRIMARY KEY NONCLUSTERED, Tag NVARCHAR(50) COLLATE Latin1_General_100_CI_AS_SC_UTF8 NULL) WITH (MEMORY_OPTIMIZED = ON);
+            """);
+    }
+
+    [Theory]
+    [InlineData("UPPER(N'a')")]
+    [InlineData("LOWER(N'a')")]
+    [InlineData("REPLACE(N'a', N'a', N'b')")]
+    [InlineData("CHARINDEX(N'a', N'abc')")]
+    [InlineData("STUFF(N'abc', 1, 1, N'x')")]
+    [InlineData("REVERSE(N'abc')")]
+    [InlineData("PATINDEX(N'%a%', N'abc')")]
+    [InlineData("QUOTENAME(N'a')")]
+    [InlineData("DATALENGTH(N'abc')")]
+    [InlineData("ISNUMERIC(N'1')")]
+    [InlineData("ISDATE(N'2020-01-01')")]
+    [InlineData("HASHBYTES('SHA2_256', N'a')")]
+    [InlineData("CONCAT(N'a', N'b')")]
+    [InlineData("FORMAT(SYSDATETIME(), N'yyyy')")]
+    [InlineData("SOUNDEX(N'a')")]
+    public async Task DenylistedBuiltin_InNativelyCompiledProcedure_FailsToDeploy(string expression)
+    {
+        var exception = await AssertDeployFailsAsync(
+            $"""
+            CREATE PROCEDURE dbo.NativeDenylistProbe
+            WITH NATIVE_COMPILATION, SCHEMABINDING
+            AS
+            BEGIN ATOMIC WITH (TRANSACTION ISOLATION LEVEL = SNAPSHOT, LANGUAGE = N'us_english')
+                DECLARE @v NVARCHAR(50) = {expression};
+            END;
+            """);
+
+        Assert.Equal(10794, exception.Number);
+    }
+
+    [Fact]
+    public async Task AllowlistedBuiltin_InNativelyCompiledProcedure_DeploysCleanly()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE PROCEDURE dbo.NativeAllowlistProbe
+            WITH NATIVE_COMPILATION, SCHEMABINDING
+            AS
+            BEGIN ATOMIC WITH (TRANSACTION ISOLATION LEVEL = SNAPSHOT, LANGUAGE = N'us_english')
+                DECLARE @a FLOAT = ABS(-1.0);
+                DECLARE @b DATETIME2 = DATEADD(DAY, 1, SYSDATETIME());
+                DECLARE @c INT = LEN(N'abc');
+                DECLARE @d UNIQUEIDENTIFIER = NEWID();
+                DECLARE @e INT = ISNULL(NULL, 1);
+            END;
+            """);
+    }
+
+    [Fact]
+    public async Task DenylistedBuiltin_InOrdinaryInterpretedProcedure_DeploysCleanly()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE PROCEDURE dbo.InterpretedProbe
+            AS
+            BEGIN
+                DECLARE @v NVARCHAR(20) = UPPER(N'a');
+            END;
+            """);
+    }
 }

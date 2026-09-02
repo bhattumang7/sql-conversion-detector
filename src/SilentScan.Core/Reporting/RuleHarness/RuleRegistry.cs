@@ -8,6 +8,7 @@ public static class RuleRegistry
     [
         new WaitForRule(),
         new BackupOptionConflictRule(),
+        new NativelyCompiledUnsupportedBuiltinRule(),
         new RestoreOptionConflictRule(),
         new ViewCheckOptionContradictionRule(),
         new CreateDatabaseOptionConflictRule(),
@@ -86,6 +87,7 @@ public static class RuleRegistry
         new ColumnstoreUnsupportedColumnTypeRule(),
         new SelectiveXmlIndexValueColumnRule(),
         new MemoryOptimizedUnsupportedColumnTypeRule(),
+        new MemoryOptimizedUtf8CollationRule(),
         new MemoryOptimizedUnsupportedIndexOptionRule(),
         new AlwaysEncryptedKeyColumnRule(),
         new AlterColumnSafetyRule(),

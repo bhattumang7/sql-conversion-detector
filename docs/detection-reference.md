@@ -493,6 +493,67 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
   distinguish them from an arbitrary CLR UDT (both resolve to an unresolved/
   null `SqlType`) - not implemented for these three pending that modeling
   gap, to avoid conflating them with a genuinely unrelated CLR UDT column.
+- **A `char`/`varchar` column carrying a UTF-8 collation (`_UTF8` suffix)
+  always fails (Msg 12356)** - independent of whether the table is ever
+  touched by a natively compiled module; the CREATE/ALTER TABLE statement
+  itself never deploys. `nvarchar`/`nchar` columns with the same collation
+  deploy cleanly (the `_UTF8` flag is a no-op for already-Unicode types).
+- **There is no fixed byte-size ceiling enforced on a memory-optimized
+  table's row at CREATE TABLE or INSERT time** on SQL Server 2022 - directly
+  probed with three `CHAR(8000)` columns (24,000+ fixed bytes) both
+  deploying and accepting an INSERT with no error. The commonly cited
+  8,060-byte in-row limit for memory-optimized tables does not hold on a
+  current engine; do not implement a rule for it.
+- **`WITH (LEDGER = ON)` combined with `MEMORY_OPTIMIZED = ON` always fails
+  (Msg 12359, "Ledger tables are not supported with memory optimized
+  tables.")** - a plain table-option conflict, decidable purely from the
+  table's own declared options; not yet built into a rule.
+
+## Natively compiled T-SQL module restrictions
+
+Oracle-confirmed directly (Docker, SQL Server 2022, compat 160) against a
+real `CREATE PROCEDURE ... WITH NATIVE_COMPILATION` / `CREATE FUNCTION ...
+WITH NATIVE_COMPILATION` module.
+
+- **A built-in function call inside a natively compiled module fails (Msg
+  10794, "The function '<name>' is not supported with natively compiled
+  modules.") for a specific, individually confirmed set of common functions**:
+  `UPPER`, `LOWER`, `REPLACE`, `CHARINDEX`, `STUFF`, `REVERSE`, `PATINDEX`,
+  `QUOTENAME`, `DATALENGTH`, `ISNUMERIC`, `ISDATE`, `HASHBYTES`, `CONCAT`,
+  `FORMAT`, `SOUNDEX` - and the aggregate `STDEV` (Msg 10794 too, "The
+  aggregate function 'STDEV' is not supported..."; `STDEVP`/`VAR`/`VARP` not
+  individually probed but documented as the same family). `STRING_AGG` and
+  `STRING_SPLIT` are denylisted from Microsoft's own unsupported-construct
+  documentation, not independently oracle-probed here.
+- **Microsoft's own "supported functions" list for native modules is
+  incomplete on a current engine - do not treat absence from it as proof of
+  rejection.** `DATENAME` compiles cleanly inside a natively compiled module
+  even though only `DATEPART` (not `DATENAME`) is named in the published
+  list; `COALESCE`, `IIF`, and `CAST`/`CONVERT`/`TRY_CAST`/`TRY_CONVERT` also
+  compile cleanly despite not appearing in the "Built-in Functions" section
+  (they are separate ScriptDom node kinds, not `FunctionCall`, and are
+  rewritten to/treated as `CASE`, which SQL Server 2017+ supports). This is
+  why the shipped rule is a denylist of individually confirmed-rejected
+  names, never an allowlist complement.
+- **`LEFT(...)`/`RIGHT(...)` also fail (Msg 10794)** but are parsed as their
+  own ScriptDom node kinds (`LeftFunctionCall`/`RightFunctionCall`), not
+  `FunctionCall` - not yet wired into the shipped denylist scanner, which
+  only visits `FunctionCall`.
+- **`ERROR_MESSAGE()`/`ERROR_NUMBER()` (and presumably the other `ERROR_*`
+  functions) are supported inside a natively compiled module but only inside
+  a `CATCH` block** - calling them elsewhere fails with a different error
+  (Msg 10792, "...cannot appear outside of a catch block"), not Msg 10794.
+  This is a context restriction, not an unsupported-function rejection; not
+  implemented (would need CATCH-block scope tracking, out of scope for the
+  shipped denylist rule).
+- **CLR UDT/function binding, "deep type" rejection beyond the denylist
+  above, and an unsupported `GENERATED ALWAYS` variant were not oracle-tested
+  this pass.** CLR is disabled on the shared local containers and enabling it
+  is a shared-infra change out of scope here; `GENERATED ALWAYS AS ROW
+  START/END` (temporal) on a memory-optimized table was probed and deploys
+  cleanly, so that specific variant is not the restriction the task loosely
+  gestured at - the `LEDGER`/`MEMORY_OPTIMIZED` conflict above is the closest
+  confirmed fact found in this area.
 
 ## Settled (do not re-propose)
 

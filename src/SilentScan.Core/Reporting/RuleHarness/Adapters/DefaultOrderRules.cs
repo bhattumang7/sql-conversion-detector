@@ -19,6 +19,14 @@ internal sealed class BackupOptionConflictRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => BackupOptionConflictScanner.Harvest((BackupOptionConflictScanner.Rule)moduleRule);
 }
 
+internal sealed class NativelyCompiledUnsupportedBuiltinRule : IPerFileRule
+{
+    public string Id => "NativelyCompiledUnsupportedBuiltinScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => NativelyCompiledUnsupportedBuiltinScanner.Scan(parseResult);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => NativelyCompiledUnsupportedBuiltinScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => NativelyCompiledUnsupportedBuiltinScanner.Harvest((NativelyCompiledUnsupportedBuiltinScanner.Rule)moduleRule);
+}
+
 internal sealed class RestoreOptionConflictRule : IPerFileRule
 {
     public string Id => "RestoreOptionConflictScanner";

@@ -85,21 +85,25 @@ Competitor tools are referred to generically; real identities are in
         FILESTREAM data-space mismatch, partition-scheme/partitioning-column
         disagreement) not tested this pass.
 
-      10. Memory-optimized (Hekaton) natively compiled module restrictions
-        distinct from the shipped table-level family (unsupported column
-        type, unsupported index option, cross-storage/CASCADE foreign key):
-        the fixed row-size ceiling for a memory-optimized table, CLR UDT/
-        function binding inside a natively compiled module, "deep type"/
-        unsupported-builtin binder rejection inside a natively compiled
-        module, non-Unicode-with-UTF-8-collation rejection in a natively
-        compiled module, and an unsupported `GENERATED ALWAYS` variant —
-        each needs its own oracle confirmation; likely higher-effort than
-        the shipped catalog-only family since a module body's own
-        expressions have to be walked, not just the table's own catalog
-        shape. **FINDING:** not tested this pass — not infra-blocked
-        (confirmed a `MEMORY_OPTIMIZED_DATA` filegroup creates cleanly with
-        plain T-SQL on the local container, no special setup needed),
-        simply not attempted yet.
+      10. Memory-optimized (Hekaton)/natively compiled module restrictions,
+        remaining after shipping the UTF-8-collation and unsupported-builtin
+        rules (see `detection-reference.md`): CLR UDT/function binding inside
+        a natively compiled module (CLR is disabled on the shared local
+        containers; enabling it is a shared-infra change, not attempted),
+        `LEFT`/`RIGHT` calls inside a natively compiled module (oracle-
+        confirmed rejected, Msg 10794, but parsed as their own ScriptDom node
+        kinds rather than `FunctionCall` — needs its own scanner hook, not
+        folded into the shipped denylist scanner), `ERROR_*` function calls
+        outside a CATCH block inside a natively compiled module (a context
+        restriction, Msg 10792, not a per-name denylist — needs CATCH-block
+        scope tracking), and the row-size-ceiling/`GENERATED ALWAYS` premises
+        from the original task item — both oracle-tested and found not to
+        hold as stated (no fixed row-size ceiling is enforced on SQL Server
+        2022; temporal `GENERATED ALWAYS AS ROW START/END` deploys cleanly on
+        a memory-optimized table). The one confirmed-but-unshipped fact in
+        this area is `LEDGER = ON` conflicting with `MEMORY_OPTIMIZED = ON`
+        (Msg 12359) — a plain table-option conflict, not yet built into a
+        rule.
 
       12. Full-text index DDL validation (unsupported column type, invalid
         language id, nondeterministic computed column, >1024 indexed
