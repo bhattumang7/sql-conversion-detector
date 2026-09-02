@@ -56,5 +56,16 @@ public static class GraphPseudoColumnAssignmentScanner
                 Findings.Add(new GraphPseudoColumnAssignmentFinding(columnName, "UPDATE", sourcePath, node.StartLine, node.StartColumn));
             }
         }
+
+        public void OnEnterInsertMergeAction(InsertMergeAction node, ModuleWalker walker)
+        {
+            foreach (var column in node.Columns)
+            {
+                if (PseudoColumnNameFor(column.ColumnType) is { } columnName)
+                {
+                    Findings.Add(new GraphPseudoColumnAssignmentFinding(columnName, "MERGE INSERT", sourcePath, column.StartLine, column.StartColumn));
+                }
+            }
+        }
     }
 }

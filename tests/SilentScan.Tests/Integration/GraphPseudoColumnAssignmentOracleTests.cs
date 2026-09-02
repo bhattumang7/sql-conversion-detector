@@ -51,6 +51,44 @@ public sealed class GraphPseudoColumnAssignmentOracleTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task RealServer_MergeInsertActionExplicitNodeId_AlwaysFails()
+    {
+        const string sql = """
+            MERGE dbo.Person AS tgt
+            USING (SELECT 'Bob' AS Name) AS src ON tgt.Name = src.Name
+            WHEN NOT MATCHED THEN INSERT ($node_id, Name) VALUES (NULL, src.Name);
+            """;
+
+        var ex = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(sql));
+
+        Assert.NotEqual(0, ex.Number);
+
+        var findings = Scan(sql);
+        var finding = Assert.Single(findings);
+        Assert.Equal("$node_id", finding.PseudoColumnName);
+        Assert.Equal("MERGE INSERT", finding.StatementKind);
+    }
+
+    [Fact]
+    public async Task RealServer_MergeUpdateActionEdgeId_AlwaysFails()
+    {
+        const string sql = """
+            MERGE dbo.Follows AS tgt
+            USING (SELECT 1 AS Id) AS src ON 1 = 0
+            WHEN MATCHED THEN UPDATE SET $edge_id = $edge_id;
+            """;
+
+        var ex = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(sql));
+
+        Assert.NotEqual(0, ex.Number);
+
+        var findings = Scan(sql);
+        var finding = Assert.Single(findings);
+        Assert.Equal("$edge_id", finding.PseudoColumnName);
+        Assert.Equal("UPDATE", finding.StatementKind);
+    }
+
+    [Fact]
     public void Scanner_OrdinaryColumnAssignment_NeverFires()
     {
         var findings = Scan(

@@ -68,6 +68,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterInsertMergeAction(InsertMergeAction node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterAssignmentSetClause(AssignmentSetClause node, ModuleWalker walker)
     {
     }

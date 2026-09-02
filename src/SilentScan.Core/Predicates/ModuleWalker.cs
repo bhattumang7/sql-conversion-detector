@@ -326,6 +326,13 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
             Dispatch(rule => rule.OnLeaveInsertStatementScope(node, this));
         });
 
+    public sealed override void ExplicitVisit(InsertMergeAction node)
+    {
+        Dispatch(rule => rule.OnEnterInsertMergeAction(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
     public sealed override void ExplicitVisit(AssignmentSetClause node)
     {
         Dispatch(rule => rule.OnEnterAssignmentSetClause(node, this));

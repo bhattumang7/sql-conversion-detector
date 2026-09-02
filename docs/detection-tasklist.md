@@ -252,19 +252,6 @@ Competitor tools are referred to generically; real identities are in
         error or a silent truncation depends on `ANSI_WARNINGS`/statement
         context — worth pinning down both modes before scoping.
 
-      40. **Shipped for `INSERT`/`UPDATE`:** `$node_id`/`$edge_id` are backed
-        by hidden system columns on a SQL Graph node/edge table that reject
-        direct manipulation — oracle-confirmed an explicit `INSERT` column-
-        list value fails ("Cannot insert the value NULL into column
-        'graph_id_...'") and `UPDATE ... SET $node_id = $node_id` fails
-        ("cannot be modified because it is either a computed column...").
-        Shipped as `GraphPseudoColumnAssignmentRuleId`, purely syntactic (no
-        catalog graph-table lookup needed — the restriction is unconditional
-        for any `$node_id`/`$edge_id` reference in these two statement
-        shapes). The original item also named `MERGE`'s `WHEN MATCHED THEN
-        UPDATE`/`WHEN NOT MATCHED THEN INSERT` assignment shapes — not
-        oracle-tested, remains open.
-
       41. Heavier-lift candidate: a joined table catalog-provably contributing
         nothing (no projected columns/predicates/grouping/ordering, and
         FK/uniqueness/nullability prove it can't change multiplicity or
