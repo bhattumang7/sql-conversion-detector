@@ -294,6 +294,7 @@ public static class RuleDocCatalog
         [Catalog.MemoryOptimizedUnsupportedColumnType.RuleId] = Catalog.MemoryOptimizedUnsupportedColumnType.Content,
         [Catalog.MemoryOptimizedUtf8Collation.RuleId] = Catalog.MemoryOptimizedUtf8Collation.Content,
         [NativelyCompiled.UnsupportedBuiltin.RuleId] = NativelyCompiled.UnsupportedBuiltin.Content,
+        [NativelyCompiled.ClrType.RuleId] = NativelyCompiled.ClrType.Content,
         [Catalog.MemoryOptimizedSchemaOnlyDurability.RuleId] = Catalog.MemoryOptimizedSchemaOnlyDurability.Content,
         [IndexShape.CompositeIndexLeadingColumn.RuleId] = IndexShape.CompositeIndexLeadingColumn.Content,
         [Statistics.MissingStatistics.RuleId] = Statistics.MissingStatistics.Content,

@@ -284,6 +284,14 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterLeftFunctionCall(LeftFunctionCall node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterRightFunctionCall(RightFunctionCall node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterNamedTableReference(NamedTableReference node, ModuleWalker walker)
     {
     }

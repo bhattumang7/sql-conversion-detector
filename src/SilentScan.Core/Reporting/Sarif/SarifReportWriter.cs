@@ -124,6 +124,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>("MemoryOptimizedUnsupportedColumnTypeScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUtf8CollationFinding>("MemoryOptimizedUtf8CollationScanner").Select(ToResult));
         results.AddRange(report.Find<NativelyCompiledUnsupportedBuiltinFinding>("NativelyCompiledUnsupportedBuiltinScanner").Select(ToResult));
+        results.AddRange(report.Find<NativelyCompiledClrTypeFinding>("NativelyCompiledClrTypeScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUnsupportedIndexOptionFinding>("MemoryOptimizedUnsupportedIndexOptionScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedForeignKeyFinding>("MemoryOptimizedForeignKeyScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedSchemaOnlyDurabilityFinding>("MemoryOptimizedSchemaOnlyDurabilityScanner").Select(ToResult));
@@ -454,6 +455,16 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NativelyCompiledUnsupportedBuiltinRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"Natively compiled module '{finding.ModuleQualifiedName}' calls {finding.FunctionName}(), which is not supported with natively compiled modules (Msg 10794), so the statement does not compile.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(NativelyCompiledClrTypeFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NativelyCompiledClrTypeRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var kindText = finding.Kind == NativelyCompiledClrTypeKind.Parameter ? "parameter" : "local variable";
+        var message = $"Natively compiled module '{finding.ModuleQualifiedName}' declares {kindText} '{finding.MemberName}' typed {finding.TypeQualifiedName}, a CLR user-defined type, which is not supported with natively compiled modules (Msg 10794), so the statement does not compile.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

@@ -60,6 +60,28 @@ public static class NativelyCompiledUnsupportedBuiltinScanner
                 moduleName, functionName.ToUpperInvariant(), sourcePath, node.StartLine, node.StartColumn));
         }
 
+        public void OnEnterLeftFunctionCall(LeftFunctionCall node, ModuleWalker walker)
+        {
+            if (_currentNativeModuleName is not { } moduleName)
+            {
+                return;
+            }
+
+            Findings.Add(new NativelyCompiledUnsupportedBuiltinFinding(
+                moduleName, "LEFT", sourcePath, node.StartLine, node.StartColumn));
+        }
+
+        public void OnEnterRightFunctionCall(RightFunctionCall node, ModuleWalker walker)
+        {
+            if (_currentNativeModuleName is not { } moduleName)
+            {
+                return;
+            }
+
+            Findings.Add(new NativelyCompiledUnsupportedBuiltinFinding(
+                moduleName, "RIGHT", sourcePath, node.StartLine, node.StartColumn));
+        }
+
         private static bool IsNativelyCompiled(ProcedureStatementBodyBase node) => node switch
         {
             ProcedureStatementBody procedure => procedure.Options.Any(o => o.OptionKind == ProcedureOptionKind.NativeCompilation),

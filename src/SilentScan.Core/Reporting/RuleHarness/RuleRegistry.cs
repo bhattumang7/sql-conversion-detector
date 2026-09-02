@@ -40,6 +40,7 @@ public static class RuleRegistry
         new OperandComparabilityRule(),
         new UnpivotExactTypeMismatchRule(),
         new SchemaboundAliasTypeRule(),
+        new NativelyCompiledClrTypeRule(),
         new SparseColumnDisallowedTypeRule(),
         new LegacyLobUtf8CollationRule(),
         new IndexCoverageRule(),

@@ -201,6 +201,8 @@ public sealed class MemoryOptimizedOracleTests : OracleTestFixture
     [InlineData("CONCAT(N'a', N'b')")]
     [InlineData("FORMAT(SYSDATETIME(), N'yyyy')")]
     [InlineData("SOUNDEX(N'a')")]
+    [InlineData("LEFT(N'abc', 1)")]
+    [InlineData("RIGHT(N'abc', 1)")]
     public async Task DenylistedBuiltin_InNativelyCompiledProcedure_FailsToDeploy(string expression)
     {
         var exception = await AssertDeployFailsAsync(

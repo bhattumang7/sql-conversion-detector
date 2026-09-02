@@ -268,6 +268,14 @@ internal sealed class UnpivotExactTypeMismatchRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => UnpivotExactTypeMismatchScanner.Harvest((UnpivotExactTypeMismatchScanner.Rule)moduleRule);
 }
 
+internal sealed class NativelyCompiledClrTypeRule : IPerFileRule
+{
+    public string Id => "NativelyCompiledClrTypeScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => NativelyCompiledClrTypeScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => NativelyCompiledClrTypeScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => NativelyCompiledClrTypeScanner.Harvest((NativelyCompiledClrTypeScanner.Rule)moduleRule);
+}
+
 internal sealed class SchemaboundAliasTypeRule : IPerFileRule
 {
     public string Id => "SchemaboundAliasTypeScanner";

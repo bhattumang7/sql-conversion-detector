@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">331 rules. 242 carry fix guidance; 31 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">332 rules. 243 carry fix guidance; 32 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>backup</h2>
@@ -451,6 +451,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <h2>predicate</h2>
     <ul class="rule-list">
       <li><a class="id" href="rules/predicate-aggregate-division-columnstore-batch-mode.html">Aggregate Division Columnstore Batch Mode</a> <code class="rule-key">silentscan/predicate/aggregate-division-columnstore-batch-mode</code><span class="snippet">An aggregate argument contains a CASE-guarded division by a non-constant divisor, on a table backed by a columnstore index.</span></li>
+      <li><a class="id" href="rules/predicate-natively-compiled-clr-type.html">Natively Compiled CLR Type</a> <code class="rule-key">silentscan/predicate/natively-compiled-clr-type</code><span class="snippet">A natively compiled stored procedure or function (WITH NATIVE_COMPILATION) declares a parameter or local variable typed as a CLR user-defined type (CREATE TYPE .</span></li>
       <li><a class="id" href="rules/predicate-natively-compiled-unsupported-builtin.html">Natively Compiled Unsupported Builtin</a> <code class="rule-key">silentscan/predicate/natively-compiled-unsupported-builtin</code><span class="snippet">A natively compiled stored procedure or scalar/inline-table-valued function (WITH NATIVE_COMPILATION) calls a built-in function outside the documented supported surface for native modules.</span></li>
       <li><a class="id" href="rules/predicate-plus-operator-null-propagation.html">Plus Operator Null Propagation</a> <code class="rule-key">silentscan/predicate/plus-operator-null-propagation</code><span class="snippet">A &#x2B; concatenation chain between string-typed operands where at least one operand is a nullable column with no ISNULL/COALESCE guard.</span></li>
       <li><a class="id" href="rules/predicate-try-cast-computed-column.html">Try Cast Computed Column</a> <code class="rule-key">silentscan/predicate/try-cast-computed-column</code><span class="snippet">A non-persisted computed column built on TRY_CAST is referenced inside a real filter-context predicate (WHERE/JOIN ON/HAVING) elsewhere in the corpus.</span></li>

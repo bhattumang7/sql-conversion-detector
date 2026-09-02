@@ -537,8 +537,9 @@ WITH NATIVE_COMPILATION` module.
   names, never an allowlist complement.
 - **`LEFT(...)`/`RIGHT(...)` also fail (Msg 10794)** but are parsed as their
   own ScriptDom node kinds (`LeftFunctionCall`/`RightFunctionCall`), not
-  `FunctionCall` - not yet wired into the shipped denylist scanner, which
-  only visits `FunctionCall`.
+  `FunctionCall` - shipped as unconditional (name-implied, no lookup needed)
+  findings via their own `IModuleRule`/`ModuleWalker` hooks alongside the
+  denylist.
 - **`ERROR_MESSAGE()`/`ERROR_NUMBER()` (and presumably the other `ERROR_*`
   functions) are supported inside a natively compiled module but only inside
   a `CATCH` block** - calling them elsewhere fails with a different error
@@ -546,14 +547,32 @@ WITH NATIVE_COMPILATION` module.
   This is a context restriction, not an unsupported-function rejection; not
   implemented (would need CATCH-block scope tracking, out of scope for the
   shipped denylist rule).
-- **CLR UDT/function binding, "deep type" rejection beyond the denylist
-  above, and an unsupported `GENERATED ALWAYS` variant were not oracle-tested
-  this pass.** CLR is disabled on the shared local containers and enabling it
-  is a shared-infra change out of scope here; `GENERATED ALWAYS AS ROW
-  START/END` (temporal) on a memory-optimized table was probed and deploys
-  cleanly, so that specific variant is not the restriction the task loosely
-  gestured at - the `LEDGER`/`MEMORY_OPTIMIZED` conflict above is the closest
-  confirmed fact found in this area.
+- **A CLR user-defined type (`CREATE TYPE ... EXTERNAL NAME`) used as a
+  parameter or local variable's type inside a natively compiled module always
+  fails (Msg 10794, "The type '<name>' is not supported with natively
+  compiled modules.")** - oracle-confirmed directly (CLR enabled on
+  `mssql-silentscan-sql` for this probe: `sp_configure 'clr enabled', 1` /
+  `'clr strict security', 0`; a minimal net472 CLR UDT built, deployed via
+  `CREATE ASSEMBLY`/`CREATE TYPE ... EXTERNAL NAME`, then referenced by a
+  `DECLARE`/parameter inside a `WITH NATIVE_COMPILATION` procedure). Decidable
+  purely by name: the catalog tracks CLR UDT qualified names from
+  `CreateTypeUdtStatement` and checks a native module's own parameter/DECLARE
+  type references against that set - no resolution of the CLR type's actual
+  shape is needed. Also confirmed: calling an **interpreted** function
+  (T-SQL or CLR) from inside a natively compiled module fails with a
+  different, broader error (Msg 12344, "Only natively compiled modules can be
+  used with natively compiled modules.") - a separate restriction (calling
+  any non-native routine, CLR or not) from the type-declaration one shipped
+  here; not implemented, since it needs cross-module native/interpreted
+  classification of the callee, not just a type name check.
+- **"Deep type" rejection beyond the denylist above was not further
+  oracle-tested this pass** - the shipped denylist (see above) covers the
+  specific functions individually confirmed rejected; the full unsupported
+  surface is not enumerated.
+- **`GENERATED ALWAYS AS ROW START/END` (temporal) on a memory-optimized
+  table deploys cleanly** - oracle-tested; not the restriction the original
+  task item loosely gestured at. The `LEDGER`/`MEMORY_OPTIMIZED` conflict
+  above is the closest confirmed fact found in this area.
 
 ## Settled (do not re-propose)
 

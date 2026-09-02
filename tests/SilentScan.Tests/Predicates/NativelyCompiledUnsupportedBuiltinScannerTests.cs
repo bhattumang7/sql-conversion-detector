@@ -80,6 +80,41 @@ public sealed class NativelyCompiledUnsupportedBuiltinScannerTests
         Assert.Equal("UPPER", finding.FunctionName);
     }
 
+    [Theory]
+    [InlineData("LEFT(N'abc', 1)", "LEFT")]
+    [InlineData("RIGHT(N'abc', 1)", "RIGHT")]
+    public void LeftOrRightCall_InNativelyCompiledProcedure_Fires(string expression, string expectedFunctionName)
+    {
+        var findings = Scan(
+            $"""
+            CREATE PROCEDURE dbo.TrimCode
+            WITH NATIVE_COMPILATION, SCHEMABINDING
+            AS
+            BEGIN ATOMIC WITH (TRANSACTION ISOLATION LEVEL = SNAPSHOT, LANGUAGE = N'us_english')
+                DECLARE @code NVARCHAR(20) = {expression};
+            END;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.TrimCode", finding.ModuleQualifiedName);
+        Assert.Equal(expectedFunctionName, finding.FunctionName);
+    }
+
+    [Fact]
+    public void LeftCall_InOrdinaryInterpretedProcedure_NeverFires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.TrimCode
+            AS
+            BEGIN
+                DECLARE @code NVARCHAR(20) = LEFT(N'abc', 1);
+            END;
+            """);
+
+        Assert.Empty(findings);
+    }
+
     [Fact]
     public void MultipleUnsupportedCalls_AllFire()
     {

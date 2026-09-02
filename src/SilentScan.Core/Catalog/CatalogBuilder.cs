@@ -293,6 +293,7 @@ public static class CatalogBuilder
         {
             if (phase == BuildPhase.ApplyEverythingElse)
             {
+                catalog.AddClrUserDefinedType(SchemaObjectNameHelper.Qualify(node.Name));
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
                     "CLR user-defined type", $"'{SchemaObjectNameHelper.Qualify(node.Name)}': CREATE TYPE ... EXTERNAL NAME is not modeled - columns of this type resolve Unknown");

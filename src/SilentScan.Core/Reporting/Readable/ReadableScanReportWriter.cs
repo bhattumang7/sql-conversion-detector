@@ -89,6 +89,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(MemoryOptimizedUnsupportedColumnType(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUtf8Collation(report, headingLevel, pathBase));
         blocks.AddRange(NativelyCompiledUnsupportedBuiltin(report, headingLevel, pathBase));
+        blocks.AddRange(NativelyCompiledClrType(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUnsupportedIndexOption(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedForeignKey(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedSchemaOnlyDurability(report, headingLevel, pathBase));
@@ -242,6 +243,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Unsupported column type on a memory-optimized table (does not deploy)", report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>(nameof(MemoryOptimizedUnsupportedColumnTypeScanner)).Count);
         AddCount(counts, "UTF-8 collation on a memory-optimized table column (does not deploy)", report.Find<MemoryOptimizedUtf8CollationFinding>(nameof(MemoryOptimizedUtf8CollationScanner)).Count);
         AddCount(counts, "Unsupported built-in function inside a natively compiled module (does not compile)", report.Find<NativelyCompiledUnsupportedBuiltinFinding>(nameof(NativelyCompiledUnsupportedBuiltinScanner)).Count);
+        AddCount(counts, "CLR user-defined type parameter/variable inside a natively compiled module (does not compile)", report.Find<NativelyCompiledClrTypeFinding>(nameof(NativelyCompiledClrTypeScanner)).Count);
         AddCount(counts, "Unsupported index option on a memory-optimized table (does not deploy)", report.Find<MemoryOptimizedUnsupportedIndexOptionFinding>(nameof(MemoryOptimizedUnsupportedIndexOptionScanner)).Count);
         AddCount(counts, "Unsupported memory-optimized foreign key (does not deploy)", report.Find<MemoryOptimizedForeignKeyFinding>(nameof(MemoryOptimizedForeignKeyScanner)).Count);
         AddCount(counts, "Memory-optimized table declared SCHEMA_ONLY durability (data lost on restart)", report.Find<MemoryOptimizedSchemaOnlyDurabilityFinding>(nameof(MemoryOptimizedSchemaOnlyDurabilityScanner)).Count);
@@ -1039,6 +1041,30 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.ModuleQualifiedName,
                 f.FunctionName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> NativelyCompiledClrType(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<NativelyCompiledClrTypeFinding>(nameof(NativelyCompiledClrTypeScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"CLR user-defined type parameter/variable inside a natively compiled module ({report.Find<NativelyCompiledClrTypeFinding>(nameof(NativelyCompiledClrTypeScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A natively compiled stored procedure or function declares a parameter or local variable typed as a CLR user-defined type - oracle-confirmed real compilation fails with Msg 10794.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NativelyCompiledClrTypeRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Module", "Kind", "Name", "Type"],
+            [.. report.Find<NativelyCompiledClrTypeFinding>(nameof(NativelyCompiledClrTypeScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ModuleQualifiedName,
+                f.Kind == NativelyCompiledClrTypeKind.Parameter ? "Parameter" : "Local variable",
+                f.MemberName,
+                f.TypeQualifiedName,
             })]);
     }
 

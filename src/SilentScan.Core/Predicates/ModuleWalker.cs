@@ -671,6 +671,20 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
         base.ExplicitVisit(node);
     }
 
+    public sealed override void ExplicitVisit(LeftFunctionCall node)
+    {
+        Dispatch(rule => rule.OnEnterLeftFunctionCall(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(RightFunctionCall node)
+    {
+        Dispatch(rule => rule.OnEnterRightFunctionCall(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
     public sealed override void ExplicitVisit(NamedTableReference node)
     {
         Dispatch(rule => rule.OnEnterNamedTableReference(node, this));

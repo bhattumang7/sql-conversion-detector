@@ -73,6 +73,8 @@ public sealed class DatabaseCatalog
 
     private HashSet<string> _msShippedObjectNames;
 
+    private HashSet<string> _clrUserDefinedTypeNames;
+
     private const int MaxSynonymHops = 8;
 
     public DatabaseCatalog()
@@ -97,6 +99,7 @@ public sealed class DatabaseCatalog
         _columnMasterKeyEnclaveSupportByName = new(_identifierComparer);
         _columnEncryptionKeyMasterKeysByName = new(_identifierComparer);
         _msShippedObjectNames = new(_identifierComparer);
+        _clrUserDefinedTypeNames = new(_identifierComparer);
     }
 
     public StringComparer IdentifierComparer => _identifierComparer;
@@ -355,6 +358,10 @@ public sealed class DatabaseCatalog
 
     public bool IsMsShippedObject(string qualifiedName) => _msShippedObjectNames.Contains(qualifiedName);
 
+    public void AddClrUserDefinedType(string qualifiedName) => _clrUserDefinedTypeNames.Add(qualifiedName);
+
+    public bool IsClrUserDefinedType(string qualifiedName) => _clrUserDefinedTypeNames.Contains(qualifiedName);
+
     public void AddSynonym(string qualifiedName, string targetQualifiedName) =>
         _synonymTargetsByQualifiedName[qualifiedName] = targetQualifiedName;
 
@@ -445,6 +452,7 @@ public sealed class DatabaseCatalog
         _columnMasterKeyEnclaveSupportByName = new(_columnMasterKeyEnclaveSupportByName, comparer);
         _columnEncryptionKeyMasterKeysByName = new(_columnEncryptionKeyMasterKeysByName, comparer);
         _msShippedObjectNames = new(_msShippedObjectNames, comparer);
+        _clrUserDefinedTypeNames = new(_clrUserDefinedTypeNames, comparer);
     }
 
     private sealed class TempScopedIdentifierComparer(StringComparer defaultComparer, StringComparer tempComparer) : StringComparer

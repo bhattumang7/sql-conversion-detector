@@ -58,6 +58,7 @@ public static class SarifRuleCatalog
     public const string LegacyLobUtf8CollationRuleId = FindingRuleIds.LegacyLobUtf8CollationRuleId;
     public const string MemoryOptimizedUtf8CollationRuleId = FindingRuleIds.MemoryOptimizedUtf8CollationRuleId;
     public const string NativelyCompiledUnsupportedBuiltinRuleId = FindingRuleIds.NativelyCompiledUnsupportedBuiltinRuleId;
+    public const string NativelyCompiledClrTypeRuleId = FindingRuleIds.NativelyCompiledClrTypeRuleId;
     public static string MemoryOptimizedUnsupportedIndexOptionRuleId(MemoryOptimizedUnsupportedIndexOptionKind kind) => FindingRuleIds.MemoryOptimizedUnsupportedIndexOptionRuleId(kind);
     public static string MemoryOptimizedForeignKeyRuleId(MemoryOptimizedForeignKeyFindingKind kind) => FindingRuleIds.MemoryOptimizedForeignKeyRuleId(kind);
     public const string MemoryOptimizedSchemaOnlyDurabilityRuleId = FindingRuleIds.MemoryOptimizedSchemaOnlyDurabilityRuleId;

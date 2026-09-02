@@ -18,7 +18,10 @@ internal static class UnsupportedBuiltin
             rejected inside a natively compiled module on a current engine (UPPER, LOWER,
             REPLACE, CHARINDEX, STUFF, REVERSE, PATINDEX, QUOTENAME, DATALENGTH, ISNUMERIC,
             ISDATE, HASHBYTES, CONCAT, FORMAT, SOUNDEX, STDEV, STDEVP, VAR, VARP, STRING_AGG,
-            and STRING_SPLIT). The supported surface for native modules is not simply the
+            STRING_SPLIT, LEFT, and RIGHT). LEFT/RIGHT calls are rejected the same way (Msg
+            10794) even though the ScriptDom parser models them as their own node kinds rather
+            than a generic function call, so they get their own scan hook rather than a
+            name lookup. The supported surface for native modules is not simply the
             complement of any one documented list - some functions absent from Microsoft's own
             published list (for example DATENAME) still compile - so absence from this denylist
             is never treated as proof of support; only functions individually confirmed to fail

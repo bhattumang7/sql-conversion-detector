@@ -96,6 +96,7 @@ public static class FindingRuleIds
     public const string LegacyLobUtf8CollationRuleId = "silentscan/catalog/legacy-lob-utf8-collation";
     public const string MemoryOptimizedUtf8CollationRuleId = "silentscan/catalog/memory-optimized-utf8-collation";
     public const string NativelyCompiledUnsupportedBuiltinRuleId = "silentscan/predicate/natively-compiled-unsupported-builtin";
+    public const string NativelyCompiledClrTypeRuleId = "silentscan/predicate/natively-compiled-clr-type";
     public static string MemoryOptimizedUnsupportedIndexOptionRuleId(MemoryOptimizedUnsupportedIndexOptionKind kind) => kind switch
     {
         MemoryOptimizedUnsupportedIndexOptionKind.ClusteredIndex => "silentscan/catalog/memory-optimized-clustered-index",
