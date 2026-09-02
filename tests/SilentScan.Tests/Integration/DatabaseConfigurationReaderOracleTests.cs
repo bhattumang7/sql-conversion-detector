@@ -215,3 +215,45 @@ public sealed class DatabaseConfigurationReaderSpatialPersistedComputedColumnOra
         Assert.Equal(160, finding.TargetCompatibilityLevel);
     }
 }
+
+[Trait("Category", "Oracle")]
+public sealed class DatabaseConfigurationReaderPlanGuideOracleTests : OracleTestFixture
+{
+    protected override string DatabaseNameSeed => nameof(DatabaseConfigurationReaderPlanGuideOracleTests);
+
+    protected override string Ddl => """
+        CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY);
+        GO
+        ALTER DATABASE CURRENT SET QUERY_STORE = ON;
+        GO
+        EXEC sp_create_plan_guide
+            @name = N'PG_Enabled',
+            @stmt = N'SELECT Id FROM dbo.T WHERE Id = 1',
+            @type = N'SQL',
+            @module_or_batch = NULL,
+            @params = NULL,
+            @hints = N'OPTION (RECOMPILE)';
+        GO
+        EXEC sp_create_plan_guide
+            @name = N'PG_Disabled',
+            @stmt = N'SELECT Id FROM dbo.T WHERE Id = 2',
+            @type = N'SQL',
+            @module_or_batch = NULL,
+            @params = NULL,
+            @hints = N'OPTION (RECOMPILE)';
+        GO
+        EXEC sp_control_plan_guide @operation = N'DISABLE', @name = N'PG_Disabled';
+        GO
+        """;
+
+    [Fact]
+    public async Task OnlyEnabledPlanGuide_FiresWithNameScopeAndHints()
+    {
+        var findings = await new DatabaseConfigurationReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var finding = Assert.Single(findings, f => f.Kind == DatabaseConfigurationFindingKind.PlanGuideAltersOptimization);
+        Assert.Equal("PG_Enabled", finding.AffectedObjectName);
+        Assert.Equal("SQL", finding.PlanGuideScopeType);
+        Assert.Equal("OPTION (RECOMPILE)", finding.PlanGuideHints);
+    }
+}

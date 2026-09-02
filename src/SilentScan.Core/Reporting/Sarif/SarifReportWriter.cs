@@ -1330,6 +1330,9 @@ public static class SarifReportWriter
             DatabaseConfigurationFindingKind.SpatialPersistedComputedColumnDisabledOnCompatibilityLevelChange => (
                 SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelWarning,
                 $"{finding.AffectedObjectName} depends on {finding.Dependency}; SQL Server's own compatibility-change DMV reports that it will be disabled at compatibility level {finding.TargetCompatibilityLevel}."),
+            DatabaseConfigurationFindingKind.PlanGuideAltersOptimization => (
+                SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelNote,
+                $"Plan guide '{finding.AffectedObjectName}' is enabled (scope {finding.PlanGuideScopeType}) and carries hints '{finding.PlanGuideHints}' - informational: a real, deliberate operational tool, not a mistake by construction."),
             _ => throw new ArgumentOutOfRangeException(nameof(finding)),
         };
 

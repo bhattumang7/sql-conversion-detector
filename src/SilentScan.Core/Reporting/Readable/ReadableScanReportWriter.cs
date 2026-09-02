@@ -3830,6 +3830,7 @@ public static class ReadableScanReportWriter
         DatabaseConfigurationFindingKind.AutoUpdateStatisticsOff => "AUTO_UPDATE_STATISTICS = OFF",
         DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault => "Compatibility level behind engine default",
         DatabaseConfigurationFindingKind.SpatialPersistedComputedColumnDisabledOnCompatibilityLevelChange => $"{finding.AffectedObjectName} disabled at compatibility level {finding.TargetCompatibilityLevel} ({finding.Dependency})",
+        DatabaseConfigurationFindingKind.PlanGuideAltersOptimization => $"Plan guide '{finding.AffectedObjectName}' enabled ({finding.PlanGuideScopeType}; hints: {finding.PlanGuideHints})",
         _ => finding.Kind.ToString(),
     };
 

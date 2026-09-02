@@ -305,6 +305,26 @@ public sealed class SarifReportWriterCoverageTests
     }
 
     [Fact]
+    public void Write_PlanGuideAltersOptimizationFinding_InterpolatesNameScopeAndHints()
+    {
+        var finding = new DatabaseConfigurationFinding(
+            DatabaseConfigurationFindingKind.PlanGuideAltersOptimization,
+            "TestDb",
+            AffectedObjectName: "PG_Test",
+            PlanGuideScopeType: "SQL",
+            PlanGuideHints: "OPTION (RECOMPILE)");
+        var report = TestScanReports.Build(DatabaseConfigurationFindings: [finding]);
+        var result = FirstResult(report);
+
+        var message = result.GetProperty("message").GetProperty("text").GetString()!;
+
+        Assert.Equal("note", result.GetProperty("level").GetString());
+        Assert.Contains("PG_Test", message, StringComparison.Ordinal);
+        Assert.Contains("scope SQL", message, StringComparison.Ordinal);
+        Assert.Contains("OPTION (RECOMPILE)", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Write_ManyFindingCollectionsAtOnce_PreservesPerCollectionOrderingAndTotalCount()
     {
         var report = TestScanReports.Build(

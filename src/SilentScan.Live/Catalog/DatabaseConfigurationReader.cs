@@ -39,6 +39,8 @@ public sealed class DatabaseConfigurationReader
 
         await AddQueryStoreFindingsAsync(connection, snapshot.DatabaseName, findings, cancellationToken);
 
+        await AddPlanGuideFindingsAsync(connection, snapshot.DatabaseName, findings, cancellationToken);
+
         return findings;
     }
 
@@ -193,6 +195,32 @@ public sealed class DatabaseConfigurationReader
         else if (!string.Equals(captureModeDesc, "AUTO", StringComparison.OrdinalIgnoreCase))
         {
             findings.Add(new DatabaseConfigurationFinding(DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto, databaseName));
+        }
+    }
+
+    private static async Task AddPlanGuideFindingsAsync(
+        SqlConnection connection,
+        string databaseName,
+        List<DatabaseConfigurationFinding> findings,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateReadOnlyCommand(
+            """
+            SELECT name, scope_type_desc, hints
+            FROM sys.plan_guides
+            WHERE is_disabled = 0
+            ORDER BY plan_guide_id;
+            """);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            findings.Add(new DatabaseConfigurationFinding(
+                DatabaseConfigurationFindingKind.PlanGuideAltersOptimization,
+                databaseName,
+                AffectedObjectName: reader.GetString(0),
+                PlanGuideScopeType: reader.GetString(1),
+                PlanGuideHints: reader.IsDBNull(2) ? null : reader.GetString(2)));
         }
     }
 

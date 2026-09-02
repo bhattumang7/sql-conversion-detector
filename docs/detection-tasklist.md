@@ -67,10 +67,6 @@ Competitor tools are referred to generically; real identities are in
         restrictions for local variable and parameter assignments.
         Encryption-state and legacy-LOB legs remain open.
 
-      30. Informational, database-configuration tier: an active
-        `sys.plan_guides` row whose hints alter optimization/parameterization
-        for in-scope application SQL. **FINDING:** not tested this pass.
-
       31. External file-format/data-export partition column type restrictions
         (PolyBase/CETAS external-table column-type and virtual-column
         allow-lists; data-export partition column resolving to a large

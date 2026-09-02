@@ -22,6 +22,8 @@ public enum DatabaseConfigurationFindingKind
     CompatibilityLevelBehindEngineDefault,
 
     SpatialPersistedComputedColumnDisabledOnCompatibilityLevelChange,
+
+    PlanGuideAltersOptimization,
 }
 
 public sealed record DatabaseConfigurationFinding(
@@ -30,7 +32,9 @@ public sealed record DatabaseConfigurationFinding(
     FindingConfidence Confidence = FindingConfidence.High,
     string? AffectedObjectName = null,
     string? Dependency = null,
-    int? TargetCompatibilityLevel = null) : IFinding
+    int? TargetCompatibilityLevel = null,
+    string? PlanGuideScopeType = null,
+    string? PlanGuideHints = null) : IFinding
 {
     public string RuleId { get; } = FindingRuleIds.DatabaseConfigurationRuleId(Kind);
 

@@ -386,6 +386,7 @@ public static class FindingRuleIds
         DatabaseConfigurationFindingKind.AutoUpdateStatisticsOff => "silentscan/database/auto-update-statistics-off",
         DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault => "silentscan/database/compatibility-level-behind-engine-default",
         DatabaseConfigurationFindingKind.SpatialPersistedComputedColumnDisabledOnCompatibilityLevelChange => "silentscan/database/spatial-persisted-computed-column-compatibility-change",
+        DatabaseConfigurationFindingKind.PlanGuideAltersOptimization => "silentscan/database/plan-guide-alters-optimization",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
     public static string UnindexedTempTableUsageRuleId(UnindexedTempTableUsageKind kind) => kind switch
