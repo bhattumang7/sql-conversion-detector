@@ -152,6 +152,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(DynamicDataMasking(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedOrderBy(report, headingLevel, pathBase));
         blocks.AddRange(RestrictedImplicitAssignment(report, headingLevel, pathBase));
+        blocks.AddRange(RevertCookieTypeMismatch(report, headingLevel, pathBase));
+        blocks.AddRange(ForXmlExplicitInlineXsd(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedKeyColumn(report, headingLevel, pathBase));
         blocks.AddRange(AlterColumnSafety(report, headingLevel, pathBase));
         blocks.AddRange(DropProtectedObject(report, headingLevel, pathBase));
@@ -256,6 +258,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Dynamic Data Masking silently defeated", report.Find<DynamicDataMaskingFinding>(nameof(DynamicDataMaskingScanner)).Count);
         AddCount(counts, "Always Encrypted ORDER BY", report.Find<AlwaysEncryptedOrderByFinding>(nameof(AlwaysEncryptedOrderByScanner)).Count);
         AddCount(counts, "sql_variant/xml assignment", report.Find<RestrictedImplicitAssignmentFinding>(nameof(RestrictedImplicitAssignmentScanner)).Count);
+        AddCount(counts, "REVERT cookie type mismatch", report.Find<RevertCookieTypeMismatchFinding>(nameof(RevertCookieTypeMismatchScanner)).Count);
+        AddCount(counts, "FOR XML EXPLICIT with inline XSD", report.Find<ForXmlExplicitInlineXsdFinding>(nameof(ForXmlExplicitInlineXsdScanner)).Count);
         AddCount(counts, "Always Encrypted non-enclave key column", report.Find<AlwaysEncryptedKeyColumnFinding>(nameof(AlwaysEncryptedKeyColumnScanner)).Count);
         AddCount(counts, "ALTER COLUMN safety", report.Find<AlterColumnSafetyFinding>(nameof(AlterColumnSafetyScanner)).Count);
         AddCount(counts, "DROP against a protected object", report.Find<DropProtectedObjectFinding>(nameof(DropProtectedObjectScanner)).Count);
@@ -1672,6 +1676,49 @@ public static class ReadableScanReportWriter
                 $"{f.TargetVariableName} ({f.TargetTypeDisplay})",
                 $"{f.SourceVariableName} ({f.SourceTypeDisplay})",
                 $"Assigned at line {f.Line}, column {f.Column}.",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> RevertCookieTypeMismatch(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<RevertCookieTypeMismatchFinding>(nameof(RevertCookieTypeMismatchScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"REVERT cookie type mismatch ({report.Find<RevertCookieTypeMismatchFinding>(nameof(RevertCookieTypeMismatchScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "REVERT WITH COOKIE references a variable that is not declared varbinary(100) - the engine only accepts the fixed varbinary(100) shape produced by EXECUTE AS ... WITH COOKIE INTO; the statement does not compile.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.RevertCookieTypeMismatchRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Cookie variable", DetailHeader],
+            [.. report.Find<RevertCookieTypeMismatchFinding>(nameof(RevertCookieTypeMismatchScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.CookieVariableName} ({f.CookieTypeDisplay})",
+                $"Referenced at line {f.Line}, column {f.Column}.",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ForXmlExplicitInlineXsd(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<ForXmlExplicitInlineXsdFinding>(nameof(ForXmlExplicitInlineXsdScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"FOR XML EXPLICIT with inline XSD ({report.Find<ForXmlExplicitInlineXsdFinding>(nameof(ForXmlExplicitInlineXsdScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A FOR XML EXPLICIT query also specifies XMLSCHEMA - this combination does not compile.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ForXmlExplicitInlineXsdRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, DetailHeader],
+            [.. report.Find<ForXmlExplicitInlineXsdFinding>(nameof(ForXmlExplicitInlineXsdScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"FOR XML EXPLICIT, XMLSCHEMA at line {f.Line}, column {f.Column}.",
             })]);
     }
 

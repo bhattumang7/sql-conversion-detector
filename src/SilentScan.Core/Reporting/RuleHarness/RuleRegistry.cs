@@ -27,6 +27,8 @@ public static class RuleRegistry
         new FloatOrderDependentAggregateRule(),
         new AlwaysEncryptedOrderByRule(),
         new RestrictedImplicitAssignmentRule(),
+        new RevertCookieTypeMismatchRule(),
+        new ForXmlExplicitInlineXsdRule(),
         new OperandComparabilityRule(),
         new UnpivotExactTypeMismatchRule(),
         new SchemaboundAliasTypeRule(),

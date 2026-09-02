@@ -149,22 +149,6 @@ Competitor tools are referred to generically; real identities are in
         and float constants in precision-sensitive expressions — likely one
         rule, not three. **FINDING:** not tested this pass.
 
-      21. `REVERT WITH COOKIE = @x` requiring `@x` to be a fixed-size
-        `varbinary` matching the engine's cookie type/size is decidable
-        from the variable's own declaration. **FINDING: confirmed real.**
-        A `varbinary(10)` cookie is rejected with Msg 15533 ("Invalid data
-        type is supplied in the 'Revert' statement"); the engine requires
-        the fixed `varbinary(100)` shape produced by `CREATE USER ...
-        WITH... COOKIE INTO`. Decidable from the variable's declared type.
-
-      23. `FOR XML` forbidden option combinations (e.g. `EXPLICIT` with inline
-        XSD) — decidable purely from the statement's own option list, no
-        catalog access needed. **FINDING: real, but as an unimplemented
-        feature, not a documented "forbidden combination."** `FOR XML
-        EXPLICIT, XMLSCHEMA` fails with "'Inline XSD for FOR XML EXPLICIT'
-        is not yet implemented" — still a real, decidable compile-time
-        reject, just frame the rationale accordingly.
-
       24. New `SecurityFindingKind`: `sp_invoke_external_rest_endpoint` is a
         real outbound-network call surface distinct from the shipped
         hardcoded-IP-address finding. **FINDING:** not tested this pass.

@@ -107,6 +107,8 @@ public static class SarifReportWriter
         results.AddRange(report.Find<DynamicDataMaskingFinding>(nameof(DynamicDataMaskingScanner)).Select(ToResult));
         results.AddRange(report.Find<AlwaysEncryptedOrderByFinding>("AlwaysEncryptedOrderByScanner").Select(ToResult));
         results.AddRange(report.Find<RestrictedImplicitAssignmentFinding>("RestrictedImplicitAssignmentScanner").Select(ToResult));
+        results.AddRange(report.Find<RevertCookieTypeMismatchFinding>("RevertCookieTypeMismatchScanner").Select(ToResult));
+        results.AddRange(report.Find<ForXmlExplicitInlineXsdFinding>("ForXmlExplicitInlineXsdScanner").Select(ToResult));
         results.AddRange(report.Find<AlwaysEncryptedKeyColumnFinding>("AlwaysEncryptedKeyColumnScanner").Select(ToResult));
         results.AddRange(report.Find<AlterColumnSafetyFinding>("AlterColumnSafetyScanner").Select(ToResult));
         results.AddRange(report.Find<DropProtectedObjectFinding>("DropProtectedObjectScanner").Select(ToResult));
@@ -1386,6 +1388,22 @@ public static class SarifReportWriter
     {
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.RestrictedImplicitAssignmentRuleId, finding.Confidence);
         var message = $"'{finding.TargetVariableName}' ({finding.TargetTypeDisplay}) is assigned directly from '{finding.SourceVariableName}' ({finding.SourceTypeDisplay}) - no implicit conversion exists between these types; the statement does not compile.";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(RevertCookieTypeMismatchFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.RevertCookieTypeMismatchRuleId, finding.Confidence);
+        var message = $"REVERT WITH COOKIE references '{finding.CookieVariableName}' ({finding.CookieTypeDisplay}), not varbinary(100) - the engine only accepts the fixed varbinary(100) cookie shape; the statement does not compile.";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(ForXmlExplicitInlineXsdFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ForXmlExplicitInlineXsdRuleId, finding.Confidence);
+        const string message = "FOR XML EXPLICIT is combined with XMLSCHEMA - this combination does not compile.";
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

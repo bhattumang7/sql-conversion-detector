@@ -412,6 +412,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterRevertStatement(RevertStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterBooleanComparisonExpressionScope(BooleanComparisonExpression node, ModuleWalker walker)
     {
     }

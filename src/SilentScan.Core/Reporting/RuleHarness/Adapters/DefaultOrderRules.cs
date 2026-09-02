@@ -172,6 +172,22 @@ internal sealed class RestrictedImplicitAssignmentRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => RestrictedImplicitAssignmentScanner.Harvest((RestrictedImplicitAssignmentScanner.Rule)moduleRule);
 }
 
+internal sealed class RevertCookieTypeMismatchRule : IPerFileRule
+{
+    public string Id => "RevertCookieTypeMismatchScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => RevertCookieTypeMismatchScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => RevertCookieTypeMismatchScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => RevertCookieTypeMismatchScanner.Harvest((RevertCookieTypeMismatchScanner.Rule)moduleRule);
+}
+
+internal sealed class ForXmlExplicitInlineXsdRule : IPerFileRule
+{
+    public string Id => "ForXmlExplicitInlineXsdScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => ForXmlExplicitInlineXsdScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => ForXmlExplicitInlineXsdScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => ForXmlExplicitInlineXsdScanner.Harvest((ForXmlExplicitInlineXsdScanner.Rule)moduleRule);
+}
+
 internal sealed class OperandComparabilityRule : IPerFileRule
 {
     public string Id => "OperandComparabilityScanner";

@@ -97,6 +97,8 @@ public static class TestScanReports
         IReadOnlyList<ColumnstoreUnsupportedColumnTypeFinding>? ColumnstoreUnsupportedColumnTypeFindings = null,
         IReadOnlyList<AlwaysEncryptedOrderByFinding>? AlwaysEncryptedOrderByFindings = null,
         IReadOnlyList<RestrictedImplicitAssignmentFinding>? RestrictedImplicitAssignmentFindings = null,
+        IReadOnlyList<RevertCookieTypeMismatchFinding>? RevertCookieTypeMismatchFindings = null,
+        IReadOnlyList<ForXmlExplicitInlineXsdFinding>? ForXmlExplicitInlineXsdFindings = null,
         IReadOnlyList<TriggerOrderFinding>? TriggerOrderFindings = null,
         IReadOnlyList<MissingStatisticsFinding>? MissingStatisticsFindings = null,
         IReadOnlyList<OperandComparabilityFinding>? OperandComparabilityFindings = null,
@@ -215,6 +217,8 @@ public static class TestScanReports
         Set("ColumnstoreUnsupportedColumnTypeScanner", ColumnstoreUnsupportedColumnTypeFindings);
         Set("AlwaysEncryptedOrderByScanner", AlwaysEncryptedOrderByFindings);
         Set("RestrictedImplicitAssignmentScanner", RestrictedImplicitAssignmentFindings);
+        Set("RevertCookieTypeMismatchScanner", RevertCookieTypeMismatchFindings);
+        Set("ForXmlExplicitInlineXsdScanner", ForXmlExplicitInlineXsdFindings);
         Set("TriggerOrderScanner", TriggerOrderFindings);
         Set("MissingStatisticsScanner", MissingStatisticsFindings);
         Set("OperandComparabilityScanner", OperandComparabilityFindings);

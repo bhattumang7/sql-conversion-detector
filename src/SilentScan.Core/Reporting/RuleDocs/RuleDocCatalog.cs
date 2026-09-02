@@ -133,6 +133,8 @@ public static class RuleDocCatalog
         [Predicates.DynamicDataMaskingComputedExpressionCollapse.RuleId] = Predicates.DynamicDataMaskingComputedExpressionCollapse.Content,
         [Predicates.AlwaysEncryptedOrderBy.RuleId] = Predicates.AlwaysEncryptedOrderBy.Content,
         [Predicates.RestrictedImplicitAssignment.RuleId] = Predicates.RestrictedImplicitAssignment.Content,
+        [Predicates.RevertCookieTypeMismatch.RuleId] = Predicates.RevertCookieTypeMismatch.Content,
+        [Predicates.ForXmlExplicitInlineXsd.RuleId] = Predicates.ForXmlExplicitInlineXsd.Content,
         [Predicates.AlwaysEncryptedKeyColumn.RuleId] = Predicates.AlwaysEncryptedKeyColumn.Content,
         [Predicates.AlterColumnPrecisionScaleNarrowing.RuleId] = Predicates.AlterColumnPrecisionScaleNarrowing.Content,
         [Predicates.AlterColumnIncompatibleFamilyConversion.RuleId] = Predicates.AlterColumnIncompatibleFamilyConversion.Content,

@@ -42,6 +42,8 @@ public static class SarifRuleCatalog
     public const string FloatOrderDependentAggregateRuleId = FindingRuleIds.FloatOrderDependentAggregateRuleId;
     public const string AlwaysEncryptedOrderByRuleId = FindingRuleIds.AlwaysEncryptedOrderByRuleId;
     public const string RestrictedImplicitAssignmentRuleId = FindingRuleIds.RestrictedImplicitAssignmentRuleId;
+    public const string RevertCookieTypeMismatchRuleId = FindingRuleIds.RevertCookieTypeMismatchRuleId;
+    public const string ForXmlExplicitInlineXsdRuleId = FindingRuleIds.ForXmlExplicitInlineXsdRuleId;
     public const string AlwaysEncryptedKeyColumnRuleId = FindingRuleIds.AlwaysEncryptedKeyColumnRuleId;
     public const string TriggerOrderRuleId = FindingRuleIds.TriggerOrderRuleId;
     public static string AlterColumnSafetyRuleId(AlterColumnSafetyKind kind) => FindingRuleIds.AlterColumnSafetyRuleId(kind);

@@ -55,6 +55,8 @@ public static class FindingRuleIds
     public const string FloatOrderDependentAggregateRuleId = "silentscan/predicates/float-order-dependent-aggregate";
     public const string AlwaysEncryptedOrderByRuleId = "silentscan/predicates/always-encrypted-order-by";
     public const string RestrictedImplicitAssignmentRuleId = "silentscan/predicates/restricted-implicit-assignment";
+    public const string RevertCookieTypeMismatchRuleId = "silentscan/predicates/revert-cookie-type-mismatch";
+    public const string ForXmlExplicitInlineXsdRuleId = "silentscan/predicates/for-xml-explicit-inline-xsd";
     public const string AlwaysEncryptedKeyColumnRuleId = "silentscan/catalog/always-encrypted-non-enclave-key-column";
     public const string TriggerOrderRuleId = "silentscan/catalog/trigger-firing-order-undefined";
     public static string AlterColumnSafetyRuleId(AlterColumnSafetyKind kind) => kind switch
