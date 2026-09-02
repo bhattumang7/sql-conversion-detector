@@ -26,6 +26,7 @@ public static class RuleRegistry
         new FloatEqualityPredicateRule(),
         new FloatOrderDependentAggregateRule(),
         new AlwaysEncryptedOrderByRule(),
+        new RestrictedImplicitAssignmentRule(),
         new OperandComparabilityRule(),
         new UnpivotExactTypeMismatchRule(),
         new SchemaboundAliasTypeRule(),

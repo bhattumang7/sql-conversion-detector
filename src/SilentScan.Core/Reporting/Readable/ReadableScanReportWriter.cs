@@ -151,6 +151,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(FloatOrderDependentAggregate(report, headingLevel, pathBase));
         blocks.AddRange(DynamicDataMasking(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedOrderBy(report, headingLevel, pathBase));
+        blocks.AddRange(RestrictedImplicitAssignment(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedKeyColumn(report, headingLevel, pathBase));
         blocks.AddRange(AlterColumnSafety(report, headingLevel, pathBase));
         blocks.AddRange(DropProtectedObject(report, headingLevel, pathBase));
@@ -254,6 +255,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Float/real columns in order-dependent aggregates", report.Find<FloatOrderDependentAggregateFinding>(nameof(FloatOrderDependentAggregateScanner)).Count);
         AddCount(counts, "Dynamic Data Masking silently defeated", report.Find<DynamicDataMaskingFinding>(nameof(DynamicDataMaskingScanner)).Count);
         AddCount(counts, "Always Encrypted ORDER BY", report.Find<AlwaysEncryptedOrderByFinding>(nameof(AlwaysEncryptedOrderByScanner)).Count);
+        AddCount(counts, "sql_variant/xml assignment", report.Find<RestrictedImplicitAssignmentFinding>(nameof(RestrictedImplicitAssignmentScanner)).Count);
         AddCount(counts, "Always Encrypted non-enclave key column", report.Find<AlwaysEncryptedKeyColumnFinding>(nameof(AlwaysEncryptedKeyColumnScanner)).Count);
         AddCount(counts, "ALTER COLUMN safety", report.Find<AlterColumnSafetyFinding>(nameof(AlterColumnSafetyScanner)).Count);
         AddCount(counts, "DROP against a protected object", report.Find<DropProtectedObjectFinding>(nameof(DropProtectedObjectScanner)).Count);
@@ -1647,6 +1649,29 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.EncryptionTypeDisplay,
                 $"Referenced in ORDER BY at line {f.Line}, column {f.Column}.",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> RestrictedImplicitAssignment(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<RestrictedImplicitAssignmentFinding>(nameof(RestrictedImplicitAssignmentScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Restricted sql_variant/xml assignment ({report.Find<RestrictedImplicitAssignmentFinding>(nameof(RestrictedImplicitAssignmentScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A local variable or parameter reads directly out of a sql_variant-typed source into a differently-typed target, or into an xml-typed target from a source that is neither xml nor a character/binary type - the statement does not compile at all (Msg 206, \"Operand type clash\", or Msg 257, \"Implicit conversion ... is not allowed\"), unconditionally.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.RestrictedImplicitAssignmentRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Target", "Source", DetailHeader],
+            [.. report.Find<RestrictedImplicitAssignmentFinding>(nameof(RestrictedImplicitAssignmentScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TargetVariableName} ({f.TargetTypeDisplay})",
+                $"{f.SourceVariableName} ({f.SourceTypeDisplay})",
+                $"Assigned at line {f.Line}, column {f.Column}.",
             })]);
     }
 

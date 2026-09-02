@@ -96,6 +96,7 @@ public static class TestScanReports
         IReadOnlyList<ForcedParameterizationFinding>? ForcedParameterizationFindings = null,
         IReadOnlyList<ColumnstoreUnsupportedColumnTypeFinding>? ColumnstoreUnsupportedColumnTypeFindings = null,
         IReadOnlyList<AlwaysEncryptedOrderByFinding>? AlwaysEncryptedOrderByFindings = null,
+        IReadOnlyList<RestrictedImplicitAssignmentFinding>? RestrictedImplicitAssignmentFindings = null,
         IReadOnlyList<TriggerOrderFinding>? TriggerOrderFindings = null,
         IReadOnlyList<MissingStatisticsFinding>? MissingStatisticsFindings = null,
         IReadOnlyList<OperandComparabilityFinding>? OperandComparabilityFindings = null,
@@ -213,6 +214,7 @@ public static class TestScanReports
         Set("ForcedParameterizationScanner", ForcedParameterizationFindings);
         Set("ColumnstoreUnsupportedColumnTypeScanner", ColumnstoreUnsupportedColumnTypeFindings);
         Set("AlwaysEncryptedOrderByScanner", AlwaysEncryptedOrderByFindings);
+        Set("RestrictedImplicitAssignmentScanner", RestrictedImplicitAssignmentFindings);
         Set("TriggerOrderScanner", TriggerOrderFindings);
         Set("MissingStatisticsScanner", MissingStatisticsFindings);
         Set("OperandComparabilityScanner", OperandComparabilityFindings);

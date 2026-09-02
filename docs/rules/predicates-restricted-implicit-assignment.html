@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restricted Implicit Assignment - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Restricted Implicit Assignment</h1>
+  <p class="rule-key"><code>silentscan/predicates/restricted-implicit-assignment</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A local variable or parameter assignment reads directly out of a sql_variant-typed source into a differently-typed target, or into an xml-typed target from a source that is neither xml nor a character/binary type - oracle-confirmed a hard compile-time reject unconditionally in every case tested (Msg 257, &quot;Implicit conversion ... is not allowed&quot;, or Msg 206, &quot;Operand type clash&quot;, depending on the specific type pair), unlike the silent data-loss conversions covered elsewhere. sql_variant accepts an implicit assignment from any other type, and xml accepts one from any character/binary type or itself - only the reverse directions (reading a sql_variant or xml value straight into an incompatible target) are restricted.</p>
+  <p class="rationale">sql_variant and xml are both able to hold values of many other types, which makes it easy to assume the engine can convert freely between them and everything else - it can&#x27;t, and the restriction is asymmetric. Oracle-confirmed against a real engine: assigning a sql_variant-typed variable directly into a differently-typed target always fails to compile, regardless of what target type it is - Msg 206 (&quot;Operand type clash&quot;) when the target is xml, Msg 257 (&quot;Implicit conversion ... is not allowed&quot;) for every other target type tried (int, varchar, datetime, bit). The reverse direction (assigning any other type into a sql_variant) is always allowed - that half of the picture is not new. xml has its own, narrower restriction: an xml-typed target accepts an implicit assignment from a character or binary-family source (or another xml value), but from anything else - int, sql_variant, and presumably every other scalar type - it fails with Msg 206. Reading a value back out of xml into anything other than another xml variable fails too, including into character/binary types, which only convert implicitly in the other direction.</p>
+  <p class="rationale">None of this is a data-loss or truncation case like the other assignment findings this tool reports - there is no implicit conversion path at all for the restricted pairs, so the statement is rejected outright before it ever runs, unconditionally, regardless of the actual value involved. The same rejection applies to a stored procedure or function parameter typed sql_variant or xml being assigned to/from a local variable, since a parameter&#x27;s declared type is exactly as fixed as a DECLARE&#x27;d local&#x27;s.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Convert explicitly through a type both sides actually support. If a sql_variant instance holds a string, CONVERT/CAST it to (n)varchar first; if it holds numeric or other scalar data, convert it to that scalar type before use - there is no direct CAST from sql_variant into xml, so the conversion always has to go through a concrete intermediate type. Going the other way, extract an xml value&#x27;s content (e.g. via .value()) into a concrete scalar type before assigning it into a sql_variant or a differently-typed target - character and binary-family targets are the only ones that can be built from an xml source at all, and only via explicit conversion.</p>
+  <h3>Assigning a sql_variant variable directly into a differently-typed variable never compiles</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>DECLARE @v sql_variant = 5;&#xA;DECLARE @i int;&#xA;SET @i = @v;</code></pre></div>
+  <p class="example-explanation">Fails to compile with Msg 257 (&quot;Implicit conversion from data type sql_variant to int is not allowed&quot;) regardless of what @v actually holds.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>DECLARE @v sql_variant = 5;&#xA;DECLARE @i int;&#xA;SET @i = CAST(@v AS int);</code></pre></div>
+  <p class="example-explanation">An explicit CAST to the known underlying type compiles and runs.</p>
+  <h3>Assigning a non-string, non-binary variable into an xml variable never compiles</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>DECLARE @i int = 5;&#xA;DECLARE @x xml;&#xA;SET @x = @i;</code></pre></div>
+  <p class="example-explanation">Fails to compile with Msg 206 (&quot;Operand type clash: int is incompatible with xml&quot;) - xml only accepts an implicit assignment from a character/binary source or another xml value.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>DECLARE @i int = 5;&#xA;DECLARE @x xml;&#xA;SET @x = CAST(CAST(@i AS varchar(20)) AS xml);</code></pre></div>
+  <p class="example-explanation">Converting through a character type first gives the engine a real conversion path to xml.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

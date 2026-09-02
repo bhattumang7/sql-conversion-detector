@@ -164,6 +164,14 @@ internal sealed class AlwaysEncryptedOrderByRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => AlwaysEncryptedOrderByScanner.Harvest((AlwaysEncryptedOrderByScanner.Rule)moduleRule);
 }
 
+internal sealed class RestrictedImplicitAssignmentRule : IPerFileRule
+{
+    public string Id => "RestrictedImplicitAssignmentScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => RestrictedImplicitAssignmentScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => RestrictedImplicitAssignmentScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => RestrictedImplicitAssignmentScanner.Harvest((RestrictedImplicitAssignmentScanner.Rule)moduleRule);
+}
+
 internal sealed class OperandComparabilityRule : IPerFileRule
 {
     public string Id => "OperandComparabilityScanner";

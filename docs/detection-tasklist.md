@@ -55,7 +55,17 @@ Competitor tools are referred to generically; real identities are in
         already `CollationConflictRuleId`'s territory, not a new assignment
         family. `sql_variant = xml` (item 3) remains the one confirmed
         "cannot implicit-convert at all" case; encryption-state and
-        legacy-LOB legs still unverified.
+        legacy-LOB legs still unverified. **Shipped, broadened beyond the
+        original leg:** oracle probing the `sql_variant`/`xml` pairing
+        further found the true restriction is bigger than "these two types
+        clash" - a `sql_variant` source can never be read directly into any
+        differently-typed target (Msg 257 for ordinary types, Msg 206 for
+        xml specifically), and an `xml` target only accepts an implicit
+        assignment from another `xml` value or a character/binary-family
+        source, never anything else (Msg 206). Shipped as
+        `RestrictedImplicitAssignmentRuleId` covering both general
+        restrictions for local variable and parameter assignments.
+        Encryption-state and legacy-LOB legs remain open.
 
       7. New family: partition/filegroup DDL alignment siblings to the
         shipped `ALTER TABLE SWITCH` family — partition-`REBUILD` alignment

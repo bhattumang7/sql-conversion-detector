@@ -106,6 +106,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<FloatOrderDependentAggregateFinding>("FloatOrderDependentAggregateScanner").Select(ToResult));
         results.AddRange(report.Find<DynamicDataMaskingFinding>(nameof(DynamicDataMaskingScanner)).Select(ToResult));
         results.AddRange(report.Find<AlwaysEncryptedOrderByFinding>("AlwaysEncryptedOrderByScanner").Select(ToResult));
+        results.AddRange(report.Find<RestrictedImplicitAssignmentFinding>("RestrictedImplicitAssignmentScanner").Select(ToResult));
         results.AddRange(report.Find<AlwaysEncryptedKeyColumnFinding>("AlwaysEncryptedKeyColumnScanner").Select(ToResult));
         results.AddRange(report.Find<AlterColumnSafetyFinding>("AlterColumnSafetyScanner").Select(ToResult));
         results.AddRange(report.Find<DropProtectedObjectFinding>("DropProtectedObjectScanner").Select(ToResult));
@@ -1377,6 +1378,14 @@ public static class SarifReportWriter
 
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AlwaysEncryptedOrderByRuleId, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.EncryptionTypeDisplay}) is referenced in this ORDER BY clause - an Always Encrypted column can never be sorted on; the statement does not compile.";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(RestrictedImplicitAssignmentFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.RestrictedImplicitAssignmentRuleId, finding.Confidence);
+        var message = $"'{finding.TargetVariableName}' ({finding.TargetTypeDisplay}) is assigned directly from '{finding.SourceVariableName}' ({finding.SourceTypeDisplay}) - no implicit conversion exists between these types; the statement does not compile.";
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
