@@ -10,6 +10,7 @@ public static class RuleRegistry
         new BackupOptionConflictRule(),
         new RestoreOptionConflictRule(),
         new ViewCheckOptionContradictionRule(),
+        new CreateDatabaseOptionConflictRule(),
         new GraphPseudoColumnAssignmentRule(),
         new CursorCloseOnCommitRule(),
         new CompositeIndexLeadingColumnRule(),

@@ -400,6 +400,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterCreateDatabaseStatement(CreateDatabaseStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterCreateProcedureStatement(CreateProcedureStatement node, ModuleWalker walker)
     {
     }

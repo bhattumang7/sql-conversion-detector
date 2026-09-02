@@ -496,6 +496,25 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`CreateDatabaseOptionConflictRuleId` — shipped for `CONTAINMENT = PARTIAL`
+  + `CATALOG_COLLATION`; other `CREATE DATABASE` option pairs probed and
+  found not to conflict.** Oracle-confirmed (Docker): `CREATE DATABASE db
+  CONTAINMENT = PARTIAL WITH CATALOG_COLLATION = DATABASE_DEFAULT` always
+  fails with Msg 12845 ("cannot specify both CONTAINMENT = PARTIAL and
+  CATALOG_COLLATION"), decidable purely from the statement's own option
+  list, the same shape as `BackupOptionConflictRuleId`/
+  `RestoreOptionConflictRuleId` — closes the `CREATE DATABASE` leg of
+  item 49 alongside those two. The conflict fires before the server-level
+  "contained database authentication" check (confirmed with that
+  `sp_configure` value at 0), so it isn't gated by server config. Also
+  tested and found to **not** conflict: `FILESTREAM` + `LEDGER`,
+  `CONTAINMENT = PARTIAL` + `FILESTREAM`, `CONTAINMENT = PARTIAL` +
+  `LEDGER`. Not explored: `MAXSIZE`/`EDITION`/`SERVICE_OBJECTIVE` (Azure SQL
+  Database syntax, likely inapplicable to on-prem `CREATE DATABASE`) and
+  `PERSISTENT_LOG_BUFFER` (requires persistent-memory hardware unavailable
+  on the local Docker instance) — left open only if a concrete need for
+  Azure SQL Database or PMEM-hardware coverage comes up, not proactively.
+
 * **`ViewCheckOptionContradictionRuleId` — shipped.** Oracle-confirmed
   (Docker): `CREATE VIEW dbo.V AS SELECT id, amt FROM dbo.T WHERE amt > 10
   WITH CHECK OPTION` followed by `INSERT INTO dbo.V (id, amt) VALUES (1, 5)`

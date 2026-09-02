@@ -240,19 +240,6 @@ Competitor tools are referred to generically; real identities are in
         client-driver-generated rather than hand-authored, low value.
         **FINDING:** not tested this pass.
 
-      49. `CREATE DATABASE` forbidden option combinations, decidable purely
-        from the statement's own option list — DBA-maintenance-script
-        scope, not typical application SQL. **Shipped for `BACKUP` and
-        `RESTORE`:** `BACKUP DATABASE ... WITH DIFFERENTIAL, COPY_ONLY`
-        always fails — a copy-only full backup never registers as a
-        differential base, so any later differential can never find "a
-        current database backup" to diff against (`Msg 3035`). Shipped as
-        `BackupOptionConflictRuleId`. `RESTORE ... WITH` combining any two
-        of `RECOVERY`/`NORECOVERY`/`STANDBY` always fails (`Msg 3031`,
-        oracle-confirmed for all three pairings) — shipped as
-        `RestoreOptionConflictRuleId`. `CREATE DATABASE` combos not tested,
-        remain open.
-
       50. PolyBase/Hadoop external-table column-type and virtual-column
         restrictions — mainstream on-prem feature but low adoption.
         **FINDING:** not tested this pass. PolyBase is now installed and
