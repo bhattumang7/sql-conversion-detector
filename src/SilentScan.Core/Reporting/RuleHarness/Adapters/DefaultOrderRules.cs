@@ -156,6 +156,14 @@ internal sealed class TvfCallArgumentMismatchRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => TvfCallArgumentMismatchScanner.Harvest((TvfCallArgumentMismatchScanner.Rule)moduleRule);
 }
 
+internal sealed class SemanticSearchRule : IPerFileRule
+{
+    public string Id => "SemanticSearchScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => SemanticSearchScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => SemanticSearchScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => SemanticSearchScanner.Harvest((SemanticSearchScanner.Rule)moduleRule);
+}
+
 internal sealed class AggregateDivisionColumnstoreRule : IPerFileRule
 {
     public string Id => "AggregateDivisionColumnstoreScanner";

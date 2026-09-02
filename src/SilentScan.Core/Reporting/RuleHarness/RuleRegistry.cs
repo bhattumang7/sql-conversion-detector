@@ -47,6 +47,7 @@ public static class RuleRegistry
         new SparseColumnDisallowedTypeRule(),
         new LegacyLobUtf8CollationRule(),
         new FullTextIndexDdlRule(),
+        new SemanticSearchRule(),
         new IndexCoverageRule(),
         new SelfReferencingDmlRule(),
         new TransactionHygieneRule(),

@@ -67,10 +67,6 @@ Competitor tools are referred to generically; real identities are in
         restrictions for local variable and parameter assignments.
         Encryption-state and legacy-LOB legs remain open.
 
-      17. Semantic Search TVFs (`SEMANTICKEYPHRASETABLE` etc.) requiring a
-        qualifying full-text semantic index — legacy/rarely used feature.
-        **FINDING:** not tested this pass.
-
       18. New family (SQL Server 2025): `JSON_VALUE(...RETURNING...)`/
         `JSON_CONTAINS` exact-match predicate shapes eligible for a JSON
         index rewrite — the JSON-index sargability counterpart to the

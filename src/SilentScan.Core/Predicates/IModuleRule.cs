@@ -320,6 +320,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterSemanticTableReference(SemanticTableReference node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterOutputClause(OutputClause node, ModuleWalker walker)
     {
     }

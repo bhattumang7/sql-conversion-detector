@@ -1,6 +1,6 @@
 namespace SilentScan.Core.Catalog;
 
-public sealed record CatalogFullTextIndexColumn(string ColumnName, string? LanguageTermRaw);
+public sealed record CatalogFullTextIndexColumn(string ColumnName, string? LanguageTermRaw, bool StatisticalSemantics = false);
 
 public sealed record CatalogFullTextIndex(
     string TableQualifiedName,

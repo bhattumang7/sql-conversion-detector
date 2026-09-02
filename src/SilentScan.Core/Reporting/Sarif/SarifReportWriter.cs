@@ -149,6 +149,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<TriggerOrderFinding>("TriggerOrderScanner").Select(ToResult));
         results.AddRange(report.Find<MissingStatisticsFinding>("MissingStatisticsScanner").Select(ToResult));
         results.AddRange(report.Find<FullTextIndexDdlFinding>("FullTextIndexDdlScanner").Select(ToResult));
+        results.AddRange(report.Find<SemanticSearchFinding>("SemanticSearchScanner").Select(ToResult));
 
         var notifications = BuildParseHealthNotifications(report.ParseHealth);
         notifications.AddRange(BuildSkippedConstructNotifications(report.SkippedConstructSummary));
@@ -432,6 +433,23 @@ public static class SarifReportWriter
             FullTextIndexDdlFindingKind.TooManyIndexedColumns =>
                 $"Full-text index on {location} lists {finding.Detail} - exceeds the full-text index column limit.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled FullTextIndexDdlFindingKind."),
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(SemanticSearchFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SemanticSearchRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var location = finding.ColumnName is { } columnName ? $"'{finding.TableQualifiedName}.{columnName}'" : $"'{finding.TableQualifiedName}'";
+        var message = finding.Kind switch
+        {
+            SemanticSearchFindingKind.TableNotSemanticFullTextIndexed =>
+                $"Semantic search function on {location} - {finding.Detail}, so the call fails (Msg 41202).",
+            SemanticSearchFindingKind.ColumnNotSemanticFullTextIndexed =>
+                $"Semantic search function on {location} - {finding.Detail}, so the call fails (Msg 41203).",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled SemanticSearchFindingKind."),
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);

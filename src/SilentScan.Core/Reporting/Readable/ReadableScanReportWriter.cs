@@ -98,6 +98,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(MemoryOptimizedSchemaOnlyDurability(report, headingLevel, pathBase));
         blocks.AddRange(NonPersistedComputedColumn(report, headingLevel, pathBase));
         blocks.AddRange(FullTextIndexDdl(report, headingLevel, pathBase));
+        blocks.AddRange(SemanticSearch(report, headingLevel, pathBase));
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
         blocks.AddRange(UnderLengthParameter(report, headingLevel, pathBase));
         blocks.AddRange(AnsiPaddingMismatch(report, headingLevel, pathBase));
@@ -250,6 +251,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Unsupported built-in function inside a natively compiled module (does not compile)", report.Find<NativelyCompiledUnsupportedBuiltinFinding>(nameof(NativelyCompiledUnsupportedBuiltinScanner)).Count);
         AddCount(counts, "CLR user-defined type parameter/variable inside a natively compiled module (does not compile)", report.Find<NativelyCompiledClrTypeFinding>(nameof(NativelyCompiledClrTypeScanner)).Count);
         AddCount(counts, "Full-text index DDL that fails to deploy", report.Find<FullTextIndexDdlFinding>(nameof(FullTextIndexDdlScanner)).Count);
+        AddCount(counts, "Semantic search function calls that fail at execution", report.Find<SemanticSearchFinding>(nameof(SemanticSearchScanner)).Count);
         AddCount(counts, "ERROR_* call outside a CATCH block inside a natively compiled module (does not compile)", report.Find<NativelyCompiledErrorOutsideCatchFinding>(nameof(NativelyCompiledErrorOutsideCatchScanner)).Count);
         AddCount(counts, "Interpreted (non-native) routine called from a natively compiled module (does not compile)", report.Find<NativelyCompiledInterpretedCalleeFinding>(nameof(NativelyCompiledInterpretedCalleeScanner)).Count);
         AddCount(counts, "MEMORY_OPTIMIZED and LEDGER both specified on the same table (does not deploy)", report.Find<MemoryOptimizedLedgerConflictFinding>(nameof(MemoryOptimizedLedgerConflictScanner)).Count);
@@ -1327,6 +1329,45 @@ public static class ReadableScanReportWriter
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                     f.TableQualifiedName,
+                    f.Detail,
+                })]);
+        }
+    }
+
+    private static IEnumerable<ReadableBlock> SemanticSearch(ScanReport report, int level, string? pathBase)
+    {
+        var all = report.Find<SemanticSearchFinding>(nameof(SemanticSearchScanner));
+
+        var tableNotIndexed = all.Where(f => f.Kind == SemanticSearchFindingKind.TableNotSemanticFullTextIndexed).ToList();
+        if (tableNotIndexed.Count > 0)
+        {
+            yield return new ReadableBlock.Heading(level, $"Semantic search function on a table with no semantic full-text index ({tableNotIndexed.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "Oracle-confirmed (Msg 41202): SEMANTICKEYPHRASETABLE, SEMANTICSIMILARITYTABLE, and SEMANTICSIMILARITYDETAILSTABLE all require the source table to have a full-text index column enabled with STATISTICAL_SEMANTICS - none does here, so the call fails.");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SemanticSearchRuleId(SemanticSearchFindingKind.TableNotSemanticFullTextIndexed)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Table", "Detail"],
+                [.. tableNotIndexed.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.TableQualifiedName,
+                    f.Detail,
+                })]);
+        }
+
+        var columnNotIndexed = all.Where(f => f.Kind == SemanticSearchFindingKind.ColumnNotSemanticFullTextIndexed).ToList();
+        if (columnNotIndexed.Count > 0)
+        {
+            yield return new ReadableBlock.Heading(level, $"Semantic search function names a column without STATISTICAL_SEMANTICS ({columnNotIndexed.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "Oracle-confirmed (Msg 41203): the column named in the call must itself be full-text indexed with STATISTICAL_SEMANTICS, even if another column on the same table qualifies.");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SemanticSearchRuleId(SemanticSearchFindingKind.ColumnNotSemanticFullTextIndexed)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ColumnHeader, "Detail"],
+                [.. columnNotIndexed.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    $"{f.TableQualifiedName}.{f.ColumnName}",
                     f.Detail,
                 })]);
         }

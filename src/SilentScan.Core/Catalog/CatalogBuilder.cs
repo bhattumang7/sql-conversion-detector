@@ -312,7 +312,7 @@ public static class CatalogBuilder
 
                 var columns = node.FullTextIndexColumns
                     .Where(c => c.Name is not null)
-                    .Select(c => new CatalogFullTextIndexColumn(c.Name.Value, c.LanguageTerm?.Value))
+                    .Select(c => new CatalogFullTextIndexColumn(c.Name.Value, c.LanguageTerm?.Value, c.StatisticalSemantics))
                     .ToList();
 
                 catalog.AddFullTextIndex(new CatalogFullTextIndex(

@@ -59,6 +59,7 @@ public sealed class LiveCatalogReader
         var cdcPartitionSwitchDisallowedTables = await ReadCdcPartitionSwitchDisallowedTablesAsync(connection, cancellationToken);
         var partitionSchemeByTable = await ReadTablePartitionSchemesAsync(connection, cancellationToken);
         var fullTextIndexTables = await ReadFullTextIndexTablesAsync(connection, cancellationToken);
+        var semanticFullTextColumnsByTable = await ReadSemanticFullTextColumnsAsync(connection, cancellationToken);
 
         foreach (var (schemeName, partitionNumber, filegroupName) in await ReadPartitionFilegroupsAsync(connection, cancellationToken))
         {
@@ -84,7 +85,10 @@ public sealed class LiveCatalogReader
                 HasRuleConstraint: ruleConstraintTables.Contains(objectId),
                 CdcPartitionSwitchDisallowed: cdcPartitionSwitchDisallowedTables.Contains(objectId),
                 PartitionSchemeName: partitionSchemeByTable.GetValueOrDefault(objectId),
-                HasFullTextIndex: fullTextIndexTables.Contains(objectId)));
+                HasFullTextIndex: fullTextIndexTables.Contains(objectId),
+                SemanticFullTextColumnNames: fullTextIndexTables.Contains(objectId)
+                    ? semanticFullTextColumnsByTable.GetValueOrDefault(objectId, [])
+                    : null));
         }
 
         foreach (var (schemaName, functionName, columns) in await ReadClrTableValuedFunctionShapesAsync(connection, catalog.Skipped, cancellationToken))
@@ -1274,6 +1278,36 @@ public sealed class LiveCatalogReader
         }
 
         return tables;
+    }
+
+    private static async Task<Dictionary<int, List<string>>> ReadSemanticFullTextColumnsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT fic.object_id, c.name
+            FROM sys.fulltext_index_columns AS fic
+            JOIN sys.columns AS c ON c.object_id = fic.object_id AND c.column_id = fic.column_id
+            WHERE fic.statistical_semantics = 1;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var columnsByTable = new Dictionary<int, List<string>>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var objectId = reader.GetInt32(0);
+            var columnName = reader.GetString(1);
+            if (!columnsByTable.TryGetValue(objectId, out var columnNames))
+            {
+                columnNames = [];
+                columnsByTable[objectId] = columnNames;
+            }
+
+            columnNames.Add(columnName);
+        }
+
+        return columnsByTable;
     }
 
     private static async Task<HashSet<int>> ReadCdcPartitionSwitchDisallowedTablesAsync(

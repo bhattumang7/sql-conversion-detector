@@ -724,6 +724,13 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
         base.ExplicitVisit(node);
     }
 
+    public sealed override void ExplicitVisit(SemanticTableReference node)
+    {
+        Dispatch(rule => rule.OnEnterSemanticTableReference(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
     public sealed override void ExplicitVisit(OutputClause node)
     {
         Dispatch(rule => rule.OnEnterOutputClause(node, this));

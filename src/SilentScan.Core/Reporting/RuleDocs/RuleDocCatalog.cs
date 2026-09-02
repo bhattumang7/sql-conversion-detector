@@ -142,6 +142,8 @@ public static class RuleDocCatalog
         [Catalog.FullTextIndexInvalidLanguageId.RuleId] = Catalog.FullTextIndexInvalidLanguageId.Content,
         [Catalog.FullTextIndexNonDeterministicComputedColumn.RuleId] = Catalog.FullTextIndexNonDeterministicComputedColumn.Content,
         [Catalog.FullTextIndexTooManyColumns.RuleId] = Catalog.FullTextIndexTooManyColumns.Content,
+        [Catalog.SemanticSearchTableNotIndexed.RuleId] = Catalog.SemanticSearchTableNotIndexed.Content,
+        [Catalog.SemanticSearchColumnNotIndexed.RuleId] = Catalog.SemanticSearchColumnNotIndexed.Content,
         [Predicates.FloatEquality.RuleId] = Predicates.FloatEquality.Content,
         [Predicates.FloatOrderDependentAggregate.RuleId] = Predicates.FloatOrderDependentAggregate.Content,
         [Predicates.DynamicDataMaskingPredicateExposure.RuleId] = Predicates.DynamicDataMaskingPredicateExposure.Content,
