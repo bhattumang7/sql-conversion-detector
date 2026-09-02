@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Common;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.TypeInference;
@@ -64,20 +65,77 @@ public static class FloatOrderDependentAggregateScanner
         {
             foreach (var parameter in call.Parameters)
             {
-                if (BaseColumnResolver.ResolveBaseColumn(parameter, sourcePath, scopeChain, catalog) is not { } resolved
-                    || resolved.Type?.Category is not (SqlTypeCategory.Real or SqlTypeCategory.Float))
+                if (parameter is ColumnReferenceExpression)
+                {
+                    if (BaseColumnResolver.ResolveBaseColumn(parameter, sourcePath, scopeChain, catalog) is { } directColumn
+                        && directColumn.Type?.Category is SqlTypeCategory.Real or SqlTypeCategory.Float)
+                    {
+                        AddFinding(directColumn.TableQualifiedName, directColumn.ColumnName, directColumn.Type, call);
+                    }
+
+                    continue;
+                }
+
+                if (!AllReferencedColumnsResolveDirectly(parameter, scopeChain))
                 {
                     continue;
                 }
 
-                Findings.Add(new FloatOrderDependentAggregateFinding(
-                    resolved.TableQualifiedName,
-                    resolved.ColumnName,
-                    resolved.Type!.ToString(),
-                    call.FunctionName.Value.ToUpperInvariant(),
-                    sourcePath,
-                    call.StartLine,
-                    call.StartColumn));
+                var expressionType = ScalarExpressionResolver.ResolveScalarType(
+                    parameter, scopeChain, sourcePath,
+                    new ScalarExpressionResolver.ScalarTypeContext(Ledger: null, catalog.TypeAliases, catalog));
+
+                if (expressionType?.Category is not (SqlTypeCategory.Real or SqlTypeCategory.Float))
+                {
+                    continue;
+                }
+
+                var referencedColumns = new HashSet<(string Table, string Column)>();
+                parameter.Accept(new BaseColumnResolver.ColumnReferenceCollector(sourcePath, scopeChain, referencedColumns, catalog));
+
+                var (tableQualifiedName, columnName) = referencedColumns.Count == 1
+                    ? referencedColumns.Single()
+                    : ("?", FragmentTextRenderer.Render(parameter));
+
+                AddFinding(tableQualifiedName, columnName, expressionType, call);
+            }
+        }
+
+        private bool AllReferencedColumnsResolveDirectly(ScalarExpression parameter, ScopeChain scopeChain)
+        {
+            var guard = new DirectColumnGuardVisitor(sourcePath, scopeChain, catalog);
+            parameter.Accept(guard);
+            return guard.AllDirect;
+        }
+
+        private void AddFinding(string tableQualifiedName, string columnName, SqlType type, FunctionCall call) =>
+            Findings.Add(new FloatOrderDependentAggregateFinding(
+                tableQualifiedName,
+                columnName,
+                type.ToString(),
+                call.FunctionName.Value.ToUpperInvariant(),
+                sourcePath,
+                call.StartLine,
+                call.StartColumn));
+
+        private sealed class DirectColumnGuardVisitor(string sourcePath, ScopeChain scopeChain, DatabaseCatalog catalog) : TSqlFragmentVisitor
+        {
+            public bool AllDirect { get; private set; } = true;
+
+            public override void ExplicitVisit(ColumnReferenceExpression node)
+            {
+                if (node.ColumnType != ColumnType.Wildcard
+                    && BaseColumnResolver.ResolveBaseColumn(node, sourcePath, scopeChain, catalog) is null)
+                {
+                    AllDirect = false;
+                }
+
+                base.ExplicitVisit(node);
+            }
+
+            public override void ExplicitVisit(ScalarSubquery node)
+            {
+                _ = node;
             }
         }
 

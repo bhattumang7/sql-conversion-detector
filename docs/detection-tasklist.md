@@ -67,11 +67,6 @@ Competitor tools are referred to generically; real identities are in
         restrictions for local variable and parameter assignments.
         Encryption-state and legacy-LOB legs remain open.
 
-      20. Broaden the float-non-determinism family (aggregate argument,
-        already written up) to float-typed arithmetic operands generally
-        and float constants in precision-sensitive expressions — likely one
-        rule, not three. **FINDING:** not tested this pass.
-
       25. `sp_execute_external_script`'s `WITH RESULT SETS`-style column
         declaration reusing a name, omitting a required type binding, or
         declaring a rejected type. **FINDING:** not tested this pass.

@@ -108,9 +108,78 @@ public sealed class FloatOrderDependentAggregateScannerTests
     }
 
     [Fact]
-    public void SumOfExpressionOverFloatColumn_NotAnalyzed()
+    public void SumOfArithmeticExpressionOverFloatColumn_Fires()
     {
         var findings = Scan("SELECT SUM(Amount * 2) FROM dbo.Measurements;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Measurements", finding.TableQualifiedName);
+        Assert.Equal("Amount", finding.ColumnName);
+        Assert.Equal("SUM", finding.AggregateFunctionName);
+    }
+
+    [Fact]
+    public void SumOfArithmeticExpressionCombiningTwoFloatColumns_ReportsExpressionText()
+    {
+        var findings = Scan("SELECT SUM(Amount + Rate) FROM dbo.Measurements;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("?", finding.TableQualifiedName);
+        Assert.Contains("Amount", finding.ColumnName, StringComparison.Ordinal);
+        Assert.Contains("Rate", finding.ColumnName, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SumOfIntegerColumnCastToFloat_Fires()
+    {
+        var findings = Scan("SELECT SUM(CAST(Quantity AS FLOAT)) FROM dbo.Measurements;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Measurements", finding.TableQualifiedName);
+        Assert.Equal("Quantity", finding.ColumnName);
+    }
+
+    [Fact]
+    public void SumOfIntegerColumnPlusFloatLiteralConstant_Fires()
+    {
+        var findings = Scan("SELECT SUM(Quantity + 1.5e0) FROM dbo.Measurements;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Measurements", finding.TableQualifiedName);
+        Assert.Equal("Quantity", finding.ColumnName);
+    }
+
+    [Fact]
+    public void SumOfIntegerColumnPlusIntegerLiteral_NeverFires()
+    {
+        var findings = Scan("SELECT SUM(Quantity + 1) FROM dbo.Measurements;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void SumOfIntegerColumnCastToDecimal_NeverFires()
+    {
+        var findings = Scan("SELECT SUM(CAST(Amount AS DECIMAL(18, 4))) FROM dbo.Measurements;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void SumOfFloatLiteralConstantsWithNoColumnOperand_Fires()
+    {
+        var findings = Scan("SELECT SUM(1.5e0 + 2.5e0) FROM dbo.Measurements;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("?", finding.TableQualifiedName);
+    }
+
+    [Fact]
+    public void SumOfArithmeticExpressionOverFloatColumn_ThroughView_NotAnalyzed()
+    {
+        var findings = Scan(
+            "SELECT SUM(Amount * 2) FROM dbo.MeasurementsView;",
+            extraDdl: "CREATE VIEW dbo.MeasurementsView AS SELECT Amount FROM dbo.Measurements;");
 
         Assert.Empty(findings);
     }

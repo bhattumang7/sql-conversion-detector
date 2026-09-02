@@ -21,6 +21,12 @@ internal static class FloatOrderDependentAggregate
             because the optimizer chose a different plan shape or scheduled the parallel threads
             differently - with no error, no warning, and no code change to point at.
 
+            The same risk applies whenever the value actually fed to the aggregate is float/real, even
+            when the underlying column is not: an arithmetic expression (`Amount * Rate`), a
+            `CAST`/`CONVERT` to `FLOAT`/`REAL`, or an expression that only becomes float/real because a
+            float literal constant (e.g. `1.5e0`) participates in it, are all summed/averaged in the
+            same plan-shape-dependent order as a bare float column would be.
+
             `MIN`, `MAX`, and `COUNT`/`COUNT_BIG` are not affected and are not flagged by this rule:
             `MIN`/`MAX` only ever compare values against each other rather than combining them
             arithmetically, and `COUNT`/`COUNT_BIG` never touch the aggregated column's value at all -
@@ -52,5 +58,31 @@ internal static class FloatOrderDependentAggregate
                     FROM dbo.SensorReadings;
                     """,
                 CompliantExplanation: "DECIMAL is an exact base-10 type, so summing it produces the same exact result regardless of the order the plan happens to combine rows in. Where FLOAT is genuinely required, treat SUM/AVG/VAR/VARP/STDEV/STDEVP results over it as reproducible only up to floating-point rounding error, not bit-for-bit stable across runs."),
+            new RuleDocExample(
+                Title: "SUM over an arithmetic expression that resolves to FLOAT is order-dependent too",
+                NoncompliantSql: """
+                    CREATE TABLE dbo.SensorReadings
+                    (
+                        ReadingId  INT   NOT NULL PRIMARY KEY,
+                        Quantity   INT   NOT NULL,
+                        UnitPrice  FLOAT NOT NULL
+                    );
+
+                    SELECT SUM(Quantity * UnitPrice) AS Total
+                    FROM dbo.SensorReadings;
+                    """,
+                NoncompliantExplanation: "Quantity * UnitPrice resolves to FLOAT because UnitPrice is FLOAT, so SUM still accumulates a FLOAT value per row - the expression is not a bare float column, but the aggregate's running result is exactly as plan-shape-dependent as SUM(UnitPrice) would be.",
+                CompliantSql: """
+                    CREATE TABLE dbo.SensorReadings
+                    (
+                        ReadingId  INT             NOT NULL PRIMARY KEY,
+                        Quantity   INT             NOT NULL,
+                        UnitPrice  DECIMAL(18, 6)  NOT NULL
+                    );
+
+                    SELECT SUM(Quantity * UnitPrice) AS Total
+                    FROM dbo.SensorReadings;
+                    """,
+                CompliantExplanation: "With UnitPrice declared DECIMAL, Quantity * UnitPrice resolves to an exact DECIMAL value, so SUM's result no longer depends on accumulation order."),
         ]);
 }

@@ -1922,7 +1922,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Float/real columns in order-dependent aggregates ({report.Find<FloatOrderDependentAggregateFinding>(nameof(FloatOrderDependentAggregateScanner)).Count})");
         yield return new ReadableBlock.Paragraph(
-            "SUM/AVG/VAR/VARP/STDEV/STDEVP is applied to a float/real (IEEE-754 approximate) column - these aggregates accumulate their running result in an order that depends on plan shape (serial vs parallel, degree of parallelism), so the identical aggregate over identical data can return a different bit pattern across runs, silently. MIN/MAX/COUNT are unaffected and not flagged.");
+            "SUM/AVG/VAR/VARP/STDEV/STDEVP is applied to a float/real (IEEE-754 approximate) column, or to an arithmetic/CAST/CONVERT expression (including one involving a float literal constant) whose result type is float/real - these aggregates accumulate their running result in an order that depends on plan shape (serial vs parallel, degree of parallelism), so the identical aggregate over identical data can return a different bit pattern across runs, silently. MIN/MAX/COUNT are unaffected and not flagged.");
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FloatOrderDependentAggregateRuleId));
         yield return new ReadableBlock.Table(
