@@ -1,0 +1,4 @@
+DECLARE @a VECTOR(3) = CAST('[1,2,3]' AS VECTOR(3));
+DECLARE @b VECTOR(4) = CAST('[1,2,3,4]' AS VECTOR(4));
+
+SELECT VECTOR_DISTANCE('cosine', @a, @b);

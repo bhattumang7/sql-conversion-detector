@@ -1583,3 +1583,48 @@ WITH NATIVE_COMPILATION` module.
   Server for Linux, so no local Docker instance can create a FILESTREAM
   filegroup to oracle-verify this against. Do not re-propose until a
   FILESTREAM-capable instance is available to probe against.
+
+* **`VectorFunctionArgumentRuleId` shipped, broadened beyond the original
+  "large-object-typed operand" leg.** Oracle-confirmed (Docker, SQL Server
+  2025): `VECTOR_DISTANCE`/`VECTOR_NORM`/`VECTORPROPERTY`'s vector-position
+  argument(s) reject *any* non-`VECTOR(n)` type at all (Msg 8116) - not just
+  large-object types. A plain `VARCHAR(10)` column, a bare string literal
+  (even one holding valid vector-literal text like `'[1,2,3]'`), and
+  `SQL_VARIANT` all fail identically to `VARCHAR(MAX)`; there is no implicit
+  conversion from a vector-literal string into `VECTOR(n)` at these call
+  sites. Also folded in a second, distinct fact found probing the same
+  functions: `VECTOR_DISTANCE`'s two vector arguments must share the same
+  declared dimension - a `VECTOR(3)` paired with a `VECTOR(4)` compiles but
+  fails at execution for every row (Msg 42204, "The vector dimensions ...
+  do not match"), independent of the row's actual data. Shipped as one rule
+  family with two kinds: `NonVectorOperand` and `DimensionMismatch`.
+  Separately confirmed while building this: the ScriptDom version this repo
+  pins (180.78.1, used by the default parser) parses `VECTOR(n)` as a
+  dedicated `VectorDataTypeReference` node, not the generic
+  `SqlDataTypeReference` with `SqlDataTypeOption.Vector` the resolver
+  already switched on - that existing case was unreachable dead code for
+  every real scan through the default parser, silently resolving every
+  `VECTOR` column/variable/CAST target to `null` (Unknown). Fixed in
+  `SqlTypeReferenceResolver` directly since it blocked this rule (and any
+  future vector-typed check) from ever firing on real code.
+
+* **`SchemaWithRejectedTypeRuleId` shipped, narrower than the original item's
+  premise for `OPENXML`.** Oracle-confirmed (Docker): the item assumed one
+  shared `sql_variant`/spatial/legacy-LOB reject set for both `OPENXML ...
+  WITH` and `OPENROWSET(BULK ...) WITH` (inline schema). The two clauses
+  actually enforce different gates. `OPENROWSET(BULK ...) WITH` rejects
+  `sql_variant`/`text`/`ntext`/`image` (Msg 13801), the CLR types
+  `geometry`/`geography`/`hierarchyid` (Msg 13802), and `xml` (Msg 13829) -
+  all three checks fire before the source file is even opened (confirmed
+  against a nonexistent file path, and identically for CSV and PARQUET
+  `FORMAT`), so they are pure compile-time schema checks. `OPENXML ...
+  WITH`, however, only rejects the CLR types (Msg 6632,
+  "CLR types cannot be used in an OpenXML WITH clause") - `sql_variant`,
+  `text`, `ntext`, and `image` columns are accepted and return real rows
+  against a real prepared document handle. `xml` columns are rejected too,
+  but for an unrelated, context-dependent reason (element-centric mapping
+  is required whenever a WITH column is typed `xml`), not a fixed type
+  gate, so it is excluded from this rule to avoid a false claim. Shipped as
+  one finding type with a `Kind` per (clause, rejected-type-category) pair
+  covering only the combinations oracle-confirmed as a fixed, unconditional
+  reject.

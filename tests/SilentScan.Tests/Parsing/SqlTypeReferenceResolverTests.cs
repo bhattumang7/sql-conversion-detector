@@ -42,6 +42,29 @@ public sealed class SqlTypeReferenceResolverTests
         Assert.Equal("Latin1_General_CI_AS", type.Collation!.Name);
     }
 
+    private static DataTypeReference ParseColumnDataTypeWithDefaultParser(string dataTypeSql)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", $"CREATE TABLE dbo.T (Col {dataTypeSql});");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var script = (TSqlScript)result.Fragment;
+        var create = (CreateTableStatement)script.Batches[0].Statements[0];
+        return create.Definition.ColumnDefinitions[0].DataType;
+    }
+
+    [Fact]
+    public void Resolve_VectorColumn_ViaDefaultParser_ResolvesToVectorCategoryWithDimensionAsLength()
+    {
+        var dataType = ParseColumnDataTypeWithDefaultParser("VECTOR(3)");
+        Assert.IsType<VectorDataTypeReference>(dataType);
+
+        var type = SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null);
+
+        Assert.NotNull(type);
+        Assert.Equal(SqlTypeCategory.Vector, type!.Category);
+        Assert.Equal(3, type.Length);
+    }
+
     [Fact]
     public void Resolve_UnknownUserDataType_NoAliasesProvided_ReturnsNull()
     {

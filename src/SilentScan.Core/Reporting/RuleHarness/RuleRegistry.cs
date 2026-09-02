@@ -38,6 +38,8 @@ public static class RuleRegistry
         new RevertCookieTypeMismatchRule(),
         new ForXmlExplicitInlineXsdRule(),
         new OperandComparabilityRule(),
+        new VectorFunctionArgumentRule(),
+        new SchemaWithRejectedTypeRule(),
         new UnpivotExactTypeMismatchRule(),
         new SchemaboundAliasTypeRule(),
         new NativelyCompiledClrTypeRule(),

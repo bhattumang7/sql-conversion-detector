@@ -268,6 +268,20 @@ internal sealed class OperandComparabilityRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => OperandComparabilityScanner.Harvest((OperandComparabilityScanner.Rule)moduleRule);
 }
 
+internal sealed class VectorFunctionArgumentRule : IPerFileRule
+{
+    public string Id => "VectorFunctionArgumentScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => VectorFunctionArgumentScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => VectorFunctionArgumentScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => VectorFunctionArgumentScanner.Harvest((VectorFunctionArgumentScanner.Rule)moduleRule);
+}
+
+internal sealed class SchemaWithRejectedTypeRule : IPerFileRule
+{
+    public string Id => "SchemaWithRejectedTypeScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => SchemaWithRejectedTypeScanner.Scan(parseResult, context.Catalog);
+}
+
 internal sealed class UnpivotExactTypeMismatchRule : IPerFileRule
 {
     public string Id => "UnpivotExactTypeMismatchScanner";

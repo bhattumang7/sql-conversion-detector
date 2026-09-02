@@ -31,6 +31,11 @@ public static class SqlTypeReferenceResolver
             return new SqlType(SqlTypeCategory.Xml);
         }
 
+        if (dataType is VectorDataTypeReference vectorType)
+        {
+            return ResolveVectorDataTypeReference(vectorType);
+        }
+
         if (dataType is not SqlDataTypeReference sqlDataType)
         {
 
@@ -119,6 +124,15 @@ public static class SqlTypeReferenceResolver
     private static SqlType ResolveVector(SqlDataTypeReference sqlDataType)
     {
         var dimensions = sqlDataType.Parameters.Count > 0 && sqlDataType.Parameters[0] is IntegerLiteral d
+            ? int.Parse(d.Value, CultureInfo.InvariantCulture)
+            : (int?)null;
+
+        return new SqlType(SqlTypeCategory.Vector, Length: dimensions);
+    }
+
+    private static SqlType ResolveVectorDataTypeReference(VectorDataTypeReference vectorType)
+    {
+        var dimensions = vectorType.Dimension is { } d
             ? int.Parse(d.Value, CultureInfo.InvariantCulture)
             : (int?)null;
 

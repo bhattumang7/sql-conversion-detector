@@ -82,6 +82,20 @@ public static class FindingRuleIds
         OperandComparabilityFindingKind.Spatial => "silentscan/predicates/spatial-operand-not-comparable",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled OperandComparabilityFindingKind."),
     };
+    public static string VectorFunctionArgumentRuleId(VectorFunctionArgumentFindingKind kind) => kind switch
+    {
+        VectorFunctionArgumentFindingKind.NonVectorOperand => "silentscan/predicates/vector-function-non-vector-operand",
+        VectorFunctionArgumentFindingKind.DimensionMismatch => "silentscan/predicates/vector-function-dimension-mismatch",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled VectorFunctionArgumentFindingKind."),
+    };
+    public static string SchemaWithRejectedTypeRuleId(SchemaWithRejectedTypeKind kind) => kind switch
+    {
+        SchemaWithRejectedTypeKind.OpenXmlClrType => "silentscan/predicates/openxml-with-clr-type-rejected",
+        SchemaWithRejectedTypeKind.OpenRowsetLegacyType => "silentscan/predicates/openrowset-with-legacy-type-rejected",
+        SchemaWithRejectedTypeKind.OpenRowsetClrType => "silentscan/predicates/openrowset-with-clr-type-rejected",
+        SchemaWithRejectedTypeKind.OpenRowsetXml => "silentscan/predicates/openrowset-with-xml-rejected",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SchemaWithRejectedTypeKind."),
+    };
     public static string DropProtectedObjectRuleId(DropProtectedObjectKind kind) => kind switch
     {
         DropProtectedObjectKind.SchemaNotEmpty => "silentscan/catalog/drop-schema-not-empty",

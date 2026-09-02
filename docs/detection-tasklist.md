@@ -67,15 +67,6 @@ Competitor tools are referred to generically; real identities are in
         restrictions for local variable and parameter assignments.
         Encryption-state and legacy-LOB legs remain open.
 
-      27. `VECTOR_DISTANCE`-family calls with a large-object-typed operand
-        (SQL Server 2025 vector feature). **FINDING:** not tested this
-        pass, despite the 2025 container being available locally.
-
-      28. `OPENXML`/`OPENROWSET WITH` schema resolving a column to a type the
-        engine's fixed type gate rejects (`sql_variant`/spatial/legacy-LOB)
-        — one rule covering both clauses. **FINDING:** not tested this
-        pass.
-
       29. `EXECUTE AT DATA_SOURCE` (elastic query) with a large-object-typed
         parameter. **FINDING:** not tested this pass.
 

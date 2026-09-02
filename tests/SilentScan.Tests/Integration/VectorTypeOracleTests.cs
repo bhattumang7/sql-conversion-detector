@@ -1,6 +1,8 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
 using SilentScan.Core.TypeInference;
 using SilentScan.Verify;
@@ -77,5 +79,94 @@ public sealed class VectorTypeOracleTests : IAsyncLifetime
         var verdict = VerdictClassifier.Classify(vectorType, vectorType);
 
         Assert.Equal(Verdict.Unknown, verdict);
+    }
+
+    private static IReadOnlyList<VectorFunctionArgumentFinding> ScanVectorFunctionArguments(string sql)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return VectorFunctionArgumentScanner.Scan(result, new DatabaseCatalog());
+    }
+
+    [Fact]
+    public async Task VectorDistance_WithVarcharOperand_FailsToCompileWithMsg8116_AndScannerFlagsIt()
+    {
+        const string Sql = """
+            DECLARE @a VARCHAR(50) = '[1,2,3]';
+            DECLARE @b VECTOR(3) = CAST('[4,5,6]' AS VECTOR(3));
+            SELECT VECTOR_DISTANCE('cosine', @a, @b);
+            """;
+
+        await using var connection = new SqlConnection(Options.BuildConnectionString(_databaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = Sql;
+
+        var exception = await Assert.ThrowsAsync<SqlException>(() => command.ExecuteScalarAsync());
+        Assert.Equal(8116, exception.Number);
+
+        var finding = Assert.Single(ScanVectorFunctionArguments(Sql));
+        Assert.Equal(VectorFunctionArgumentFindingKind.NonVectorOperand, finding.Kind);
+        Assert.Equal("VECTOR_DISTANCE", finding.FunctionName);
+    }
+
+    [Fact]
+    public async Task VectorDistance_WithTwoVectorOperandsOfMatchingDimension_SucceedsAndScannerDoesNotFlagIt()
+    {
+        const string Sql = """
+            DECLARE @a VECTOR(3) = CAST('[1,2,3]' AS VECTOR(3));
+            DECLARE @b VECTOR(3) = CAST('[4,5,6]' AS VECTOR(3));
+            SELECT VECTOR_DISTANCE('cosine', @a, @b);
+            """;
+
+        await using var connection = new SqlConnection(Options.BuildConnectionString(_databaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = Sql;
+        await command.ExecuteScalarAsync();
+
+        Assert.Empty(ScanVectorFunctionArguments(Sql));
+    }
+
+    [Fact]
+    public async Task VectorDistance_WithMismatchedVectorDimensions_FailsAtExecutionWithMsg42204_AndScannerFlagsIt()
+    {
+        const string Sql = """
+            DECLARE @a VECTOR(3) = CAST('[1,2,3]' AS VECTOR(3));
+            DECLARE @b VECTOR(4) = CAST('[1,2,3,4]' AS VECTOR(4));
+            SELECT VECTOR_DISTANCE('cosine', @a, @b);
+            """;
+
+        await using var connection = new SqlConnection(Options.BuildConnectionString(_databaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = Sql;
+
+        var exception = await Assert.ThrowsAsync<SqlException>(() => command.ExecuteScalarAsync());
+        Assert.Equal(42204, exception.Number);
+
+        var finding = Assert.Single(ScanVectorFunctionArguments(Sql));
+        Assert.Equal(VectorFunctionArgumentFindingKind.DimensionMismatch, finding.Kind);
+    }
+
+    [Fact]
+    public async Task VectorProperty_WithNvarcharOperand_FailsToCompileWithMsg8116_AndScannerFlagsIt()
+    {
+        const string Sql = """
+            DECLARE @a NVARCHAR(50) = N'[1,2,3]';
+            SELECT VECTORPROPERTY(@a, 'Dimensions');
+            """;
+
+        await using var connection = new SqlConnection(Options.BuildConnectionString(_databaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = Sql;
+
+        var exception = await Assert.ThrowsAsync<SqlException>(() => command.ExecuteScalarAsync());
+        Assert.Equal(8116, exception.Number);
+
+        var finding = Assert.Single(ScanVectorFunctionArguments(Sql));
+        Assert.Equal(VectorFunctionArgumentFindingKind.NonVectorOperand, finding.Kind);
+        Assert.Equal("VECTORPROPERTY", finding.FunctionName);
     }
 }

@@ -173,6 +173,12 @@ public static class RuleDocCatalog
         [Predicates.LegacyLobOperandNotComparable.RuleId] = Predicates.LegacyLobOperandNotComparable.Content,
         [Predicates.JsonOperandNotComparable.RuleId] = Predicates.JsonOperandNotComparable.Content,
         [Predicates.SpatialOperandNotComparable.RuleId] = Predicates.SpatialOperandNotComparable.Content,
+        [Predicates.VectorFunctionNonVectorOperand.RuleId] = Predicates.VectorFunctionNonVectorOperand.Content,
+        [Predicates.VectorFunctionDimensionMismatch.RuleId] = Predicates.VectorFunctionDimensionMismatch.Content,
+        [Predicates.OpenXmlWithClrTypeRejected.RuleId] = Predicates.OpenXmlWithClrTypeRejected.Content,
+        [Predicates.OpenRowsetWithLegacyTypeRejected.RuleId] = Predicates.OpenRowsetWithLegacyTypeRejected.Content,
+        [Predicates.OpenRowsetWithClrTypeRejected.RuleId] = Predicates.OpenRowsetWithClrTypeRejected.Content,
+        [Predicates.OpenRowsetWithXmlRejected.RuleId] = Predicates.OpenRowsetWithXmlRejected.Content,
 
         [Catalog.UntrustedForeignKey.RuleId] = Catalog.UntrustedForeignKey.Content,
         [Catalog.UntrustedCheckConstraint.RuleId] = Catalog.UntrustedCheckConstraint.Content,

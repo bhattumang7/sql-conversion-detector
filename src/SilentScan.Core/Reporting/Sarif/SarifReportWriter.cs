@@ -123,6 +123,8 @@ public static class SarifReportWriter
         results.AddRange(report.Find<DropProtectedObjectFinding>("DropProtectedObjectScanner").Select(ToResult));
         results.AddRange(report.Find<OnlineRebuildLegacyLobFinding>("OnlineRebuildLegacyLobScanner").Select(ToResult));
         results.AddRange(report.Find<OperandComparabilityFinding>("OperandComparabilityScanner").Select(ToResult));
+        results.AddRange(report.Find<VectorFunctionArgumentFinding>(nameof(VectorFunctionArgumentScanner)).Select(ToResult));
+        results.AddRange(report.Find<SchemaWithRejectedTypeFinding>(nameof(SchemaWithRejectedTypeScanner)).Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>("MemoryOptimizedUnsupportedColumnTypeScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUtf8CollationFinding>("MemoryOptimizedUtf8CollationScanner").Select(ToResult));
         results.AddRange(report.Find<NativelyCompiledUnsupportedBuiltinFinding>("NativelyCompiledUnsupportedBuiltinScanner").Select(ToResult));
@@ -1708,6 +1710,25 @@ public static class SarifReportWriter
             _ => "used in a comparison",
         };
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TypeDisplay}) is {positionText} - the {typeLabel} data type is not comparable here; the statement does not compile.";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(VectorFunctionArgumentFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.VectorFunctionArgumentRuleId(finding.Kind), finding.Confidence);
+        var message = finding.Kind == VectorFunctionArgumentFindingKind.DimensionMismatch
+            ? $"{finding.FunctionName}'s two vector arguments declare different dimensions ({finding.TypeDisplay} vs {finding.OtherTypeDisplay}) - the vector dimensions do not match; the call fails at execution for every row (Msg 42204)."
+            : $"{finding.FunctionName}'s {finding.ArgumentDescription} is {finding.TypeDisplay}, not a VECTOR(n) value - the statement does not compile (Msg 8116).";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(SchemaWithRejectedTypeFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SchemaWithRejectedTypeRuleId(finding.Kind), finding.Confidence);
+        var clauseText = finding.Kind == SchemaWithRejectedTypeKind.OpenXmlClrType ? "OPENXML ... WITH" : "OPENROWSET(BULK ...) inline-schema WITH";
+        var message = $"{clauseText} schema column '{finding.ColumnName}' is declared {finding.TypeDisplay} - this clause's fixed type gate always rejects this type.";
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

@@ -180,6 +180,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(SparseColumnDisallowedType(report, headingLevel, pathBase));
         blocks.AddRange(LegacyLobUtf8Collation(report, headingLevel, pathBase));
         blocks.AddRange(OperandComparability(report, headingLevel, pathBase));
+        blocks.AddRange(VectorFunctionArgument(report, headingLevel, pathBase));
+        blocks.AddRange(SchemaWithRejectedType(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
         blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
         blocks.AddRange(TriggerCorrectness(report, headingLevel, pathBase));
@@ -298,6 +300,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "SPARSE column of a disallowed type", report.Find<SparseColumnDisallowedTypeFinding>(nameof(SparseColumnDisallowedTypeScanner)).Count);
         AddCount(counts, "TEXT/NTEXT column with a UTF-8 or supplementary-character-aware collation", report.Find<LegacyLobUtf8CollationFinding>(nameof(LegacyLobUtf8CollationScanner)).Count);
         AddCount(counts, "Operand not comparable (xml/json/legacy large object/spatial)", report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count);
+        AddCount(counts, "Vector function argument type errors", report.Find<VectorFunctionArgumentFinding>(nameof(VectorFunctionArgumentScanner)).Count);
+        AddCount(counts, "OPENXML/OPENROWSET WITH schema rejected column type", report.Find<SchemaWithRejectedTypeFinding>(nameof(SchemaWithRejectedTypeScanner)).Count);
         AddCount(counts, "Query anti-patterns", report.Find<QueryAntiPatternFinding>(nameof(QueryAntiPatternScanner)).Count);
         AddCount(counts, "Index-coverage shapes", report.Find<IndexCoverageFinding>(nameof(IndexCoverageScanner)).Count);
         AddCount(counts, "Trigger correctness", report.Find<TriggerCorrectnessFinding>(nameof(TriggerCorrectnessScanner)).Count);
@@ -2348,6 +2352,53 @@ public static class ReadableScanReportWriter
                     $"{f.Context}{(f.OperatorText is null ? "" : $" ({f.OperatorText})")} at line {f.Line}, column {f.Column}.",
                 })]);
         }
+    }
+
+    private static IEnumerable<ReadableBlock> VectorFunctionArgument(ScanReport report, int level, string? pathBase)
+    {
+        var findings = report.Find<VectorFunctionArgumentFinding>(nameof(VectorFunctionArgumentScanner));
+        if (findings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Vector function argument type errors ({findings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A VECTOR_DISTANCE/VECTOR_NORM/VECTORPROPERTY call's vector-position argument is not a VECTOR(n)-typed value, or VECTOR_DISTANCE's two vector arguments declare different dimensions - the statement never compiles or never succeeds at execution, regardless of the actual data.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Function", "Argument", "Type", DetailHeader],
+            [.. findings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.FunctionName,
+                f.ArgumentDescription,
+                f.OtherTypeDisplay is null ? f.TypeDisplay : $"{f.TypeDisplay} vs {f.OtherTypeDisplay}",
+                RuleDocSite.Url(SarifRuleCatalog.VectorFunctionArgumentRuleId(f.Kind)),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> SchemaWithRejectedType(ScanReport report, int level, string? pathBase)
+    {
+        var findings = report.Find<SchemaWithRejectedTypeFinding>(nameof(SchemaWithRejectedTypeScanner));
+        if (findings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"OPENXML/OPENROWSET WITH schema rejected column type ({findings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An OPENXML ... WITH or OPENROWSET(BULK ...) inline-schema WITH clause declares a column typed sql_variant, text/ntext/image, a CLR type (geometry/geography/hierarchyid), or (OPENROWSET only) xml - a type the engine's fixed type gate for that clause always rejects.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Type", DetailHeader],
+            [.. findings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ColumnName,
+                f.TypeDisplay,
+                RuleDocSite.Url(SarifRuleCatalog.SchemaWithRejectedTypeRuleId(f.Kind)),
+            })]);
     }
 
     private static IEnumerable<ReadableBlock> QueryAntiPattern(ScanReport report, int level, string? pathBase)
