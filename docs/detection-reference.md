@@ -590,6 +590,33 @@ WITH NATIVE_COMPILATION` module.
 
 ## Settled (do not re-propose)
 
+* **`JsonIndexRewriteEligibleRuleId` shipped — `JSON_VALUE(column, path) = value`
+  never seeks a JSON index (SQL Server 2025) even when one exists on the column;
+  only `JSON_CONTAINS(column, value, path) = 1` does.** Oracle-confirmed (Docker,
+  SQL Server 2025) via real plan XML on a 5000-row JSON-indexed table:
+  `JSON_VALUE(j,'$.a') = '2500'` compiles to a `Clustered Index Scan` regardless of
+  the JSON index, while `JSON_CONTAINS(j, 2500, '$.a') = 1` against the identical
+  table compiles to `Nested Loops` with `Clustered Index Seek` operators against
+  the JSON index by name. `JSON_CONTAINS`'s signature is `(json_expr, sql_scalar_value,
+  json_path)` — the value must be a native SQL-typed argument (an `int`/`nvarchar`
+  literal, variable, or parameter), not a JSON-encoded string; passing the value as
+  a quoted string (e.g. `'1'` instead of `1`) silently returns 0/false rather than
+  matching. Returns `NULL` when the path doesn't exist, `1`/`0` for match/no-match
+  otherwise. `CREATE JSON INDEX` requires the native `JSON` column type (rejects
+  `NVARCHAR(MAX)`) and `SET QUOTED_IDENTIFIER ON`. The rule fires on the
+  `JSON_VALUE(...) = value` shape (RETURNING clause or not — ScriptDom keeps the
+  RETURNING type out of `FunctionCall.Parameters`, so the 2-parameter match is
+  unaffected) when the column has a JSON index; it does not suppress the general
+  function-wrapped-column finding, since the predicate as written stays
+  non-sargable regardless. JSON indexes are tracked in `CatalogIndex` via a new
+  `IsJsonIndex` flag but deliberately excluded from every existing "usable index"
+  filter across `IndexCoverageScanner`, `CompositeIndexLeadingColumnScanner`,
+  `SecurityPredicateIndexScanner`, `TemporalTableHistoryIndexGapScanner`, and the
+  duplicate/subsumed-index, FK-leading-index, and partition-alignment checks in
+  `IndexDesignScanner` — a JSON index is not seekable via a plain equality
+  comparison on the column the way a B-tree index is, so treating it as one there
+  would misfire.
+
 * **`StringSplitArgumentRuleId` family broadened beyond separator length -
   argument-type validation and 3-argument-form engine-version gate shipped;
   the `REGEXP_*` MAX-argument fold-in stays killed.** Oracle-confirmed

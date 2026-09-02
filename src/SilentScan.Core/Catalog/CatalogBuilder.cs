@@ -524,6 +524,16 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
+        public override void ExplicitVisit(CreateJsonIndexStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                VisitCreateJsonIndex(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
         public override void ExplicitVisit(DeclareTableVariableStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
@@ -1212,6 +1222,27 @@ public static class CatalogBuilder
                 [.. createIndex.IncludeColumns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)],
                 IsFiltered: createIndex.FilterPredicate is not null,
                 IsClustered: createIndex.Clustered == true);
+
+            catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] }, writeScope);
+        }
+
+        private void VisitCreateJsonIndex(CreateJsonIndexStatement createIndex)
+        {
+            var qualifiedName = SchemaObjectNameHelper.Qualify(createIndex.OnName);
+            var (existing, writeScope) = catalog.FindForMutation(qualifiedName, _currentScope);
+            if (existing is null)
+            {
+                RecordUnresolvedTarget("CREATE JSON INDEX", qualifiedName, createIndex);
+                return;
+            }
+
+            var index = new CatalogIndex(
+                createIndex.Name?.Value,
+                CatalogIndexKind.Index,
+                IsUnique: false,
+                [createIndex.JsonColumn.Value],
+                IncludedColumns: [],
+                IsJsonIndex: true);
 
             catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] }, writeScope);
         }

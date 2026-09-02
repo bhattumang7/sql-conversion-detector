@@ -28,6 +28,7 @@ public static class TestScanReports
         IReadOnlyList<TvfCallArgumentMismatchFinding>? TvfCallArgumentMismatchFindings = null,
         IReadOnlyList<ProcCallTableValuedArgumentMismatchFinding>? ProcCallTableValuedArgumentMismatchFindings = null,
         IReadOnlyList<TemporalBoundaryPrecisionFinding>? TemporalBoundaryFindings = null,
+        IReadOnlyList<JsonIndexRewriteFinding>? JsonIndexRewriteFindings = null,
         IReadOnlyList<MaxTypedColumnFinding>? MaxTypedColumnFindings = null,
         IReadOnlyList<OversizedParameterFinding>? OversizedParameterFindings = null,
         IReadOnlyList<UnderLengthParameterFinding>? UnderLengthParameterFindings = null,
@@ -138,6 +139,7 @@ public static class TestScanReports
 
         Set("NonSargablePredicateScanner", Tier1Findings);
         Set("NonSargablePredicateScanner", TemporalBoundaryFindings);
+        Set("NonSargablePredicateScanner", JsonIndexRewriteFindings);
         Set("TypedPredicateExtractor", TypedFindings);
         Set("TypedPredicateExtractor", ExpressionDerivedFindings);
         Set("TypedPredicateExtractor", CollationConflictFindings);

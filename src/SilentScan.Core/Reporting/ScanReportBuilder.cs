@@ -88,7 +88,7 @@ public static class ScanReportBuilder
         var ruleResults = RuleHarness.RuleRunner.Run(RuleHarness.RuleRegistry.All, usableParseResults, ruleContext, minimumConfidence, progress);
         var ruleCrashes = ruleResults.Crashes;
 
-        List<(List<SargabilityFinding> Findings, List<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings, IReadOnlyList<SkippedConstruct> Skipped)> tier1PerFile;
+        List<(List<SargabilityFinding> Findings, List<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings, List<JsonIndexRewriteFinding> JsonIndexRewriteFindings, IReadOnlyList<SkippedConstruct> Skipped)> tier1PerFile;
         using (var tier1Stage = progress.Begin("scanning syntactic predicates", usableCount))
         {
             tier1PerFile = usableParseResults
@@ -97,14 +97,16 @@ public static class ScanReportBuilder
                 {
                     tier1Stage.Advance(currentItem: r.SourcePath);
                     var fileLedger = new SkipLedger();
-                    var (findings, temporalBoundaryFindings) = NonSargablePredicateScanner.ScanFull(r, catalog, lineage, ledger: fileLedger, callerScopeByCalleeScope: callerScopeByCalleeScope);
-                    return (Findings: findings.ToList(), TemporalBoundaryFindings: temporalBoundaryFindings.ToList(), Skipped: fileLedger.Entries);
+                    var (findings, temporalBoundaryFindings, jsonIndexRewriteFindings) = NonSargablePredicateScanner.ScanFull(r, catalog, lineage, ledger: fileLedger, callerScopeByCalleeScope: callerScopeByCalleeScope);
+                    return (Findings: findings.ToList(), TemporalBoundaryFindings: temporalBoundaryFindings.ToList(), JsonIndexRewriteFindings: jsonIndexRewriteFindings.ToList(), Skipped: fileLedger.Entries);
                 })
                 .ToList();
         }
 
         var tier1Findings = tier1PerFile.SelectMany(p => p.Findings).ToList();
         var temporalBoundaryFindings = tier1PerFile.SelectMany(p => p.TemporalBoundaryFindings)
+            .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
+        var jsonIndexRewriteFindings = tier1PerFile.SelectMany(p => p.JsonIndexRewriteFindings)
             .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
         var tier1SkippedEntries = tier1PerFile.SelectMany(p => p.Skipped).ToList();
         PhaseMemory.ReleaseBetweenPhases();
@@ -236,6 +238,7 @@ public static class ScanReportBuilder
             .ToList();
 
         temporalBoundaryFindings = [.. temporalBoundaryFindings.Where(f => f.Confidence <= minimumConfidence)];
+        jsonIndexRewriteFindings = [.. jsonIndexRewriteFindings.Where(f => f.Confidence <= minimumConfidence)];
         oversizedParameterFindings = [.. oversizedParameterFindings.Where(f => f.Confidence <= minimumConfidence)];
         underLengthParameterFindings = [.. underLengthParameterFindings.Where(f => f.Confidence <= minimumConfidence)];
         ansiPaddingMismatchFindings = [.. ansiPaddingMismatchFindings.Where(f => f.Confidence <= minimumConfidence)];
@@ -245,7 +248,7 @@ public static class ScanReportBuilder
 
         var findingsByRuleId = new Dictionary<string, IReadOnlyList<IFinding>>(ruleResults.AllFindings, StringComparer.Ordinal)
         {
-            ["NonSargablePredicateScanner"] = [.. tier1Findings, .. temporalBoundaryFindings],
+            ["NonSargablePredicateScanner"] = [.. tier1Findings, .. temporalBoundaryFindings, .. jsonIndexRewriteFindings],
             ["TypedPredicateExtractor"] = [
                 .. typedFindings, .. expressionDerivedFindings, .. collationConflictFindings, .. writeLossFindings,
                 .. oversizedParameterFindings, .. underLengthParameterFindings, .. ansiPaddingMismatchFindings,

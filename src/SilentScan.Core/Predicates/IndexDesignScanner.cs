@@ -166,7 +166,7 @@ public static class IndexDesignScanner
     private static void ScanDuplicateAndSubsumedIndexes(CatalogTable table, StringComparer identifierComparer, List<IndexDesignFinding> findings)
     {
         var candidates = table.Indexes
-            .Where(i => !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0)
+            .Where(i => !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && !i.IsJsonIndex && i.KeyColumns.Count > 0)
             .ToList();
 
         for (var i = 0; i < candidates.Count; i++)
@@ -282,7 +282,7 @@ public static class IndexDesignScanner
             var referencedTable = group.First().ReferencedTableQualifiedName;
 
             var hasLeadingIndex = parentTable.Indexes.Any(i =>
-                !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore
+                !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && !i.IsJsonIndex
                 && i.KeyColumns.Count >= fkColumns.Count
                 && i.KeyColumns.Take(fkColumns.Count).All(c => fkColumns.Contains(c)));
 
@@ -637,7 +637,7 @@ public static class IndexDesignScanner
 
         foreach (var index in table.Indexes)
         {
-            if (ReferenceEquals(index, clusteredIndex) || index.IsDisabled || index.IsColumnstore)
+            if (ReferenceEquals(index, clusteredIndex) || index.IsDisabled || index.IsColumnstore || index.IsJsonIndex)
             {
                 continue;
             }

@@ -63,7 +63,7 @@ public static class IndexCoverageScanner
             }
 
             var usableNonclusteredIndexes = table.Indexes
-                .Where(i => !i.IsFiltered && !i.IsColumnstore && !i.IsDisabled && !i.IsClustered && i.KeyColumns.Count > 0)
+                .Where(i => !i.IsFiltered && !i.IsColumnstore && !i.IsDisabled && !i.IsClustered && !i.IsJsonIndex && i.KeyColumns.Count > 0)
                 .ToList();
 
             var candidateIndexes = usableNonclusteredIndexes

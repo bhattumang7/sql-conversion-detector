@@ -25,7 +25,7 @@ public static class NonSargablePredicateScanner
         IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) =>
         ScanFull(parseResult, catalog, lineage, enclosingScope, ledger, callerScopeByCalleeScope).Findings;
 
-    public static (IReadOnlyList<SargabilityFinding> Findings, IReadOnlyList<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings) ScanFull(
+    public static (IReadOnlyList<SargabilityFinding> Findings, IReadOnlyList<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings, IReadOnlyList<JsonIndexRewriteFinding> JsonIndexRewriteFindings) ScanFull(
         SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, DynamicSqlScope? enclosingScope = null, SkipLedger? ledger = null,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
     {
@@ -40,7 +40,7 @@ public static class NonSargablePredicateScanner
         }
 
         parseResult.Fragment.Accept(walker);
-        return (rule.Findings, rule.TemporalBoundaryFindings);
+        return (rule.Findings, rule.TemporalBoundaryFindings, rule.JsonIndexRewriteFindings);
     }
 
     private sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
@@ -48,6 +48,8 @@ public static class NonSargablePredicateScanner
         public List<SargabilityFinding> Findings { get; } = [];
 
         public List<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings { get; } = [];
+
+        public List<JsonIndexRewriteFinding> JsonIndexRewriteFindings { get; } = [];
 
         public void OnEnterQuerySpecificationScope(QuerySpecification node, ScopeChain scopeChain, ModuleWalker walker) =>
             ModuleWalker.InspectAllPredicateLocations(node, scopeChain, (condition, chain) => InspectCondition(condition, chain, walker));
@@ -119,6 +121,41 @@ public static class NonSargablePredicateScanner
             {
                 InspectSide(node.SecondExpression, scopeChain, walker);
             }
+
+            TryAddJsonIndexRewriteFinding(node.FirstExpression, node.ComparisonType, scopeChain, walker);
+            TryAddJsonIndexRewriteFinding(node.SecondExpression, node.ComparisonType, scopeChain, walker);
+        }
+
+        private void TryAddJsonIndexRewriteFinding(ScalarExpression side, BooleanComparisonType comparisonType, ScopeChain scopeChain, ModuleWalker walker)
+        {
+            if (comparisonType != BooleanComparisonType.Equals)
+            {
+                return;
+            }
+
+            while (side is ParenthesisExpression parenthesized)
+            {
+                side = parenthesized.Expression;
+            }
+
+            if (side is not FunctionCall { Parameters: [ColumnReferenceExpression columnRef, StringLiteral pathLiteral] } functionCall
+                || !JsonComputedColumnMatcher.IsJsonValueFunction(functionCall.FunctionName.Value)
+                || ColumnName(columnRef) is not { } columnName)
+            {
+                return;
+            }
+
+            var (tableQualifiedName, _, _) = ResolveIndexInfo(columnRef, scopeChain, walker);
+            if (tableQualifiedName is not { } table
+                || catalog.Find(table, walker.CurrentProcScope) is not { } catalogTable
+                || !catalogTable.HasJsonIndex(columnName, catalog.IdentifierComparer))
+            {
+                return;
+            }
+
+            JsonIndexRewriteFindings.Add(new JsonIndexRewriteFinding(
+                table, columnName, pathLiteral.Value, Common.FragmentTextRenderer.Render(functionCall),
+                sourcePath, functionCall.StartLine, functionCall.StartColumn));
         }
 
         private void InspectTernary(BooleanTernaryExpression node, ScopeChain scopeChain, ModuleWalker walker)

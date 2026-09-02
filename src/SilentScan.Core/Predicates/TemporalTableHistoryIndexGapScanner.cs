@@ -41,7 +41,7 @@ public static class TemporalTableHistoryIndexGapScanner
     }
 
     private static bool IsComparableIndex(CatalogIndex index) =>
-        index.Kind == CatalogIndexKind.Index && !index.IsFiltered && !index.IsColumnstore && !index.IsDisabled
+        index.Kind == CatalogIndexKind.Index && !index.IsFiltered && !index.IsColumnstore && !index.IsDisabled && !index.IsJsonIndex
         && index.KeyColumns.Count > 0;
 
     private static bool SameKeyColumns(CatalogIndex current, CatalogIndex candidate, StringComparer identifierComparer) =>

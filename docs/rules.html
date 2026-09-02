@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">350 rules. 261 carry fix guidance; 37 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">351 rules. 262 carry fix guidance; 38 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>backup</h2>
@@ -372,6 +372,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
   <section class="family-section">
     <h2>index</h2>
     <ul class="rule-list">
+      <li><a class="id" href="rules/index-json-contains-rewrite-eligible.html">Json Contains Rewrite Eligible</a> <code class="rule-key">silentscan/index/json-contains-rewrite-eligible</code><span class="snippet">An equality predicate compares JSON_VALUE(column, path) against a value on a column that has a JSON index (SQL Server 2025), which stays a Clustered Index Scan.</span></li>
       <li><a class="id" href="rules/index-key-lookup-prone.html">Key Lookup Prone</a> <code class="rule-key">silentscan/index/key-lookup-prone</code><span class="snippet">A WHERE-equality seek against a table&#x27;s own single candidate nonclustered index does not cover every other column the statement references on that table.</span></li>
     </ul>
   </section>

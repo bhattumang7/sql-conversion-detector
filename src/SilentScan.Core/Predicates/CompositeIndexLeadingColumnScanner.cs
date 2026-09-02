@@ -56,7 +56,7 @@ public static class CompositeIndexLeadingColumnScanner
             HashSet<(string Table, string Column)> anyReferencedColumns,
             TSqlFragment node)
         {
-            var usableIndexes = table.Indexes.Where(i => !i.IsFiltered && !i.IsColumnstore && !i.IsDisabled && i.KeyColumns.Count > 0).ToList();
+            var usableIndexes = table.Indexes.Where(i => !i.IsFiltered && !i.IsColumnstore && !i.IsDisabled && !i.IsJsonIndex && i.KeyColumns.Count > 0).ToList();
 
             foreach (var index in usableIndexes.Where(i => i.KeyColumns.Count >= 2))
             {

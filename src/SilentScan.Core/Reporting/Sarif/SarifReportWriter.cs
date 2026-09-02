@@ -45,6 +45,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<ProcCallTableValuedArgumentMismatchFinding>("ProcCallTableValuedArgumentMismatchScanner").Select(ToResult));
         results.AddRange(report.Find<SpExecuteSqlParameterMismatchFinding>("SpExecuteSqlParameterMismatchScanner").Select(ToResult));
         results.AddRange(report.Find<TemporalBoundaryPrecisionFinding>("NonSargablePredicateScanner").Select(ToResult));
+        results.AddRange(report.Find<JsonIndexRewriteFinding>("NonSargablePredicateScanner").Select(ToResult));
         results.AddRange(report.Find<MaxTypedColumnFinding>("MaxTypedColumnScanner").Select(ToResult));
         results.AddRange(report.Find<ColumnstoreUnsupportedColumnTypeFinding>("ColumnstoreUnsupportedColumnTypeScanner").Select(ToResult));
         results.AddRange(report.Find<SelectiveXmlIndexValueColumnFinding>("SelectiveXmlIndexValueColumnScanner").Select(ToResult));
@@ -400,6 +401,16 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TemporalBoundaryPrecisionRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (scale {finding.ColumnScale}) is compared with BETWEEN against upper bound '{finding.BoundaryLiteralText}' ({finding.BoundaryLiteralFractionalDigits} fractional digit(s)) - rows in the precision gap are silently excluded. Rewrite as >= start AND < (start of the next period).";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(JsonIndexRewriteFinding finding)
+    {
+
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.JsonIndexRewriteEligibleRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+        var message = $"JSON_VALUE({finding.ColumnName}, '{finding.JsonPath}') = ... stays a scan even though '{finding.TableQualifiedName}.{finding.ColumnName}' has a JSON index - rewrite as JSON_CONTAINS({finding.ColumnName}, value, '{finding.JsonPath}') = 1 so the JSON index is seekable.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

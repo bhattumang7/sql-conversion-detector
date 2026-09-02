@@ -67,14 +67,6 @@ Competitor tools are referred to generically; real identities are in
         restrictions for local variable and parameter assignments.
         Encryption-state and legacy-LOB legs remain open.
 
-      18. New family (SQL Server 2025): `JSON_VALUE(...RETURNING...)`/
-        `JSON_CONTAINS` exact-match predicate shapes eligible for a JSON
-        index rewrite — the JSON-index sargability counterpart to the
-        shipped `IndexCoverageKeyLookupProneIndexRuleId` family; needs an
-        oracle matrix for what "exact match" precisely means on a brand-new
-        feature. **FINDING:** not tested this pass, despite the 2025
-        container being available locally.
-
       20. Broaden the float-non-determinism family (aggregate argument,
         already written up) to float-typed arithmetic operands generally
         and float constants in precision-sensitive expressions — likely one

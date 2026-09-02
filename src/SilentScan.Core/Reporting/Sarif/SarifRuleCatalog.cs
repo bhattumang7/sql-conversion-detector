@@ -35,6 +35,7 @@ public static class SarifRuleCatalog
     public const string ProcCallTableValuedArgumentMismatchRuleId = FindingRuleIds.ProcCallTableValuedArgumentMismatchRuleId;
     public const string SpExecuteSqlParameterMismatchRuleId = FindingRuleIds.SpExecuteSqlParameterMismatchRuleId;
     public const string TemporalBoundaryPrecisionRuleId = FindingRuleIds.TemporalBoundaryPrecisionRuleId;
+    public const string JsonIndexRewriteEligibleRuleId = FindingRuleIds.JsonIndexRewriteEligibleRuleId;
     public static string MaxTypedColumnRuleId(NonIndexableColumnFindingKind kind) => FindingRuleIds.MaxTypedColumnRuleId(kind);
     public const string ColumnstoreUnsupportedColumnTypeRuleId = FindingRuleIds.ColumnstoreUnsupportedColumnTypeRuleId;
     public static string SelectiveXmlIndexValueColumnRuleId(SelectiveXmlIndexValueColumnFindingKind kind) => FindingRuleIds.SelectiveXmlIndexValueColumnRuleId(kind);

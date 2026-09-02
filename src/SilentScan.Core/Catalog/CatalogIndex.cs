@@ -19,6 +19,7 @@ public sealed record CatalogIndex(
     bool IgnoreDupKey = false,
     bool IsXmlIndex = false,
     bool IsSpatialIndex = false,
+    bool IsJsonIndex = false,
     bool AllowRowLocks = true,
     bool AllowPageLocks = true)
 {

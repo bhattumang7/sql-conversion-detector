@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Json Contains Rewrite Eligible - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Json Contains Rewrite Eligible</h1>
+  <p class="rule-key"><code>silentscan/index/json-contains-rewrite-eligible</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">An equality predicate compares JSON_VALUE(column, path) against a value on a column that has a JSON index (SQL Server 2025), which stays a Clustered Index Scan - oracle-confirmed via real plan XML that only the JSON_CONTAINS(column, value, path) = 1 form seeks the JSON index.</p>
+  <p class="rationale">SQL Server 2025 adds a native `JSON` data type and `CREATE JSON INDEX`, backed by an internal table the optimizer can seek. But that index is only reachable through `JSON_CONTAINS(column, value, path)` - it does not make `JSON_VALUE(column, path) = value` itself seekable, because `JSON_VALUE` wraps the column in a function call like any other non-sargable predicate. Oracle-confirmed directly against a real 2025 engine: on a JSON column with a JSON index and thousands of rows, `WHERE JSON_VALUE(j,&#x27;$.a&#x27;) = &#x27;2500&#x27;` still produces a `Clustered Index Scan`, while `WHERE JSON_CONTAINS(j, 2500, &#x27;$.a&#x27;) = 1` against the identical table produces a `Nested Loops` plan with `Clustered Index Seek` operators against the JSON index by name.</p>
+  <p class="rationale">This rule fires when an equality predicate compares `JSON_VALUE(column, path)` against a value and that column has a JSON index - the predicate as written stays non-sargable (the general function-wrapped-column rule already flags that), but the JSON index makes a specific rewrite available that a plain function-wrapped-column finding can&#x27;t suggest.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Rewrite `JSON_VALUE(column, path) = value` as `JSON_CONTAINS(column, value, path) = 1` so the predicate seeks the JSON index instead of scanning the table.</p>
+  <h3>An equality comparison against JSON_VALUE on a JSON-indexed column</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Orders&#xA;(&#xA;    Id      INT NOT NULL PRIMARY KEY,&#xA;    Payload JSON NOT NULL&#xA;);&#xA;CREATE JSON INDEX IX_Orders_Payload ON dbo.Orders(Payload);&#xA;&#xA;SELECT Id&#xA;FROM dbo.Orders&#xA;WHERE JSON_VALUE(Payload, &#x27;$.status&#x27;) = &#x27;shipped&#x27;;</code></pre></div>
+  <p class="example-explanation">Payload has a JSON index, but JSON_VALUE(Payload, &#x27;$.status&#x27;) wraps the column in a function call, so the comparison still scans dbo.Orders.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT Id&#xA;FROM dbo.Orders&#xA;WHERE JSON_CONTAINS(Payload, &#x27;shipped&#x27;, &#x27;$.status&#x27;) = 1;</code></pre></div>
+  <p class="example-explanation">JSON_CONTAINS is the form the optimizer can seek the JSON index with - the comparison is no longer a function wrapped around the column.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/JSON_INDEX_REWRITE_ELIGIBLE_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Oracle-confirmed against a real SQL Server 2025 engine: with a JSON index on Payload,&#xA;-- JSON_VALUE(Payload, &#x27;$.status&#x27;) = &#x27;shipped&#x27; still produces a Clustered Index Scan, while&#xA;-- JSON_CONTAINS(Payload, &#x27;shipped&#x27;, &#x27;$.status&#x27;) = 1 against the identical table seeks the&#xA;-- JSON index instead.&#xA;CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId INT NOT NULL PRIMARY KEY,&#xA;    Payload JSON NOT NULL&#xA;);&#xA;CREATE JSON INDEX IX_Orders_Payload ON dbo.Orders(Payload);&#xA;GO&#xA;&#xA;SELECT OrderId&#xA;FROM dbo.Orders&#xA;WHERE JSON_VALUE(Payload, &#x27;$.status&#x27;) = &#x27;shipped&#x27;;</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

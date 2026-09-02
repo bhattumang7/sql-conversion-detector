@@ -60,7 +60,7 @@ public static class SecurityPredicateIndexScanner
         }
 
         var hasSupportingIndex = table.Indexes.Any(i =>
-            !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0
+            !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && !i.IsJsonIndex && i.KeyColumns.Count > 0
             && boundColumns.Contains(i.KeyColumns[0], catalog.IdentifierComparer));
 
         if (hasSupportingIndex)

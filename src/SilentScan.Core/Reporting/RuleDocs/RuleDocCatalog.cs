@@ -39,6 +39,7 @@ public static class RuleDocCatalog
         [Join.OuterJoinPredicateCollapse.RuleId] = Join.OuterJoinPredicateCollapse.Content,
         [Dml.SelfReferencingDml.RuleId] = Dml.SelfReferencingDml.Content,
         [Index.KeyLookupProneIndex.RuleId] = Index.KeyLookupProneIndex.Content,
+        [Index.JsonIndexRewriteEligible.RuleId] = Index.JsonIndexRewriteEligible.Content,
         [Predicate.StringConcatNull.RuleId] = Predicate.StringConcatNull.Content,
 
         [Naming.ReservedKeywordAsIdentifier.RuleId] = Naming.ReservedKeywordAsIdentifier.Content,
