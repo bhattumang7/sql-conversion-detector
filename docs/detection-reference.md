@@ -1628,3 +1628,34 @@ WITH NATIVE_COMPILATION` module.
   one finding type with a `Kind` per (clause, rejected-type-category) pair
   covering only the combinations oracle-confirmed as a fixed, unconditional
   reject.
+
+* **`ExecuteAtLargeObjectParameterRuleId` shipped, broader than the original
+  `EXECUTE AT DATA_SOURCE`-only item.** ScriptDom (every pinned version, up
+  to 180.102.0) cannot parse the elastic-query `AT DATA_SOURCE
+  data_source_name` clause at all - it is not a distinguishable AST shape,
+  so the rule instead targets `EXECUTE ('...', @param, ...) AT
+  linked_server_name`, the syntactically parseable sibling form - oracle
+  probing confirmed both forms share the identical underlying
+  remote-parameter-exchange restriction, reproducing the same crash directly
+  against a real `DATA_SOURCE` target as well as against a linked server.
+  Oracle-confirmed (Docker, SQL Server 2022 and 2025):
+  each comma-separated value after the command-text string becomes a
+  remote-call parameter, independent of the command text's own type -
+  passing a `VARCHAR(MAX)`/`NVARCHAR(MAX)`/`VARBINARY(MAX)`-typed local
+  variable or parameter at one of those positions does not produce a clean
+  error, it kills the connection with an internal engine assertion failure
+  ("pilb->m_cRef == 0", memilb.cpp) instead - reproduced identically whether
+  the remote target is a real linked server or an external data source, and
+  regardless of whether the remote call would otherwise have succeeded (the
+  crash was observed even after the remote query had already returned rows).
+  A same-position `xml`-typed value is instead rejected cleanly with Msg
+  9512 ("Xml data type is not supported as a parameter to remote calls").
+  Fixed-length types (e.g. `NVARCHAR(100)`) and `INT` at the same position
+  are unaffected. A single MAX-typed command-text argument with no
+  additional parameters does not trigger the crash - only the additional,
+  comma-separated parameter positions do. Shipped as one finding family with
+  two kinds: `CrashesSession` and `XmlRejected`. The crash is an
+  unrecoverable native fault, not a catchable `SqlException`, so the
+  integration test that reproduces it runs `sqlcmd` out-of-process (via
+  `docker exec`) rather than through `Microsoft.Data.SqlClient` in-process,
+  since triggering it through the ADO.NET client aborts the .NET CLR itself.

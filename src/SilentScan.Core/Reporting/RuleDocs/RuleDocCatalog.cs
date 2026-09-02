@@ -179,6 +179,8 @@ public static class RuleDocCatalog
         [Predicates.OpenRowsetWithLegacyTypeRejected.RuleId] = Predicates.OpenRowsetWithLegacyTypeRejected.Content,
         [Predicates.OpenRowsetWithClrTypeRejected.RuleId] = Predicates.OpenRowsetWithClrTypeRejected.Content,
         [Predicates.OpenRowsetWithXmlRejected.RuleId] = Predicates.OpenRowsetWithXmlRejected.Content,
+        [Predicates.ExecuteAtLargeObjectParameterCrashesSession.RuleId] = Predicates.ExecuteAtLargeObjectParameterCrashesSession.Content,
+        [Predicates.ExecuteAtXmlParameterRejected.RuleId] = Predicates.ExecuteAtXmlParameterRejected.Content,
 
         [Catalog.UntrustedForeignKey.RuleId] = Catalog.UntrustedForeignKey.Content,
         [Catalog.UntrustedCheckConstraint.RuleId] = Catalog.UntrustedCheckConstraint.Content,

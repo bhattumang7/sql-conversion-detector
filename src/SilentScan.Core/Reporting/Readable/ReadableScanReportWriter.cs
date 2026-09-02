@@ -182,6 +182,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(OperandComparability(report, headingLevel, pathBase));
         blocks.AddRange(VectorFunctionArgument(report, headingLevel, pathBase));
         blocks.AddRange(SchemaWithRejectedType(report, headingLevel, pathBase));
+        blocks.AddRange(ExecuteAtLargeObjectParameter(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
         blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
         blocks.AddRange(TriggerCorrectness(report, headingLevel, pathBase));
@@ -302,6 +303,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Operand not comparable (xml/json/legacy large object/spatial)", report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count);
         AddCount(counts, "Vector function argument type errors", report.Find<VectorFunctionArgumentFinding>(nameof(VectorFunctionArgumentScanner)).Count);
         AddCount(counts, "OPENXML/OPENROWSET WITH schema rejected column type", report.Find<SchemaWithRejectedTypeFinding>(nameof(SchemaWithRejectedTypeScanner)).Count);
+        AddCount(counts, "EXECUTE (...) AT large-object/xml parameter", report.Find<ExecuteAtLargeObjectParameterFinding>(nameof(ExecuteAtLargeObjectParameterScanner)).Count);
         AddCount(counts, "Query anti-patterns", report.Find<QueryAntiPatternFinding>(nameof(QueryAntiPatternScanner)).Count);
         AddCount(counts, "Index-coverage shapes", report.Find<IndexCoverageFinding>(nameof(IndexCoverageScanner)).Count);
         AddCount(counts, "Trigger correctness", report.Find<TriggerCorrectnessFinding>(nameof(TriggerCorrectnessScanner)).Count);
@@ -2398,6 +2400,29 @@ public static class ReadableScanReportWriter
                 f.ColumnName,
                 f.TypeDisplay,
                 RuleDocSite.Url(SarifRuleCatalog.SchemaWithRejectedTypeRuleId(f.Kind)),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ExecuteAtLargeObjectParameter(ScanReport report, int level, string? pathBase)
+    {
+        var findings = report.Find<ExecuteAtLargeObjectParameterFinding>(nameof(ExecuteAtLargeObjectParameterScanner));
+        if (findings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"EXECUTE (...) AT large-object/xml parameter ({findings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An EXECUTE ('...', @param, ...) AT linked_server/data_source call passes a VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) or xml-typed local variable or parameter as one of the remote call's arguments. A large-object-typed value there crashes the connection with an internal engine assertion failure rather than a clean error; an xml-typed value is rejected outright (Msg 9512, \"Xml data type is not supported as a parameter to remote calls\").");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ParameterHeader, "Type", DetailHeader],
+            [.. findings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"@{f.VariableName}",
+                f.TypeDisplay,
+                RuleDocSite.Url(SarifRuleCatalog.ExecuteAtLargeObjectParameterRuleId(f.Kind)),
             })]);
     }
 

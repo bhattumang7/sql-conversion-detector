@@ -67,9 +67,6 @@ Competitor tools are referred to generically; real identities are in
         restrictions for local variable and parameter assignments.
         Encryption-state and legacy-LOB legs remain open.
 
-      29. `EXECUTE AT DATA_SOURCE` (elastic query) with a large-object-typed
-        parameter. **FINDING:** not tested this pass.
-
       30. Informational, database-configuration tier: an active
         `sys.plan_guides` row whose hints alter optimization/parameterization
         for in-scope application SQL. **FINDING:** not tested this pass.

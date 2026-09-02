@@ -96,6 +96,12 @@ public static class FindingRuleIds
         SchemaWithRejectedTypeKind.OpenRowsetXml => "silentscan/predicates/openrowset-with-xml-rejected",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SchemaWithRejectedTypeKind."),
     };
+    public static string ExecuteAtLargeObjectParameterRuleId(ExecuteAtLargeObjectParameterFindingKind kind) => kind switch
+    {
+        ExecuteAtLargeObjectParameterFindingKind.CrashesSession => "silentscan/predicates/execute-at-large-object-parameter-crashes-session",
+        ExecuteAtLargeObjectParameterFindingKind.XmlRejected => "silentscan/predicates/execute-at-xml-parameter-rejected",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled ExecuteAtLargeObjectParameterFindingKind."),
+    };
     public static string DropProtectedObjectRuleId(DropProtectedObjectKind kind) => kind switch
     {
         DropProtectedObjectKind.SchemaNotEmpty => "silentscan/catalog/drop-schema-not-empty",

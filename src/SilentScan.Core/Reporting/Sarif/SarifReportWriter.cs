@@ -125,6 +125,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<OperandComparabilityFinding>("OperandComparabilityScanner").Select(ToResult));
         results.AddRange(report.Find<VectorFunctionArgumentFinding>(nameof(VectorFunctionArgumentScanner)).Select(ToResult));
         results.AddRange(report.Find<SchemaWithRejectedTypeFinding>(nameof(SchemaWithRejectedTypeScanner)).Select(ToResult));
+        results.AddRange(report.Find<ExecuteAtLargeObjectParameterFinding>(nameof(ExecuteAtLargeObjectParameterScanner)).Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>("MemoryOptimizedUnsupportedColumnTypeScanner").Select(ToResult));
         results.AddRange(report.Find<MemoryOptimizedUtf8CollationFinding>("MemoryOptimizedUtf8CollationScanner").Select(ToResult));
         results.AddRange(report.Find<NativelyCompiledUnsupportedBuiltinFinding>("NativelyCompiledUnsupportedBuiltinScanner").Select(ToResult));
@@ -1729,6 +1730,16 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SchemaWithRejectedTypeRuleId(finding.Kind), finding.Confidence);
         var clauseText = finding.Kind == SchemaWithRejectedTypeKind.OpenXmlClrType ? "OPENXML ... WITH" : "OPENROWSET(BULK ...) inline-schema WITH";
         var message = $"{clauseText} schema column '{finding.ColumnName}' is declared {finding.TypeDisplay} - this clause's fixed type gate always rejects this type.";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(ExecuteAtLargeObjectParameterFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ExecuteAtLargeObjectParameterRuleId(finding.Kind), finding.Confidence);
+        var message = finding.Kind == ExecuteAtLargeObjectParameterFindingKind.CrashesSession
+            ? $"Parameter @{finding.VariableName} ({finding.TypeDisplay}) is passed to EXECUTE (...) AT - a large-object-typed parameter here crashes the connection with an internal assertion failure (Msg 3624), not a clean error."
+            : $"Parameter @{finding.VariableName} ({finding.TypeDisplay}) is passed to EXECUTE (...) AT - the xml data type is not supported as a parameter to remote calls (Msg 9512).";
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
