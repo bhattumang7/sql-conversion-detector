@@ -31,6 +31,7 @@ public static class SarifRuleCatalog
     public const string ColumnAnsiPaddingOffRuleId = FindingRuleIds.ColumnAnsiPaddingOffRuleId;
     public const string CrossTableTypeDriftRuleId = FindingRuleIds.CrossTableTypeDriftRuleId;
     public const string ProcCallArgumentMismatchRuleId = FindingRuleIds.ProcCallArgumentMismatchRuleId;
+    public const string TvfCallArgumentMismatchRuleId = FindingRuleIds.TvfCallArgumentMismatchRuleId;
     public const string ProcCallTableValuedArgumentMismatchRuleId = FindingRuleIds.ProcCallTableValuedArgumentMismatchRuleId;
     public const string SpExecuteSqlParameterMismatchRuleId = FindingRuleIds.SpExecuteSqlParameterMismatchRuleId;
     public const string TemporalBoundaryPrecisionRuleId = FindingRuleIds.TemporalBoundaryPrecisionRuleId;

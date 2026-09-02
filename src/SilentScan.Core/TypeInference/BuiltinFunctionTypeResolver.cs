@@ -168,4 +168,24 @@ public static class BuiltinFunctionTypeResolver
 
     public static SqlType? ResolveGlobalVariable(string name) =>
         GlobalVariableTypes.GetValueOrDefault(name);
+
+    public static SqlType? ResolveStringAggResult(SqlType? valueType)
+    {
+        if (valueType is not { IsStringFamily: true })
+        {
+            return null;
+        }
+
+        var category = DemoteFixedWidthCategory(valueType).Category;
+        if (valueType.IsMax)
+        {
+            return new SqlType(category, IsMax: true, Collation: valueType.Collation);
+        }
+
+        var cap = category is SqlTypeCategory.NChar or SqlTypeCategory.NVarChar ? UnicodeAggCapChars : NonUnicodeAggCapChars;
+        return new SqlType(category, Length: cap, Collation: valueType.Collation);
+    }
+
+    private const int NonUnicodeAggCapChars = 8000;
+    private const int UnicodeAggCapChars = 4000;
 }

@@ -79,6 +79,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(CrossTableTypeDrift(report, headingLevel, pathBase));
         blocks.AddRange(TriggerOrder(report, headingLevel, pathBase));
         blocks.AddRange(ProcCallArgumentMismatch(report, headingLevel, pathBase));
+        blocks.AddRange(TvfCallArgumentMismatch(report, headingLevel, pathBase));
         blocks.AddRange(ProcCallTableValuedArgumentMismatch(report, headingLevel, pathBase));
         blocks.AddRange(SpExecuteSqlParameterMismatch(report, headingLevel, pathBase));
         blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
@@ -224,6 +225,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Foreign-key column pairs whose types/collations drift", report.Find<CrossTableTypeDriftFinding>(nameof(CrossTableTypeDriftScanner)).Count);
         AddCount(counts, "Tables with undefined AFTER trigger firing order", report.Find<TriggerOrderFinding>(nameof(TriggerOrderScanner)).Count);
         AddCount(counts, "EXEC call-site arguments risking silent data loss at the parameter boundary", report.Find<ProcCallArgumentMismatchFinding>(nameof(ProcCallArgumentMismatchScanner)).Count);
+        AddCount(counts, "Inline TVF call-site arguments risking silent data loss at the parameter boundary", report.Find<TvfCallArgumentMismatchFinding>(nameof(TvfCallArgumentMismatchScanner)).Count);
         AddCount(counts, "EXEC call-site table-valued parameter columns risking silent data loss when their caller-side table variable was populated", report.Find<ProcCallTableValuedArgumentMismatchFinding>(nameof(ProcCallTableValuedArgumentMismatchScanner)).Count);
         AddCount(counts, "sp_executesql call-site arguments risking silent data loss against their own declared parameter type", report.Find<SpExecuteSqlParameterMismatchFinding>(nameof(SpExecuteSqlParameterMismatchScanner)).Count);
         AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.Find<TemporalBoundaryPrecisionFinding>(nameof(NonSargablePredicateScanner)).Count);
@@ -761,6 +763,32 @@ public static class ReadableScanReportWriter
                 f.CalleeQualifiedName,
                 f.FormalParameterName,
                 f.IsOutputWriteback ? "OUTPUT writeback (callee -> caller)" : "input (caller -> callee)",
+                f.CallerExpressionDisplay,
+                f.CallerTypeDisplay,
+                f.FormalParameterTypeDisplay,
+                DescribeWriteLossKind(f.Kind),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> TvfCallArgumentMismatch(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<TvfCallArgumentMismatchFinding>(nameof(TvfCallArgumentMismatchScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Inline TVF call-site argument mismatches ({report.Find<TvfCallArgumentMismatchFinding>(nameof(TvfCallArgumentMismatchScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A real FROM/APPLY call site invoking an inline table-valued function has a silent narrowing conversion at parameter marshalling, not a predicate - an assignment-shaped conversion, classified the same way an INSERT/UPDATE assignment's silent data loss is, applied to an inline TVF's own parameter boundary the same way it already applies to a stored procedure's EXEC call site.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TvfCallArgumentMismatchRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Callee", ParameterHeader, "Caller-side expression", "Caller type", "Parameter type", "Risk"],
+            [.. report.Find<TvfCallArgumentMismatchFinding>(nameof(TvfCallArgumentMismatchScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.CalleeQualifiedName,
+                f.FormalParameterName,
                 f.CallerExpressionDisplay,
                 f.CallerTypeDisplay,
                 f.FormalParameterTypeDisplay,

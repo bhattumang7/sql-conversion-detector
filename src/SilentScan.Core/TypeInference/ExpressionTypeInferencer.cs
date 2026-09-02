@@ -48,6 +48,12 @@ public static class ExpressionTypeInferencer
     private static SqlType? ResolveBuiltinCall(
         string name, IList<ScalarExpression> parameters, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases)
     {
+        if (string.Equals(name, "STRING_AGG", StringComparison.OrdinalIgnoreCase) && parameters.Count == 2)
+        {
+            var valueType = Resolve(parameters[0], resolveLeaf, typeAliases);
+            return BuiltinFunctionTypeResolver.ResolveStringAggResult(valueType);
+        }
+
         if (BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && parameters.Count > argumentIndex)
         {
             var argumentType = Resolve(parameters[argumentIndex], resolveLeaf, typeAliases);

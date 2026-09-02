@@ -197,16 +197,6 @@ Competitor tools are referred to generically; real identities are in
         legacy LOB column (matches a real engine-emitted warning).
         **FINDING:** not tested this pass.
 
-      36. `ProcCallArgumentMismatchRuleId` sibling: a streaming/inline TVF's
-        own parameter boundary needing an implicit conversion, the same
-        silent-marshalling family applied to a different call-site kind.
-        **FINDING: confirmed real and silent.** An inline TVF declared
-        `(@p varchar(3))` called as `dbo.probe_itvf('hello')` returns
-        `'hel'` — the 5-char literal is silently truncated to the
-        parameter's declared width with no error, same shape as the
-        shipped forward-direction proc-call rule and as item 5's OUTPUT
-        finding.
-
       37. `SessionDateSettingRuleId(DateFormat)` may be scoped too narrowly:
         the shipped rule only fires when the module's own body contains an
         explicit `SET DATEFORMAT`, but an ambiguous string-to-date
@@ -225,18 +215,6 @@ Competitor tools are referred to generically; real identities are in
         `SET DATEFORMAT` — is too narrow; any ambiguous `mm/dd`-vs-`dd/mm`
         date literal is at risk regardless of whether `SET DATEFORMAT`
         appears anywhere.
-
-      38. Fold into the bounded-string-builtins family already written up:
-        `STRING_AGG`'s result type is capped at `VARCHAR(8000)`/
-        `NVARCHAR(4000)` when none of its operands are MAX-typed, regardless
-        of row count — a structural type-level fact, not row-count-dependent.
-        **FINDING: confirmed real, both legs.** `sys.dm_exec_describe_first_result_set`
-        against a `STRING_AGG(CAST(x AS varchar(10)), ',')` call with no
-        MAX-typed operand reports the result column as `varchar(8000)`
-        regardless of input row count. The `nvarchar(10)` operand variant
-        reports `max_length = 8000` too — that's bytes, which is exactly
-        `nvarchar(4000)` (2 bytes/char), confirming the `NVARCHAR(4000)`
-        cap as claimed.
 
       39. New family: `NVARCHAR` to a UTF-8-collation `VARCHAR` conversion (and
         the reverse) can expand/contract byte length past the declared

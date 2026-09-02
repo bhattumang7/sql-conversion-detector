@@ -87,4 +87,49 @@ public sealed class BuiltinFunctionTypeResolverTests
 
         Assert.Equal(source, BuiltinFunctionTypeResolver.DemoteFixedWidthCategory(source));
     }
+
+    [Fact]
+    public void ResolveStringAggResult_NonUnicodeValue_CapsAt8000()
+    {
+        var result = BuiltinFunctionTypeResolver.ResolveStringAggResult(new SqlType(SqlTypeCategory.VarChar, Length: 10));
+
+        Assert.Equal(SqlTypeCategory.VarChar, result!.Category);
+        Assert.Equal(8000, result.Length);
+        Assert.False(result.IsMax);
+    }
+
+    [Fact]
+    public void ResolveStringAggResult_UnicodeValue_CapsAt4000()
+    {
+        var result = BuiltinFunctionTypeResolver.ResolveStringAggResult(new SqlType(SqlTypeCategory.NVarChar, Length: 10));
+
+        Assert.Equal(SqlTypeCategory.NVarChar, result!.Category);
+        Assert.Equal(4000, result.Length);
+        Assert.False(result.IsMax);
+    }
+
+    [Fact]
+    public void ResolveStringAggResult_MaxTypedValue_IsNotCapped()
+    {
+        var result = BuiltinFunctionTypeResolver.ResolveStringAggResult(new SqlType(SqlTypeCategory.VarChar, IsMax: true));
+
+        Assert.True(result!.IsMax);
+    }
+
+    [Fact]
+    public void ResolveStringAggResult_FixedWidthValueCategory_DemotesToVariableWidth()
+    {
+        var result = BuiltinFunctionTypeResolver.ResolveStringAggResult(new SqlType(SqlTypeCategory.Char, Length: 10));
+
+        Assert.Equal(SqlTypeCategory.VarChar, result!.Category);
+        Assert.Equal(8000, result.Length);
+    }
+
+    [Fact]
+    public void ResolveStringAggResult_NonStringValue_ReturnsNull()
+    {
+        var result = BuiltinFunctionTypeResolver.ResolveStringAggResult(new SqlType(SqlTypeCategory.Int));
+
+        Assert.Null(result);
+    }
 }

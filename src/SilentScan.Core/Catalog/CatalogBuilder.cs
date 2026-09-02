@@ -562,7 +562,7 @@ public static class CatalogBuilder
             {
                 RegisterTableValuedParameters(parameters);
 
-                if (node is CreateProcedureStatement or AlterProcedureStatement or CreateOrAlterProcedureStatement)
+                if (node is CreateProcedureStatement or AlterProcedureStatement or CreateOrAlterProcedureStatement or FunctionStatementBody)
                 {
                     RegisterProcedureParameters(parameters);
                 }

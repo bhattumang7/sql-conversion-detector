@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TVF Argument Type Mismatch - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>TVF Argument Type Mismatch</h1>
+  <p class="rule-key"><code>silentscan/call-graph/tvf-argument-type-mismatch</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A real FROM/APPLY call site invokes an inline table-valued function with a literal or caller-side variable argument whose type risks silent data loss against the function&#x27;s own declared parameter type - the same assignment-shaped conversion as a stored procedure&#x27;s EXEC argument mismatch, but at an inline TVF&#x27;s own parameter boundary.</p>
+  <p class="rationale">This rule follows a real call site, not just an inline table-valued function&#x27;s own declaration: it resolves a `FROM dbo.SomeFunction(...)` or `CROSS/OUTER APPLY dbo.SomeFunction(...)` reference, looks up the literal or caller-side variable actually passed at each argument position, and compares its type against the function&#x27;s declared parameter type. Table-valued function arguments are always positional in T-SQL - there is no named-parameter syntax the way there is for `EXEC` - so the same silent narrowing that can affect a stored procedure&#x27;s own parameter marshalling can affect an inline TVF&#x27;s parameter marshalling too: a shorter string literal or variable, a narrower numeric type, or a coarser temporal type is implicitly converted to the function&#x27;s declared parameter type before the function body&#x27;s own `RETURN (SELECT ...)` ever runs.</p>
+  <p class="rationale">This is classified the same way an INSERT or UPDATE assignment&#x27;s silent data loss is, because the underlying mechanism is identical - it&#x27;s an assignment, not a predicate. The fact that the assignment happens at an inline TVF&#x27;s own parameter boundary rather than inside a DML statement doesn&#x27;t change the mechanism, only where in the code the loss happens - which is also why it&#x27;s easy to miss in review, since neither the call site&#x27;s own argument expression nor the function&#x27;s own parameter declaration looks wrong in isolation, only the pairing across the call site does. Inline TVFs have no OUTPUT parameters, so this rule only has one direction to check, unlike the equivalent EXEC call-site rule.</p>
+  <h2>How can I fix it?</h2>
+  <h3>A wider caller-side variable silently truncated at the call site</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE FUNCTION dbo.fn_OrdersByCode (@Code VARCHAR(3))&#xA;RETURNS TABLE&#xA;AS&#xA;RETURN (SELECT OrderId, Code FROM dbo.Orders WHERE Code = @Code);&#xA;&#xA;-- Caller:&#xA;DECLARE @code VARCHAR(10) = &#x27;ABCDEF&#x27;;&#xA;SELECT * FROM dbo.fn_OrdersByCode(@code);</code></pre></div>
+  <p class="example-explanation">@code is VARCHAR(10), but the function&#x27;s own parameter is VARCHAR(3) - the value is silently truncated to &#x27;ABC&#x27; when SQL Server implicitly converts it at parameter marshalling, before the function body&#x27;s own RETURN clause ever runs, and the mismatch is invisible unless the two declarations are compared side by side.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>-- Caller:&#xA;DECLARE @code VARCHAR(3) = &#x27;ABC&#x27;;&#xA;SELECT * FROM dbo.fn_OrdersByCode(@code);</code></pre></div>
+  <p class="example-explanation">The caller&#x27;s variable now matches the function&#x27;s declared parameter width exactly - the value crosses the call boundary with no implicit narrowing conversion.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

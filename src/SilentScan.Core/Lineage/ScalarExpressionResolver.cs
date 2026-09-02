@@ -92,6 +92,13 @@ public static class ScalarExpressionResolver
         var inputs = CollectColumnInputs(functionCall, context);
         var name = functionCall.FunctionName.Value;
 
+        if (string.Equals(name, "STRING_AGG", StringComparison.OrdinalIgnoreCase) && functionCall.Parameters.Count == 2)
+        {
+            var valueType = ColumnProvenanceAnalysis.TryGetScalarType(Resolve(functionCall.Parameters[0], context));
+            var aggType = BuiltinFunctionTypeResolver.ResolveStringAggResult(valueType);
+            return new ColumnProvenance.Expression(aggType, inputs, context.SourcePath, functionCall.StartLine);
+        }
+
         if (BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
         {
             var argumentType = ColumnProvenanceAnalysis.TryGetScalarType(Resolve(functionCall.Parameters[argumentIndex], context));

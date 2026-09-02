@@ -354,6 +354,30 @@ public sealed class WriteLossExtractionTests
     }
 
     [Fact]
+    public void Extract_SetVariableFromStringAggWithNoMaxOperand_FlagsLengthTruncation()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col VARCHAR(10) NULL);",
+            "DECLARE @v VARCHAR(20); SET @v = (SELECT STRING_AGG(Col, ',') FROM dbo.T);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.LengthTruncation, finding.Kind);
+        Assert.Null(finding.TableQualifiedName);
+        Assert.Equal("@v", finding.ColumnName);
+        Assert.Equal(8000, finding.SourceType.Length);
+    }
+
+    [Fact]
+    public void Extract_SetVariableFromStringAggWithMaxOperand_NoFinding()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col VARCHAR(MAX) NULL);",
+            "DECLARE @v VARCHAR(20); SET @v = (SELECT STRING_AGG(Col, ',') FROM dbo.T);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void Extract_SetVariableUndeclared_LedgeredOrSkippedWithoutThrowing()
     {
         var findings = Extract("SET @never_declared = 123.456;");

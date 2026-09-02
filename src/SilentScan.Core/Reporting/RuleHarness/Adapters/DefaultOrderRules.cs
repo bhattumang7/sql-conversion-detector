@@ -108,6 +108,14 @@ internal sealed class StringConcatNullRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => StringConcatNullScanner.Harvest((StringConcatNullScanner.Rule)moduleRule);
 }
 
+internal sealed class TvfCallArgumentMismatchRule : IPerFileRule
+{
+    public string Id => "TvfCallArgumentMismatchScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => TvfCallArgumentMismatchScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => TvfCallArgumentMismatchScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => TvfCallArgumentMismatchScanner.Harvest((TvfCallArgumentMismatchScanner.Rule)moduleRule);
+}
+
 internal sealed class AggregateDivisionColumnstoreRule : IPerFileRule
 {
     public string Id => "AggregateDivisionColumnstoreScanner";

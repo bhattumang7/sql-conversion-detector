@@ -119,6 +119,7 @@ public static class RuleDocCatalog
         [Catalog.AnsiPaddingOffColumn.RuleId] = Catalog.AnsiPaddingOffColumn.Content,
         [Catalog.CrossTableFkTypeDrift.RuleId] = Catalog.CrossTableFkTypeDrift.Content,
         [CallGraph.ArgumentTypeMismatch.RuleId] = CallGraph.ArgumentTypeMismatch.Content,
+        [CallGraph.TvfArgumentTypeMismatch.RuleId] = CallGraph.TvfArgumentTypeMismatch.Content,
         [CallGraph.TableValuedArgumentMismatch.RuleId] = CallGraph.TableValuedArgumentMismatch.Content,
         [CallGraph.SpExecuteSqlParameterMismatch.RuleId] = CallGraph.SpExecuteSqlParameterMismatch.Content,
         [Catalog.MaxTypedColumn.RuleId] = Catalog.MaxTypedColumn.Content,

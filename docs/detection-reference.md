@@ -496,6 +496,45 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`TvfCallArgumentMismatchRuleId` — shipped.** Oracle-confirmed (Docker): an
+  inline table-valued function declared `(@p VARCHAR(3))` called as
+  `dbo.probe_itvf('hello')` returns `'hel'` — the 5-character literal is
+  silently truncated to the parameter's declared width with no error, the
+  same shape as the shipped forward-direction EXEC call-site rule
+  (`ProcCallArgumentMismatchRuleId`). Only inline TVFs are in scope (matched
+  via `TableValuedFunctionKind.Inline`) - multi-statement and CLR TVFs are
+  not. Arguments are always positional in T-SQL (no named-parameter syntax
+  for functions), and there are no OUTPUT parameters, so the scanner is
+  simpler than its EXEC-call-site sibling: no name/position matching table,
+  no writeback direction. Only a literal or a locally-scoped variable
+  argument is resolved to a static type - a column-reference argument (e.g.
+  a correlated `CROSS APPLY` argument) resolves to an unknown type and is
+  silently skipped rather than guessed at. Fixed a pre-existing catalog gap
+  while shipping this: `CatalogBuilder` only ever registered
+  `ProcedureParameterInfo` (via `AddProcedureParameters`) for
+  `CREATE/ALTER PROCEDURE`, never for `CREATE/ALTER FUNCTION` (scalar or
+  table-valued) even though `FunctionStatementBody` is itself a
+  `ProcedureStatementBodyBase` - so `catalog.TryGetProcedureParameters` was
+  silently empty for every function scope, including a function's own
+  formal parameters when resolving dynamic SQL folding state inside its own
+  body.
+
+* **`STRING_AGG` result type modeled in `BuiltinFunctionTypeResolver`/
+  `ScalarExpressionResolver` — not a standalone rule.** Oracle-confirmed
+  (Docker) via `sys.dm_exec_describe_first_result_set`: when neither the
+  value expression nor the separator is MAX-typed, `STRING_AGG`'s result is
+  capped at `VARCHAR(8000)`/`NVARCHAR(4000)` regardless of aggregated row
+  count — a structural fact about the type, not something that needs
+  row-count analysis. A MAX-typed value expression removes the cap
+  (`VARCHAR(MAX)`/`NVARCHAR(MAX)` result). A MAX-typed separator is not a
+  "no cap" case at all — it's a compile-time reject (Msg 8734, "Separator
+  parameter for STRING_AGG cannot be large object type"); the separator
+  argument must also be a literal or variable (Msg 8733), never an arbitrary
+  expression. Teaching the type resolver this cap feeds the existing
+  variable-assignment `WriteLossFinding` (`LengthTruncation`) machinery
+  automatically for any `SET`/`DECLARE` assigning an uncapped `STRING_AGG`
+  result into a narrower target — no bespoke scanner needed.
+
 * **`OnlineRebuildLegacyLobRuleId` — shipped for `ALTER TABLE ... REBUILD
   WITH (ONLINE = ON)`, `ALTER INDEX ALL ... REBUILD WITH (ONLINE = ON)`
   (Msg 2725), `ALTER TABLE ... ALTER COLUMN ... WITH (ONLINE = ON)`

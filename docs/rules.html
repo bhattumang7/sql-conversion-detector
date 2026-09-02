@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">323 rules. 235 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">324 rules. 235 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>backup</h2>
@@ -101,6 +101,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/call-graph-argument-type-mismatch.html">Argument Type Mismatch</a> <code class="rule-key">silentscan/call-graph/argument-type-mismatch</code><span class="snippet">A real EXEC call site passes a caller-side variable whose declared type risks silent data loss against the callee&#x27;s own declared parameter type.</span></li>
       <li><a class="id" href="rules/call-graph-sp-executesql-parameter-type-mismatch.html">Sp Executesql Parameter Type Mismatch</a> <code class="rule-key">silentscan/call-graph/sp-executesql-parameter-type-mismatch</code><span class="snippet">An EXEC sp_executesql call site declares a parameter&#x27;s type in its own literal parameter-definition string and binds a caller-side variable to it whose declared type risks silent data loss against that declared type.</span></li>
       <li><a class="id" href="rules/call-graph-table-valued-argument-column-mismatch.html">Table Valued Argument Column Mismatch</a> <code class="rule-key">silentscan/call-graph/table-valued-argument-column-mismatch</code><span class="snippet">A real EXEC call site passes a table-valued parameter argument whose caller-side table variable was itself populated (via a literal INSERT .</span></li>
+      <li><a class="id" href="rules/call-graph-tvf-argument-type-mismatch.html">TVF Argument Type Mismatch</a> <code class="rule-key">silentscan/call-graph/tvf-argument-type-mismatch</code><span class="snippet">A real FROM/APPLY call site invokes an inline table-valued function with a literal or caller-side variable argument whose type risks silent data loss against the function&#x27;s own declared parameter type.</span></li>
     </ul>
   </section>
 

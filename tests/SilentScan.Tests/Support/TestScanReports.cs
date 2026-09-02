@@ -25,6 +25,7 @@ public static class TestScanReports
         IReadOnlyList<AnsiPaddingOffColumnFinding>? AnsiPaddingOffColumnFindings = null,
         IReadOnlyList<CrossTableTypeDriftFinding>? CrossTableTypeDriftFindings = null,
         IReadOnlyList<ProcCallArgumentMismatchFinding>? ProcCallArgumentMismatchFindings = null,
+        IReadOnlyList<TvfCallArgumentMismatchFinding>? TvfCallArgumentMismatchFindings = null,
         IReadOnlyList<ProcCallTableValuedArgumentMismatchFinding>? ProcCallTableValuedArgumentMismatchFindings = null,
         IReadOnlyList<TemporalBoundaryPrecisionFinding>? TemporalBoundaryFindings = null,
         IReadOnlyList<MaxTypedColumnFinding>? MaxTypedColumnFindings = null,
@@ -153,6 +154,7 @@ public static class TestScanReports
         Set("AnsiPaddingOffColumnScanner", AnsiPaddingOffColumnFindings);
         Set("CrossTableTypeDriftScanner", CrossTableTypeDriftFindings);
         Set("ProcCallArgumentMismatchScanner", ProcCallArgumentMismatchFindings);
+        Set("TvfCallArgumentMismatchScanner", TvfCallArgumentMismatchFindings);
         Set("ProcCallTableValuedArgumentMismatchScanner", ProcCallTableValuedArgumentMismatchFindings);
         Set("MaxTypedColumnScanner", MaxTypedColumnFindings);
         Set("PartialCompositeForeignKeyJoinScanner", PartialCompositeForeignKeyJoinFindings);

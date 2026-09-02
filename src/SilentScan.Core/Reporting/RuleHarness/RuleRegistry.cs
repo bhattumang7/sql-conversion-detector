@@ -19,6 +19,7 @@ public static class RuleRegistry
         new CatchAllPredicateRule(),
         new BareTopNoOrderByRule(),
         new StringConcatNullRule(),
+        new TvfCallArgumentMismatchRule(),
         new AggregateDivisionColumnstoreRule(),
         new ParameterReassignmentPredicateRule(),
         new NotInNullableSubqueryRule(),
