@@ -134,6 +134,19 @@ public static partial class SecurityScanner
             }
         }
 
+        public void OnEnterExecutableProcedureReference(ExecutableProcedureReference node, ModuleWalker walker)
+        {
+            if (node.ProcedureReference?.ProcedureReference?.Name.BaseIdentifier.Value is { } routineName
+                && string.Equals(routineName, "sp_invoke_external_rest_endpoint", StringComparison.OrdinalIgnoreCase))
+            {
+                Findings.Add(new SecurityFinding(
+                    SecurityFindingKind.ExternalRestEndpointCall,
+                    sourcePath, node.StartLine, node.StartColumn,
+                    "\"sp_invoke_external_rest_endpoint\" makes an outbound HTTPS call to an endpoint this statement supplies - a real outbound-network call surface distinct from a hardcoded IP address literal. Make sure the endpoint and any data sent to it are safe/intentional.",
+                    FindingConfidence.High));
+            }
+        }
+
         public void OnEnterBooleanComparisonExpressionScope(BooleanComparisonExpression node, ModuleWalker walker) =>
             _inBooleanComparison = true;
 

@@ -359,6 +359,7 @@ public static class FindingRuleIds
         SecurityFindingKind.WeakHashAlgorithm => "silentscan/security/weak-hash-algorithm",
         SecurityFindingKind.WeakHashAlgorithmInSensitiveContext => "silentscan/security/weak-hash-algorithm-sensitive-context",
         SecurityFindingKind.UnprovableDynamicSqlText => "silentscan/security/unprovable-dynamic-sql-text",
+        SecurityFindingKind.ExternalRestEndpointCall => "silentscan/security/external-rest-endpoint-call",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
     public static string ViewOrderingRuleId(ViewOrderingFindingKind kind) => kind switch

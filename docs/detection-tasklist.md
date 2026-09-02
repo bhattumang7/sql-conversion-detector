@@ -149,10 +149,6 @@ Competitor tools are referred to generically; real identities are in
         and float constants in precision-sensitive expressions — likely one
         rule, not three. **FINDING:** not tested this pass.
 
-      24. New `SecurityFindingKind`: `sp_invoke_external_rest_endpoint` is a
-        real outbound-network call surface distinct from the shipped
-        hardcoded-IP-address finding. **FINDING:** not tested this pass.
-
       25. `sp_execute_external_script`'s `WITH RESULT SETS`-style column
         declaration reusing a name, omitting a required type binding, or
         declaring a rejected type. **FINDING:** not tested this pass.

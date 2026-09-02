@@ -182,6 +182,7 @@ public static class RuleDocCatalog
         [Security.WeakHashAlgorithm.RuleId] = Security.WeakHashAlgorithm.Content,
         [Security.WeakHashAlgorithmInSensitiveContext.RuleId] = Security.WeakHashAlgorithmInSensitiveContext.Content,
         [Security.UnprovableDynamicSqlText.RuleId] = Security.UnprovableDynamicSqlText.Content,
+        [Security.ExternalRestEndpointCall.RuleId] = Security.ExternalRestEndpointCall.Content,
 
         [ControlFlow.CursorFetchColumnCountMismatch.RuleId] = ControlFlow.CursorFetchColumnCountMismatch.Content,
         [ControlFlow.EmptyCatchBlock.RuleId] = ControlFlow.EmptyCatchBlock.Content,

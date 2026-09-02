@@ -180,6 +180,33 @@ public sealed class SecurityScannerTests
     }
 
     [Fact]
+    public void CallToExternalRestEndpoint_Fires()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                EXEC sp_invoke_external_rest_endpoint @url = 'https://example.com/webhook';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == SecurityFindingKind.ExternalRestEndpointCall);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void CallToUnrelatedProcedure_NeverFiresExternalRestEndpoint()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                EXEC dbo.SomeOtherProcedure @Value = 1;
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == SecurityFindingKind.ExternalRestEndpointCall);
+    }
+
+    [Fact]
     public void HashBytesMd5GeneralUse_FiresGeneralKind()
     {
         var findings = Scan("""

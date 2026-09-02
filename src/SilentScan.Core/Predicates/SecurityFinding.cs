@@ -14,6 +14,8 @@ public enum SecurityFindingKind
     WeakHashAlgorithmInSensitiveContext,
 
     UnprovableDynamicSqlText,
+
+    ExternalRestEndpointCall,
 }
 
 public sealed record SecurityFinding(
