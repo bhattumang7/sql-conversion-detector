@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">324 rules. 235 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">325 rules. 236 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>backup</h2>
@@ -507,6 +507,13 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/query-unbounded-table-write.html">Unbounded Table Write</a> <code class="rule-key">silentscan/query/unbounded-table-write</code><span class="snippet">An UPDATE/DELETE has no WHERE clause and no TOP.</span></li>
       <li><a class="id" href="rules/query-union-of-provably-disjoint-branches.html">Union Of Provably Disjoint Branches</a> <code class="rule-key">silentscan/query/union-of-provably-disjoint-branches</code><span class="snippet">A UNION combines branches that each filter the same table/column to a distinct literal.</span></li>
       <li><a class="id" href="rules/query-unqualified-table-reference.html">Unqualified Table Reference</a> <code class="rule-key">silentscan/query/unqualified-table-reference</code><span class="snippet">A table reference at a real query site carries no explicit schema qualifier.</span></li>
+    </ul>
+  </section>
+
+  <section class="family-section">
+    <h2>restore</h2>
+    <ul class="rule-list">
+      <li><a class="id" href="rules/restore-option-conflict.html">Option Conflict</a> <code class="rule-key">silentscan/restore/option-conflict</code><span class="snippet">A RESTORE statement&#x27;s own WITH clause combines two of RECOVERY, NORECOVERY, and STANDBY.</span></li>
     </ul>
   </section>
 

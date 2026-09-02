@@ -34,6 +34,12 @@ internal static class UnicodeReplacement
             the time anyone notices the '?' characters in a report, the original values are
             already gone - there is no log of what was overwritten, since the statement itself
             reported no error.
+
+            This rule excludes a target whose collation carries the _UTF8 flag: oracle-confirmed a
+            UTF8-collation VARCHAR/CHAR target stores every character exactly as written, with no
+            '?' substitution, since UTF-8 can encode any Unicode character. Such a target has a
+            different risk instead - its declared length is a byte cap rather than a character cap,
+            so a multi-byte character can still overflow it even though nothing gets replaced.
             """,
         HowToFixIt: """
             Change the target column's declared type from VARCHAR/CHAR (or TEXT) to NVARCHAR/NCHAR

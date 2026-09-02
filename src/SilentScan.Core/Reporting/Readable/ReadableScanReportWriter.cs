@@ -124,6 +124,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(BoundedStringBuiltinTruncation(report, headingLevel, pathBase));
         blocks.AddRange(WaitFor(report, headingLevel, pathBase));
         blocks.AddRange(BackupOptionConflict(report, headingLevel, pathBase));
+        blocks.AddRange(RestoreOptionConflict(report, headingLevel, pathBase));
         blocks.AddRange(GraphPseudoColumnAssignment(report, headingLevel, pathBase));
         blocks.AddRange(CursorCloseOnCommit(report, headingLevel, pathBase));
         blocks.AddRange(ViewOrdering(report, headingLevel, pathBase));
@@ -314,6 +315,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "REPLICATE/REPLACE/SPACE constant-provable result truncation", report.Find<BoundedStringBuiltinTruncationFinding>(nameof(BoundedStringBuiltinTruncationScanner)).Count);
         AddCount(counts, "WAITFOR DELAY/TIME", report.Find<WaitForFinding>(nameof(WaitForScanner)).Count);
         AddCount(counts, "BACKUP DATABASE WITH DIFFERENTIAL, COPY_ONLY", report.Find<BackupOptionConflictFinding>(nameof(BackupOptionConflictScanner)).Count);
+        AddCount(counts, "RESTORE WITH conflicting RECOVERY/NORECOVERY/STANDBY", report.Find<RestoreOptionConflictFinding>(nameof(RestoreOptionConflictScanner)).Count);
         AddCount(counts, "$node_id/$edge_id direct assignment", report.Find<GraphPseudoColumnAssignmentFinding>(nameof(GraphPseudoColumnAssignmentScanner)).Count);
         AddCount(counts, "Cursors silently closed by CURSOR_CLOSE_ON_COMMIT then fetched", report.Find<CursorCloseOnCommitFinding>(nameof(CursorCloseOnCommitScanner)).Count);
         AddCount(counts, "View/inline TVF ordering not guaranteed", report.Find<ViewOrderingFinding>(nameof(ViewOrderingScanner)).Count);
@@ -2969,6 +2971,35 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
             })]);
     }
+
+    private static IEnumerable<ReadableBlock> RestoreOptionConflict(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<RestoreOptionConflictFinding>(nameof(RestoreOptionConflictScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"RESTORE WITH conflicting RECOVERY/NORECOVERY/STANDBY ({report.Find<RestoreOptionConflictFinding>(nameof(RestoreOptionConflictScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "RECOVERY, NORECOVERY, and STANDBY describe mutually exclusive end states for the database after the restore completes - combining any two always fails (Msg 3031).");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.RestoreOptionConflictRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Conflict"],
+            [.. report.Find<RestoreOptionConflictFinding>(nameof(RestoreOptionConflictScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                DescribeRestoreOptionConflictKind(f.Kind),
+            })]);
+    }
+
+    private static string DescribeRestoreOptionConflictKind(RestoreOptionConflictKind kind) => kind switch
+    {
+        RestoreOptionConflictKind.RecoveryAndNoRecovery => "RECOVERY + NORECOVERY",
+        RestoreOptionConflictKind.RecoveryAndStandby => "RECOVERY + STANDBY",
+        RestoreOptionConflictKind.NoRecoveryAndStandby => "NORECOVERY + STANDBY",
+        _ => kind.ToString(),
+    };
 
     private static IEnumerable<ReadableBlock> GraphPseudoColumnAssignment(ScanReport report, int level, string? pathBase)
     {

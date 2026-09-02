@@ -79,6 +79,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner").Select(ToResult));
         results.AddRange(report.Find<BoundedStringBuiltinTruncationFinding>("BoundedStringBuiltinTruncationScanner").Select(ToResult));
         results.AddRange(report.Find<BackupOptionConflictFinding>("BackupOptionConflictScanner").Select(ToResult));
+        results.AddRange(report.Find<RestoreOptionConflictFinding>("RestoreOptionConflictScanner").Select(ToResult));
         results.AddRange(report.Find<GraphPseudoColumnAssignmentFinding>("GraphPseudoColumnAssignmentScanner").Select(ToResult));
         results.AddRange(report.Find<WaitForFinding>("WaitForScanner").Select(ToResult));
         results.AddRange(report.Find<CursorCloseOnCommitFinding>("CursorCloseOnCommitScanner").Select(ToResult));
@@ -1064,6 +1065,21 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.BackupOptionConflictRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         const string message = "BACKUP DATABASE with both DIFFERENTIAL and COPY_ONLY always fails - a copy-only backup never registers as a differential base, so no differential can ever find a current backup to diff against (Msg 3035).";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(RestoreOptionConflictFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.RestoreOptionConflictRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            RestoreOptionConflictKind.RecoveryAndNoRecovery => "RESTORE with both RECOVERY and NORECOVERY always fails - the two describe mutually exclusive end states for the database (Msg 3031).",
+            RestoreOptionConflictKind.RecoveryAndStandby => "RESTORE with both RECOVERY and STANDBY always fails - the two describe mutually exclusive end states for the database (Msg 3031).",
+            RestoreOptionConflictKind.NoRecoveryAndStandby => "RESTORE with both NORECOVERY and STANDBY always fails - the two describe mutually exclusive end states for the database (Msg 3031).",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
+        };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }

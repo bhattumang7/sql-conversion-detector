@@ -216,20 +216,6 @@ Competitor tools are referred to generically; real identities are in
         date literal is at risk regardless of whether `SET DATEFORMAT`
         appears anywhere.
 
-      39. New family: `NVARCHAR` to a UTF-8-collation `VARCHAR` conversion (and
-        the reverse) can expand/contract byte length past the declared
-        target's 8000-byte cap — distinct failure mode from
-        `WriteLossUnicodeReplacementRuleId` (byte-length overflow, not
-        codepage `?` replacement); needs an oracle pass on exact truncation
-        behavior. **FINDING: confirmed real.** 4000 `nvarchar` characters
-        of a 3-byte-in-UTF-8 CJK character (12,000 UTF-8 bytes) assigned
-        into a `varchar(8000) COLLATE Latin1_General_100_CI_AS_SC_UTF8`
-        column raises "String or binary data would be truncated" — a hard
-        error under default session settings, distinct in kind from the
-        silent `?`-replacement codepage-loss rule. Whether it's a hard
-        error or a silent truncation depends on `ANSI_WARNINGS`/statement
-        context — worth pinning down both modes before scoping.
-
       41. Heavier-lift candidate: a joined table catalog-provably contributing
         nothing (no projected columns/predicates/grouping/ordering, and
         FK/uniqueness/nullability prove it can't change multiplicity or
@@ -292,15 +278,18 @@ Competitor tools are referred to generically; real identities are in
         client-driver-generated rather than hand-authored, low value.
         **FINDING:** not tested this pass.
 
-      49. `BACKUP`/`RESTORE` and `CREATE DATABASE` forbidden option
-        combinations, decidable purely from the statement's own option
-        list — DBA-maintenance-script scope, not typical application SQL.
-        **Shipped for one concrete combo:** `BACKUP DATABASE ... WITH
-        DIFFERENTIAL, COPY_ONLY` always fails — a copy-only full backup
-        never registers as a differential base, so any later differential
-        can never find "a current database backup" to diff against (`Msg
-        3035`). Shipped as `BackupOptionConflictRuleId`. `RESTORE` and
-        `CREATE DATABASE` combos not tested, remain open.
+      49. `CREATE DATABASE` forbidden option combinations, decidable purely
+        from the statement's own option list — DBA-maintenance-script
+        scope, not typical application SQL. **Shipped for `BACKUP` and
+        `RESTORE`:** `BACKUP DATABASE ... WITH DIFFERENTIAL, COPY_ONLY`
+        always fails — a copy-only full backup never registers as a
+        differential base, so any later differential can never find "a
+        current database backup" to diff against (`Msg 3035`). Shipped as
+        `BackupOptionConflictRuleId`. `RESTORE ... WITH` combining any two
+        of `RECOVERY`/`NORECOVERY`/`STANDBY` always fails (`Msg 3031`,
+        oracle-confirmed for all three pairings) — shipped as
+        `RestoreOptionConflictRuleId`. `CREATE DATABASE` combos not tested,
+        remain open.
 
       50. PolyBase/Hadoop external-table column-type and virtual-column
         restrictions — mainstream on-prem feature but low adoption.

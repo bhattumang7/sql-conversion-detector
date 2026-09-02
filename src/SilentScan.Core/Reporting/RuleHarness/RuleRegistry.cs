@@ -8,6 +8,7 @@ public static class RuleRegistry
     [
         new WaitForRule(),
         new BackupOptionConflictRule(),
+        new RestoreOptionConflictRule(),
         new GraphPseudoColumnAssignmentRule(),
         new CursorCloseOnCommitRule(),
         new CompositeIndexLeadingColumnRule(),

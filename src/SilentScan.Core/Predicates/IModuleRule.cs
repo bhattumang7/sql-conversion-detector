@@ -392,6 +392,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterRestoreStatement(RestoreStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterCreateProcedureStatement(CreateProcedureStatement node, ModuleWalker walker)
     {
     }

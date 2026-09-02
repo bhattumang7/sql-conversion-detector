@@ -1,3 +1,4 @@
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
 using SilentScan.Core.TypeInference;
@@ -176,6 +177,30 @@ public sealed class WriteLossClassifierTests
         var kind = WriteLossClassifier.Classify(target, source, sourceExpression: null, isVariableTarget: true);
 
         Assert.Null(kind);
+    }
+
+    [Fact]
+    public void UnicodeReplacement_Utf8CollationTarget_NeverFlags()
+    {
+        var target = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("Latin1_General_100_CI_AS_SC_UTF8"));
+        var source = new SqlType(SqlTypeCategory.NVarChar, Length: 5);
+        var literal = new StringLiteral { IsNational = true, Value = "龍龍龍龍龍" };
+
+        var kind = WriteLossClassifier.Classify(target, source, literal, isVariableTarget: true);
+
+        Assert.Null(kind);
+    }
+
+    [Fact]
+    public void UnicodeReplacement_NonUtf8CollationTarget_StillFlags()
+    {
+        var target = new SqlType(SqlTypeCategory.VarChar, Length: 20);
+        var source = new SqlType(SqlTypeCategory.NVarChar, Length: 5);
+        var literal = new StringLiteral { IsNational = true, Value = "龍龍龍龍龍" };
+
+        var kind = WriteLossClassifier.Classify(target, source, literal, isVariableTarget: true);
+
+        Assert.Equal(WriteLossKind.UnicodeToNonUnicodeReplacement, kind);
     }
 
     [Fact]

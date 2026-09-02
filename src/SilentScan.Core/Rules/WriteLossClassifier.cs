@@ -49,7 +49,7 @@ public static class WriteLossClassifier
     }
 
     private static bool IsUnicodeReplacementRisk(SqlType target, SqlType source, Literal? literal) =>
-        source.IsUnicodeString && target.IsNonUnicodeString && !IsAsciiOnlyLiteral(literal);
+        source.IsUnicodeString && target.IsNonUnicodeString && target.Collation is not { IsUtf8: true } && !IsAsciiOnlyLiteral(literal);
 
     private static Predicates.WriteLossKind? NumericNarrowingKind(SqlType target, SqlType source, Literal? literal)
     {

@@ -496,6 +496,35 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 
 ## Settled (do not re-propose)
 
+* **`RestoreOptionConflictRuleId` — shipped for `RECOVERY`/`NORECOVERY`/
+  `STANDBY` pairwise conflicts on `RESTORE`.** Oracle-confirmed (Docker):
+  every pairing among the three always fails with Msg 3031 ("Option '...'
+  conflicts with option(s) '...'"), decidable purely from the statement's own
+  `WITH` clause, the same shape as the shipped
+  `BackupOptionConflictRuleId` (`DIFFERENTIAL`/`COPY_ONLY`). `RESTORE...
+  CREATE DATABASE` forbidden option combinations remain open.
+
+* **UTF8-collation VARCHAR/CHAR target — a declared-length byte cap, not a
+  character cap; a candidate `WriteLossKind` for it does not clear the
+  family's own bar.** Oracle-confirmed (Docker) two separate facts about a
+  target whose collation carries the `_UTF8` flag: (1) it stores every
+  Unicode character exactly as written, with no `?` substitution — fixed a
+  pre-existing false positive in `WriteLossClassifier.IsUnicodeReplacementRisk`,
+  which flagged `UnicodeToNonUnicodeReplacement` for any non-Unicode target
+  regardless of collation; (2) a value whose UTF-8 byte length exceeds the
+  target's declared length is a hard error under `ANSI_WARNINGS ON` (Msg
+  2628, the default) and a silent truncation only under `ANSI_WARNINGS OFF`
+  — same ANSI_WARNINGS-dependent split as ordinary `LengthTruncation`, which
+  is why that family is scoped to variable/parameter targets only (table
+  columns hard-error by default). But a variable/parameter target can never
+  actually carry a UTF8 collation in real T-SQL: `DECLARE ... COLLATE` is
+  not legal syntax for locals (Msg 156), and `CREATE TYPE ... FROM
+  VARCHAR(n) COLLATE ...` is rejected the same way — a type alias also
+  cannot carry an explicit collation. So a `WriteLossKind` for this scoped
+  the way `LengthTruncation` is (variable/parameter targets only) would be
+  unreachable dead code; the only real occurrence is on table columns, where
+  it is not silent by default. Not shipped as a distinct `WriteLossKind`.
+
 * **`TvfCallArgumentMismatchRuleId` — shipped.** Oracle-confirmed (Docker): an
   inline table-valued function declared `(@p VARCHAR(3))` called as
   `dbo.probe_itvf('hello')` returns `'hel'` — the 5-character literal is
