@@ -590,6 +590,34 @@ WITH NATIVE_COMPILATION` module.
 
 ## Settled (do not re-propose)
 
+* **`sp_execute_external_script`'s `WITH RESULT SETS` column declaration
+  (reused name / missing type / rejected type) - killed, not statically
+  decidable.** The item assumed SQL Server rejects a duplicate column name,
+  an untyped column, or specific "rejected" data types when the clause
+  redefines this procedure's output shape. Oracle-checked (Docker, SQL
+  Server 2025): a plain `EXEC <proc> WITH RESULT SETS ((x INT, x
+  VARCHAR(10)))` against an ordinary procedure is accepted with no error -
+  duplicate names are not rejected by the engine. An untyped column
+  (`WITH RESULT SETS ((x))`) is a ScriptDom parse error already, not a
+  distinguishable AST shape to flag. The documented "unsupported data
+  types" list for `sp_execute_external_script`
+  (`cursor`/`timestamp`/`datetime2`/`datetimeoffset`/`time`/`sql_variant`/
+  `text`/`image`/`xml`/`hierarchyid`/`geometry`/`geography`/CLR UDTs)
+  governs the *input* query and `@params`, not the `WITH RESULT SETS`
+  output column list - Microsoft's own docs make that scope explicit.
+  Whether the engine actually rejects any of those types when declared as
+  *output* columns can only be observed by running a real R/Python script
+  through Machine Learning Services and inspecting the result, which is
+  unavailable in this environment (no ML Services runtime, EULA
+  unaccepted) and, more fundamentally, not something SQL Server's own
+  catalog/metadata can describe ahead of time - the procedure's actual
+  output shape depends on arbitrary external-script logic, unlike a
+  T-SQL procedure's `DESCRIBE FIRST RESULT SET`-able shape. Out of scope
+  under the decidable-from-catalog-data rule; `ExecResultSetsShapeCandidateScanner`
+  already covers `WITH RESULT SETS` shape/type mismatches for ordinary
+  T-SQL procedures via live `DESCRIBE`, which is the part of this space
+  that is decidable.
+
 * **`JsonIndexRewriteEligibleRuleId` shipped — `JSON_VALUE(column, path) = value`
   never seeks a JSON index (SQL Server 2025) even when one exists on the column;
   only `JSON_CONTAINS(column, value, path) = 1` does.** Oracle-confirmed (Docker,

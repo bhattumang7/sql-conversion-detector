@@ -67,10 +67,6 @@ Competitor tools are referred to generically; real identities are in
         restrictions for local variable and parameter assignments.
         Encryption-state and legacy-LOB legs remain open.
 
-      25. `sp_execute_external_script`'s `WITH RESULT SETS`-style column
-        declaration reusing a name, omitting a required type binding, or
-        declaring a rejected type. **FINDING:** not tested this pass.
-
       26. `OPENJSON WITH` schema projecting a native `json`-typed column
         while the enabling feature switch is off. **FINDING:** not tested
         this pass.
