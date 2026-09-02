@@ -85,27 +85,6 @@ Competitor tools are referred to generically; real identities are in
         FILESTREAM data-space mismatch, partition-scheme/partitioning-column
         disagreement) not tested this pass.
 
-      10. Memory-optimized (Hekaton)/natively compiled module restrictions,
-        remaining after shipping the UTF-8-collation, unsupported-builtin
-        (including LEFT/RIGHT), and CLR-UDT-parameter/variable rules (see
-        `detection-reference.md`): calling an interpreted (non-native)
-        function or procedure - CLR or plain T-SQL - from inside a natively
-        compiled module (Msg 12344, "Only natively compiled modules can be
-        used with natively compiled modules." - a broader restriction than
-        the CLR-type-declaration one shipped, needs cross-module
-        native/interpreted callee classification, not just a type name
-        check), and `ERROR_*` function calls outside a CATCH block inside a
-        natively compiled module (a context restriction, Msg 10792, not a
-        per-name denylist — needs CATCH-block scope tracking). The
-        row-size-ceiling/`GENERATED ALWAYS` premises from the original task
-        item were both oracle-tested and found not to hold as stated (no
-        fixed row-size ceiling is enforced on SQL Server 2022; temporal
-        `GENERATED ALWAYS AS ROW START/END` deploys cleanly on a
-        memory-optimized table) — settled, do not re-propose. The one
-        confirmed-but-unshipped fact in this area is `LEDGER = ON` conflicting
-        with `MEMORY_OPTIMIZED = ON` (Msg 12359) — a plain table-option
-        conflict, not yet built into a rule.
-
       12. Full-text index DDL validation (unsupported column type, invalid
         language id, nondeterministic computed column, >1024 indexed
         columns) — real but needs new full-text-index modeling in the

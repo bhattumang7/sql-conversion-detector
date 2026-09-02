@@ -192,6 +192,14 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterCatchBlock(TryCatchStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnLeaveCatchBlock(TryCatchStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterBooleanBinaryExpression(BooleanBinaryExpression node, ModuleWalker walker)
     {
     }

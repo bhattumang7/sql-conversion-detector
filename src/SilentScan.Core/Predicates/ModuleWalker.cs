@@ -506,7 +506,11 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
     {
         Dispatch(rule => rule.OnEnterTryCatchStatement(node, this));
 
-        base.ExplicitVisit(node);
+        node.TryStatements?.Accept(this);
+
+        Dispatch(rule => rule.OnEnterCatchBlock(node, this));
+        node.CatchStatements?.Accept(this);
+        Dispatch(rule => rule.OnLeaveCatchBlock(node, this));
 
         Dispatch(rule => rule.OnLeaveTryCatchStatement(node, this));
     }

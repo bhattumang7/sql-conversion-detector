@@ -276,6 +276,30 @@ internal sealed class NativelyCompiledClrTypeRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => NativelyCompiledClrTypeScanner.Harvest((NativelyCompiledClrTypeScanner.Rule)moduleRule);
 }
 
+internal sealed class NativelyCompiledErrorOutsideCatchRule : IPerFileRule
+{
+    public string Id => "NativelyCompiledErrorOutsideCatchScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => NativelyCompiledErrorOutsideCatchScanner.Scan(parseResult);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => NativelyCompiledErrorOutsideCatchScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => NativelyCompiledErrorOutsideCatchScanner.Harvest((NativelyCompiledErrorOutsideCatchScanner.Rule)moduleRule);
+}
+
+internal sealed class NativelyCompiledInterpretedCalleeRule : IPerFileRule
+{
+    public string Id => "NativelyCompiledInterpretedCalleeScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => NativelyCompiledInterpretedCalleeScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => NativelyCompiledInterpretedCalleeScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => NativelyCompiledInterpretedCalleeScanner.Harvest((NativelyCompiledInterpretedCalleeScanner.Rule)moduleRule);
+}
+
+internal sealed class MemoryOptimizedLedgerConflictRule : IPerFileRule
+{
+    public string Id => "MemoryOptimizedLedgerConflictScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => MemoryOptimizedLedgerConflictScanner.Scan(parseResult);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => MemoryOptimizedLedgerConflictScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => MemoryOptimizedLedgerConflictScanner.Harvest((MemoryOptimizedLedgerConflictScanner.Rule)moduleRule);
+}
+
 internal sealed class SchemaboundAliasTypeRule : IPerFileRule
 {
     public string Id => "SchemaboundAliasTypeScanner";

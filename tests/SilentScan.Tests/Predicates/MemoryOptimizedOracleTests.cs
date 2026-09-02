@@ -248,4 +248,180 @@ public sealed class MemoryOptimizedOracleTests : OracleTestFixture
             END;
             """);
     }
+
+    [Theory]
+    [InlineData("ERROR_NUMBER()", "INT")]
+    [InlineData("ERROR_MESSAGE()", "NVARCHAR(2048)")]
+    [InlineData("ERROR_SEVERITY()", "INT")]
+    [InlineData("ERROR_STATE()", "INT")]
+    [InlineData("ERROR_LINE()", "INT")]
+    [InlineData("ERROR_PROCEDURE()", "NVARCHAR(126)")]
+    public async Task ErrorFunction_OutsideCatchBlock_FailsToDeploy(string expression, string declaredType)
+    {
+        var exception = await AssertDeployFailsAsync(
+            $"""
+            CREATE PROCEDURE dbo.NativeErrorOutsideCatchProbe
+            WITH NATIVE_COMPILATION, SCHEMABINDING
+            AS
+            BEGIN ATOMIC WITH (TRANSACTION ISOLATION LEVEL = SNAPSHOT, LANGUAGE = N'us_english')
+                DECLARE @v {declaredType} = {expression};
+            END;
+            """);
+
+        Assert.Equal(10792, exception.Number);
+    }
+
+    [Fact]
+    public async Task ErrorNumber_InsideCatchBlock_DeploysCleanly()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE PROCEDURE dbo.NativeErrorInsideCatchProbe
+            WITH NATIVE_COMPILATION, SCHEMABINDING
+            AS
+            BEGIN ATOMIC WITH (TRANSACTION ISOLATION LEVEL = SNAPSHOT, LANGUAGE = N'us_english')
+                DECLARE @lastError INT, @x INT = 0;
+                BEGIN TRY
+                    SET @lastError = 1 / @x;
+                END TRY
+                BEGIN CATCH
+                    SET @lastError = ERROR_NUMBER();
+                END CATCH
+            END;
+            """);
+    }
+
+    [Fact]
+    public async Task ErrorNumber_OutsideCatchBlock_InOrdinaryInterpretedProcedure_DeploysCleanly()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE PROCEDURE dbo.InterpretedErrorProbe
+            AS
+            BEGIN
+                DECLARE @lastError INT = ERROR_NUMBER();
+            END;
+            """);
+    }
+
+    [Fact]
+    public async Task ExecInterpretedProcedure_FromNativelyCompiledProcedure_FailsToDeploy()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE TABLE dbo.CalleeAuditLog (Id INT NOT NULL IDENTITY PRIMARY KEY, Message NVARCHAR(200) NOT NULL);
+            """);
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE PROCEDURE dbo.LogCalleeAudit
+            AS
+            BEGIN
+                INSERT INTO dbo.CalleeAuditLog (Message) VALUES (N'audited');
+            END;
+            """);
+
+        var exception = await AssertDeployFailsAsync(
+            """
+            CREATE PROCEDURE dbo.NativeExecInterpretedProbe
+            WITH NATIVE_COMPILATION, SCHEMABINDING
+            AS
+            BEGIN ATOMIC WITH (TRANSACTION ISOLATION LEVEL = SNAPSHOT, LANGUAGE = N'us_english')
+                EXEC dbo.LogCalleeAudit;
+            END;
+            """);
+
+        Assert.Equal(12342, exception.Number);
+    }
+
+    [Fact]
+    public async Task CallInterpretedScalarFunction_FromNativelyCompiledProcedure_FailsToDeploy()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE FUNCTION dbo.ComputeCalleeTax(@amount DECIMAL(19,4))
+            RETURNS DECIMAL(19,4)
+            AS
+            BEGIN
+                RETURN @amount * 0.1;
+            END;
+            """);
+
+        var exception = await AssertDeployFailsAsync(
+            """
+            CREATE PROCEDURE dbo.NativeCallInterpretedFunctionProbe
+            WITH NATIVE_COMPILATION, SCHEMABINDING
+            AS
+            BEGIN ATOMIC WITH (TRANSACTION ISOLATION LEVEL = SNAPSHOT, LANGUAGE = N'us_english')
+                DECLARE @tax DECIMAL(19,4) = dbo.ComputeCalleeTax(100);
+            END;
+            """);
+
+        Assert.Equal(12344, exception.Number);
+    }
+
+    [Fact]
+    public async Task ExecNativelyCompiledProcedure_FromNativelyCompiledProcedure_DeploysCleanly()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE PROCEDURE dbo.NativeCalleeProbe
+            WITH NATIVE_COMPILATION, SCHEMABINDING
+            AS
+            BEGIN ATOMIC WITH (TRANSACTION ISOLATION LEVEL = SNAPSHOT, LANGUAGE = N'us_english')
+                DECLARE @dummy INT = 1;
+            END;
+            """);
+
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE PROCEDURE dbo.NativeCallerProbe
+            WITH NATIVE_COMPILATION, SCHEMABINDING
+            AS
+            BEGIN ATOMIC WITH (TRANSACTION ISOLATION LEVEL = SNAPSHOT, LANGUAGE = N'us_english')
+                EXEC dbo.NativeCalleeProbe;
+            END;
+            """);
+    }
+
+    [Fact]
+    public async Task ExecInterpretedProcedure_FromOrdinaryInterpretedProcedure_DeploysCleanly()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE PROCEDURE dbo.InterpretedCalleeProbe
+            AS
+            BEGIN
+                SELECT 1;
+            END;
+            """);
+
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE PROCEDURE dbo.InterpretedCallerProbe
+            AS
+            BEGIN
+                EXEC dbo.InterpretedCalleeProbe;
+            END;
+            """);
+    }
+
+    [Fact]
+    public async Task MemoryOptimizedAndLedger_BothOn_FailsToDeploy()
+    {
+        var exception = await AssertDeployFailsAsync(
+            """
+            CREATE TABLE dbo.LedgerConflictProbe (Id INT NOT NULL PRIMARY KEY NONCLUSTERED) WITH (MEMORY_OPTIMIZED = ON, LEDGER = ON);
+            """);
+
+        Assert.Equal(12359, exception.Number);
+    }
+
+    [Fact]
+    public async Task MemoryOptimizedOnly_DeploysCleanly()
+    {
+        await AssertDeploySucceedsAsync(
+            """
+            CREATE TABLE dbo.MemoryOptimizedOnlyProbe (Id INT NOT NULL PRIMARY KEY NONCLUSTERED) WITH (MEMORY_OPTIMIZED = ON);
+            """);
+    }
 }

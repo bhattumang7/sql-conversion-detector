@@ -63,6 +63,8 @@ public sealed class DatabaseCatalog
 
     private Dictionary<string, bool> _moduleIsSchemaBoundByQualifiedName;
 
+    private Dictionary<string, bool> _routineIsNativelyCompiledByQualifiedName;
+
     private Dictionary<string, string> _synonymTargetsByQualifiedName;
 
     private Dictionary<string, IReadOnlyList<ProcedureParameterInfo>> _procedureParametersByQualifiedName;
@@ -94,6 +96,7 @@ public sealed class DatabaseCatalog
         _moduleIsRecompiledByQualifiedName = new(_identifierComparer);
         _moduleUsesDatabaseCollationByQualifiedName = new(_identifierComparer);
         _moduleIsSchemaBoundByQualifiedName = new(_identifierComparer);
+        _routineIsNativelyCompiledByQualifiedName = new(_identifierComparer);
         _synonymTargetsByQualifiedName = new(_identifierComparer);
         _procedureParametersByQualifiedName = new(_identifierComparer);
         _columnMasterKeyEnclaveSupportByName = new(_identifierComparer);
@@ -307,6 +310,12 @@ public sealed class DatabaseCatalog
     public bool TryGetModuleIsSchemaBound(string qualifiedName, out bool isSchemaBound) =>
         _moduleIsSchemaBoundByQualifiedName.TryGetValue(qualifiedName, out isSchemaBound);
 
+    public void AddRoutineNativeCompilation(string qualifiedName, bool isNativelyCompiled) =>
+        _routineIsNativelyCompiledByQualifiedName[qualifiedName] = isNativelyCompiled;
+
+    public bool TryGetRoutineIsNativelyCompiled(string qualifiedName, out bool isNativelyCompiled) =>
+        _routineIsNativelyCompiledByQualifiedName.TryGetValue(qualifiedName, out isNativelyCompiled);
+
     public void AddProcedureParameters(string qualifiedName, IReadOnlyList<ProcedureParameterInfo> parameters)
     {
         if (parameters.Count == 0 && _procedureParametersByQualifiedName.TryGetValue(qualifiedName, out var existing) && existing.Count > 0)
@@ -447,6 +456,7 @@ public sealed class DatabaseCatalog
         _moduleIsRecompiledByQualifiedName = new(_moduleIsRecompiledByQualifiedName, comparer);
         _moduleUsesDatabaseCollationByQualifiedName = new(_moduleUsesDatabaseCollationByQualifiedName, comparer);
         _moduleIsSchemaBoundByQualifiedName = new(_moduleIsSchemaBoundByQualifiedName, comparer);
+        _routineIsNativelyCompiledByQualifiedName = new(_routineIsNativelyCompiledByQualifiedName, comparer);
         _synonymTargetsByQualifiedName = new(_synonymTargetsByQualifiedName, comparer);
         _procedureParametersByQualifiedName = new(_procedureParametersByQualifiedName, comparer);
         _columnMasterKeyEnclaveSupportByName = new(_columnMasterKeyEnclaveSupportByName, comparer);

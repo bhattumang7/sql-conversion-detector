@@ -90,6 +90,9 @@ public static class ReadableScanReportWriter
         blocks.AddRange(MemoryOptimizedUtf8Collation(report, headingLevel, pathBase));
         blocks.AddRange(NativelyCompiledUnsupportedBuiltin(report, headingLevel, pathBase));
         blocks.AddRange(NativelyCompiledClrType(report, headingLevel, pathBase));
+        blocks.AddRange(NativelyCompiledErrorOutsideCatch(report, headingLevel, pathBase));
+        blocks.AddRange(NativelyCompiledInterpretedCallee(report, headingLevel, pathBase));
+        blocks.AddRange(MemoryOptimizedLedgerConflict(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUnsupportedIndexOption(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedForeignKey(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedSchemaOnlyDurability(report, headingLevel, pathBase));
@@ -244,6 +247,9 @@ public static class ReadableScanReportWriter
         AddCount(counts, "UTF-8 collation on a memory-optimized table column (does not deploy)", report.Find<MemoryOptimizedUtf8CollationFinding>(nameof(MemoryOptimizedUtf8CollationScanner)).Count);
         AddCount(counts, "Unsupported built-in function inside a natively compiled module (does not compile)", report.Find<NativelyCompiledUnsupportedBuiltinFinding>(nameof(NativelyCompiledUnsupportedBuiltinScanner)).Count);
         AddCount(counts, "CLR user-defined type parameter/variable inside a natively compiled module (does not compile)", report.Find<NativelyCompiledClrTypeFinding>(nameof(NativelyCompiledClrTypeScanner)).Count);
+        AddCount(counts, "ERROR_* call outside a CATCH block inside a natively compiled module (does not compile)", report.Find<NativelyCompiledErrorOutsideCatchFinding>(nameof(NativelyCompiledErrorOutsideCatchScanner)).Count);
+        AddCount(counts, "Interpreted (non-native) routine called from a natively compiled module (does not compile)", report.Find<NativelyCompiledInterpretedCalleeFinding>(nameof(NativelyCompiledInterpretedCalleeScanner)).Count);
+        AddCount(counts, "MEMORY_OPTIMIZED and LEDGER both specified on the same table (does not deploy)", report.Find<MemoryOptimizedLedgerConflictFinding>(nameof(MemoryOptimizedLedgerConflictScanner)).Count);
         AddCount(counts, "Unsupported index option on a memory-optimized table (does not deploy)", report.Find<MemoryOptimizedUnsupportedIndexOptionFinding>(nameof(MemoryOptimizedUnsupportedIndexOptionScanner)).Count);
         AddCount(counts, "Unsupported memory-optimized foreign key (does not deploy)", report.Find<MemoryOptimizedForeignKeyFinding>(nameof(MemoryOptimizedForeignKeyScanner)).Count);
         AddCount(counts, "Memory-optimized table declared SCHEMA_ONLY durability (data lost on restart)", report.Find<MemoryOptimizedSchemaOnlyDurabilityFinding>(nameof(MemoryOptimizedSchemaOnlyDurabilityScanner)).Count);
@@ -1065,6 +1071,72 @@ public static class ReadableScanReportWriter
                 f.Kind == NativelyCompiledClrTypeKind.Parameter ? "Parameter" : "Local variable",
                 f.MemberName,
                 f.TypeQualifiedName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> NativelyCompiledErrorOutsideCatch(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<NativelyCompiledErrorOutsideCatchFinding>(nameof(NativelyCompiledErrorOutsideCatchScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"ERROR_* call outside a CATCH block inside a natively compiled module ({report.Find<NativelyCompiledErrorOutsideCatchFinding>(nameof(NativelyCompiledErrorOutsideCatchScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A natively compiled stored procedure or function calls ERROR_MESSAGE()/ERROR_NUMBER()/ERROR_SEVERITY()/ERROR_STATE()/ERROR_LINE()/ERROR_PROCEDURE() outside a CATCH block - oracle-confirmed real compilation fails with Msg 10792.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NativelyCompiledErrorOutsideCatchRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Module", "Function"],
+            [.. report.Find<NativelyCompiledErrorOutsideCatchFinding>(nameof(NativelyCompiledErrorOutsideCatchScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ModuleQualifiedName,
+                f.FunctionName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> NativelyCompiledInterpretedCallee(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<NativelyCompiledInterpretedCalleeFinding>(nameof(NativelyCompiledInterpretedCalleeScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Interpreted (non-native) routine called from a natively compiled module ({report.Find<NativelyCompiledInterpretedCalleeFinding>(nameof(NativelyCompiledInterpretedCalleeScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A natively compiled stored procedure or function executes or calls a routine that the scanned SQL itself defines without NATIVE_COMPILATION - oracle-confirmed real compilation fails (Msg 12342 for EXEC, Msg 12344 for a function call).");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NativelyCompiledInterpretedCalleeRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Module", "Kind", "Callee"],
+            [.. report.Find<NativelyCompiledInterpretedCalleeFinding>(nameof(NativelyCompiledInterpretedCalleeScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ModuleQualifiedName,
+                f.Kind == NativelyCompiledInterpretedCalleeKind.ExecutedProcedure ? "EXEC" : "Function call",
+                f.CalleeQualifiedName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> MemoryOptimizedLedgerConflict(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<MemoryOptimizedLedgerConflictFinding>(nameof(MemoryOptimizedLedgerConflictScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"MEMORY_OPTIMIZED and LEDGER both specified on the same table ({report.Find<MemoryOptimizedLedgerConflictFinding>(nameof(MemoryOptimizedLedgerConflictScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A CREATE TABLE statement specifies both MEMORY_OPTIMIZED = ON and LEDGER = ON - oracle-confirmed real deployment fails with Msg 12359.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MemoryOptimizedLedgerConflictRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table"],
+            [.. report.Find<MemoryOptimizedLedgerConflictFinding>(nameof(MemoryOptimizedLedgerConflictScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
             })]);
     }
 

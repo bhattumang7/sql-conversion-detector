@@ -507,7 +507,7 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
 - **`WITH (LEDGER = ON)` combined with `MEMORY_OPTIMIZED = ON` always fails
   (Msg 12359, "Ledger tables are not supported with memory optimized
   tables.")** - a plain table-option conflict, decidable purely from the
-  table's own declared options; not yet built into a rule.
+  table's own declared options; shipped as `MemoryOptimizedLedgerConflictRuleId`.
 
 ## Natively compiled T-SQL module restrictions
 
@@ -540,13 +540,16 @@ WITH NATIVE_COMPILATION` module.
   `FunctionCall` - shipped as unconditional (name-implied, no lookup needed)
   findings via their own `IModuleRule`/`ModuleWalker` hooks alongside the
   denylist.
-- **`ERROR_MESSAGE()`/`ERROR_NUMBER()` (and presumably the other `ERROR_*`
-  functions) are supported inside a natively compiled module but only inside
-  a `CATCH` block** - calling them elsewhere fails with a different error
-  (Msg 10792, "...cannot appear outside of a catch block"), not Msg 10794.
-  This is a context restriction, not an unsupported-function rejection; not
-  implemented (would need CATCH-block scope tracking, out of scope for the
-  shipped denylist rule).
+- **`ERROR_MESSAGE()`/`ERROR_NUMBER()`/`ERROR_SEVERITY()`/`ERROR_STATE()`/
+  `ERROR_LINE()`/`ERROR_PROCEDURE()` are supported inside a natively compiled
+  module but only inside a `CATCH` block** - calling any of them elsewhere
+  fails (Msg 10792, "...cannot appear outside of a catch block"; oracle-
+  confirmed individually for all six), not Msg 10794. A context restriction,
+  not an unsupported-function rejection - shipped as
+  `NativelyCompiledErrorOutsideCatchRuleId`, tracking CATCH-block nesting via
+  dedicated `ModuleWalker` enter/leave hooks around `TryCatchStatement`'s
+  `CatchStatements` list (distinct from the existing `TryCatchStatement`
+  enter/leave hooks, which span both the `TRY` and `CATCH` bodies).
 - **A CLR user-defined type (`CREATE TYPE ... EXTERNAL NAME`) used as a
   parameter or local variable's type inside a natively compiled module always
   fails (Msg 10794, "The type '<name>' is not supported with natively
@@ -558,13 +561,24 @@ WITH NATIVE_COMPILATION` module.
   purely by name: the catalog tracks CLR UDT qualified names from
   `CreateTypeUdtStatement` and checks a native module's own parameter/DECLARE
   type references against that set - no resolution of the CLR type's actual
-  shape is needed. Also confirmed: calling an **interpreted** function
-  (T-SQL or CLR) from inside a natively compiled module fails with a
-  different, broader error (Msg 12344, "Only natively compiled modules can be
-  used with natively compiled modules.") - a separate restriction (calling
-  any non-native routine, CLR or not) from the type-declaration one shipped
-  here; not implemented, since it needs cross-module native/interpreted
-  classification of the callee, not just a type name check.
+  shape is needed. Shipped as `NativelyCompiledClrTypeRuleId`.
+- **Calling a routine that is itself not natively compiled from inside a
+  natively compiled module always fails, but with a different error
+  depending on the call shape**: `EXEC` against an interpreted procedure
+  fails with Msg 12342 ("The EXECUTE statement in natively compiled modules
+  only supports executing natively compiled modules."); calling an
+  interpreted scalar function fails with Msg 12344 ("Only natively compiled
+  modules can be used with natively compiled modules.") - both
+  oracle-confirmed independently, and confirmed clean for the reverse
+  (calling another natively compiled procedure via `EXEC` deploys cleanly).
+  Shipped as `NativelyCompiledInterpretedCalleeRuleId`: the catalog tracks
+  every scanned `CREATE`/`ALTER`/`CREATE OR ALTER PROCEDURE`/`FUNCTION`'s
+  native-compilation status by qualified name (`DatabaseCatalog
+  .AddRoutineNativeCompilation`/`TryGetRoutineIsNativelyCompiled`, populated
+  in `CatalogBuilder.VisitScopedBody`), and a native module's own `EXEC`/
+  function-call targets are checked against it; a callee whose own
+  definition isn't among the scanned files is never treated as interpreted
+  (unresolved is not evidence of rejection).
 - **"Deep type" rejection beyond the denylist above was not further
   oracle-tested this pass** - the shipped denylist (see above) covers the
   specific functions individually confirmed rejected; the full unsupported
@@ -572,7 +586,7 @@ WITH NATIVE_COMPILATION` module.
 - **`GENERATED ALWAYS AS ROW START/END` (temporal) on a memory-optimized
   table deploys cleanly** - oracle-tested; not the restriction the original
   task item loosely gestured at. The `LEDGER`/`MEMORY_OPTIMIZED` conflict
-  above is the closest confirmed fact found in this area.
+  above (shipped) is the closest confirmed fact found in this area.
 
 ## Settled (do not re-propose)
 
