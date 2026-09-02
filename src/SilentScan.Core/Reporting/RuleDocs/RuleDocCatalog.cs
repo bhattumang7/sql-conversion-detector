@@ -144,6 +144,8 @@ public static class RuleDocCatalog
         [Predicates.RevertCookieTypeMismatch.RuleId] = Predicates.RevertCookieTypeMismatch.Content,
         [Predicates.ForXmlExplicitInlineXsd.RuleId] = Predicates.ForXmlExplicitInlineXsd.Content,
         [Predicates.AlwaysEncryptedKeyColumn.RuleId] = Predicates.AlwaysEncryptedKeyColumn.Content,
+        [Predicates.AlwaysEncryptedUnsupportedColumn.DataTypeRuleId] = Predicates.AlwaysEncryptedUnsupportedColumn.DataTypeContent,
+        [Predicates.AlwaysEncryptedUnsupportedColumn.IdentityRuleId] = Predicates.AlwaysEncryptedUnsupportedColumn.IdentityContent,
         [Predicates.AlterColumnPrecisionScaleNarrowing.RuleId] = Predicates.AlterColumnPrecisionScaleNarrowing.Content,
         [Predicates.AlterColumnIncompatibleFamilyConversion.RuleId] = Predicates.AlterColumnIncompatibleFamilyConversion.Content,
         [Predicates.AlterColumnTemporalOffsetDropped.RuleId] = Predicates.AlterColumnTemporalOffsetDropped.Content,

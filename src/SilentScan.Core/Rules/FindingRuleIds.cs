@@ -59,6 +59,12 @@ public static class FindingRuleIds
     public const string RevertCookieTypeMismatchRuleId = "silentscan/predicates/revert-cookie-type-mismatch";
     public const string ForXmlExplicitInlineXsdRuleId = "silentscan/predicates/for-xml-explicit-inline-xsd";
     public const string AlwaysEncryptedKeyColumnRuleId = "silentscan/catalog/always-encrypted-non-enclave-key-column";
+    public static string AlwaysEncryptedUnsupportedColumnRuleId(AlwaysEncryptedUnsupportedColumnKind kind) => kind switch
+    {
+        AlwaysEncryptedUnsupportedColumnKind.UnsupportedDataType => "silentscan/catalog/always-encrypted-unsupported-data-type",
+        AlwaysEncryptedUnsupportedColumnKind.IdentityColumn => "silentscan/catalog/always-encrypted-identity-column",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled AlwaysEncryptedUnsupportedColumnKind."),
+    };
     public const string TriggerOrderRuleId = "silentscan/catalog/trigger-firing-order-undefined";
     public static string AlterColumnSafetyRuleId(AlterColumnSafetyKind kind) => kind switch
     {

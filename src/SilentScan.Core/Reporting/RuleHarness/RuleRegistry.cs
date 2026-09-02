@@ -95,6 +95,7 @@ public static class RuleRegistry
         new MemoryOptimizedUtf8CollationRule(),
         new MemoryOptimizedUnsupportedIndexOptionRule(),
         new AlwaysEncryptedKeyColumnRule(),
+        new AlwaysEncryptedUnsupportedColumnRule(),
         new AlterColumnSafetyRule(),
         new DropProtectedObjectRule(),
         new OnlineRebuildLegacyLobRule(),

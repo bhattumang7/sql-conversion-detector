@@ -115,6 +115,7 @@ public static class TestScanReports
         IReadOnlyList<FloatOrderDependentAggregateFinding>? FloatOrderDependentAggregateFindings = null,
         IReadOnlyList<DynamicDataMaskingFinding>? DynamicDataMaskingFindings = null,
         IReadOnlyList<AlwaysEncryptedKeyColumnFinding>? AlwaysEncryptedKeyColumnFindings = null,
+        IReadOnlyList<AlwaysEncryptedUnsupportedColumnFinding>? AlwaysEncryptedUnsupportedColumnFindings = null,
         IReadOnlyList<AlterColumnSafetyFinding>? AlterColumnSafetyFindings = null,
         IReadOnlyList<DropProtectedObjectFinding>? DropProtectedObjectFindings = null,
         IReadOnlyList<OnlineRebuildLegacyLobFinding>? OnlineRebuildLegacyLobFindings = null,
@@ -237,6 +238,7 @@ public static class TestScanReports
         Set("FloatOrderDependentAggregateScanner", FloatOrderDependentAggregateFindings);
         Set(nameof(DynamicDataMaskingScanner), DynamicDataMaskingFindings);
         Set("AlwaysEncryptedKeyColumnScanner", AlwaysEncryptedKeyColumnFindings);
+        Set("AlwaysEncryptedUnsupportedColumnScanner", AlwaysEncryptedUnsupportedColumnFindings);
         Set("AlterColumnSafetyScanner", AlterColumnSafetyFindings);
         Set("DropProtectedObjectScanner", DropProtectedObjectFindings);
         Set("OnlineRebuildLegacyLobScanner", OnlineRebuildLegacyLobFindings);

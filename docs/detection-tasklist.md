@@ -85,11 +85,6 @@ Competitor tools are referred to generically; real identities are in
         FILESTREAM data-space mismatch, partition-scheme/partitioning-column
         disagreement) not tested this pass.
 
-      13. Always Encrypted per-type restrictions beyond the comparison/index
-        family already written up — a column type the engine's own
-        encryption-support rules reject outright. **FINDING:** not tested
-        this pass.
-
       16. New family: `STRING_SPLIT`/`REGEXP_MATCHES`-style string TVF
         argument-type and MAX-width validation, and `STRING_SPLIT`'s
         3-argument ordinality form being version-gated — fold together

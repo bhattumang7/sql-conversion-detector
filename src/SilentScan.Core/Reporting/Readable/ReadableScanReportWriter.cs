@@ -169,6 +169,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(RevertCookieTypeMismatch(report, headingLevel, pathBase));
         blocks.AddRange(ForXmlExplicitInlineXsd(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedKeyColumn(report, headingLevel, pathBase));
+        blocks.AddRange(AlwaysEncryptedUnsupportedColumn(report, headingLevel, pathBase));
         blocks.AddRange(AlterColumnSafety(report, headingLevel, pathBase));
         blocks.AddRange(DropProtectedObject(report, headingLevel, pathBase));
         blocks.AddRange(OnlineRebuildLegacyLob(report, headingLevel, pathBase));
@@ -283,6 +284,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "REVERT cookie type mismatch", report.Find<RevertCookieTypeMismatchFinding>(nameof(RevertCookieTypeMismatchScanner)).Count);
         AddCount(counts, "FOR XML EXPLICIT with inline XSD", report.Find<ForXmlExplicitInlineXsdFinding>(nameof(ForXmlExplicitInlineXsdScanner)).Count);
         AddCount(counts, "Always Encrypted non-enclave key column", report.Find<AlwaysEncryptedKeyColumnFinding>(nameof(AlwaysEncryptedKeyColumnScanner)).Count);
+        AddCount(counts, "Always Encrypted unsupported data type", report.Find<AlwaysEncryptedUnsupportedColumnFinding>(nameof(AlwaysEncryptedUnsupportedColumnScanner)).Count(f => f.Kind == AlwaysEncryptedUnsupportedColumnKind.UnsupportedDataType));
+        AddCount(counts, "Always Encrypted identity column", report.Find<AlwaysEncryptedUnsupportedColumnFinding>(nameof(AlwaysEncryptedUnsupportedColumnScanner)).Count(f => f.Kind == AlwaysEncryptedUnsupportedColumnKind.IdentityColumn));
         AddCount(counts, "ALTER COLUMN safety", report.Find<AlterColumnSafetyFinding>(nameof(AlterColumnSafetyScanner)).Count);
         AddCount(counts, "DROP against a protected object", report.Find<DropProtectedObjectFinding>(nameof(DropProtectedObjectScanner)).Count);
         AddCount(counts, "Online index rebuild blocked by a legacy large-object column", report.Find<OnlineRebuildLegacyLobFinding>(nameof(OnlineRebuildLegacyLobScanner)).Count);
@@ -2011,6 +2014,45 @@ public static class ReadableScanReportWriter
                     _ => "index",
                 },
             })]);
+    }
+
+    private static IEnumerable<ReadableBlock> AlwaysEncryptedUnsupportedColumn(ScanReport report, int level, string? pathBase)
+    {
+        var unsupportedType = report.Find<AlwaysEncryptedUnsupportedColumnFinding>(nameof(AlwaysEncryptedUnsupportedColumnScanner)).Where(f => f.Kind == AlwaysEncryptedUnsupportedColumnKind.UnsupportedDataType).ToList();
+        if (unsupportedType.Count > 0)
+        {
+            yield return new ReadableBlock.Heading(level, $"Always Encrypted unsupported data type ({unsupportedType.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "A column declared ENCRYPTED WITH has a data type Always Encrypted rejects outright - the statement does not deploy (Msg 33280).");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.AlwaysEncryptedUnsupportedColumnRuleId(AlwaysEncryptedUnsupportedColumnKind.UnsupportedDataType)));
+
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ColumnHeader, "Type"],
+                [.. unsupportedType.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    $"{f.TableQualifiedName}.{f.ColumnName}",
+                    f.TypeDisplay ?? string.Empty,
+                })]);
+        }
+
+        var identity = report.Find<AlwaysEncryptedUnsupportedColumnFinding>(nameof(AlwaysEncryptedUnsupportedColumnScanner)).Where(f => f.Kind == AlwaysEncryptedUnsupportedColumnKind.IdentityColumn).ToList();
+        if (identity.Count > 0)
+        {
+            yield return new ReadableBlock.Heading(level, $"Always Encrypted identity column ({identity.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "A column declared IDENTITY also carries ENCRYPTED WITH - an identity column must be unencrypted, so the statement does not deploy (Msg 2749).");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.AlwaysEncryptedUnsupportedColumnRuleId(AlwaysEncryptedUnsupportedColumnKind.IdentityColumn)));
+
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ColumnHeader, "Type"],
+                [.. identity.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    $"{f.TableQualifiedName}.{f.ColumnName}",
+                    f.TypeDisplay ?? string.Empty,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> AlterColumnSafety(ScanReport report, int level, string? pathBase)

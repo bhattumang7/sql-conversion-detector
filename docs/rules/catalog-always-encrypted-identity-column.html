@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Always Encrypted Identity Column - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Always Encrypted Identity Column</h1>
+  <p class="rule-key"><code>silentscan/catalog/always-encrypted-identity-column</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A column declared IDENTITY also carries ENCRYPTED WITH - oracle-confirmed (Msg 2749, &quot;must be ... unencrypted&quot;) an identity column can never be encrypted, independent of its underlying integer/decimal type. Purely catalog-derived from the column&#x27;s own declaration.</p>
+  <p class="rationale">An IDENTITY column&#x27;s value is generated and read by the engine itself during ordinary INSERT processing, entirely outside the client-driver path that Always Encrypted relies on to encrypt and decrypt values - there is no point at which the engine could produce an encrypted identity value on its own. SQL Server rejects the combination outright the moment `ENCRYPTED WITH` is attached to an `IDENTITY` column (oracle-confirmed, Msg 2749: &quot;Identity column &#x27;...&#x27; must be of data type int, bigint, smallint, tinyint, or decimal or numeric with a scale of 0, unencrypted, and constrained to be nonnullable&quot;), independent of which of those otherwise-valid identity types is used. This is a pure catalog fact about the column&#x27;s own declaration.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Drop `ENCRYPTED WITH` from the identity column - its value is a sequence number, not sensitive data - and encrypt a separate, non-identity column instead if the row also needs an encrypted value.</p>
+  <h3>An IDENTITY column can never carry ENCRYPTED WITH</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Customer&#xA;(&#xA;    CustomerId INT IDENTITY(1,1)&#xA;        ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = CEK1, ENCRYPTION_TYPE = DETERMINISTIC, ALGORITHM = &#x27;AEAD_AES_256_CBC_HMAC_SHA_256&#x27;)&#xA;);</code></pre></div>
+  <p class="example-explanation">CustomerId is IDENTITY, so ENCRYPTED WITH is rejected outright - this fails to deploy with Msg 2749 regardless of the underlying integer type.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TABLE dbo.Customer&#xA;(&#xA;    CustomerId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,&#xA;    Ssn        INT&#xA;        ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = CEK1, ENCRYPTION_TYPE = DETERMINISTIC, ALGORITHM = &#x27;AEAD_AES_256_CBC_HMAC_SHA_256&#x27;)&#xA;);</code></pre></div>
+  <p class="example-explanation">CustomerId stays a plain identity column, and the value that actually needs protection is encrypted on a separate, non-identity column instead.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/predicates/ALWAYS_ENCRYPTED_IDENTITY_COLUMN_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Oracle-confirmed against the standing Docker instance: attaching ENCRYPTED WITH to an&#xA;-- IDENTITY column fails to deploy with Msg 2749 (&quot;must be ... unencrypted&quot;), independent of&#xA;-- which otherwise-valid identity type is used.&#xA;CREATE COLUMN MASTER KEY CMK1&#xA;WITH (&#xA;    KEY_STORE_PROVIDER_NAME = &#x27;MSSQL_CERTIFICATE_STORE&#x27;,&#xA;    KEY_PATH = &#x27;CurrentUser/My/0000000000000000000000000000000000000000&#x27;&#xA;);&#xA;GO&#xA;CREATE COLUMN ENCRYPTION KEY CEK1&#xA;WITH VALUES&#xA;(&#xA;    COLUMN_MASTER_KEY = CMK1,&#xA;    ALGORITHM = &#x27;RSA_OAEP&#x27;,&#xA;    ENCRYPTED_VALUE = 0x01000000&#xA;);&#xA;GO&#xA;CREATE TABLE dbo.Customer&#xA;(&#xA;    CustomerId INT&#xA;        ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = CEK1, ENCRYPTION_TYPE = DETERMINISTIC, ALGORITHM = &#x27;AEAD_AES_256_CBC_HMAC_SHA_256&#x27;)&#xA;        IDENTITY&#xA;);</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

@@ -91,6 +91,12 @@ internal sealed class AlwaysEncryptedKeyColumnRule : ICatalogRule
     public IReadOnlyList<IFinding> Scan(RuleContext context) => AlwaysEncryptedKeyColumnScanner.Scan(context.Catalog);
 }
 
+internal sealed class AlwaysEncryptedUnsupportedColumnRule : ICatalogRule
+{
+    public string Id => "AlwaysEncryptedUnsupportedColumnScanner";
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => AlwaysEncryptedUnsupportedColumnScanner.Scan(context.Catalog);
+}
+
 internal sealed class AlterColumnSafetyRule : ICatalogRule
 {
     public string Id => "AlterColumnSafetyScanner";

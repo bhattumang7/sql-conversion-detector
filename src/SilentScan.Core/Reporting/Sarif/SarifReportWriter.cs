@@ -117,6 +117,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<RevertCookieTypeMismatchFinding>("RevertCookieTypeMismatchScanner").Select(ToResult));
         results.AddRange(report.Find<ForXmlExplicitInlineXsdFinding>("ForXmlExplicitInlineXsdScanner").Select(ToResult));
         results.AddRange(report.Find<AlwaysEncryptedKeyColumnFinding>("AlwaysEncryptedKeyColumnScanner").Select(ToResult));
+        results.AddRange(report.Find<AlwaysEncryptedUnsupportedColumnFinding>("AlwaysEncryptedUnsupportedColumnScanner").Select(ToResult));
         results.AddRange(report.Find<AlterColumnSafetyFinding>("AlterColumnSafetyScanner").Select(ToResult));
         results.AddRange(report.Find<DropProtectedObjectFinding>("DropProtectedObjectScanner").Select(ToResult));
         results.AddRange(report.Find<OnlineRebuildLegacyLobFinding>("OnlineRebuildLegacyLobScanner").Select(ToResult));
@@ -1580,6 +1581,21 @@ public static class SarifReportWriter
             _ => "index",
         };
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is a key column of {objectKind} '{finding.ObjectName}' - the column is RANDOMIZED-encrypted with a column encryption key whose column master key was not declared with ENCLAVE_COMPUTATIONS, so it cannot be used as a key column in a constraint, index, or statistics; the statement does not deploy.";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(AlwaysEncryptedUnsupportedColumnFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AlwaysEncryptedUnsupportedColumnRuleId(finding.Kind), finding.Confidence);
+        var message = finding.Kind switch
+        {
+            AlwaysEncryptedUnsupportedColumnKind.UnsupportedDataType =>
+                $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared ENCRYPTED WITH on data type {finding.TypeDisplay} - this data type is not supported for encryption; the statement does not deploy (Msg 33280).",
+            AlwaysEncryptedUnsupportedColumnKind.IdentityColumn =>
+                $"'{finding.TableQualifiedName}.{finding.ColumnName}' is an IDENTITY column declared ENCRYPTED WITH - an identity column must be unencrypted; the statement does not deploy (Msg 2749).",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled AlwaysEncryptedUnsupportedColumnKind."),
+        };
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: 1);
     }

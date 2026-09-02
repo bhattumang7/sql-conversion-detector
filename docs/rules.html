@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">339 rules. 250 carry fix guidance; 35 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">341 rules. 252 carry fix guidance; 37 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>backup</h2>
@@ -111,7 +111,9 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/catalog-alter-column-incompatible-family-conversion.html">Alter Column Incompatible Family Conversion</a> <code class="rule-key">silentscan/catalog/alter-column-incompatible-family-conversion</code><span class="snippet">An ALTER TABLE .</span></li>
       <li><a class="id" href="rules/catalog-alter-column-precision-scale-narrowing.html">Alter Column Precision Scale Narrowing</a> <code class="rule-key">silentscan/catalog/alter-column-precision-scale-narrowing</code><span class="snippet">An ALTER TABLE .</span></li>
       <li><a class="id" href="rules/catalog-alter-column-temporal-offset-dropped.html">Alter Column Temporal Offset Dropped</a> <code class="rule-key">silentscan/catalog/alter-column-temporal-offset-dropped</code><span class="snippet">An ALTER TABLE .</span></li>
+      <li><a class="id" href="rules/catalog-always-encrypted-identity-column.html">Always Encrypted Identity Column</a> <code class="rule-key">silentscan/catalog/always-encrypted-identity-column</code><span class="snippet">A column declared IDENTITY also carries ENCRYPTED WITH.</span></li>
       <li><a class="id" href="rules/catalog-always-encrypted-non-enclave-key-column.html">Always Encrypted Non Enclave Key Column</a> <code class="rule-key">silentscan/catalog/always-encrypted-non-enclave-key-column</code><span class="snippet">A RANDOMIZED-encrypted column is used as a key column of an index, PRIMARY KEY/UNIQUE constraint, or statistics object, and the column encryption key backing it is tied to a column master key declared without ENCLAVE_COMPUTATIONS.</span></li>
+      <li><a class="id" href="rules/catalog-always-encrypted-unsupported-data-type.html">Always Encrypted Unsupported Data Type</a> <code class="rule-key">silentscan/catalog/always-encrypted-unsupported-data-type</code><span class="snippet">A column declared ENCRYPTED WITH has a data type from the set Always Encrypted&#x27;s own engine rejects outright regardless of encryption type or enclave configuration.</span></li>
       <li><a class="id" href="rules/catalog-cascading-foreign-key.html">Cascading Foreign Key</a> <code class="rule-key">silentscan/catalog/cascading-foreign-key</code><span class="snippet">A foreign key with a non-NO_ACTION ON DELETE/ON UPDATE action.</span></li>
       <li><a class="id" href="rules/catalog-check-constraint-null-not-handled.html">Check Constraint Null Not Handled</a> <code class="rule-key">silentscan/catalog/check-constraint-null-not-handled</code><span class="snippet">A nullable column&#x27;s own CHECK constraint predicate has no IS NULL/IS NOT NULL test against that column anywhere in the predicate.</span></li>
       <li><a class="id" href="rules/catalog-check-constraint-on-identity-column.html">Check Constraint On Identity Column</a> <code class="rule-key">silentscan/catalog/check-constraint-on-identity-column</code><span class="snippet">A CHECK constraint&#x27;s own definition directly references an IDENTITY column.</span></li>
