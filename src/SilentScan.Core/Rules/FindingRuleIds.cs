@@ -151,6 +151,8 @@ public static class FindingRuleIds
     public const string QueryAntiPatternAlterSchemaTransferMsShippedObjectRuleId = "silentscan/query/alter-schema-transfer-ms-shipped-object";
     public const string QueryAntiPatternGroupingSetsCardinalityLimitExceededRuleId = "silentscan/query/grouping-sets-cardinality-limit-exceeded";
     public const string QueryAntiPatternGroupingArgumentNotInGroupByListRuleId = "silentscan/query/grouping-argument-not-in-group-by-list";
+    public const string QueryAntiPatternAlterTableRebuildPartitionOutOfRangeRuleId = "silentscan/query/alter-table-rebuild-partition-out-of-range";
+    public const string QueryAntiPatternPartitionRebuildNumberExceedsCeilingRuleId = "silentscan/query/partition-rebuild-number-exceeds-ceiling";
     public const string IndexCoverageKeyLookupProneIndexRuleId = "silentscan/index/key-lookup-prone";
     public const string TriggerCorrectnessMultiRowUnsafeSingleRowAssignmentRuleId = "silentscan/trigger/multi-row-unsafe-single-row-assignment";
     public const string TriggerCorrectnessMultiRowUnsafeKeyedDmlRuleId = "silentscan/trigger/multi-row-unsafe-keyed-dml";
@@ -601,6 +603,8 @@ public static class FindingRuleIds
         QueryAntiPatternFindingKind.AlterSchemaTransferMsShippedObject => QueryAntiPatternAlterSchemaTransferMsShippedObjectRuleId,
         QueryAntiPatternFindingKind.GroupingSetsCardinalityLimitExceeded => QueryAntiPatternGroupingSetsCardinalityLimitExceededRuleId,
         QueryAntiPatternFindingKind.GroupingArgumentNotInGroupByList => QueryAntiPatternGroupingArgumentNotInGroupByListRuleId,
+        QueryAntiPatternFindingKind.AlterTableRebuildPartitionOutOfRange => QueryAntiPatternAlterTableRebuildPartitionOutOfRangeRuleId,
+        QueryAntiPatternFindingKind.PartitionRebuildNumberExceedsCeiling => QueryAntiPatternPartitionRebuildNumberExceedsCeilingRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled QueryAntiPatternFindingKind."),
     };
     public static string IndexCoverageRuleId(IndexCoverageFindingKind kind) => kind switch

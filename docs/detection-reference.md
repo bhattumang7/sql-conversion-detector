@@ -1462,8 +1462,52 @@ WITH NATIVE_COMPILATION` module.
   FILESTREAM-dependent oracle probe; do not re-propose until that changes.
 
 * **`ALTER INDEX ... REBUILD PARTITION = n` partition-number ceiling is
-  15000, not 14999.** Oracle-confirmed (Docker): partition number 15000 is
-  valid (rejected only because it didn't exist on the probe table, Msg
-  7730); partition number 15001 is rejected as out of range with the engine
-  stating the valid range as "1 to 15000" (Msg 7722). Any future rule
+  15000, not 14999 - shipped as `QueryAntiPatternPartitionRebuildNumberExceedsCeilingRuleId`
+  (universal 1-15000 range, both `ALTER TABLE ... REBUILD PARTITION = n` and
+  `ALTER INDEX ... REBUILD PARTITION = n`) and
+  `QueryAntiPatternAlterTableRebuildPartitionOutOfRangeRuleId` (in-range but
+  above the target table's own partition count).** Oracle-confirmed
+  (Docker): partition number 15000 is valid on a table whose scheme doesn't
+  have that many partitions (rejected only because it didn't exist on the
+  probe table, Msg 7730 - "partition number N does not exist in index");
+  partition number 15001 is rejected as out of range regardless of any
+  table's scheme, with the engine stating the valid range as "1 to 15000"
+  (Msg 7722). Both statement forms raise the same two messages. Any rule
   encoding this ceiling must use 15000, not 14999.
+
+* **Partition function boundary count exceeding the 15000-partition ceiling
+  - killed, engine-guaranteed unreachable.** Hypothesized: a `CREATE
+  PARTITION FUNCTION` with more boundary values than the engine allows
+  partitions (14999 boundaries -> 15000 partitions). Oracle-confirmed
+  (Docker): the engine enforces this ceiling at `CREATE`/`ALTER PARTITION
+  FUNCTION` time itself - 14999 boundary values succeeds, 15000 boundary
+  values (15001 partitions) is rejected unconditionally with Msg 7719,
+  "CREATE/ALTER partition function failed as only a maximum of 15000
+  partitions can be created." A live catalog can therefore never contain a
+  partition function whose boundary count exceeds the ceiling - same
+  unreachable-via-live-catalog shape as the partition function parameter
+  type mismatch entry above. Only the statement-level partition-*number*
+  ceiling (a literal reference exceeding 15000 in `REBUILD PARTITION = n`,
+  independent of any table's actual scheme) is reachable and is shipped,
+  above.
+
+* **`DROP` against a read-only filegroup - inconclusive, not shipped.**
+  Hypothesized sibling to the shipped `ALTER TABLE SWITCH` filegroup
+  checks: dropping a filegroup that is currently read-only. Oracle probe
+  (Docker): `DROP FILEGROUP` on a read-only-but-still-present filegroup
+  fails with Msg 5042 ("filegroup is not empty"), which fires identically
+  for any filegroup still carrying a data file regardless of its read-only
+  state - the probe never isolated a rejection that depends specifically on
+  read-only, only on the filegroup still holding a file. Do not re-propose
+  without a probe that empties the filegroup first (removes its last data
+  file) and then compares DROP behavior on read-only vs. read-write with no
+  file present.
+
+* **FILESTREAM data-space compatibility mismatch - infra-blocked, not
+  shipped.** Sibling to the shipped `ALTER TABLE SWITCH` filegroup checks:
+  a table's `FILESTREAM_ON` clause naming a filegroup that isn't marked
+  `CONTAINS FILESTREAM`. Same platform limitation as the `CREATE TRIGGER`
+  FILESTREAM entry above - FILESTREAM cannot be enabled at all on SQL
+  Server for Linux, so no local Docker instance can create a FILESTREAM
+  filegroup to oracle-verify this against. Do not re-propose until a
+  FILESTREAM-capable instance is available to probe against.

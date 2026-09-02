@@ -150,6 +150,12 @@ public static class QueryAntiPatternScanner
         public void OnEnterAlterSchemaStatement(AlterSchemaStatement node, ModuleWalker walker) =>
             InspectAlterSchemaTransferMsShippedObject(node);
 
+        public void OnEnterAlterTableRebuildStatement(AlterTableRebuildStatement node, ModuleWalker walker) =>
+            InspectAlterTableRebuildPartitionNumber(node);
+
+        public void OnEnterAlterIndexStatement(AlterIndexStatement node, ModuleWalker walker) =>
+            InspectAlterIndexRebuildPartitionCeiling(node);
+
         public void OnEnterSelectStatementScope(SelectStatement node, ModuleWalker walker) =>
             InspectRecursiveCteMaxRecursion(node);
 
@@ -777,6 +783,64 @@ public static class QueryAntiPatternScanner
 
         private static int? ResolveIntegerLiteral(ScalarExpression expression) =>
             expression is IntegerLiteral { Value: { } text } && int.TryParse(text, out var value) ? value : null;
+
+        private const int MaxPartitionNumber = 15000;
+
+        private void InspectAlterTableRebuildPartitionNumber(AlterTableRebuildStatement node)
+        {
+            if (node.Partition?.Number is not { } numberExpression || ResolveIntegerLiteral(numberExpression) is not { } partitionNumber)
+            {
+                return;
+            }
+
+            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+
+            if (partitionNumber > MaxPartitionNumber)
+            {
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.PartitionRebuildNumberExceedsCeiling, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE '{qualifiedName}' REBUILD PARTITION = {partitionNumber} - partition number can range from 1 to {MaxPartitionNumber} (error 7722); this statement will fail at execution.",
+                    FindingConfidence.High));
+                return;
+            }
+
+            if (catalog.Find(qualifiedName) is not { Kind: CatalogTableKind.Table } table
+                || table.PartitionSchemeName is not { } schemeName
+                || !catalog.TryGetPartitionFunctionSignature(schemeName, out var signature))
+            {
+                return;
+            }
+
+            var partitionCount = signature.BoundaryValues.Count + 1;
+            if (partitionNumber > partitionCount)
+            {
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableRebuildPartitionOutOfRange, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE '{qualifiedName}' REBUILD PARTITION = {partitionNumber} - table '{qualifiedName}' is partitioned on scheme '{schemeName}' with {partitionCount} partition(s); partition {partitionNumber} does not exist (error 7730); this statement will fail at execution.",
+                    FindingConfidence.High));
+            }
+        }
+
+        private void InspectAlterIndexRebuildPartitionCeiling(AlterIndexStatement node)
+        {
+            if (node.Partition?.Number is not { } numberExpression
+                || ResolveIntegerLiteral(numberExpression) is not { } partitionNumber
+                || partitionNumber <= MaxPartitionNumber)
+            {
+                return;
+            }
+
+            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.OnName));
+            var indexName = node.Name?.Value ?? "ALL";
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.PartitionRebuildNumberExceedsCeiling, sourcePath,
+                node.StartLine, node.StartColumn,
+                $"ALTER INDEX '{indexName}' ON '{qualifiedName}' REBUILD PARTITION = {partitionNumber} - partition number can range from 1 to {MaxPartitionNumber} (error 7722); this statement will fail at execution.",
+                FindingConfidence.High));
+        }
 
         private void InspectAlterTableSwitchTemporalMismatch(AlterTableSwitchStatement node)
         {

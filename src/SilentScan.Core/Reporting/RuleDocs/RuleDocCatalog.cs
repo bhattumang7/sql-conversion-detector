@@ -100,6 +100,8 @@ public static class RuleDocCatalog
         [QueryAntiPattern.AlterSchemaTransferMsShippedObject.RuleId] = QueryAntiPattern.AlterSchemaTransferMsShippedObject.Content,
         [QueryAntiPattern.GroupingSetsCardinalityLimitExceeded.RuleId] = QueryAntiPattern.GroupingSetsCardinalityLimitExceeded.Content,
         [QueryAntiPattern.GroupingArgumentNotInGroupByList.RuleId] = QueryAntiPattern.GroupingArgumentNotInGroupByList.Content,
+        [QueryAntiPattern.AlterTableRebuildPartitionOutOfRange.RuleId] = QueryAntiPattern.AlterTableRebuildPartitionOutOfRange.Content,
+        [QueryAntiPattern.PartitionRebuildNumberExceedsCeiling.RuleId] = QueryAntiPattern.PartitionRebuildNumberExceedsCeiling.Content,
 
         [TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.RuleId] = TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.Content,
         [TriggerCorrectness.MultiRowUnsafeKeyedDml.RuleId] = TriggerCorrectness.MultiRowUnsafeKeyedDml.Content,

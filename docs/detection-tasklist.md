@@ -67,24 +67,6 @@ Competitor tools are referred to generically; real identities are in
         restrictions for local variable and parameter assignments.
         Encryption-state and legacy-LOB legs remain open.
 
-      7. New family: partition/filegroup DDL alignment siblings to the
-        shipped `ALTER TABLE SWITCH` family — partition-`REBUILD` alignment
-        mismatch, `DROP` against a non-updateable (read-only/offline)
-        filegroup, FILESTREAM data-space compatibility mismatch, a
-        partition scheme's columns disagreeing with the partitioning
-        columns, and a compile-time-foldable partition number exceeding the
-        engine's ceiling. **FINDING:** partial. The ceiling is 15000, not
-        14999 as originally guessed (oracle-confirmed, see
-        `detection-reference.md`) — partition number 15000 itself is valid,
-        15001 is rejected (Msg 7722, "range from 1 to 15000"). The
-        read-only-filegroup-drop probe was inconclusive: `DROP` on a
-        read-only-but-still-present filegroup fails with Msg 5042 ("not
-        empty"), which fires for any filegroup still carrying a data file
-        regardless of read-only state — doesn't isolate a read-only-specific
-        rejection. Remaining legs (partition-REBUILD alignment mismatch,
-        FILESTREAM data-space mismatch, partition-scheme/partitioning-column
-        disagreement) not tested this pass.
-
       17. Semantic Search TVFs (`SEMANTICKEYPHRASETABLE` etc.) requiring a
         qualifying full-text semantic index — legacy/rarely used feature.
         **FINDING:** not tested this pass.

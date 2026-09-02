@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">346 rules. 257 carry fix guidance; 37 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">348 rules. 259 carry fix guidance; 37 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>backup</h2>
@@ -496,6 +496,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <h2>query</h2>
     <ul class="rule-list">
       <li><a class="id" href="rules/query-alter-schema-transfer-ms-shipped-object.html">Alter Schema Transfer Ms Shipped Object</a> <code class="rule-key">silentscan/query/alter-schema-transfer-ms-shipped-object</code><span class="snippet">An ALTER SCHEMA .</span></li>
+      <li><a class="id" href="rules/query-alter-table-rebuild-partition-out-of-range.html">Alter Table Rebuild Partition Out Of Range</a> <code class="rule-key">silentscan/query/alter-table-rebuild-partition-out-of-range</code><span class="snippet">An ALTER TABLE .</span></li>
       <li><a class="id" href="rules/query-alter-table-switch-cdc-partition-switch.html">Alter Table Switch Cdc Partition Switch</a> <code class="rule-key">silentscan/query/alter-table-switch-cdc-partition-switch</code><span class="snippet">An ALTER TABLE .</span></li>
       <li><a class="id" href="rules/query-alter-table-switch-column-mismatch.html">Alter Table Switch Column Mismatch</a> <code class="rule-key">silentscan/query/alter-table-switch-column-mismatch</code><span class="snippet">An ALTER TABLE .</span></li>
       <li><a class="id" href="rules/query-alter-table-switch-constraint-mismatch.html">Alter Table Switch Constraint Mismatch</a> <code class="rule-key">silentscan/query/alter-table-switch-constraint-mismatch</code><span class="snippet">An ALTER TABLE .</span></li>
@@ -519,6 +520,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/query-merge-unconditional-delete.html">MERGE Unconditional Delete</a> <code class="rule-key">silentscan/query/merge-unconditional-delete</code><span class="snippet">A MERGE WHEN MATCHED/WHEN NOT MATCHED BY SOURCE THEN DELETE branch carries no additional AND condition of its own.</span></li>
       <li><a class="id" href="rules/query-multi-row-insert-ignore-dup-key-drop.html">Multi Row Insert Ignore Dup Key Drop</a> <code class="rule-key">silentscan/query/multi-row-insert-ignore-dup-key-drop</code><span class="snippet">A multi-row INSERT targets a table with a UNIQUE index built WITH (IGNORE_DUP_KEY = ON).</span></li>
       <li><a class="id" href="rules/query-non-aggregate-having-predicate.html">Non Aggregate HAVING Predicate</a> <code class="rule-key">silentscan/query/non-aggregate-having-predicate</code><span class="snippet">A HAVING condition references only GROUP BY key columns/literals and no aggregate result.</span></li>
+      <li><a class="id" href="rules/query-partition-rebuild-number-exceeds-ceiling.html">Partition Rebuild Number Exceeds Ceiling</a> <code class="rule-key">silentscan/query/partition-rebuild-number-exceeds-ceiling</code><span class="snippet">An ALTER TABLE .</span></li>
       <li><a class="id" href="rules/query-rbar-single-row-loop-dml.html">Rbar Single Row Loop DML</a> <code class="rule-key">silentscan/query/rbar-single-row-loop-dml</code><span class="snippet">A WHILE loop issues a single-row UPDATE/DELETE keyed to a variable the same loop advances per iteration (row-by-row processing).</span></li>
       <li><a class="id" href="rules/query-recursive-cte-missing-maxrecursion.html">Recursive CTE Missing Maxrecursion</a> <code class="rule-key">silentscan/query/recursive-cte-missing-maxrecursion</code><span class="snippet">A recursive CTE&#x27;s containing statement has no OPTION (MAXRECURSION n).</span></li>
       <li><a class="id" href="rules/query-table-variable-low-compat-estimate.html">Table Variable Low Compat Estimate</a> <code class="rule-key">silentscan/query/table-variable-low-compat-estimate</code><span class="snippet">A table variable is used as a query source while the connected database&#x27;s compatibility level is below 150.</span></li>

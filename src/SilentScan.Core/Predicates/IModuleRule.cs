@@ -224,6 +224,14 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterAlterTableRebuildStatement(AlterTableRebuildStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterAlterIndexStatement(AlterIndexStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterDeclareCursorStatement(DeclareCursorStatement node, ModuleWalker walker)
     {
     }

@@ -67,6 +67,10 @@ public enum QueryAntiPatternFindingKind
     GroupingSetsCardinalityLimitExceeded,
 
     GroupingArgumentNotInGroupByList,
+
+    AlterTableRebuildPartitionOutOfRange,
+
+    PartitionRebuildNumberExceedsCeiling,
 }
 
 public sealed record QueryAntiPatternFinding(
