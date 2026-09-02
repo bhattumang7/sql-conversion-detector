@@ -309,6 +309,14 @@ public static class CatalogBuilder
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
                     "full-text index", $"'{SchemaObjectNameHelper.Qualify(node.OnName)}': CREATE FULLTEXT INDEX is not modeled - supports CONTAINS/FREETEXT, not the comparison operators this tool classifies");
+
+                var columns = node.FullTextIndexColumns
+                    .Where(c => c.Name is not null)
+                    .Select(c => new CatalogFullTextIndexColumn(c.Name.Value, c.LanguageTerm?.Value))
+                    .ToList();
+
+                catalog.AddFullTextIndex(new CatalogFullTextIndex(
+                    SchemaObjectNameHelper.Qualify(node.OnName), columns, sourcePath, node.StartLine, node.StartColumn));
             }
 
             node.AcceptChildren(this);
@@ -1433,7 +1441,9 @@ public static class CatalogBuilder
             IsMasked: columnDefinition.IsMasked,
             MaskingFunctionName: MaskingFunctionNameNormalizer.Normalize(columnDefinition.MaskingFunction?.Value),
             IsGeneratedAlwaysPeriod: columnDefinition.GeneratedAlways is GeneratedAlwaysType.RowStart or GeneratedAlwaysType.RowEnd,
-            IsSparse: columnDefinition.StorageOptions?.SparseOption == SparseColumnOption.Sparse);
+            IsSparse: columnDefinition.StorageOptions?.SparseOption == SparseColumnOption.Sparse,
+            IsComputedNonDeterministic: columnDefinition.ComputedColumnExpression is { } expressionForDeterminism
+                && ComputedColumnDeterminismChecker.IsNonDeterministic(expressionForDeterminism));
     }
 
     private static ColumnEncryptionEnclaveSupport ResolveEnclaveSupport(ColumnEncryptionDefinition? encryption, DatabaseCatalog? catalog) =>

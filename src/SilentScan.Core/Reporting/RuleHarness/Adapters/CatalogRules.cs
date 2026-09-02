@@ -121,6 +121,13 @@ internal sealed class LegacyLobUtf8CollationRule : ICatalogRule
     public IReadOnlyList<IFinding> Scan(RuleContext context) => LegacyLobUtf8CollationScanner.Scan(context.Catalog);
 }
 
+internal sealed class FullTextIndexDdlRule : ICatalogRule
+{
+    public string Id => "FullTextIndexDdlScanner";
+    public bool ApplyConfidenceFilter => false;
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => FullTextIndexDdlScanner.Scan(context.Catalog);
+}
+
 internal sealed class MemoryOptimizedForeignKeyRule : ICatalogRule
 {
     public string Id => "MemoryOptimizedForeignKeyScanner";

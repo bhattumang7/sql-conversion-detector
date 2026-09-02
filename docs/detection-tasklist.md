@@ -85,16 +85,6 @@ Competitor tools are referred to generically; real identities are in
         FILESTREAM data-space mismatch, partition-scheme/partitioning-column
         disagreement) not tested this pass.
 
-      12. Full-text index DDL validation (unsupported column type, invalid
-        language id, nondeterministic computed column, >1024 indexed
-        columns) — real but needs new full-text-index modeling in the
-        catalog builder that doesn't exist today. **FINDING:** not tested
-        this pass, despite full-text capability being available directly on
-        `mssql-silentscan-sql` (`IsFullTextInstalled` = 1; the separate
-        `silentscan-mssql-fts` container CLAUDE.md references no longer
-        exists) — deprioritized given the catalog-builder prerequisite
-        called out in the bullet itself.
-
       13. Always Encrypted per-type restrictions beyond the comparison/index
         family already written up — a column type the engine's own
         encryption-support rules reject outright. **FINDING:** not tested
