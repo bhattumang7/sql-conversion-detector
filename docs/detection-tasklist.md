@@ -25,16 +25,6 @@ Competitor tools are referred to generically; real identities are in
       area, or "verify it isn't already covered" rather than a clean new
       gap) but are real enough not to drop silently. Each still needs its
       own oracle confirmation before design.
-      1. Verify the shipped predicate-survival algebra already folds `LIKE`
-        patterns into its interval model, and already flattens nested
-        AND/OR trees (not just direct conjuncts/disjuncts) before treating
-        those as closed — may already be covered by the recent commit.
-        **FINDING:** split verdict. `PredicateSurvivalAnalyzer.Flatten`
-        already recurses through nested same-type AND/OR trees and unwraps
-        parens — that half is already correct, not a gap. But the analyzer
-        has no `LIKE`/`BooleanLikeExpression` handling at all — patterns
-        are not folded into the interval model. Real, narrower gap: LIKE
-        folding only.
       2. `ScalarUdfInlineabilityScanner`: the survey claims it covers only
         about half the engine's real inlineability checks; beyond the two
         gaps already written up above (compat-level gate, re-eval-count
@@ -70,13 +60,17 @@ Competitor tools are referred to generically; real identities are in
         filegroup, FILESTREAM data-space compatibility mismatch, a
         partition scheme's columns disagreeing with the partitioning
         columns, and a compile-time-foldable partition number exceeding the
-        engine's 14999 ceiling. **FINDING:** not tested this pass.
-      8. `CREATE TRIGGER` on a FILESTREAM-backed table failing at DDL time.
-        **FINDING: infra-blocked, not a scoping question.** FILESTREAM is not
-        configurable at all on SQL Server for Linux — `mssql-conf set
-        filestream.share_name`/`filestream.access_level` both report "not
-        supported" on the local containers. No local setup can unblock this
-        item.
+        engine's ceiling. **FINDING:** partial. The ceiling is 15000, not
+        14999 as originally guessed (oracle-confirmed, see
+        `detection-reference.md`) — partition number 15000 itself is valid,
+        15001 is rejected (Msg 7722, "range from 1 to 15000"). The
+        read-only-filegroup-drop probe was inconclusive: `DROP` on a
+        read-only-but-still-present filegroup fails with Msg 5042 ("not
+        empty"), which fires for any filegroup still carrying a data file
+        regardless of read-only state — doesn't isolate a read-only-specific
+        rejection. Remaining legs (partition-REBUILD alignment mismatch,
+        FILESTREAM data-space mismatch, partition-scheme/partitioning-column
+        disagreement) not tested this pass.
       10. Memory-optimized (Hekaton) natively compiled module restrictions
         distinct from the shipped table-level family (unsupported column
         type, unsupported index option, cross-storage/CASCADE foreign key):
@@ -130,14 +124,6 @@ Competitor tools are referred to generically; real identities are in
         oracle matrix for what "exact match" precisely means on a brand-new
         feature. **FINDING:** not tested this pass, despite the 2025
         container being available locally.
-      19. `CollationConflictRuleId`: confirm `GREATEST`/`LEAST` (2022+)
-        arguments are actually walked by the existing collation-conflict
-        predicate walker — genuinely incompatible collations there should
-        already report but may not. **FINDING: engine side confirmed
-        real** — `GREATEST('a' COLLATE Latin1_General_CI_AS, 'b' COLLATE
-        French_CI_AS)` errors with Msg 468 (collation conflict). Whether
-        the scanner's own predicate walker visits `GREATEST`/`LEAST` calls
-        was not checked (source-code side of this item still open).
       20. Broaden the float-non-determinism family (aggregate argument,
         already written up) to float-typed arithmetic operands generally
         and float constants in precision-sensitive expressions — likely one

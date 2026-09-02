@@ -11,6 +11,12 @@ public static class CollationConflictProbeBuilder
         var table2 = BracketQualifiedName(finding.SecondTableQualifiedName);
         var column2 = Bracket(finding.SecondColumnName);
 
+        if (finding.Operator.Equals("GREATEST", StringComparison.OrdinalIgnoreCase)
+            || finding.Operator.Equals("LEAST", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"SELECT {finding.Operator}(t1.{column1}, t2.{column2}) FROM {table1} AS t1 CROSS JOIN {table2} AS t2;";
+        }
+
         return $"SELECT 1 FROM {table1} AS t1 CROSS JOIN {table2} AS t2 WHERE t1.{column1} {finding.Operator} t2.{column2};";
     }
 

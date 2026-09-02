@@ -670,6 +670,35 @@ public static class TypedPredicateExtractor
             TryAddFinding(node.FirstExpression, node.SecondExpression, "LIKE", node, walker);
         }
 
+        public void OnEnterFunctionCall(FunctionCall node, ModuleWalker walker)
+        {
+            if (node.CallTarget is not null || node.FunctionName?.Value is not { } functionName
+                || node.Parameters.Count < 2
+                || !(functionName.Equals("GREATEST", StringComparison.OrdinalIgnoreCase)
+                    || functionName.Equals("LEAST", StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            var scopeChain = walker.CurrentScopeChain();
+            var columns = new List<PredicateOperand.Column>();
+            foreach (var parameter in node.Parameters)
+            {
+                if (ResolveOperand(parameter, scopeChain, walker) is PredicateOperand.Column column)
+                {
+                    columns.Add(column);
+                }
+            }
+
+            for (var i = 0; i < columns.Count; i++)
+            {
+                for (var j = i + 1; j < columns.Count; j++)
+                {
+                    TryRecordCollationConflict(columns[i], columns[j], functionName.ToUpperInvariant(), node);
+                }
+            }
+        }
+
         public void OnInPredicate(InPredicate node, ModuleWalker walker)
         {
             if (walker.IsDeadPredicate(node))

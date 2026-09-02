@@ -1,6 +1,5 @@
 using System.Globalization;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
-using SilentScan.Core.Catalog;
 
 namespace SilentScan.Core.Predicates.Normalization;
 
@@ -531,11 +530,20 @@ public static class PredicateSurvivalAnalyzer
                     Add(key, new GroupedLeaf(false, false, new LiteralConstraint(key, CmpOp.Ge, lower, null), colRef3));
                     Add(key, new GroupedLeaf(false, false, new LiteralConstraint(key, CmpOp.Le, upper, null), colRef3));
                     break;
+
+                case LikePredicate { EscapeExpression: null, SecondExpression: StringLiteral { Value: { } pattern } } like
+                    when TryGetColumnKey(like.FirstExpression) is { } likeKey
+                        && like.FirstExpression is ColumnReferenceExpression colRef4
+                        && !HasLikeWildcard(pattern):
+                    Add(likeKey, new GroupedLeaf(false, false, new LiteralConstraint(likeKey, like.NotDefined ? CmpOp.Ne : CmpOp.Eq, null, pattern), colRef4));
+                    break;
             }
         }
 
         return groups;
     }
+
+    private static bool HasLikeWildcard(string pattern) => pattern.AsSpan().IndexOfAny("%_[]") >= 0;
 
     private static bool? IsColumnNotNull(
         IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>

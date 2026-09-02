@@ -66,6 +66,32 @@ public sealed class CollationConflictVerifierTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task VerifyAsync_GreatestOverConflictingCollations_ConfirmsCompileFailure()
+    {
+        var finding = new CollationConflictFinding(
+            "dbo.CC1", "Code", "SQL_Latin1_General_CP1_CI_AS",
+            "dbo.CC2", "Code", "Latin1_General_CI_AS",
+            "GREATEST", "file.sql", 1, 1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CollationConflictOutcome.Confirmed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_LeastOverMatchingCollations_IsNotConfirmed()
+    {
+        var finding = new CollationConflictFinding(
+            "dbo.CC1", "Code", "SQL_Latin1_General_CP1_CI_AS",
+            "dbo.CC3", "Code", "SQL_Latin1_General_CP1_CI_AS",
+            "LEAST", "file.sql", 1, 1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CollationConflictOutcome.NotConfirmed, result.Outcome);
+    }
+
+    [Fact]
     public async Task VerifyAsync_TableNoLongerInDeployedSchema_ReturnsProbeFailed()
     {
         var finding = new CollationConflictFinding(

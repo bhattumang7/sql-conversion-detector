@@ -35,6 +35,8 @@ public sealed class PredicateSurvivalAnalyzerTests
         public override void ExplicitVisit(BooleanIsNullExpression node) => Leaves.Add(node);
 
         public override void ExplicitVisit(BooleanTernaryExpression node) => Leaves.Add(node);
+
+        public override void ExplicitVisit(LikePredicate node) => Leaves.Add(node);
     }
 
     private static BooleanExpression ParseCondition(string whereExpr)
@@ -464,6 +466,44 @@ public sealed class PredicateSurvivalAnalyzerTests
     {
         var (dead, leaves) = Analyze("NotNullCol = +5 AND NotNullCol = -5");
         Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
+
+    [Fact]
+    public void LiteralLikePatternWithoutWildcards_ContradictsDifferentEquality_MarkedDead()
+    {
+        var (dead, leaves) = Analyze("CsCol = 'a' AND CsCol LIKE 'b'");
+        Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
+
+    [Fact]
+    public void LiteralLikePatternWithoutWildcards_MatchingEquality_NotDead()
+    {
+        Assert.Empty(Analyze("NotNullCol = 'a' AND NotNullCol LIKE 'a'").Dead);
+    }
+
+    [Fact]
+    public void NotLikeLiteralPattern_SameLiteralAsEquality_MarkedDead()
+    {
+        var (dead, leaves) = Analyze("NotNullCol = 'a' AND NotNullCol NOT LIKE 'a'");
+        Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
+
+    [Fact]
+    public void NotLikeLiteralPattern_DifferentLiteralFromEquality_NotDead()
+    {
+        Assert.Empty(Analyze("NotNullCol = 'a' AND NotNullCol NOT LIKE 'b'").Dead);
+    }
+
+    [Fact]
+    public void LikePatternWithWildcard_NeverFoldedIntoLiteralConstraint()
+    {
+        Assert.Empty(Analyze("NotNullCol = 'a' AND NotNullCol LIKE 'b%'").Dead);
+    }
+
+    [Fact]
+    public void LikePatternWithEscapeClause_NeverFoldedIntoLiteralConstraint()
+    {
+        Assert.Empty(Analyze("NotNullCol = 'a' AND NotNullCol LIKE 'b' ESCAPE '\\'").Dead);
     }
 
     [Theory]

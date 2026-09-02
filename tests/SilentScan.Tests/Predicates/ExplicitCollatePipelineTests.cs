@@ -175,6 +175,60 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     }
 
     [Fact]
+    public void GreatestOverColumnsWithDifferingCollations_ReportsCollationConflict()
+    {
+        var report = ScanParsedOnly("""
+            CREATE TABLE dbo.GreatestLocal (
+                Email varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            GO
+            CREATE TABLE dbo.GreatestVendor (
+                Email varchar(100) COLLATE Latin1_General_CI_AS NOT NULL);
+            GO
+            SELECT GREATEST(l.Email, v.Email)
+            FROM dbo.GreatestLocal l, dbo.GreatestVendor v;
+            """);
+
+        var conflict = Assert.Single(report.Find<CollationConflictFinding>("TypedPredicateExtractor"));
+        Assert.Equal("dbo.GreatestLocal", conflict.FirstTableQualifiedName);
+        Assert.Equal("dbo.GreatestVendor", conflict.SecondTableQualifiedName);
+        Assert.Equal("GREATEST", conflict.Operator);
+    }
+
+    [Fact]
+    public void LeastOverColumnsWithMatchingCollations_NoConflictReported()
+    {
+        var report = ScanParsedOnly("""
+            CREATE TABLE dbo.LeastLocal (
+                Email varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            GO
+            CREATE TABLE dbo.LeastVendor (
+                Email varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            GO
+            SELECT LEAST(l.Email, v.Email)
+            FROM dbo.LeastLocal l, dbo.LeastVendor v;
+            """);
+
+        Assert.Empty(report.Find<CollationConflictFinding>("TypedPredicateExtractor"));
+    }
+
+    [Fact]
+    public void GreatestOverThreeArguments_ReportsConflictForEachMismatchedPair()
+    {
+        var report = ScanParsedOnly("""
+            CREATE TABLE dbo.GreatestA (Email varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            GO
+            CREATE TABLE dbo.GreatestB (Email varchar(100) COLLATE Latin1_General_CI_AS NOT NULL);
+            GO
+            CREATE TABLE dbo.GreatestC (Email varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            GO
+            SELECT GREATEST(a.Email, b.Email, c.Email)
+            FROM dbo.GreatestA a, dbo.GreatestB b, dbo.GreatestC c;
+            """);
+
+        Assert.Equal(2, report.Find<CollationConflictFinding>("TypedPredicateExtractor").Count);
+    }
+
+    [Fact]
     public void CrossCategoryColumnVsColumn_DifferingCollations_ReportsCollationConflict()
     {
 

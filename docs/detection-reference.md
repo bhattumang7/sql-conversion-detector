@@ -1222,3 +1222,17 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
   either local instance — `DBCC HELP('RULE')` returns "No help available
   for DBCC statement 'RULE'", and the syntax itself doesn't parse. The
   premise was invented, not documented.
+
+* **`CREATE TRIGGER` on a FILESTREAM-backed table — infra-blocked, not a
+  scoping question.** FILESTREAM cannot be enabled at all on SQL Server for
+  Linux (`mssql-conf set filestream.share_name`/`filestream.access_level`
+  both report "not supported" on both local containers) — a platform
+  limitation, not a missing package. No local setup can unblock a
+  FILESTREAM-dependent oracle probe; do not re-propose until that changes.
+
+* **`ALTER INDEX ... REBUILD PARTITION = n` partition-number ceiling is
+  15000, not 14999.** Oracle-confirmed (Docker): partition number 15000 is
+  valid (rejected only because it didn't exist on the probe table, Msg
+  7730); partition number 15001 is rejected as out of range with the engine
+  stating the valid range as "1 to 15000" (Msg 7722). Any future rule
+  encoding this ceiling must use 15000, not 14999.
