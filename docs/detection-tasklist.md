@@ -67,10 +67,6 @@ Competitor tools are referred to generically; real identities are in
         restrictions for local variable and parameter assignments.
         Encryption-state and legacy-LOB legs remain open.
 
-      26. `OPENJSON WITH` schema projecting a native `json`-typed column
-        while the enabling feature switch is off. **FINDING:** not tested
-        this pass.
-
       27. `VECTOR_DISTANCE`-family calls with a large-object-typed operand
         (SQL Server 2025 vector feature). **FINDING:** not tested this
         pass, despite the 2025 container being available locally.

@@ -645,6 +645,23 @@ WITH NATIVE_COMPILATION` module.
   comparison on the column the way a B-tree index is, so treating it as one there
   would misfire.
 
+* **`OPENJSON WITH` schema projecting a native `json`-typed column while an
+  "enabling feature switch" is off - killed, no such switch exists.** The item
+  assumed native `json`-type support in `OPENJSON`'s `WITH` clause is gated by
+  some server/database configuration that could be off, making the projection
+  silently misbehave. Oracle-checked (Docker, SQL Server 2025, RTM CU8,
+  compatibility level 170 and 160 both tried): `sys.database_scoped_configurations`
+  has no `PREVIEW_FEATURES` row or any other JSON-named entry on this build, and
+  `sp_configure` has no JSON-related option either - the native `json` type and
+  `OPENJSON ... WITH (col json '$.path' AS JSON)` both work unconditionally, at
+  every compatibility level tried. There is a real, engine-verified but unrelated
+  silent-failure shape in the same clause: a `WITH` column (of *any* type, `json`
+  included) whose path resolves to a JSON object/array returns `NULL` instead of
+  erroring unless the column definition carries the `AS JSON` modifier - but that
+  is generic `OPENJSON` behavior predating the native type and not statically
+  decidable, since whether a given path is object/array-valued at runtime depends
+  on the JSON document's shape, not on anything in the catalog.
+
 * **`StringSplitArgumentRuleId` family broadened beyond separator length -
   argument-type validation and 3-argument-form engine-version gate shipped;
   the `REGEXP_*` MAX-argument fold-in stays killed.** Oracle-confirmed
