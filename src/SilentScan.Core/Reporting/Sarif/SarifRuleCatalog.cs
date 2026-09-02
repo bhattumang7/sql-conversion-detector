@@ -232,6 +232,7 @@ public static class SarifRuleCatalog
     public const string MissingStatisticsRuleId = FindingRuleIds.MissingStatisticsRuleId;
     public static string IndexHintRuleId(IndexHintFindingKind kind) => FindingRuleIds.IndexHintRuleId(kind);
     public static string SessionDateSettingRuleId(SessionDateSettingKind kind) => FindingRuleIds.SessionDateSettingRuleId(kind);
+    public const string AmbiguousDateLiteralConversionRuleId = FindingRuleIds.AmbiguousDateLiteralConversionRuleId;
     public static string CartesianJoinRuleId(CartesianJoinKind kind) => FindingRuleIds.CartesianJoinRuleId(kind);
     public const string TruncateSwallowedRuleId = FindingRuleIds.TruncateSwallowedRuleId;
     public static string DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind kind) => FindingRuleIds.DatabaseConfigurationRuleId(kind);

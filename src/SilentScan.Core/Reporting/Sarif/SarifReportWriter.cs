@@ -88,6 +88,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<CompositeIndexLeadingColumnFinding>("CompositeIndexLeadingColumnScanner").Select(ToResult));
         results.AddRange(report.Find<IndexHintFinding>("IndexHintScanner").Select(ToResult));
         results.AddRange(report.Find<SessionDateSettingFinding>("SessionDateSettingScanner").Select(ToResult));
+        results.AddRange(report.Find<AmbiguousDateLiteralConversionFinding>("AmbiguousDateLiteralConversionScanner").Select(ToResult));
         results.AddRange(report.Find<CartesianJoinFinding>("CartesianJoinScanner").Select(ToResult));
         results.AddRange(report.Find<TruncateSwallowedFinding>("TruncateSwallowedScanner").Select(ToResult));
         results.AddRange(report.Find<UnindexedTempTableUsageFinding>("UnindexedTempTableUsageScanner").Select(ToResult));
@@ -1237,6 +1238,13 @@ public static class SarifReportWriter
                 "SET DATEFIRST changes what DATEPART(weekday, ...) returns for the rest of this session - oracle-confirmed the identical date returns a different weekday ordinal depending on which value was set first.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
         };
+        return BuildResult(ruleId, FloorLevelForConfidence(LevelNote, finding.Confidence), message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(AmbiguousDateLiteralConversionFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AmbiguousDateLiteralConversionRuleId, finding.Confidence);
+        var message = $"'{finding.LiteralText}' is cast/converted to a date/time type with no explicit style - oracle-confirmed the identical ambiguous literal resolves to a different real date depending purely on the session's own DATEFORMAT/LANGUAGE, with no SET DATEFORMAT statement required in this module.";
         return BuildResult(ruleId, FloorLevelForConfidence(LevelNote, finding.Confidence), message, finding.SourcePath, finding.Line, finding.Column);
     }
 

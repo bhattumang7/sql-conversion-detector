@@ -323,6 +323,7 @@ public static class FindingRuleIds
         SessionDateSettingKind.DateFirst => "silentscan/session-date/set-datefirst",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
+    public const string AmbiguousDateLiteralConversionRuleId = "silentscan/session-date/ambiguous-date-literal-conversion";
     public static string CartesianJoinRuleId(CartesianJoinKind kind) => kind switch
     {
         CartesianJoinKind.CommaJoin => "silentscan/join/cartesian-comma-join",

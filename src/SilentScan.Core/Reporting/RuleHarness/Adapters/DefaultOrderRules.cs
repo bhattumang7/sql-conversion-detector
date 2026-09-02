@@ -68,6 +68,14 @@ internal sealed class SessionDateSettingRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => SessionDateSettingScanner.Harvest((SessionDateSettingScanner.Rule)moduleRule);
 }
 
+internal sealed class AmbiguousDateLiteralConversionRule : IPerFileRule
+{
+    public string Id => "AmbiguousDateLiteralConversionScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => AmbiguousDateLiteralConversionScanner.Scan(parseResult);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => AmbiguousDateLiteralConversionScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => AmbiguousDateLiteralConversionScanner.Harvest((AmbiguousDateLiteralConversionScanner.Rule)moduleRule);
+}
+
 internal sealed class CartesianJoinRule : IPerFileRule
 {
     public string Id => "CartesianJoinScanner";

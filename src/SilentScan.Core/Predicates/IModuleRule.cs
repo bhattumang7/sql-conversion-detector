@@ -304,6 +304,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterCastCall(CastCall node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterFetchCursorStatement(FetchCursorStatement node, ModuleWalker walker)
     {
     }

@@ -12,7 +12,7 @@ public sealed record ScanReport(
     DynamicSqlSummary DynamicSqlSummary,
     int SchemaVersion = ScanReport.CurrentSchemaVersion)
 {
-    public const int CurrentSchemaVersion = 79;
+    public const int CurrentSchemaVersion = 80;
 
     public IReadOnlyList<RuleCatalogEntry> RuleCatalog { get; } = RuleCatalogEntries.All;
 

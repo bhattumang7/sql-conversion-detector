@@ -62,6 +62,7 @@ public static class TestScanReports
         IReadOnlyList<CompositeIndexLeadingColumnFinding>? CompositeIndexLeadingColumnFindings = null,
         IReadOnlyList<IndexHintFinding>? IndexHintFindings = null,
         IReadOnlyList<SessionDateSettingFinding>? SessionDateSettingFindings = null,
+        IReadOnlyList<AmbiguousDateLiteralConversionFinding>? AmbiguousDateLiteralConversionFindings = null,
         IReadOnlyList<CartesianJoinFinding>? CartesianJoinFindings = null,
         IReadOnlyList<TruncateSwallowedFinding>? TruncateSwallowedFindings = null,
         IReadOnlyList<UnindexedTempTableUsageFinding>? UnindexedTempTableUsageFindings = null,
@@ -184,6 +185,7 @@ public static class TestScanReports
         Set("CompositeIndexLeadingColumnScanner", CompositeIndexLeadingColumnFindings);
         Set("IndexHintScanner", IndexHintFindings);
         Set("SessionDateSettingScanner", SessionDateSettingFindings);
+        Set("AmbiguousDateLiteralConversionScanner", AmbiguousDateLiteralConversionFindings);
         Set("CartesianJoinScanner", CartesianJoinFindings);
         Set("TruncateSwallowedScanner", TruncateSwallowedFindings);
         Set("UnindexedTempTableUsageScanner", UnindexedTempTableUsageFindings);

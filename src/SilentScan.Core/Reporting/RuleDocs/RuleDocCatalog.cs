@@ -46,6 +46,7 @@ public static class RuleDocCatalog
 
         [SessionDate.SetDateFormat.RuleId] = SessionDate.SetDateFormat.Content,
         [SessionDate.SetDateFirst.RuleId] = SessionDate.SetDateFirst.Content,
+        [SessionDate.AmbiguousDateLiteralConversion.RuleId] = SessionDate.AmbiguousDateLiteralConversion.Content,
 
         [Hint.IndexDoesNotExist.RuleId] = Hint.IndexDoesNotExist.Content,
         [Hint.HintedIndexNotSeekable.RuleId] = Hint.HintedIndexNotSeekable.Content,

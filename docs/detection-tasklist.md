@@ -197,25 +197,6 @@ Competitor tools are referred to generically; real identities are in
         legacy LOB column (matches a real engine-emitted warning).
         **FINDING:** not tested this pass.
 
-      37. `SessionDateSettingRuleId(DateFormat)` may be scoped too narrowly:
-        the shipped rule only fires when the module's own body contains an
-        explicit `SET DATEFORMAT`, but an ambiguous string-to-date
-        conversion is reportedly session-format-dependent under
-        compatibility level > 99 even with no `SET DATEFORMAT` present in
-        the module — a real under-detection gap if confirmed, not just a
-        new rule. **FINDING: confirmed real, and significant.** With
-        *no* `SET DATEFORMAT` anywhere and `us_english` as the session
-        language, `CAST('02/03/2024' AS date)` parses as **2024-02-03**
-        (Feb 3). After only `SET LANGUAGE British` (still no
-        `SET DATEFORMAT` statement anywhere), the identical literal parses
-        as **2024-03-02** (Mar 2) — same string, same module text,
-        different result, driven entirely by the session's default
-        language/dateformat. The shipped rule's premise — that the risk
-        only exists when the module body contains an explicit
-        `SET DATEFORMAT` — is too narrow; any ambiguous `mm/dd`-vs-`dd/mm`
-        date literal is at risk regardless of whether `SET DATEFORMAT`
-        appears anywhere.
-
       41. Heavier-lift candidate: a joined table catalog-provably contributing
         nothing (no projected columns/predicates/grouping/ordering, and
         FK/uniqueness/nullability prove it can't change multiplicity or

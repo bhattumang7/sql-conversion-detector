@@ -133,6 +133,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(MissingStatistics(report, headingLevel, pathBase));
         blocks.AddRange(IndexHint(report, headingLevel, pathBase));
         blocks.AddRange(SessionDateSetting(report, headingLevel, pathBase));
+        blocks.AddRange(AmbiguousDateLiteralConversion(report, headingLevel, pathBase));
         blocks.AddRange(CartesianJoin(report, headingLevel, pathBase));
         blocks.AddRange(TruncateSwallowed(report, headingLevel, pathBase));
         blocks.AddRange(UnindexedTempTableUsage(report, headingLevel, pathBase));
@@ -324,6 +325,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Predicate columns with no applicable statistic and auto-create disabled", report.Find<MissingStatisticsFinding>(nameof(MissingStatisticsScanner)).Count);
         AddCount(counts, "INDEX hints naming a nonexistent or non-seekable index", report.Find<IndexHintFinding>(nameof(IndexHintScanner)).Count);
         AddCount(counts, "SET DATEFORMAT/DATEFIRST mid-module", report.Find<SessionDateSettingFinding>(nameof(SessionDateSettingScanner)).Count);
+        AddCount(counts, "Ambiguous date literal cast/converted with no explicit style", report.Find<AmbiguousDateLiteralConversionFinding>(nameof(AmbiguousDateLiteralConversionScanner)).Count);
         AddCount(counts, "Cartesian and always-false joins", report.Find<CartesianJoinFinding>(nameof(CartesianJoinScanner)).Count);
         AddCount(counts, "TRUNCATE swallowed by an empty/non-rethrowing CATCH", report.Find<TruncateSwallowedFinding>(nameof(TruncateSwallowedScanner)).Count);
         AddCount(counts, "Unindexed SELECT INTO temp table usage", report.Find<UnindexedTempTableUsageFinding>(nameof(UnindexedTempTableUsageScanner)).Count);
@@ -3213,6 +3215,27 @@ public static class ReadableScanReportWriter
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 })]);
         }
+    }
+
+    private static IEnumerable<ReadableBlock> AmbiguousDateLiteralConversion(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<AmbiguousDateLiteralConversionFinding>(nameof(AmbiguousDateLiteralConversionScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Ambiguous date literal cast/converted with no explicit style ({report.Find<AmbiguousDateLiteralConversionFinding>(nameof(AmbiguousDateLiteralConversionScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A CAST or style-less CONVERT to a date/time type is given a string literal where both the day and month positions parse as valid month numbers - oracle-confirmed the identical literal resolves to a different real date depending purely on the session's own DATEFORMAT/LANGUAGE, with no SET DATEFORMAT statement required anywhere in this module.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.AmbiguousDateLiteralConversionRuleId));
+        yield return new ReadableBlock.Table(
+            ["Literal", WhereHeader],
+            [.. report.Find<AmbiguousDateLiteralConversionFinding>(nameof(AmbiguousDateLiteralConversionScanner)).Select(f => new List<string>
+            {
+                f.LiteralText,
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+            })]);
     }
 
     private static IEnumerable<ReadableBlock> CartesianJoin(ScanReport report, int level, string? pathBase)

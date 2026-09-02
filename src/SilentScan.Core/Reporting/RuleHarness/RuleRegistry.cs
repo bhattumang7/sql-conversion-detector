@@ -14,6 +14,7 @@ public static class RuleRegistry
         new CompositeIndexLeadingColumnRule(),
         new MissingStatisticsRule(),
         new SessionDateSettingRule(),
+        new AmbiguousDateLiteralConversionRule(),
         new CartesianJoinRule(),
         new OuterJoinPredicateCollapseRule(),
         new TruncateSwallowedRule(),
