@@ -7,15 +7,52 @@ cp .env.example .env      # override SILENTSCAN_SA_PASSWORD if you want
 docker compose up -d
 ```
 
-The compose image includes Full-Text Search, so `SERVERPROPERTY('IsFullTextInstalled')` is 1 on the local oracle.
+`docker compose up -d` starts two SQL Server instances built from
+`docker/mssql-fts/Dockerfile` (parameterized by `BASE_IMAGE`/`MSSQL_REPO_YEAR`
+build args), each with Full-Text Search and PolyBase installed
+(`SERVERPROPERTY('IsFullTextInstalled')` and `IsPolyBaseInstalled')` are both
+1) and `polybase enabled`/`show advanced options` already turned on via
+`sp_configure`:
 
-Set `SILENTSCAN_SQL_PORT` before `docker compose up -d` to use a different local port; the test tooling uses the same setting.
+- `sql` / container `mssql-silentscan-sql` — SQL Server 2022, port 14330.
+  Also gets a self-referencing linked server (`SILENTSCAN_LOOPBACK`, via
+  `sp_addlinkedserver`/`sp_addlinkedsrvlogin`) for linked-server-dependent
+  oracle probes.
+- `sql2025` / container `silentscan-sql2025` — SQL Server 2025, port 14331,
+  for 2025-only features (native `VECTOR`, `JSON_VALUE ... RETURNING`, etc.).
+  Its `MSOLEDBSQL`/`MSOLEDBSQL19` provider hits a TLS handshake error on
+  loopback linked servers on this build, so it does not get
+  `SILENTSCAN_LOOPBACK` — use the 2022 instance for linked-server oracle work.
 
-Connects on `localhost,14330`, user `sa`. Used by `SilentScan.Verify` (lineage
-oracle against `sys.columns`, plan-XML `CONVERT_IMPLICIT` confirmation) and
-`SilentScan.Bench`. Compat level is pinned to 160 per-database by the tooling,
-not at the server level — each spike/bench database sets it explicitly after
-`CREATE DATABASE`.
+Both `*-init` one-shot services run `docker/mssql-fts/init/*.sql` against
+their instance once the server is healthy; they exit 0 once done and can be
+re-run any time with `docker compose up -d sql-init sql2025-init` (idempotent
+— checks `sys.servers`/`sp_configure` state before making changes).
+
+The PolyBase/FTS packages are installed with `apt-get download` +
+`dpkg -i --force-depends` rather than a plain `apt-get install`: the packages
+declare a hard dependency on `mssql-server` itself, and `apt-get install`
+happily pulls and reinstalls the *whole* engine from the apt repo to satisfy
+it — for the 2025 base image (Ubuntu 24.04) that apt-installed engine binary
+is linked against libraries the 24.04 base doesn't ship (only a 22.04/jammy
+apt repo exists for the 2025 release), so the reinstalled `sqlservr` fails to
+start (`liblber-2.5.so.0: cannot open shared object file`). Installing just
+the FTS/PolyBase `.deb`s directly leaves the base image's own working
+`sqlservr` binary alone.
+
+Set `SILENTSCAN_SQL_PORT`/`SILENTSCAN_SQL2025_PORT` before `docker compose up
+-d` to use different local ports; the test tooling uses the same settings.
+
+Used by `SilentScan.Verify` (lineage oracle against `sys.columns`, plan-XML
+`CONVERT_IMPLICIT` confirmation) and `SilentScan.Bench`. Compat level is
+pinned to 160 per-database by the tooling, not at the server level — each
+spike/bench database sets it explicitly after `CREATE DATABASE`.
+
+FILESTREAM was checked directly against the container and is not
+configurable at all on SQL Server for Linux (`mssql-conf set
+filestream.share_name`/`filestream.access_level` both report "not
+supported") — this is a platform limitation, not a missing package; nothing
+in this compose setup can unblock a FILESTREAM-dependent oracle probe.
 
 ## Build & test
 

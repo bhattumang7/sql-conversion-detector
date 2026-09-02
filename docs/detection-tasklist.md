@@ -72,8 +72,11 @@ Competitor tools are referred to generically; real identities are in
         columns, and a compile-time-foldable partition number exceeding the
         engine's 14999 ceiling. **FINDING:** not tested this pass.
       8. `CREATE TRIGGER` on a FILESTREAM-backed table failing at DDL time.
-        **FINDING:** not tested this pass — needs FILESTREAM enabled on a
-        throwaway database, out of scope for the VALUES-only probes used.
+        **FINDING: infra-blocked, not a scoping question.** FILESTREAM is not
+        configurable at all on SQL Server for Linux — `mssql-conf set
+        filestream.share_name`/`filestream.access_level` both report "not
+        supported" on the local containers. No local setup can unblock this
+        item.
       10. Memory-optimized (Hekaton) natively compiled module restrictions
         distinct from the shipped table-level family (unsupported column
         type, unsupported index option, cross-storage/CASCADE foreign key):
@@ -263,8 +266,11 @@ Competitor tools are referred to generically; real identities are in
         cardinality estimate, an oracle-confirmable mechanical fact rather
         than a vague warning, the same precision upgrade already done for
         the table-variable-low-compat-estimate rule. **FINDING:** not
-        tested this pass — needs a linked server configured, out of scope
-        for the VALUES-only probes used.
+        tested this pass. A self-referencing linked server
+        (`SILENTSCAN_LOOPBACK`) is now committed/available on the 2022 local
+        instance (`docs/local-dev.md`) for this — the infra gap is closed,
+        oracle confirmation of the cardinality-estimate claim itself is
+        still open.
       43. `CheckConstraintNullNotHandledRuleId`-family sibling: a DML
         statement against a `WITH CHECK OPTION` view whose inserted/updated
         values are provably contradicted by the view's own predicate —
@@ -326,15 +332,18 @@ Competitor tools are referred to generically; real identities are in
         `CREATE DATABASE` combos not tested.
       50. PolyBase/Hadoop external-table column-type and virtual-column
         restrictions — mainstream on-prem feature but low adoption.
-        **FINDING:** not tested this pass.
+        **FINDING:** not tested this pass. PolyBase is now installed and
+        enabled (`IsPolyBaseInstalled` = 1, `polybase enabled` on) on both
+        local instances, `CREATE EXTERNAL DATA SOURCE` confirmed working —
+        the infra gap is closed, see `docs/local-dev.md`.
       51. A typed XML variable resolving to a different/missing schema
         collection than its type metadata records — rare in normal
         authoring. **FINDING:** not tested this pass.
       52. Remaining leg of the `DropProtectedObjectRuleId` family (`DROP
         SCHEMA` non-empty, `DROP ROLE` fixed role — shipped): `DROP EXTERNAL
         DATA SOURCE`/`DROP EXTERNAL FILE FORMAT` blocked by a dependent
-        external table/stream. **FINDING:** not tested this pass (no
-        PolyBase/external-table setup available).
+        external table/stream. **FINDING:** not tested this pass — PolyBase
+        is now available locally (see item 50), infra gap closed.
       53. Ledger tables restrict which `ALTER COLUMN` shapes are legal
         (`sys.tables.is_ledger_on` plus before/after column shape) — narrow
         feature. **FINDING: not confirmed — appears less restrictive than

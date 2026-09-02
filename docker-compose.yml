@@ -3,6 +3,9 @@ services:
     image: silentscan-mssql-fts
     build:
       context: ./docker/mssql-fts
+      args:
+        BASE_IMAGE: mcr.microsoft.com/mssql/server:2022-latest
+        MSSQL_REPO_YEAR: "2022"
     container_name: mssql-silentscan-sql
     environment:
       ACCEPT_EULA: "Y"
@@ -18,5 +21,53 @@ services:
     volumes:
       - silentscan-sql-data:/var/opt/mssql
 
+  sql-init:
+    image: silentscan-mssql-fts
+    depends_on:
+      sql:
+        condition: service_healthy
+    entrypoint: >
+      /bin/bash -c "
+      /opt/mssql-tools18/bin/sqlcmd -C -S sql -U sa -P \"$$SA_PASSWORD\" -i /init/enable-features.sql &&
+      /opt/mssql-tools18/bin/sqlcmd -C -S sql -U sa -P \"$$SA_PASSWORD\" -i /init/linked-server.sql
+      "
+    environment:
+      SA_PASSWORD: "${SILENTSCAN_SA_PASSWORD:-SilentScan!Dev2026}"
+    volumes:
+      - ./docker/mssql-fts/init/enable-features.sql:/init/enable-features.sql:ro
+      - ./docker/mssql-fts/init/linked-server.sql:/init/linked-server.sql:ro
+
+  sql2025:
+    image: silentscan-mssql-fts-2025
+    build:
+      context: ./docker/mssql-fts
+      args:
+        BASE_IMAGE: mcr.microsoft.com/mssql/server:2025-latest
+        MSSQL_REPO_YEAR: "2025"
+    container_name: silentscan-sql2025
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${SILENTSCAN_SA_PASSWORD:-SilentScan!Dev2026}"
+      MSSQL_PID: "Developer"
+    ports:
+      - "${SILENTSCAN_SQL2025_PORT:-14331}:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"${SILENTSCAN_SA_PASSWORD:-SilentScan!Dev2026}\" -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - silentscan-sql2025-data:/var/opt/mssql
+
+  sql2025-init:
+    image: silentscan-mssql-fts-2025
+    depends_on:
+      sql2025:
+        condition: service_healthy
+    entrypoint: ["/opt/mssql-tools18/bin/sqlcmd", "-C", "-S", "sql2025", "-U", "sa", "-P", "${SILENTSCAN_SA_PASSWORD:-SilentScan!Dev2026}", "-i", "/init/enable-features.sql"]
+    volumes:
+      - ./docker/mssql-fts/init/enable-features.sql:/init/enable-features.sql:ro
+
 volumes:
   silentscan-sql-data:
+  silentscan-sql2025-data:
