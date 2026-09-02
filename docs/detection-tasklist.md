@@ -25,6 +25,7 @@ Competitor tools are referred to generically; real identities are in
       area, or "verify it isn't already covered" rather than a clean new
       gap) but are real enough not to drop silently. Each still needs its
       own oracle confirmation before design.
+
       2. `ScalarUdfInlineabilityScanner`: the survey claims it covers only
         about half the engine's real inlineability checks; beyond the two
         gaps already written up above (compat-level gate, re-eval-count
@@ -35,6 +36,7 @@ Competitor tools are referred to generically; real identities are in
         non-inlineable one (using `ERROR_NUMBER()`) on SQL Server 2022 —
         not a usable oracle signal as tried. Needs a different verification
         method (e.g. checking actual plan inlining) before scoping.
+
       4. New family: an assignment (`SET`/`INSERT`/`UPDATE`) whose source
         type cannot legally implicit-convert to the target at all
         (encryption-state mismatch, illegal collation coercion, legacy-LOB
@@ -54,6 +56,7 @@ Competitor tools are referred to generically; real identities are in
         family. `sql_variant = xml` (item 3) remains the one confirmed
         "cannot implicit-convert at all" case; encryption-state and
         legacy-LOB legs still unverified.
+
       7. New family: partition/filegroup DDL alignment siblings to the
         shipped `ALTER TABLE SWITCH` family — partition-`REBUILD` alignment
         mismatch, `DROP` against a non-updateable (read-only/offline)
@@ -71,6 +74,7 @@ Competitor tools are referred to generically; real identities are in
         rejection. Remaining legs (partition-REBUILD alignment mismatch,
         FILESTREAM data-space mismatch, partition-scheme/partitioning-column
         disagreement) not tested this pass.
+
       10. Memory-optimized (Hekaton) natively compiled module restrictions
         distinct from the shipped table-level family (unsupported column
         type, unsupported index option, cross-storage/CASCADE foreign key):
@@ -86,6 +90,7 @@ Competitor tools are referred to generically; real identities are in
         (confirmed a `MEMORY_OPTIMIZED_DATA` filegroup creates cleanly with
         plain T-SQL on the local container, no special setup needed),
         simply not attempted yet.
+
       12. Full-text index DDL validation (unsupported column type, invalid
         language id, nondeterministic computed column, >1024 indexed
         columns) — real but needs new full-text-index modeling in the
@@ -95,10 +100,12 @@ Competitor tools are referred to generically; real identities are in
         `silentscan-mssql-fts` container CLAUDE.md references no longer
         exists) — deprioritized given the catalog-builder prerequisite
         called out in the bullet itself.
+
       13. Always Encrypted per-type restrictions beyond the comparison/index
         family already written up — a column type the engine's own
         encryption-support rules reject outright. **FINDING:** not tested
         this pass.
+
       16. New family: `STRING_SPLIT`/`REGEXP_MATCHES`-style string TVF
         argument-type and MAX-width validation, and `STRING_SPLIT`'s
         3-argument ordinality form being version-gated — fold together
@@ -114,9 +121,11 @@ Competitor tools are referred to generically; real identities are in
         level) — don't scope a compat-level check for this, verify against
         actual major version instead. Argument-type/MAX-width validation
         legs not tested.
+
       17. Semantic Search TVFs (`SEMANTICKEYPHRASETABLE` etc.) requiring a
         qualifying full-text semantic index — legacy/rarely used feature.
         **FINDING:** not tested this pass.
+
       18. New family (SQL Server 2025): `JSON_VALUE(...RETURNING...)`/
         `JSON_CONTAINS` exact-match predicate shapes eligible for a JSON
         index rewrite — the JSON-index sargability counterpart to the
@@ -124,10 +133,12 @@ Competitor tools are referred to generically; real identities are in
         oracle matrix for what "exact match" precisely means on a brand-new
         feature. **FINDING:** not tested this pass, despite the 2025
         container being available locally.
+
       20. Broaden the float-non-determinism family (aggregate argument,
         already written up) to float-typed arithmetic operands generally
         and float constants in precision-sensitive expressions — likely one
         rule, not three. **FINDING:** not tested this pass.
+
       21. `REVERT WITH COOKIE = @x` requiring `@x` to be a fixed-size
         `varbinary` matching the engine's cookie type/size is decidable
         from the variable's own declaration. **FINDING: confirmed real.**
@@ -135,6 +146,7 @@ Competitor tools are referred to generically; real identities are in
         type is supplied in the 'Revert' statement"); the engine requires
         the fixed `varbinary(100)` shape produced by `CREATE USER ...
         WITH... COOKIE INTO`. Decidable from the variable's declared type.
+
       23. `FOR XML` forbidden option combinations (e.g. `EXPLICIT` with inline
         XSD) — decidable purely from the statement's own option list, no
         catalog access needed. **FINDING: real, but as an unimplemented
@@ -142,43 +154,55 @@ Competitor tools are referred to generically; real identities are in
         EXPLICIT, XMLSCHEMA` fails with "'Inline XSD for FOR XML EXPLICIT'
         is not yet implemented" — still a real, decidable compile-time
         reject, just frame the rationale accordingly.
+
       24. New `SecurityFindingKind`: `sp_invoke_external_rest_endpoint` is a
         real outbound-network call surface distinct from the shipped
         hardcoded-IP-address finding. **FINDING:** not tested this pass.
+
       25. `sp_execute_external_script`'s `WITH RESULT SETS`-style column
         declaration reusing a name, omitting a required type binding, or
         declaring a rejected type. **FINDING:** not tested this pass.
+
       26. `OPENJSON WITH` schema projecting a native `json`-typed column
         while the enabling feature switch is off. **FINDING:** not tested
         this pass.
+
       27. `VECTOR_DISTANCE`-family calls with a large-object-typed operand
         (SQL Server 2025 vector feature). **FINDING:** not tested this
         pass, despite the 2025 container being available locally.
+
       28. `OPENXML`/`OPENROWSET WITH` schema resolving a column to a type the
         engine's fixed type gate rejects (`sql_variant`/spatial/legacy-LOB)
         — one rule covering both clauses. **FINDING:** not tested this
         pass.
+
       29. `EXECUTE AT DATA_SOURCE` (elastic query) with a large-object-typed
         parameter. **FINDING:** not tested this pass.
+
       30. Informational, database-configuration tier: an active
         `sys.plan_guides` row whose hints alter optimization/parameterization
         for in-scope application SQL. **FINDING:** not tested this pass.
+
       31. External file-format/data-export partition column type restrictions
         (PolyBase/CETAS external-table column-type and virtual-column
         allow-lists; data-export partition column resolving to a large
         object or unsupported type) — real but niche. **FINDING:** not
         tested this pass.
+
       32. A statically-known boolean element inside a JSON literal converted
         to the native `VECTOR` type (SQL Server 2025 feature, narrow).
         **FINDING:** not tested this pass.
+
       33. A full-text predicate (`CONTAINS`/`FREETEXT`) used inside an
         aggregate/`GROUP BY` scope the engine rejects. **FINDING:** not
         tested this pass.
+
       35. New family: `CHANGE_TRACKING` restrictions — `ALTER TABLE ...
         ENABLE CHANGE_TRACKING` against a table carrying an Always Encrypted
         column, and change tracking already enabled on a table carrying a
         legacy LOB column (matches a real engine-emitted warning).
         **FINDING:** not tested this pass.
+
       36. `ProcCallArgumentMismatchRuleId` sibling: a streaming/inline TVF's
         own parameter boundary needing an implicit conversion, the same
         silent-marshalling family applied to a different call-site kind.
@@ -188,6 +212,7 @@ Competitor tools are referred to generically; real identities are in
         parameter's declared width with no error, same shape as the
         shipped forward-direction proc-call rule and as item 5's OUTPUT
         finding.
+
       37. `SessionDateSettingRuleId(DateFormat)` may be scoped too narrowly:
         the shipped rule only fires when the module's own body contains an
         explicit `SET DATEFORMAT`, but an ambiguous string-to-date
@@ -206,6 +231,7 @@ Competitor tools are referred to generically; real identities are in
         `SET DATEFORMAT` — is too narrow; any ambiguous `mm/dd`-vs-`dd/mm`
         date literal is at risk regardless of whether `SET DATEFORMAT`
         appears anywhere.
+
       38. Fold into the bounded-string-builtins family already written up:
         `STRING_AGG`'s result type is capped at `VARCHAR(8000)`/
         `NVARCHAR(4000)` when none of its operands are MAX-typed, regardless
@@ -217,6 +243,7 @@ Competitor tools are referred to generically; real identities are in
         reports `max_length = 8000` too — that's bytes, which is exactly
         `nvarchar(4000)` (2 bytes/char), confirming the `NVARCHAR(4000)`
         cap as claimed.
+
       39. New family: `NVARCHAR` to a UTF-8-collation `VARCHAR` conversion (and
         the reverse) can expand/contract byte length past the declared
         target's 8000-byte cap — distinct failure mode from
@@ -230,6 +257,7 @@ Competitor tools are referred to generically; real identities are in
         silent `?`-replacement codepage-loss rule. Whether it's a hard
         error or a silent truncation depends on `ANSI_WARNINGS`/statement
         context — worth pinning down both modes before scoping.
+
       40. Explicit `INSERT`/`UPDATE`/`MERGE` assignment to a SQL Graph node/
         edge table's own `$node_id`/`$edge_id` system column. **FINDING:
         confirmed real.** `$node_id` is backed by hidden system columns
@@ -239,6 +267,7 @@ Competitor tools are referred to generically; real identities are in
         $node_id` fails with "cannot be modified because it is either a
         computed column..." — the column is effectively immutable/
         system-managed, confirming the restriction.
+
       41. Heavier-lift candidate: a joined table catalog-provably contributing
         nothing (no projected columns/predicates/grouping/ordering, and
         FK/uniqueness/nullability prove it can't change multiplicity or
@@ -246,6 +275,7 @@ Competitor tools are referred to generically; real identities are in
         multiplicity/null-extension proof is substantial engineering, not a
         quick win. **FINDING:** not tested this pass; this one is a design
         question more than an oracle question.
+
       42. `QueryAntiPatternLinkedServerOrCrossDatabaseReferenceRuleId`:
         sharpen the existing "close to a guess" framing — a linked-server/
         remote-query source reportedly gets a fixed exactly-1-row
@@ -257,6 +287,7 @@ Competitor tools are referred to generically; real identities are in
         instance (`docs/local-dev.md`) for this — the infra gap is closed,
         oracle confirmation of the cardinality-estimate claim itself is
         still open.
+
       43. `CheckConstraintNullNotHandledRuleId`-family sibling: a DML
         statement against a `WITH CHECK OPTION` view whose inserted/updated
         values are provably contradicted by the view's own predicate —
@@ -271,6 +302,7 @@ Competitor tools are referred to generically; real identities are in
         predicate before running it. That's a design/implementation
         question about the scanner's constant-folding reach, not an
         oracle question — the oracle side of this item is done.
+
       44. `DeprecatedSyntaxDeprecatedSetRowcountRuleId` is scoped too
         narrowly: it only warns `SET ROWCOUNT` will stop being honored by
         DML in a future release, but a nonzero `SET ROWCOUNT` left active
@@ -280,11 +312,13 @@ Competitor tools are referred to generically; real identities are in
         1` before a 3-row insert into a table variable makes a subsequent
         `SELECT COUNT(*)` return `1`, not `3` — a live correctness risk
         today, independent of the future-deprecation angle.
+
       45. `DanglingObjectReferenceRuleId` sibling: a CLR aggregate whose
         catalog-registered `Terminate`/`Accumulate` method can no longer be
         resolved after `ALTER ASSEMBLY` fails only on first invocation —
         same deferred-resolution shape, but CLR aggregates are rare.
         **FINDING:** not tested this pass.
+
       46. `CREATE`/`ALTER XML SCHEMA COLLECTION` binding a column to a
         disallowed scalar type. **FINDING:** attempted, but the probe was
         misdirected (tested `SPARSE` + typed-`xml` column, not an XSD
@@ -292,6 +326,7 @@ Competitor tools are referred to generically; real identities are in
         Side-result worth keeping: a sparse `xml` column (typed or
         untyped) is allowed — don't add XML to item 14's disallowed-type
         list.
+
       47. New consolidated rule: CLR UDT catalog-metadata validity — two UDT
         signatures treated as interchangeable when they aren't, a
         referenced UDT method that can't be resolved, an incompatible CLR
@@ -299,10 +334,12 @@ Competitor tools are referred to generically; real identities are in
         doesn't support. Hand-authored CLR UDTs beyond the built-in spatial
         types are rare, so low real-world hit rate. **FINDING:** not
         tested this pass.
+
       48. `sp_cursoropen`/`sp_cursorexecute` called with a literal scroll-
         option bitmask or `paramdef` shape the engine rejects — usually
         client-driver-generated rather than hand-authored, low value.
         **FINDING:** not tested this pass.
+
       49. `BACKUP`/`RESTORE` and `CREATE DATABASE` forbidden option
         combinations, decidable purely from the statement's own option
         list — DBA-maintenance-script scope, not typical application SQL.
@@ -316,20 +353,24 @@ Competitor tools are referred to generically; real identities are in
         message rather than a dedicated "COPY_ONLY+DIFFERENTIAL is
         invalid" message — still confirms the practical restriction.
         `CREATE DATABASE` combos not tested.
+
       50. PolyBase/Hadoop external-table column-type and virtual-column
         restrictions — mainstream on-prem feature but low adoption.
         **FINDING:** not tested this pass. PolyBase is now installed and
         enabled (`IsPolyBaseInstalled` = 1, `polybase enabled` on) on both
         local instances, `CREATE EXTERNAL DATA SOURCE` confirmed working —
         the infra gap is closed, see `docs/local-dev.md`.
+
       51. A typed XML variable resolving to a different/missing schema
         collection than its type metadata records — rare in normal
         authoring. **FINDING:** not tested this pass.
+
       52. Remaining leg of the `DropProtectedObjectRuleId` family (`DROP
         SCHEMA` non-empty, `DROP ROLE` fixed role — shipped): `DROP EXTERNAL
         DATA SOURCE`/`DROP EXTERNAL FILE FORMAT` blocked by a dependent
         external table/stream. **FINDING:** not tested this pass — PolyBase
         is now available locally (see item 50), infra gap closed.
+
       53. Ledger tables restrict which `ALTER COLUMN` shapes are legal
         (`sys.tables.is_ledger_on` plus before/after column shape) — narrow
         feature. **FINDING: not confirmed — appears less restrictive than
