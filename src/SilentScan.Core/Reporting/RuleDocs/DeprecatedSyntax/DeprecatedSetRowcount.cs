@@ -9,9 +9,15 @@ internal static class DeprecatedSetRowcount
 
     public static RuleDocContent Content { get; } = new(
         WhyItMatters: """
-            SET ROWCOUNT is deprecated - use TOP (n) instead; Microsoft documents it as not honored
-            by INSERT/UPDATE/DELETE in a future release. Code relying on it to limit rows affected by
-            a DML statement is at risk of silently losing that limit.
+            SET ROWCOUNT silently caps rows affected/returned by every subsequent statement in the
+            session right now, not just as a future-deprecation risk: oracle-confirmed, a nonzero
+            SET ROWCOUNT left active before a multi-row INSERT makes a later SELECT COUNT(*) against
+            that same data return the capped count, not the true one. It is also deprecated - use
+            TOP (n) instead; Microsoft documents it as not honored by INSERT/UPDATE/DELETE in a
+            future release. Code relying on it to limit rows affected by a DML statement is at risk
+            of silently losing that limit once the deprecation lands, on top of the present-tense
+            risk of a forgotten SET ROWCOUNT quietly limiting unrelated statements later in the same
+            session.
             """,
         HowToFixIt: "Use TOP (n) instead of SET ROWCOUNT.",
         Examples:

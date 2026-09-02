@@ -881,6 +881,13 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
         base.ExplicitVisit(node);
     }
 
+    public sealed override void ExplicitVisit(BackupDatabaseStatement node)
+    {
+        Dispatch(rule => rule.OnEnterBackupDatabaseStatement(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
     public sealed override void ExplicitVisit(StringLiteral node)
     {
         Dispatch(rule => rule.OnEnterStringLiteral(node, this));

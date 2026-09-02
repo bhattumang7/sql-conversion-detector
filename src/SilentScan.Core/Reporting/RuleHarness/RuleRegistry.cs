@@ -7,6 +7,8 @@ public static class RuleRegistry
     public static IReadOnlyList<IRule> All { get; } =
     [
         new WaitForRule(),
+        new BackupOptionConflictRule(),
+        new GraphPseudoColumnAssignmentRule(),
         new CursorCloseOnCommitRule(),
         new CompositeIndexLeadingColumnRule(),
         new MissingStatisticsRule(),

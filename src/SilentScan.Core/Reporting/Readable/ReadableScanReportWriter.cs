@@ -122,6 +122,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(StringSplitArgument(report, headingLevel, pathBase));
         blocks.AddRange(BoundedStringBuiltinTruncation(report, headingLevel, pathBase));
         blocks.AddRange(WaitFor(report, headingLevel, pathBase));
+        blocks.AddRange(BackupOptionConflict(report, headingLevel, pathBase));
+        blocks.AddRange(GraphPseudoColumnAssignment(report, headingLevel, pathBase));
         blocks.AddRange(CursorCloseOnCommit(report, headingLevel, pathBase));
         blocks.AddRange(ViewOrdering(report, headingLevel, pathBase));
         blocks.AddRange(TransactionHygiene(report, headingLevel, pathBase));
@@ -309,6 +311,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "STRING_SPLIT separator arguments not exactly one character", report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).Count);
         AddCount(counts, "REPLICATE/REPLACE/SPACE constant-provable result truncation", report.Find<BoundedStringBuiltinTruncationFinding>(nameof(BoundedStringBuiltinTruncationScanner)).Count);
         AddCount(counts, "WAITFOR DELAY/TIME", report.Find<WaitForFinding>(nameof(WaitForScanner)).Count);
+        AddCount(counts, "BACKUP DATABASE WITH DIFFERENTIAL, COPY_ONLY", report.Find<BackupOptionConflictFinding>(nameof(BackupOptionConflictScanner)).Count);
+        AddCount(counts, "$node_id/$edge_id direct assignment", report.Find<GraphPseudoColumnAssignmentFinding>(nameof(GraphPseudoColumnAssignmentScanner)).Count);
         AddCount(counts, "Cursors silently closed by CURSOR_CLOSE_ON_COMMIT then fetched", report.Find<CursorCloseOnCommitFinding>(nameof(CursorCloseOnCommitScanner)).Count);
         AddCount(counts, "View/inline TVF ordering not guaranteed", report.Find<ViewOrderingFinding>(nameof(ViewOrderingScanner)).Count);
         AddCount(counts, "Unresolved BEGIN TRANSACTION", report.Find<TransactionHygieneFinding>(nameof(TransactionHygieneScanner)).Count);
@@ -2915,6 +2919,48 @@ public static class ReadableScanReportWriter
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.IsInsideTransaction ? "Yes" : "No",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> BackupOptionConflict(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<BackupOptionConflictFinding>(nameof(BackupOptionConflictScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"BACKUP DATABASE WITH DIFFERENTIAL, COPY_ONLY ({report.Find<BackupOptionConflictFinding>(nameof(BackupOptionConflictScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "COPY_ONLY and DIFFERENTIAL are mutually exclusive - a copy-only backup never registers as a differential base, so this combination always fails (Msg 3035).");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.BackupOptionConflictRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader],
+            [.. report.Find<BackupOptionConflictFinding>(nameof(BackupOptionConflictScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> GraphPseudoColumnAssignment(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<GraphPseudoColumnAssignmentFinding>(nameof(GraphPseudoColumnAssignmentScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"$node_id/$edge_id direct assignment ({report.Find<GraphPseudoColumnAssignmentFinding>(nameof(GraphPseudoColumnAssignmentScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "$node_id/$edge_id are hidden, system-managed columns on a SQL Graph node/edge table - an explicit INSERT or UPDATE value for them always fails.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.GraphPseudoColumnAssignmentRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Column", "Statement"],
+            [.. report.Find<GraphPseudoColumnAssignmentFinding>(nameof(GraphPseudoColumnAssignmentScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.PseudoColumnName,
+                f.StatementKind,
             })]);
     }
 

@@ -221,6 +221,8 @@ public static class SarifRuleCatalog
     public static string StringSplitArgumentRuleId(StringSplitArgumentFindingKind kind) => FindingRuleIds.StringSplitArgumentRuleId(kind);
     public static string BoundedStringBuiltinTruncationRuleId(BoundedStringBuiltinTruncationFindingKind kind) => FindingRuleIds.BoundedStringBuiltinTruncationRuleId(kind);
     public const string WaitForRuleId = FindingRuleIds.WaitForRuleId;
+    public const string BackupOptionConflictRuleId = FindingRuleIds.BackupOptionConflictRuleId;
+    public const string GraphPseudoColumnAssignmentRuleId = FindingRuleIds.GraphPseudoColumnAssignmentRuleId;
     public const string CursorCloseOnCommitRuleId = FindingRuleIds.CursorCloseOnCommitRuleId;
     public static string TransactionHygieneRuleId(TransactionHygieneFindingKind kind) => FindingRuleIds.TransactionHygieneRuleId(kind);
     public const string OutputParameterRuleId = FindingRuleIds.OutputParameterRuleId;

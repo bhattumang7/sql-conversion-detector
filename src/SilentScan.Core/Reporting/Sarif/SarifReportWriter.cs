@@ -77,6 +77,8 @@ public static class SarifReportWriter
         results.AddRange(report.Find<WindowFunctionArgumentFinding>("WindowFunctionArgumentScanner").Select(ToResult));
         results.AddRange(report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner").Select(ToResult));
         results.AddRange(report.Find<BoundedStringBuiltinTruncationFinding>("BoundedStringBuiltinTruncationScanner").Select(ToResult));
+        results.AddRange(report.Find<BackupOptionConflictFinding>("BackupOptionConflictScanner").Select(ToResult));
+        results.AddRange(report.Find<GraphPseudoColumnAssignmentFinding>("GraphPseudoColumnAssignmentScanner").Select(ToResult));
         results.AddRange(report.Find<WaitForFinding>("WaitForScanner").Select(ToResult));
         results.AddRange(report.Find<CursorCloseOnCommitFinding>("CursorCloseOnCommitScanner").Select(ToResult));
         results.AddRange(report.Find<ViewOrderingFinding>("ViewOrderingScanner").Select(ToResult));
@@ -1042,6 +1044,24 @@ public static class SarifReportWriter
                 $"SPACE's requested {finding.ComputedLength}-character result is over its fixed {finding.CapBytes}-byte cap - oracle-confirmed the excess is silently truncated away, with no error.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
         };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(BackupOptionConflictFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.BackupOptionConflictRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        const string message = "BACKUP DATABASE with both DIFFERENTIAL and COPY_ONLY always fails - a copy-only backup never registers as a differential base, so no differential can ever find a current backup to diff against (Msg 3035).";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(GraphPseudoColumnAssignmentFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.GraphPseudoColumnAssignmentRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"{finding.StatementKind} assigns '{finding.PseudoColumnName}' directly - it is a hidden, system-managed column on a SQL Graph node/edge table and always rejects a direct value.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }

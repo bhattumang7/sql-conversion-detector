@@ -192,6 +192,8 @@ public static class RuleDocCatalog
         [ControlFlow.CaseExpressionMissingElse.RuleId] = ControlFlow.CaseExpressionMissingElse.Content,
         [ControlFlow.NonDeterministicCaseInput.RuleId] = ControlFlow.NonDeterministicCaseInput.Content,
         [ControlFlow.WaitFor.RuleId] = ControlFlow.WaitFor.Content,
+        [Backup.DifferentialCopyOnly.RuleId] = Backup.DifferentialCopyOnly.Content,
+        [Graph.PseudoColumnAssignment.RuleId] = Graph.PseudoColumnAssignment.Content,
         [ControlFlow.CursorCloseOnCommit.RuleId] = ControlFlow.CursorCloseOnCommit.Content,
         [ControlFlow.TransactionHygieneUnresolved.RuleId] = ControlFlow.TransactionHygieneUnresolved.Content,
         [ControlFlow.TransactionHygieneImplicit.RuleId] = ControlFlow.TransactionHygieneImplicit.Content,

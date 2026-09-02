@@ -376,7 +376,7 @@ public static class DeprecatedSyntaxScanner
         public void OnEnterSetRowCountStatement(SetRowCountStatement node, ModuleWalker walker)
         {
             Add(DeprecatedSyntaxFindingKind.DeprecatedSetRowcount, node,
-                "SET ROWCOUNT is deprecated - use TOP (n) instead; Microsoft documents it as not honored by INSERT/UPDATE/DELETE in a future release.");
+                "SET ROWCOUNT silently caps rows affected/returned by every subsequent statement in the session right now, not just in some future release - oracle-confirmed (a nonzero SET ROWCOUNT before a multi-row insert makes a later SELECT COUNT(*) return the capped count, not the true one). It is also deprecated - use TOP (n) instead; Microsoft documents it as not honored by INSERT/UPDATE/DELETE in a future release.");
         }
 
         public void OnEnterReadTextStatement(ReadTextStatement node, ModuleWalker walker)

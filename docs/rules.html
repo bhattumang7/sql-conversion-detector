@@ -86,7 +86,14 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">321 rules. 233 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">323 rules. 235 carry fix guidance; 29 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+
+  <section class="family-section">
+    <h2>backup</h2>
+    <ul class="rule-list">
+      <li><a class="id" href="rules/backup-differential-copy-only.html">Differential Copy Only</a> <code class="rule-key">silentscan/backup/differential-copy-only</code><span class="snippet">BACKUP DATABASE .</span></li>
+    </ul>
+  </section>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -219,7 +226,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
   <section class="family-section">
     <h2>deprecated-syntax</h2>
     <ul class="rule-list">
-      <li><a class="id" href="rules/deprecated-syntax-deprecated-set-rowcount.html">Deprecated Set Rowcount</a> <code class="rule-key">silentscan/deprecated-syntax/deprecated-set-rowcount</code><span class="snippet">SET ROWCOUNT is deprecated.</span></li>
+      <li><a class="id" href="rules/deprecated-syntax-deprecated-set-rowcount.html">Deprecated Set Rowcount</a> <code class="rule-key">silentscan/deprecated-syntax/deprecated-set-rowcount</code><span class="snippet">SET ROWCOUNT silently caps rows affected/returned by every subsequent statement in the session right now (oracle-confirmed), not just a future-deprecation risk; it is also deprecated.</span></li>
       <li><a class="id" href="rules/deprecated-syntax-equals-null-comparison.html">Equals Null Comparison</a> <code class="rule-key">silentscan/deprecated-syntax/equals-null-comparison</code><span class="snippet">&quot;= NULL&quot; never matches any row under the default ANSI_NULLS ON session setting, including a genuinely NULL value.</span></li>
       <li><a class="id" href="rules/deprecated-syntax-legacy-lob-function.html">Legacy Lob Function</a> <code class="rule-key">silentscan/deprecated-syntax/legacy-lob-function</code><span class="snippet">TEXTPTR/TEXTVALID are legacy functions tied to the deprecated text/ntext/image large-object types, tracked by the engine&#x27;s own deprecated-features counters.</span></li>
       <li><a class="id" href="rules/deprecated-syntax-legacy-lob-statement.html">Legacy Lob Statement</a> <code class="rule-key">silentscan/deprecated-syntax/legacy-lob-statement</code><span class="snippet">READTEXT/WRITETEXT/UPDATETEXT are legacy statements for the deprecated text/ntext/image large-object types, tracked by the engine&#x27;s own deprecated-features counters.</span></li>
@@ -318,6 +325,13 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/formatting-redundant-parentheses.html">Redundant Parentheses</a> <code class="rule-key">silentscan/formatting/redundant-parentheses</code><span class="snippet">A parenthesized expression whose parentheses do not change grouping or precedence at all.</span></li>
       <li><a class="id" href="rules/formatting-single-line-conditional-body.html">Single Line Conditional Body</a> <code class="rule-key">silentscan/formatting/single-line-conditional-body</code><span class="snippet">An IF/WHILE/ELSE body is a single unbraced statement sharing its own keyword&#x27;s line.</span></li>
       <li><a class="id" href="rules/formatting-tab-character.html">Tab Character</a> <code class="rule-key">silentscan/formatting/tab-character</code><span class="snippet">A literal tab character appears in the source text.</span></li>
+    </ul>
+  </section>
+
+  <section class="family-section">
+    <h2>graph</h2>
+    <ul class="rule-list">
+      <li><a class="id" href="rules/graph-pseudo-column-assignment.html">Pseudo Column Assignment</a> <code class="rule-key">silentscan/graph/pseudo-column-assignment</code><span class="snippet">$node_id/$edge_id are backed by hidden system columns on a SQL Graph node/edge table and reject direct manipulation.</span></li>
     </ul>
   </section>
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Deprecated Set Rowcount - SilentScan rules</title>
+<title>Pseudo Column Assignment - SilentScan rules</title>
 <style>
 :root {
   color-scheme: light dark;
@@ -86,21 +86,23 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <body>
 <main>
   <a class="back-link" href="../rules.html">&larr; All rules</a>
-  <h1>Deprecated Set Rowcount</h1>
-  <p class="rule-key"><code>silentscan/deprecated-syntax/deprecated-set-rowcount</code></p>
+  <h1>Pseudo Column Assignment</h1>
+  <p class="rule-key"><code>silentscan/graph/pseudo-column-assignment</code></p>
   <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
   <h2>Why is this an issue?</h2>
-  <p class="rationale">SET ROWCOUNT silently caps rows affected/returned by every subsequent statement in the session right now (oracle-confirmed), not just a future-deprecation risk; it is also deprecated - use TOP (n) instead; Microsoft documents it as not honored by INSERT/UPDATE/DELETE in a future release.</p>
-  <p class="rationale">SET ROWCOUNT silently caps rows affected/returned by every subsequent statement in the session right now, not just as a future-deprecation risk: oracle-confirmed, a nonzero SET ROWCOUNT left active before a multi-row INSERT makes a later SELECT COUNT(*) against that same data return the capped count, not the true one. It is also deprecated - use TOP (n) instead; Microsoft documents it as not honored by INSERT/UPDATE/DELETE in a future release. Code relying on it to limit rows affected by a DML statement is at risk of silently losing that limit once the deprecation lands, on top of the present-tense risk of a forgotten SET ROWCOUNT quietly limiting unrelated statements later in the same session.</p>
+  <p class="rationale">$node_id/$edge_id are backed by hidden system columns on a SQL Graph node/edge table and reject direct manipulation - oracle-confirmed an explicit INSERT column-list value fails (&quot;Cannot insert the value NULL into column &#x27;graph_id_...&#x27;&quot;) and an UPDATE targeting the pseudo-column fails (&quot;cannot be modified because it is either a computed column...&quot;); the column is effectively immutable/system-managed.</p>
+  <p class="rationale">`$node_id`/`$edge_id` are pseudo-columns backed by hidden, system-managed columns on a SQL Graph node/edge table - the engine assigns and maintains their value itself, and rejects any attempt to supply or change it directly.</p>
+  <p class="rationale">Oracle-confirmed on both statement shapes: an `INSERT` naming `$node_id`/`$edge_id` in its column list fails (&quot;Cannot insert the value NULL into column &#x27;graph_id_...&#x27;&quot;), and an `UPDATE` targeting the pseudo-column fails (&quot;cannot be modified because it is either a computed column...&quot;). This is decidable purely from the statement&#x27;s own column references - no catalog lookup is needed, since the restriction holds for every graph node/edge table&#x27;s `$node_id`/`$edge_id`, unconditionally.</p>
   <h2>How can I fix it?</h2>
-  <p class="rationale">Use TOP (n) instead of SET ROWCOUNT.</p>
-  <h3>SET ROWCOUNT limiting a DELETE</h3>
+  <p class="rationale">Remove $node_id/$edge_id from the INSERT column list or UPDATE SET clause - the engine assigns and maintains these values itself.</p>
+  <h3>INSERT naming $node_id explicitly</h3>
   <p class="example-label fires-label">Noncompliant code example</p>
-  <div class="fires-block"><pre><code>SET ROWCOUNT 100;&#xA;DELETE FROM dbo.OrderStaging WHERE Status = &#x27;Processed&#x27;;&#xA;SET ROWCOUNT 0;</code></pre></div>
-  <p class="example-explanation">SET ROWCOUNT is deprecated and Microsoft documents it as not honored by DELETE in a future release, so the row limit could silently stop applying.</p>
-  <p class="example-label clean-label">Compliant solution</p>
-  <div class="clean-block"><pre><code>DELETE TOP (100) FROM dbo.OrderStaging WHERE Status = &#x27;Processed&#x27;;</code></pre></div>
-  <p class="example-explanation">TOP (n) expresses the same row limit directly on the statement, with no session-level setting to forget to reset.</p>
+  <div class="fires-block"><pre><code>INSERT INTO dbo.Person ($node_id, Name) VALUES (DEFAULT, &#x27;Alice&#x27;);</code></pre></div>
+  <p class="example-explanation">$node_id is a hidden, system-managed column - supplying a value for it in the INSERT column list always fails.</p>
+  <h3>UPDATE targeting $edge_id</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>UPDATE dbo.Follows SET $edge_id = $edge_id WHERE Id = 1;</code></pre></div>
+  <p class="example-explanation">$edge_id cannot be modified because it is a computed, system-managed column - this UPDATE always fails.</p>
   <footer>
     Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
   </footer>

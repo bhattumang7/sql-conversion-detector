@@ -384,6 +384,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterBackupDatabaseStatement(BackupDatabaseStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterCreateProcedureStatement(CreateProcedureStatement node, ModuleWalker walker)
     {
     }

@@ -252,15 +252,18 @@ Competitor tools are referred to generically; real identities are in
         error or a silent truncation depends on `ANSI_WARNINGS`/statement
         context — worth pinning down both modes before scoping.
 
-      40. Explicit `INSERT`/`UPDATE`/`MERGE` assignment to a SQL Graph node/
-        edge table's own `$node_id`/`$edge_id` system column. **FINDING:
-        confirmed real.** `$node_id` is backed by hidden system columns
-        that reject direct manipulation: supplying an explicit value via
-        the normal `INSERT` column list fails ("Cannot insert the value
-        NULL into column 'graph_id_...'"), and `UPDATE ... SET $node_id =
-        $node_id` fails with "cannot be modified because it is either a
-        computed column..." — the column is effectively immutable/
-        system-managed, confirming the restriction.
+      40. **Shipped for `INSERT`/`UPDATE`:** `$node_id`/`$edge_id` are backed
+        by hidden system columns on a SQL Graph node/edge table that reject
+        direct manipulation — oracle-confirmed an explicit `INSERT` column-
+        list value fails ("Cannot insert the value NULL into column
+        'graph_id_...'") and `UPDATE ... SET $node_id = $node_id` fails
+        ("cannot be modified because it is either a computed column...").
+        Shipped as `GraphPseudoColumnAssignmentRuleId`, purely syntactic (no
+        catalog graph-table lookup needed — the restriction is unconditional
+        for any `$node_id`/`$edge_id` reference in these two statement
+        shapes). The original item also named `MERGE`'s `WHEN MATCHED THEN
+        UPDATE`/`WHEN NOT MATCHED THEN INSERT` assignment shapes — not
+        oracle-tested, remains open.
 
       41. Heavier-lift candidate: a joined table catalog-provably contributing
         nothing (no projected columns/predicates/grouping/ordering, and
@@ -297,16 +300,6 @@ Competitor tools are referred to generically; real identities are in
         question about the scanner's constant-folding reach, not an
         oracle question — the oracle side of this item is done.
 
-      44. `DeprecatedSyntaxDeprecatedSetRowcountRuleId` is scoped too
-        narrowly: it only warns `SET ROWCOUNT` will stop being honored by
-        DML in a future release, but a nonzero `SET ROWCOUNT` left active
-        silently limits rows affected/returned by every subsequent
-        statement right now — a present-tense correctness risk, not just a
-        future-deprecation one. **FINDING: confirmed real.** `SET ROWCOUNT
-        1` before a 3-row insert into a table variable makes a subsequent
-        `SELECT COUNT(*)` return `1`, not `3` — a live correctness risk
-        today, independent of the future-deprecation angle.
-
       45. `DanglingObjectReferenceRuleId` sibling: a CLR aggregate whose
         catalog-registered `Terminate`/`Accumulate` method can no longer be
         resolved after `ALTER ASSEMBLY` fails only on first invocation —
@@ -337,16 +330,12 @@ Competitor tools are referred to generically; real identities are in
       49. `BACKUP`/`RESTORE` and `CREATE DATABASE` forbidden option
         combinations, decidable purely from the statement's own option
         list — DBA-maintenance-script scope, not typical application SQL.
-        **FINDING: confirmed real for one concrete combo.**
-        `BACKUP DATABASE ... WITH DIFFERENTIAL, COPY_ONLY` always fails —
-        a copy-only full backup never registers as a differential base, so
-        any later differential can never find "a current database backup"
-        to diff against (`Msg 3035`). This is a genuine, always-fails,
-        decidable-from-the-statement's-own-option-list combination, though
-        the actual error only surfaces as the generic "no current backup"
-        message rather than a dedicated "COPY_ONLY+DIFFERENTIAL is
-        invalid" message — still confirms the practical restriction.
-        `CREATE DATABASE` combos not tested.
+        **Shipped for one concrete combo:** `BACKUP DATABASE ... WITH
+        DIFFERENTIAL, COPY_ONLY` always fails — a copy-only full backup
+        never registers as a differential base, so any later differential
+        can never find "a current database backup" to diff against (`Msg
+        3035`). Shipped as `BackupOptionConflictRuleId`. `RESTORE` and
+        `CREATE DATABASE` combos not tested, remain open.
 
       50. PolyBase/Hadoop external-table column-type and virtual-column
         restrictions — mainstream on-prem feature but low adoption.

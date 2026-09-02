@@ -11,6 +11,22 @@ internal sealed class WaitForRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => WaitForScanner.Harvest((WaitForScanner.Rule)moduleRule);
 }
 
+internal sealed class BackupOptionConflictRule : IPerFileRule
+{
+    public string Id => "BackupOptionConflictScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => BackupOptionConflictScanner.Scan(parseResult);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => BackupOptionConflictScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => BackupOptionConflictScanner.Harvest((BackupOptionConflictScanner.Rule)moduleRule);
+}
+
+internal sealed class GraphPseudoColumnAssignmentRule : IPerFileRule
+{
+    public string Id => "GraphPseudoColumnAssignmentScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => GraphPseudoColumnAssignmentScanner.Scan(parseResult);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => GraphPseudoColumnAssignmentScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => GraphPseudoColumnAssignmentScanner.Harvest((GraphPseudoColumnAssignmentScanner.Rule)moduleRule);
+}
+
 internal sealed class CursorCloseOnCommitRule : IPerFileRule
 {
     public string Id => "CursorCloseOnCommitScanner";

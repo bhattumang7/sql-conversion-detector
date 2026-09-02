@@ -296,6 +296,8 @@ public static class FindingRuleIds
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
     public const string WaitForRuleId = "silentscan/control-flow/waitfor";
+    public const string BackupOptionConflictRuleId = "silentscan/backup/differential-copy-only";
+    public const string GraphPseudoColumnAssignmentRuleId = "silentscan/graph/pseudo-column-assignment";
     public const string CursorCloseOnCommitRuleId = "silentscan/control-flow/cursor-close-on-commit";
     public static string TransactionHygieneRuleId(TransactionHygieneFindingKind kind) => kind switch
     {
