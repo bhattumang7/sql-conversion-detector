@@ -40,6 +40,7 @@ public static class RuleRegistry
         new OperandComparabilityRule(),
         new VectorFunctionArgumentRule(),
         new SchemaWithRejectedTypeRule(),
+        new ExternalTableUnsupportedColumnTypeRule(),
         new ExecuteAtLargeObjectParameterRule(),
         new UnpivotExactTypeMismatchRule(),
         new SchemaboundAliasTypeRule(),

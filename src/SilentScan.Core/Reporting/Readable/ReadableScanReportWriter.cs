@@ -86,6 +86,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(JsonIndexRewrite(report, headingLevel, pathBase));
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
         blocks.AddRange(ColumnstoreUnsupportedColumnType(report, headingLevel, pathBase));
+        blocks.AddRange(ExternalTableUnsupportedColumnType(report, headingLevel, pathBase));
         blocks.AddRange(SelectiveXmlIndexValueColumn(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUnsupportedColumnType(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUtf8Collation(report, headingLevel, pathBase));
@@ -250,6 +251,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.Find<MaxTypedColumnFinding>(nameof(MaxTypedColumnScanner)).Count(f => f.Kind == NonIndexableColumnFindingKind.MaxLength));
         AddCount(counts, "Legacy large-object columns (can never appear in any index)", report.Find<MaxTypedColumnFinding>(nameof(MaxTypedColumnScanner)).Count(f => f.Kind == NonIndexableColumnFindingKind.LegacyLargeObject));
         AddCount(counts, "Columnstore-unsupported-type columns participating in a columnstore index (does not deploy)", report.Find<ColumnstoreUnsupportedColumnTypeFinding>(nameof(ColumnstoreUnsupportedColumnTypeScanner)).Count);
+        AddCount(counts, "CREATE EXTERNAL TABLE columns declared with a PolyBase-unsupported type (does not deploy)", report.Find<ExternalTableUnsupportedColumnTypeFinding>(nameof(ExternalTableUnsupportedColumnTypeScanner)).Count);
         AddCount(counts, "Secondary selective XML indexes over an oversized/large-object value column (does not deploy)", report.Find<SelectiveXmlIndexValueColumnFinding>(nameof(SelectiveXmlIndexValueColumnScanner)).Count);
         AddCount(counts, "Unsupported column type on a memory-optimized table (does not deploy)", report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>(nameof(MemoryOptimizedUnsupportedColumnTypeScanner)).Count);
         AddCount(counts, "UTF-8 collation on a memory-optimized table column (does not deploy)", report.Find<MemoryOptimizedUtf8CollationFinding>(nameof(MemoryOptimizedUtf8CollationScanner)).Count);
@@ -988,6 +990,29 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.TypeDisplay,
                 f.IndexName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ExternalTableUnsupportedColumnType(ScanReport report, int level, string? pathBase)
+    {
+        var findings = report.Find<ExternalTableUnsupportedColumnTypeFinding>(nameof(ExternalTableUnsupportedColumnTypeScanner));
+        if (findings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"CREATE EXTERNAL TABLE columns declared with a PolyBase-unsupported type ({findings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A CREATE EXTERNAL TABLE column's own declared type is checked against a fixed PolyBase allow-list before the engine ever opens the external data source - oracle-confirmed real DDL execution fails with Msg 46518 (\"The type '...' is not supported with external tables.\"), independent of the file format, DATA_SOURCE, or whether the referenced location exists.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ExternalTableUnsupportedColumnTypeRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Type"],
+            [.. findings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.TypeDisplay,
             })]);
     }
 

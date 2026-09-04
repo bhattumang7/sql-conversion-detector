@@ -282,6 +282,12 @@ internal sealed class SchemaWithRejectedTypeRule : IPerFileRule
     public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => SchemaWithRejectedTypeScanner.Scan(parseResult, context.Catalog);
 }
 
+internal sealed class ExternalTableUnsupportedColumnTypeRule : IPerFileRule
+{
+    public string Id => "ExternalTableUnsupportedColumnTypeScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => ExternalTableUnsupportedColumnTypeScanner.Scan(parseResult, context.Catalog);
+}
+
 internal sealed class ExecuteAtLargeObjectParameterRule : IPerFileRule
 {
     public string Id => "ExecuteAtLargeObjectParameterScanner";

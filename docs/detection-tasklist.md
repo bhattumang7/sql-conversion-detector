@@ -67,12 +67,6 @@ Competitor tools are referred to generically; real identities are in
         restrictions for local variable and parameter assignments.
         Encryption-state and legacy-LOB legs remain open.
 
-      31. External file-format/data-export partition column type restrictions
-        (PolyBase/CETAS external-table column-type and virtual-column
-        allow-lists; data-export partition column resolving to a large
-        object or unsupported type) — real but niche. **FINDING:** not
-        tested this pass.
-
       32. A statically-known boolean element inside a JSON literal converted
         to the native `VECTOR` type (SQL Server 2025 feature, narrow).
         **FINDING:** not tested this pass.

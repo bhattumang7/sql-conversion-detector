@@ -41,6 +41,7 @@ public static class FindingRuleIds
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled NonIndexableColumnFindingKind."),
     };
     public const string ColumnstoreUnsupportedColumnTypeRuleId = "silentscan/catalog/columnstore-unsupported-column-type";
+    public const string ExternalTableUnsupportedColumnTypeRuleId = "silentscan/predicates/external-table-unsupported-column-type";
     public static string SelectiveXmlIndexValueColumnRuleId(SelectiveXmlIndexValueColumnFindingKind kind) => kind switch
     {
         SelectiveXmlIndexValueColumnFindingKind.TooWide => "silentscan/catalog/selective-xml-index-value-column-too-wide",

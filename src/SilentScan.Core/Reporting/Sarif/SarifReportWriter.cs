@@ -48,6 +48,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<JsonIndexRewriteFinding>("NonSargablePredicateScanner").Select(ToResult));
         results.AddRange(report.Find<MaxTypedColumnFinding>("MaxTypedColumnScanner").Select(ToResult));
         results.AddRange(report.Find<ColumnstoreUnsupportedColumnTypeFinding>("ColumnstoreUnsupportedColumnTypeScanner").Select(ToResult));
+        results.AddRange(report.Find<ExternalTableUnsupportedColumnTypeFinding>(nameof(ExternalTableUnsupportedColumnTypeScanner)).Select(ToResult));
         results.AddRange(report.Find<SelectiveXmlIndexValueColumnFinding>("SelectiveXmlIndexValueColumnScanner").Select(ToResult));
         results.AddRange(report.Find<OversizedParameterFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
         results.AddRange(report.Find<UnderLengthParameterFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
@@ -477,6 +478,14 @@ public static class SarifReportWriter
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} and participates in columnstore index '{finding.IndexName}' - this does not deploy (Msg 35343: a SQL_VARIANT column cannot participate in a columnstore index).";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(ExternalTableUnsupportedColumnTypeFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ExternalTableUnsupportedColumnTypeRuleId, finding.Confidence);
+        var message = $"External table column '{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} - this type is not supported with external tables (Msg 46518).";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(SelectiveXmlIndexValueColumnFinding finding)

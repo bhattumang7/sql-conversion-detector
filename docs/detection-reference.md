@@ -1659,3 +1659,31 @@ WITH NATIVE_COMPILATION` module.
   integration test that reproduces it runs `sqlcmd` out-of-process (via
   `docker exec`) rather than through `Microsoft.Data.SqlClient` in-process,
   since triggering it through the ADO.NET client aborts the .NET CLR itself.
+
+* **External file-format/data-export partition column type restrictions —
+  `CREATE EXTERNAL TABLE`'s own explicit column-list form shipped; the
+  CETAS select-inferred form and the "virtual/partition column" leg killed,
+  not applicable on this engine.** Oracle-confirmed (Docker, SQL Server
+  2022, PolyBase + `hadoop connectivity` enabled): a `CREATE EXTERNAL
+  TABLE (...)` column declared `SQL_VARIANT`, `XML`, `HIERARCHYID`,
+  `GEOMETRY`, `GEOGRAPHY`, `NTEXT`, `TEXT`, `IMAGE`, `TIMESTAMP`, or a
+  MAX-length `VARCHAR`/`NVARCHAR`/`VARBINARY` always fails with Msg 46518
+  ("The type '...' is not supported with external tables"), identically
+  across `DELIMITEDTEXT` and `PARQUET` file formats and independent of
+  whether `LOCATION` resolves to anything real — a pure declared-schema
+  check with no format-dependent allow-list, unlike the originally-scoped
+  "per file-format allow-list" premise. `CREATE EXTERNAL TABLE AS SELECT`
+  rejects the identical type set on its select-list-inferred column types
+  (Msg 15877, oracle-confirmed), but scoping that leg would require full
+  expression-type inference over the CETAS `SELECT` (source column/cast/
+  literal resolution through `ScopeChain`) rather than reading a declared
+  `DataTypeReference` off the AST directly — not attempted this pass, left
+  open rather than shipped partial. The "virtual column"/`PARTITION_COLUMNS`
+  half of the item is a Synapse dedicated-SQL-pool CETAS feature, not a
+  SQL Server one: ScriptDom 180.102.0's `ExternalTableOptionKind` enum has
+  no partition-columns member (`Distribution`, `FileFormat`, `Location`,
+  `RejectSampleValue`, `RejectType`, `RejectValue`, `SchemaName`,
+  `ObjectName`, `RejectedRowLocation`, `TableOptions` only), and
+  `ExternalTableColumnDefinition` carries no per-column virtual/partition
+  marker — out of scope under the decidable-from-SQL-Server-catalog rule,
+  not a gap in this tool. Shipped as `ExternalTableUnsupportedColumnTypeRuleId`.

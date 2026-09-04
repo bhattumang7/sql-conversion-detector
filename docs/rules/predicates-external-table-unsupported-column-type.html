@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>External Table Unsupported Column Type - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>External Table Unsupported Column Type</h1>
+  <p class="rule-key"><code>silentscan/predicates/external-table-unsupported-column-type</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A CREATE EXTERNAL TABLE column declaration uses a type PolyBase never allows in an external table&#x27;s own schema - SQL_VARIANT, XML, HIERARCHYID, GEOMETRY, GEOGRAPHY, NTEXT, TEXT, IMAGE, TIMESTAMP/ROWVERSION, or a MAX-length VARCHAR/NVARCHAR/VARBINARY column - oracle-confirmed (Msg 46518, &quot;The type &#x27;...&#x27; is not supported with external tables.&quot;) the DDL is rejected before the engine ever opens the external data source, independent of the file format, the DATA_SOURCE, or whether the referenced location or file exists. The same fixed type gate rejects a CREATE EXTERNAL TABLE AS SELECT column whose declared source type falls in this set (Msg 15877); this rule covers the explicit column-list form only.</p>
+  <p class="rationale">A `CREATE EXTERNAL TABLE` column list is checked against a fixed PolyBase type allow-list at DDL time, before the engine ever opens the referenced `DATA_SOURCE`/`LOCATION` - the check runs identically whether the file format is delimited text or Parquet, and whether the referenced location exists at all. Oracle-confirmed directly (real DDL execution, SQL Server 2022): `SQL_VARIANT`, `XML`, `HIERARCHYID`, `GEOMETRY`, `GEOGRAPHY`, `NTEXT`, `TEXT`, `IMAGE`, and `TIMESTAMP`/`ROWVERSION` are rejected outright with `Msg 46518: The type &#x27;...&#x27; is not supported with external tables.`, and so is a `VARCHAR(MAX)`/`NVARCHAR(MAX)`/ `VARBINARY(MAX)` column - unlike an ordinary table, an external table has no fixed/MAX split by format; every MAX-length string or binary column is rejected regardless of format. The same fixed gate rejects a `CREATE EXTERNAL TABLE AS SELECT` column whose source expression resolves to one of these types (`Msg 15877`), though that select-list-inferred form isn&#x27;t covered by this rule - only an external table&#x27;s own explicit column declarations are.</p>
+  <p class="rationale">This is exactly the class of bug static analysis exists to catch before it reaches a deployment pipeline: the DDL parses fine and reads fine - PolyBase&#x27;s whole purpose is bridging to a schema the server doesn&#x27;t control - so nothing about the statement looks wrong until someone actually runs it against a real data source, by which point it&#x27;s a broken export/import pipeline rather than a two-second code review catch.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Retype the external table&#x27;s own column declaration to a supported, non-MAX type. This is purely a declared-schema restriction on the external table object - the underlying source file&#x27;s actual column can be whatever type it is; PolyBase&#x27;s type conversion happens as it reads each row, so a fixed-length type wide enough for the real data (e.g. `NVARCHAR(4000)` in place of `NVARCHAR(MAX)`) is enough to satisfy the gate without losing any data the source file actually contains.</p>
+  <h3>An NVARCHAR(MAX) column on an external table declaration</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE EXTERNAL TABLE dbo.SalesExport&#xA;(&#xA;    SaleId  INT             NOT NULL,&#xA;    Notes   NVARCHAR(MAX)   NULL&#xA;)&#xA;WITH&#xA;(&#xA;    LOCATION    = &#x27;/sales/&#x27;,&#xA;    DATA_SOURCE = ExternalBlobSource,&#xA;    FILE_FORMAT = ExternalParquetFormat&#xA;);&#xA;-- Fails to deploy: Msg 46518, &quot;The type &#x27;nvarchar(max)&#x27; is not supported&#xA;-- with external tables&quot; - rejected before DATA_SOURCE is ever opened.</code></pre></div>
+  <p class="example-explanation">Notes is declared NVARCHAR(MAX) - PolyBase&#x27;s external-table type gate rejects every MAX-length string/binary column outright, independent of FILE_FORMAT or whether /sales/ exists.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE EXTERNAL TABLE dbo.SalesExport&#xA;(&#xA;    SaleId  INT             NOT NULL,&#xA;    Notes   NVARCHAR(4000)  NULL&#xA;)&#xA;WITH&#xA;(&#xA;    LOCATION    = &#x27;/sales/&#x27;,&#xA;    DATA_SOURCE = ExternalBlobSource,&#xA;    FILE_FORMAT = ExternalParquetFormat&#xA;);</code></pre></div>
+  <p class="example-explanation">NVARCHAR(4000) is a fixed-length type wide enough for the real data - the DDL deploys, and PolyBase still converts each row&#x27;s actual value as it reads it.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>
