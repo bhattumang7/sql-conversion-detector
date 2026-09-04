@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Common;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.TypeInference;
@@ -30,30 +31,19 @@ public static class ExecuteAtLargeObjectParameterScanner
 
     internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
-        private readonly Dictionary<string, SqlType> variableTypes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly VariableTypeTracker _variableTypes = new(catalog);
 
         public List<ExecuteAtLargeObjectParameterFinding> Findings { get; } = [];
 
-        public void OnEnterTSqlBatch(TSqlBatch node, ModuleWalker walker) => variableTypes.Clear();
+        public void OnEnterTSqlBatch(TSqlBatch node, ModuleWalker walker) => _variableTypes.Clear();
 
-        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
-        {
-            variableTypes.Clear();
-            foreach (var parameter in node.Parameters)
-            {
-                Track(parameter.VariableName.Value, parameter.DataType);
-            }
-        }
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker) =>
+            _variableTypes.TrackParameters(node);
 
-        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) => variableTypes.Clear();
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) => _variableTypes.Clear();
 
-        public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)
-        {
-            foreach (var declaration in node.Declarations)
-            {
-                Track(declaration.VariableName.Value, declaration.DataType);
-            }
-        }
+        public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker) =>
+            _variableTypes.TrackDeclarations(node);
 
         public void OnEnterExecuteStatement(ExecuteStatement node, ModuleWalker walker)
         {
@@ -65,7 +55,7 @@ public static class ExecuteAtLargeObjectParameterScanner
             foreach (var parameter in stringList.Parameters)
             {
                 if (parameter.ParameterValue is not VariableReference variable
-                    || !variableTypes.TryGetValue(variable.Name, out var type))
+                    || !_variableTypes.TryGetValue(variable.Name, out var type))
                 {
                     continue;
                 }
@@ -82,15 +72,6 @@ public static class ExecuteAtLargeObjectParameterScanner
                         variable.Name.TrimStart('@'), type.ToString(), ExecuteAtLargeObjectParameterFindingKind.XmlRejected,
                         sourcePath, variable.StartLine, variable.StartColumn));
                 }
-            }
-        }
-
-        private void Track(string variableName, DataTypeReference dataType)
-        {
-            var resolved = SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null, catalog.TypeAliases);
-            if (resolved is not null)
-            {
-                variableTypes[variableName] = resolved;
             }
         }
     }

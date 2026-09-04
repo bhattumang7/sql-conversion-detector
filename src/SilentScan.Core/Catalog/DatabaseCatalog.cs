@@ -1,6 +1,5 @@
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.TypeInference;
-using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Catalog;
 
@@ -51,9 +50,9 @@ public sealed class DatabaseCatalog
 
     private Dictionary<string, IReadOnlyList<string>> _viewCompiledColumnsByQualifiedName;
 
-    private Dictionary<string, string> _viewDefinitionTextByQualifiedName;
+    private readonly Dictionary<string, string> _viewDefinitionTextByQualifiedName;
 
-    private Dictionary<string, PartitionFunctionSignature> _partitionFunctionSignatureBySchemeName;
+    private readonly Dictionary<string, PartitionFunctionSignature> _partitionFunctionSignatureBySchemeName;
 
     private Dictionary<string, bool> _moduleUsesQuotedIdentifierByQualifiedName;
 

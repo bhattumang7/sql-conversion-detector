@@ -13,7 +13,7 @@ internal static class SetOptionFlowTracker
         }
 
         var policy = new Policy(flag);
-        var state = default(FlowState);
+        var state = default(SetOptionFlowState);
         foreach (var batch in script.Batches)
         {
             state = ProcedureBodyFlowWalker.Walk(batch.Statements, state with { Depth = 0 }, policy);
@@ -22,32 +22,11 @@ internal static class SetOptionFlowTracker
         return state.IsOff;
     }
 
-    private readonly record struct FlowState(bool IsOff, bool RestoreIsOff, int Depth);
-
-    private sealed class Policy(SetOptions flag) : IStatementFlowPolicy<FlowState>
+    private sealed class Policy(SetOptions flag) : SetOptionFlowPolicyBase
     {
-        public bool IsDeclined(FlowState state) => false;
-
-        public bool IsDone(FlowState state) => false;
-
-        public FlowState PerStatement(TSqlStatement statement, FlowState state) =>
+        public override SetOptionFlowState PerStatement(TSqlStatement statement, SetOptionFlowState state) =>
             statement is PredicateSetStatement { Options: var options, IsOn: var isOn } && (options & flag) != 0
                 ? state with { IsOff = !isOn }
                 : state;
-
-        public FlowState OnReturn(FlowState state, TSqlStatement statement) => state;
-
-        public FlowState OnThrow(FlowState state) => state;
-
-        public FlowState OnGoTo(FlowState state) => state;
-
-        public FlowState CloneForBranch(FlowState state) =>
-            state with { RestoreIsOff = state.IsOff, Depth = state.Depth + 1 };
-
-        public FlowState Merge(FlowState a, FlowState b)
-        {
-            var winner = a.Depth >= b.Depth ? a : b;
-            return new FlowState(winner.RestoreIsOff, winner.RestoreIsOff, winner.Depth - 1);
-        }
     }
 }

@@ -29,20 +29,20 @@ public static class VectorLiteralConversionScanner
                 .ThenBy(f => f.Column),
         ];
 
-    private static string DescribeElementKind(JsonValueKind kind) => kind switch
-    {
-        JsonValueKind.True or JsonValueKind.False => "boolean",
-        JsonValueKind.String => "string",
-        JsonValueKind.Null => "null",
-        JsonValueKind.Object => "object",
-        _ => kind.ToString(),
-    };
-
     internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         private readonly Dictionary<string, DataTypeReference> _variableDataTypes = new(StringComparer.OrdinalIgnoreCase);
 
         public List<VectorLiteralConversionFinding> Findings { get; } = [];
+
+        private static string DescribeElementKind(JsonValueKind kind) => kind switch
+        {
+            JsonValueKind.True or JsonValueKind.False => "boolean",
+            JsonValueKind.String => "string",
+            JsonValueKind.Null => "null",
+            JsonValueKind.Object => "object",
+            _ => kind.ToString(),
+        };
 
         public void OnEnterTSqlBatch(TSqlBatch node, ModuleWalker walker) => _variableDataTypes.Clear();
 
@@ -110,23 +110,19 @@ public static class VectorLiteralConversionScanner
                     return;
                 }
 
-                var elementCount = 0;
-                foreach (var element in document.RootElement.EnumerateArray())
+                var elementKinds = document.RootElement.EnumerateArray().Select(e => e.ValueKind).ToList();
+                var elementCount = elementKinds.Count;
+                var firstNonNumericIndex = elementKinds.FindIndex(k => k is not (JsonValueKind.Number or JsonValueKind.Array));
+                if (firstNonNumericIndex >= 0)
                 {
-                    elementCount++;
-                    if (element.ValueKind is JsonValueKind.Number or JsonValueKind.Array)
-                    {
-                        continue;
-                    }
-
                     Findings.Add(new VectorLiteralConversionFinding(
-                        stringLiteral.Value, vectorType.ToString(), DescribeElementKind(element.ValueKind), ActualElementCount: null, DeclaredDimensions: null,
+                        stringLiteral.Value, vectorType.ToString(), DescribeElementKind(elementKinds[firstNonNumericIndex]), ActualElementCount: null, DeclaredDimensions: null,
                         VectorLiteralConversionFindingKind.NonNumericJsonElement, sourcePath, stringLiteral.StartLine, stringLiteral.StartColumn));
                     return;
                 }
 
                 if (vectorType.Length is { } declaredDimensions && elementCount != declaredDimensions
-                    && document.RootElement.EnumerateArray().All(e => e.ValueKind == JsonValueKind.Number))
+                    && elementKinds.All(k => k == JsonValueKind.Number))
                 {
                     Findings.Add(new VectorLiteralConversionFinding(
                         stringLiteral.Value, vectorType.ToString(), ElementKind: null, elementCount, declaredDimensions,

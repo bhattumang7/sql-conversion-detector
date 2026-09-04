@@ -42,14 +42,8 @@ public static class ForXmlExplicitInlineXsdScanner
                 return;
             }
 
-            var hasExplicit = false;
-            var hasInlineXsd = false;
-
-            foreach (var option in options)
-            {
-                hasExplicit |= option.OptionKind == XmlForClauseOptions.Explicit;
-                hasInlineXsd |= option.OptionKind == XmlForClauseOptions.XmlSchema;
-            }
+            var hasExplicit = options.Any(o => o.OptionKind == XmlForClauseOptions.Explicit);
+            var hasInlineXsd = options.Any(o => o.OptionKind == XmlForClauseOptions.XmlSchema);
 
             if (!hasExplicit || !hasInlineXsd)
             {

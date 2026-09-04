@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Common;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
@@ -40,25 +41,6 @@ public static class BareTopNoOrderByScanner
         }
 
         private static bool IsHundredPercent(TopRowFilter top) =>
-            top.Percent && IsOneHundredLiteral(Unwrap(top.Expression));
-
-        private static bool IsOneHundredLiteral(ScalarExpression expression) =>
-            expression switch
-            {
-                IntegerLiteral { Value: "100" } => true,
-                NumericLiteral { Value: var value } => IsExactlyOneHundred(value),
-                _ => false,
-            };
-
-        private static bool IsExactlyOneHundred(string value)
-        {
-            var dot = value.IndexOf('.', StringComparison.Ordinal);
-            var integerPart = dot < 0 ? value : value[..dot];
-            var fractionalPart = dot < 0 ? string.Empty : value[(dot + 1)..];
-            return integerPart == "100" && fractionalPart.All(c => c == '0');
-        }
-
-        private static ScalarExpression Unwrap(ScalarExpression expression) =>
-            expression is ParenthesisExpression parenthesis ? Unwrap(parenthesis.Expression) : expression;
+            top.Percent && TopPercentLiteralHelper.IsHundredPercentLiteral(top.Expression);
     }
 }

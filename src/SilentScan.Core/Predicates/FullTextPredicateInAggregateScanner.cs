@@ -39,10 +39,16 @@ public static class FullTextPredicateInAggregateScanner
 
         public override void ExplicitVisit(FullTextPredicate node) => Found ??= node;
 
+        [System.Diagnostics.CodeAnalysis.SuppressMessage(
+            "Critical Code Smell", "S1186:Methods should not be empty",
+            Justification = "Deliberately stops descent into a nested subquery so a FullTextPredicate belonging to an inner scope is never matched to this function call's aggregate.")]
         public override void ExplicitVisit(ScalarSubquery node)
         {
         }
 
+        [System.Diagnostics.CodeAnalysis.SuppressMessage(
+            "Critical Code Smell", "S1186:Methods should not be empty",
+            Justification = "Deliberately stops descent into a nested query specification so a FullTextPredicate belonging to an inner scope is never matched to this function call's aggregate.")]
         public override void ExplicitVisit(QuerySpecification node)
         {
         }

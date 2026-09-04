@@ -64,14 +64,14 @@ public static class ExecResultSetsShapeCandidateScanner
             InlineResultSetDefinition inlineDefinition, DatabaseCatalog catalog)
         {
             var declaredColumns = new List<ExecResultSetsDeclaredColumn>(inlineDefinition.ResultColumnDefinitions.Count);
-            foreach (var columnDefinition in inlineDefinition.ResultColumnDefinitions)
+            foreach (var columnDefinition in inlineDefinition.ResultColumnDefinitions.Select(d => d.ColumnDefinition))
             {
-                if (columnDefinition.ColumnDefinition is not { ColumnIdentifier: { } identifier, DataType: { } dataType })
+                if (columnDefinition is not { ColumnIdentifier: { } identifier, DataType: { } dataType })
                 {
                     return null;
                 }
 
-                var type = SqlTypeReferenceResolver.Resolve(dataType, columnDefinition.ColumnDefinition.Collation, catalog.TypeAliases);
+                var type = SqlTypeReferenceResolver.Resolve(dataType, columnDefinition.Collation, catalog.TypeAliases);
                 if (type is null)
                 {
                     return null;

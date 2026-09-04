@@ -26,6 +26,23 @@ internal static class IndexedViewCorrespondenceMatcher
             return IndexedViewCorrespondence.DoesNotMatch;
         }
 
+        var selectListCorrespondence = CompareSelectElements(sourceQuery, targetQuery, catalog);
+        if (selectListCorrespondence != IndexedViewCorrespondence.Matches)
+        {
+            return selectListCorrespondence;
+        }
+
+        return CompareWhere(sourceQuery.WhereClause, targetQuery.WhereClause, catalog) switch
+        {
+            null => IndexedViewCorrespondence.Unknown,
+            true => IndexedViewCorrespondence.Matches,
+            false => IndexedViewCorrespondence.DoesNotMatch,
+        };
+    }
+
+    private static IndexedViewCorrespondence CompareSelectElements(
+        QuerySpecification sourceQuery, QuerySpecification targetQuery, DatabaseCatalog catalog)
+    {
         for (var i = 0; i < sourceQuery.SelectElements.Count; i++)
         {
             if (sourceQuery.SelectElements[i] is not SelectScalarExpression sourceScalar
@@ -58,12 +75,7 @@ internal static class IndexedViewCorrespondenceMatcher
             }
         }
 
-        return CompareWhere(sourceQuery.WhereClause, targetQuery.WhereClause, catalog) switch
-        {
-            null => IndexedViewCorrespondence.Unknown,
-            true => IndexedViewCorrespondence.Matches,
-            false => IndexedViewCorrespondence.DoesNotMatch,
-        };
+        return IndexedViewCorrespondence.Matches;
     }
 
     private static bool? CompareWhere(WhereClause? source, WhereClause? target, DatabaseCatalog catalog)
@@ -93,34 +105,38 @@ internal static class IndexedViewCorrespondenceMatcher
             return BooleanEquals(left, rightParen.Expression, catalog);
         }
 
-        switch (left, right)
+        return (left, right) switch
         {
-            case (BooleanComparisonExpression lc, BooleanComparisonExpression rc):
-                if (lc.ComparisonType != rc.ComparisonType)
-                {
-                    return false;
-                }
+            (BooleanComparisonExpression lc, BooleanComparisonExpression rc) => ComparisonEquals(lc, rc, catalog),
+            (BooleanBinaryExpression lb, BooleanBinaryExpression rb) => BinaryEquals(lb, rb, catalog),
+            (BooleanIsNullExpression li, BooleanIsNullExpression ri) =>
+                li.IsNot != ri.IsNot ? false : ScalarEquals(li.Expression, ri.Expression, catalog),
+            _ => null,
+        };
+    }
 
-                var firstEqual = ScalarEquals(lc.FirstExpression, rc.FirstExpression, catalog);
-                var secondEqual = ScalarEquals(lc.SecondExpression, rc.SecondExpression, catalog);
-                return firstEqual is null || secondEqual is null ? null : firstEqual.Value && secondEqual.Value;
-
-            case (BooleanBinaryExpression lb, BooleanBinaryExpression rb):
-                if (lb.BinaryExpressionType != rb.BinaryExpressionType)
-                {
-                    return false;
-                }
-
-                var leftEqual = BooleanEquals(lb.FirstExpression, rb.FirstExpression, catalog);
-                var rightEqual = BooleanEquals(lb.SecondExpression, rb.SecondExpression, catalog);
-                return leftEqual is null || rightEqual is null ? null : leftEqual.Value && rightEqual.Value;
-
-            case (BooleanIsNullExpression li, BooleanIsNullExpression ri):
-                return li.IsNot != ri.IsNot ? false : ScalarEquals(li.Expression, ri.Expression, catalog);
-
-            default:
-                return null;
+    private static bool? ComparisonEquals(BooleanComparisonExpression lc, BooleanComparisonExpression rc, DatabaseCatalog catalog)
+    {
+        if (lc.ComparisonType != rc.ComparisonType)
+        {
+            return false;
         }
+
+        var firstEqual = ScalarEquals(lc.FirstExpression, rc.FirstExpression, catalog);
+        var secondEqual = ScalarEquals(lc.SecondExpression, rc.SecondExpression, catalog);
+        return firstEqual is null || secondEqual is null ? null : firstEqual.Value && secondEqual.Value;
+    }
+
+    private static bool? BinaryEquals(BooleanBinaryExpression lb, BooleanBinaryExpression rb, DatabaseCatalog catalog)
+    {
+        if (lb.BinaryExpressionType != rb.BinaryExpressionType)
+        {
+            return false;
+        }
+
+        var leftEqual = BooleanEquals(lb.FirstExpression, rb.FirstExpression, catalog);
+        var rightEqual = BooleanEquals(lb.SecondExpression, rb.SecondExpression, catalog);
+        return leftEqual is null || rightEqual is null ? null : leftEqual.Value && rightEqual.Value;
     }
 
     private static bool? ScalarEquals(ScalarExpression left, ScalarExpression right, DatabaseCatalog catalog)

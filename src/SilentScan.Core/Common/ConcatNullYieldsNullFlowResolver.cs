@@ -13,7 +13,7 @@ internal static class ConcatNullYieldsNullFlowResolver
         }
 
         var policy = new Policy(map);
-        var state = default(FlowState);
+        var state = default(SetOptionFlowState);
         foreach (var batch in script.Batches)
         {
             state = ProcedureBodyFlowWalker.Walk(batch.Statements, state with { Depth = 0 }, policy);
@@ -22,9 +22,7 @@ internal static class ConcatNullYieldsNullFlowResolver
         return map;
     }
 
-    private readonly record struct FlowState(bool IsOff, bool RestoreIsOff, int Depth);
-
-    private sealed class Policy(Dictionary<TSqlStatement, bool> map) : IStatementFlowPolicy<FlowState>
+    private sealed class Policy(Dictionary<TSqlStatement, bool> map) : SetOptionFlowPolicyBase
     {
         private static StatementList? GetScopedStatementList(TSqlStatement statement) => statement switch
         {
@@ -33,17 +31,13 @@ internal static class ConcatNullYieldsNullFlowResolver
             _ => null,
         };
 
-        public bool IsDeclined(FlowState state) => false;
-
-        public bool IsDone(FlowState state) => false;
-
-        public FlowState PerStatement(TSqlStatement statement, FlowState state)
+        public override SetOptionFlowState PerStatement(TSqlStatement statement, SetOptionFlowState state)
         {
             map[statement] = state.IsOff;
 
             if (GetScopedStatementList(statement) is { Statements: var nestedStatements })
             {
-                ProcedureBodyFlowWalker.Walk(nestedStatements, default(FlowState), this);
+                ProcedureBodyFlowWalker.Walk(nestedStatements, default(SetOptionFlowState), this);
             }
 
             if (statement is PredicateSetStatement { Options: var options, IsOn: var isOn } && (options & SetOptions.ConcatNullYieldsNull) != 0)
@@ -52,21 +46,6 @@ internal static class ConcatNullYieldsNullFlowResolver
             }
 
             return state;
-        }
-
-        public FlowState OnReturn(FlowState state, TSqlStatement statement) => state;
-
-        public FlowState OnThrow(FlowState state) => state;
-
-        public FlowState OnGoTo(FlowState state) => state;
-
-        public FlowState CloneForBranch(FlowState state) =>
-            state with { RestoreIsOff = state.IsOff, Depth = state.Depth + 1 };
-
-        public FlowState Merge(FlowState a, FlowState b)
-        {
-            var winner = a.Depth >= b.Depth ? a : b;
-            return new FlowState(winner.RestoreIsOff, winner.RestoreIsOff, winner.Depth - 1);
         }
     }
 }

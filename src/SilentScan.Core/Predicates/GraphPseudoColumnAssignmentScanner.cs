@@ -27,16 +27,16 @@ public static class GraphPseudoColumnAssignmentScanner
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-    private static string? PseudoColumnNameFor(ColumnType columnType) => columnType switch
-    {
-        ColumnType.PseudoColumnGraphNodeId => "$node_id",
-        ColumnType.PseudoColumnGraphEdgeId => "$edge_id",
-        _ => null,
-    };
-
     internal sealed class Rule(string sourcePath) : IModuleRule
     {
         public List<GraphPseudoColumnAssignmentFinding> Findings { get; } = [];
+
+        private static string? PseudoColumnNameFor(ColumnType columnType) => columnType switch
+        {
+            ColumnType.PseudoColumnGraphNodeId => "$node_id",
+            ColumnType.PseudoColumnGraphEdgeId => "$edge_id",
+            _ => null,
+        };
 
         public void OnEnterInsertStatementScope(InsertStatement node, ModuleWalker walker)
         {

@@ -41,7 +41,7 @@ public static class NativelyCompiledErrorOutsideCatchScanner
         public List<NativelyCompiledErrorOutsideCatchFinding> Findings { get; } = [];
 
         public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker) =>
-            _currentNativeModuleName = IsNativelyCompiled(node) ? TryGetModuleQualifiedName(node) : null;
+            _currentNativeModuleName = NativelyCompiledModuleHelper.IsNativelyCompiled(node) ? NativelyCompiledModuleHelper.TryGetModuleQualifiedName(node) : null;
 
         public void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker) =>
             _currentNativeModuleName = null;
@@ -63,23 +63,5 @@ public static class NativelyCompiledErrorOutsideCatchScanner
             Findings.Add(new NativelyCompiledErrorOutsideCatchFinding(
                 moduleName, functionName.ToUpperInvariant(), sourcePath, node.StartLine, node.StartColumn));
         }
-
-        private static bool IsNativelyCompiled(ProcedureStatementBodyBase node) => node switch
-        {
-            ProcedureStatementBody procedure => procedure.Options.Any(o => o.OptionKind == ProcedureOptionKind.NativeCompilation),
-            FunctionStatementBody function => function.Options.Any(o => o.OptionKind == FunctionOptionKind.NativeCompilation),
-            _ => false,
-        };
-
-        private static string? TryGetModuleQualifiedName(ProcedureStatementBodyBase node) => node switch
-        {
-            CreateProcedureStatement p => SchemaObjectNameHelper.Qualify(p.ProcedureReference.Name),
-            AlterProcedureStatement p => SchemaObjectNameHelper.Qualify(p.ProcedureReference.Name),
-            CreateOrAlterProcedureStatement p => SchemaObjectNameHelper.Qualify(p.ProcedureReference.Name),
-            CreateFunctionStatement f => SchemaObjectNameHelper.Qualify(f.Name),
-            AlterFunctionStatement f => SchemaObjectNameHelper.Qualify(f.Name),
-            CreateOrAlterFunctionStatement f => SchemaObjectNameHelper.Qualify(f.Name),
-            _ => null,
-        };
     }
 }

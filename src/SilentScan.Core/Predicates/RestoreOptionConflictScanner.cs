@@ -33,16 +33,9 @@ public static class RestoreOptionConflictScanner
 
         public void OnEnterRestoreStatement(RestoreStatement node, ModuleWalker walker)
         {
-            var hasRecovery = false;
-            var hasNoRecovery = false;
-            var hasStandby = false;
-
-            foreach (var option in node.Options)
-            {
-                hasRecovery |= option.OptionKind == RestoreOptionKind.Recovery;
-                hasNoRecovery |= option.OptionKind == RestoreOptionKind.NoRecovery;
-                hasStandby |= option.OptionKind == RestoreOptionKind.Standby;
-            }
+            var hasRecovery = node.Options.Any(o => o.OptionKind == RestoreOptionKind.Recovery);
+            var hasNoRecovery = node.Options.Any(o => o.OptionKind == RestoreOptionKind.NoRecovery);
+            var hasStandby = node.Options.Any(o => o.OptionKind == RestoreOptionKind.Standby);
 
             if (hasRecovery && hasNoRecovery)
             {

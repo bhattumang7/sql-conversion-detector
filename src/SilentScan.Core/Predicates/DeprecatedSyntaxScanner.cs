@@ -382,13 +382,11 @@ public static class DeprecatedSyntaxScanner
 
         public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)
         {
-            foreach (var declaration in node.Declarations)
+            foreach (var declaration in node.Declarations.Where(d =>
+                d.DataType is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Text or SqlDataTypeOption.NText or SqlDataTypeOption.Image }))
             {
-                if (declaration.DataType is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Text or SqlDataTypeOption.NText or SqlDataTypeOption.Image })
-                {
-                    Add(DeprecatedSyntaxFindingKind.LegacyLobLocalVariable, declaration,
-                        $"@{declaration.VariableName.Value} is declared with the deprecated text/ntext/image large-object types, which are invalid for local variables (Msg 2739) - migrate the column to VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX).");
-                }
+                Add(DeprecatedSyntaxFindingKind.LegacyLobLocalVariable, declaration,
+                    $"@{declaration.VariableName.Value} is declared with the deprecated text/ntext/image large-object types, which are invalid for local variables (Msg 2739) - migrate the column to VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX).");
             }
         }
 

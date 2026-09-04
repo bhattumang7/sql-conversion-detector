@@ -49,28 +49,7 @@ public static class FullTextIndexDdlScanner
                     continue;
                 }
 
-                if (column.Type is { } type && !IsSupportedColumnType(type))
-                {
-                    findings.Add(new FullTextIndexDdlFinding(
-                        FullTextIndexDdlFindingKind.UnsupportedColumnType, fullTextIndex.TableQualifiedName, column.Name,
-                        type.ToString(), fullTextIndex.SourcePath, fullTextIndex.Line, fullTextIndex.Column));
-                }
-
-                if (column.IsComputed && !column.IsPersisted && column.IsComputedNonDeterministic)
-                {
-                    findings.Add(new FullTextIndexDdlFinding(
-                        FullTextIndexDdlFindingKind.NonDeterministicComputedColumn, fullTextIndex.TableQualifiedName, column.Name,
-                        "nondeterministic nonpersisted computed column", fullTextIndex.SourcePath, fullTextIndex.Line, fullTextIndex.Column));
-                }
-
-                if (ftColumn.LanguageTermRaw is { } languageTermRaw
-                    && TryParseNumericLcid(languageTermRaw, out var lcid)
-                    && !FullTextLanguageCatalog.InstalledLcids.Contains(lcid))
-                {
-                    findings.Add(new FullTextIndexDdlFinding(
-                        FullTextIndexDdlFindingKind.InvalidLanguageId, fullTextIndex.TableQualifiedName, column.Name,
-                        $"LANGUAGE {languageTermRaw}", fullTextIndex.SourcePath, fullTextIndex.Line, fullTextIndex.Column));
-                }
+                ScanColumn(fullTextIndex, ftColumn, column, findings);
             }
         }
 
@@ -82,6 +61,33 @@ public static class FullTextIndexDdlScanner
                 .ThenBy(f => f.TableQualifiedName, StringComparer.Ordinal)
                 .ThenBy(f => f.ColumnName, StringComparer.Ordinal),
         ];
+    }
+
+    private static void ScanColumn(
+        CatalogFullTextIndex fullTextIndex, CatalogFullTextIndexColumn ftColumn, CatalogColumn column, List<FullTextIndexDdlFinding> findings)
+    {
+        if (column.Type is { } type && !IsSupportedColumnType(type))
+        {
+            findings.Add(new FullTextIndexDdlFinding(
+                FullTextIndexDdlFindingKind.UnsupportedColumnType, fullTextIndex.TableQualifiedName, column.Name,
+                type.ToString(), fullTextIndex.SourcePath, fullTextIndex.Line, fullTextIndex.Column));
+        }
+
+        if (column.IsComputed && !column.IsPersisted && column.IsComputedNonDeterministic)
+        {
+            findings.Add(new FullTextIndexDdlFinding(
+                FullTextIndexDdlFindingKind.NonDeterministicComputedColumn, fullTextIndex.TableQualifiedName, column.Name,
+                "nondeterministic nonpersisted computed column", fullTextIndex.SourcePath, fullTextIndex.Line, fullTextIndex.Column));
+        }
+
+        if (ftColumn.LanguageTermRaw is { } languageTermRaw
+            && TryParseNumericLcid(languageTermRaw, out var lcid)
+            && !FullTextLanguageCatalog.InstalledLcids.Contains(lcid))
+        {
+            findings.Add(new FullTextIndexDdlFinding(
+                FullTextIndexDdlFindingKind.InvalidLanguageId, fullTextIndex.TableQualifiedName, column.Name,
+                $"LANGUAGE {languageTermRaw}", fullTextIndex.SourcePath, fullTextIndex.Line, fullTextIndex.Column));
+        }
     }
 
     private static bool IsSupportedColumnType(SqlType type) =>

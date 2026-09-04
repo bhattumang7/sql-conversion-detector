@@ -32,22 +32,22 @@ public static class XmlSchemaCollectionDisallowedTypeScanner
                 .ThenBy(f => f.Column),
         ];
 
-    private static (string? Namespace, string Local) ResolveQualifiedName(XElement context, string value)
-    {
-        var separatorIndex = value.IndexOf(':');
-        if (separatorIndex < 0)
-        {
-            return (context.GetDefaultNamespace().NamespaceName is { Length: > 0 } ns ? ns : null, value);
-        }
-
-        var prefix = value[..separatorIndex];
-        var local = value[(separatorIndex + 1)..];
-        return (context.GetNamespaceOfPrefix(prefix)?.NamespaceName, local);
-    }
-
     internal sealed class Rule(string sourcePath) : IModuleRule
     {
         public List<XmlSchemaCollectionDisallowedTypeFinding> Findings { get; } = [];
+
+        private static (string? Namespace, string Local) ResolveQualifiedName(XElement context, string value)
+        {
+            var separatorIndex = value.IndexOf(':');
+            if (separatorIndex < 0)
+            {
+                return (context.GetDefaultNamespace().NamespaceName is { Length: > 0 } ns ? ns : null, value);
+            }
+
+            var prefix = value[..separatorIndex];
+            var local = value[(separatorIndex + 1)..];
+            return (context.GetNamespaceOfPrefix(prefix)?.NamespaceName, local);
+        }
 
         public void OnEnterCreateXmlSchemaCollectionStatement(CreateXmlSchemaCollectionStatement node, ModuleWalker walker) =>
             Inspect(node.Name, node.Expression);

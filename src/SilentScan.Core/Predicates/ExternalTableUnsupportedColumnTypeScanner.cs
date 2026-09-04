@@ -49,22 +49,21 @@ public static class ExternalTableUnsupportedColumnTypeScanner
                 .ThenBy(f => f.Column),
         ];
 
-    private static bool IsUnsupported(SqlType type) =>
-        UnsupportedCategories.Contains(type.Category) || (type.IsMax && MaxLengthUnsupportedCategories.Contains(type.Category));
-
     internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         private readonly Dictionary<QuerySpecification, string> pendingCetasQueries = new(ReferenceEqualityComparer.Instance);
 
         public List<ExternalTableUnsupportedColumnTypeFinding> Findings { get; } = [];
 
+        private static bool IsUnsupported(SqlType type) =>
+            UnsupportedCategories.Contains(type.Category) || (type.IsMax && MaxLengthUnsupportedCategories.Contains(type.Category));
+
         public void OnEnterCreateExternalTableStatement(CreateExternalTableStatement node, ModuleWalker walker)
         {
             var tableName = SchemaObjectNameHelper.Qualify(node.SchemaObjectName);
 
-            foreach (var columnDefinition in node.ColumnDefinitions)
+            foreach (var column in node.ColumnDefinitions.Select(columnDefinition => columnDefinition.ColumnDefinition))
             {
-                var column = columnDefinition.ColumnDefinition;
                 if (column?.ColumnIdentifier is not { Value: { } columnName }
                     || SqlTypeReferenceResolver.Resolve(column.DataType, columnCollation: null, catalog.TypeAliases) is not { } type
                     || !IsUnsupported(type))

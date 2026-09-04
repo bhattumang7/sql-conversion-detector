@@ -44,7 +44,20 @@ public static class OnlineRebuildLegacyLobScanner
                 continue;
             }
 
-            var lobType = IsLegacyLob(alter.PreviousType) ? alter.PreviousType : IsLegacyLob(alter.NewType) ? alter.NewType : null;
+            SqlType? lobType;
+            if (IsLegacyLob(alter.PreviousType))
+            {
+                lobType = alter.PreviousType;
+            }
+            else if (IsLegacyLob(alter.NewType))
+            {
+                lobType = alter.NewType;
+            }
+            else
+            {
+                lobType = null;
+            }
+
             if (lobType is null)
             {
                 continue;

@@ -1406,22 +1406,7 @@ public sealed class LiveCatalogReader
 
             if (!rowsByIndex.TryGetValue(key, out var row))
             {
-                var indexName = await reader.IsDBNullAsync(3, cancellationToken) ? null : reader.GetString(3);
-                var typeDesc = reader.GetString(4);
-                var partitionSchemeName = await reader.IsDBNullAsync(14, cancellationToken) ? null : reader.GetString(14);
-                var partitioningColumnName = await reader.IsDBNullAsync(15, cancellationToken) ? null : reader.GetString(15);
-                row = new IndexRow(
-                    Name: indexName,
-                    TypeDesc: typeDesc,
-                    IsUnique: reader.GetBoolean(5),
-                    IsPrimaryKey: reader.GetBoolean(6),
-                    IsUniqueConstraint: reader.GetBoolean(7),
-                    HasFilter: reader.GetBoolean(8),
-                    IsDisabled: reader.GetBoolean(9),
-                    KeyColumns: [],
-                    IncludedColumns: [],
-                    PartitionSchemeName: partitionSchemeName,
-                    PartitioningColumnName: partitioningColumnName);
+                row = await ReadIndexRowAsync(reader, cancellationToken);
                 rowsByIndex[key] = row;
             }
 
@@ -1456,6 +1441,26 @@ public sealed class LiveCatalogReader
         }
 
         return indexesByView;
+    }
+
+    private static async Task<IndexRow> ReadIndexRowAsync(SqlDataReader reader, CancellationToken cancellationToken)
+    {
+        var indexName = await reader.IsDBNullAsync(3, cancellationToken) ? null : reader.GetString(3);
+        var typeDesc = reader.GetString(4);
+        var partitionSchemeName = await reader.IsDBNullAsync(14, cancellationToken) ? null : reader.GetString(14);
+        var partitioningColumnName = await reader.IsDBNullAsync(15, cancellationToken) ? null : reader.GetString(15);
+        return new IndexRow(
+            Name: indexName,
+            TypeDesc: typeDesc,
+            IsUnique: reader.GetBoolean(5),
+            IsPrimaryKey: reader.GetBoolean(6),
+            IsUniqueConstraint: reader.GetBoolean(7),
+            HasFilter: reader.GetBoolean(8),
+            IsDisabled: reader.GetBoolean(9),
+            KeyColumns: [],
+            IncludedColumns: [],
+            PartitionSchemeName: partitionSchemeName,
+            PartitioningColumnName: partitioningColumnName);
     }
 
     private static async Task<Dictionary<string, IReadOnlyList<string>>> ReadIndexedViewBaseTablesAsync(

@@ -35,15 +35,15 @@ public static class VectorFunctionArgumentScanner
                 .ThenBy(f => f.Column),
         ];
 
-    private static string DescribeArgument(string functionName, int index) => functionName.ToUpperInvariant() switch
-    {
-        "VECTOR_DISTANCE" => index == 1 ? "first vector argument" : "second vector argument",
-        _ => "vector argument",
-    };
-
     internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
         private readonly Dictionary<string, SqlType?> _variables = new(StringComparer.OrdinalIgnoreCase);
+
+        private static string DescribeArgument(string functionName, int index) => functionName.ToUpperInvariant() switch
+        {
+            "VECTOR_DISTANCE" => index == 1 ? "first vector argument" : "second vector argument",
+            _ => "vector argument",
+        };
 
         public List<VectorFunctionArgumentFinding> Findings { get; } = [];
 

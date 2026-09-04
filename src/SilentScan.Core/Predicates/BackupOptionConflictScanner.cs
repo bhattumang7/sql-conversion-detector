@@ -33,14 +33,8 @@ public static class BackupOptionConflictScanner
 
         public void OnEnterBackupDatabaseStatement(BackupDatabaseStatement node, ModuleWalker walker)
         {
-            var hasDifferential = false;
-            var hasCopyOnly = false;
-
-            foreach (var option in node.Options)
-            {
-                hasDifferential |= option.OptionKind == BackupOptionKind.Differential;
-                hasCopyOnly |= option.OptionKind == BackupOptionKind.CopyOnly;
-            }
+            var hasDifferential = node.Options.Any(o => o.OptionKind == BackupOptionKind.Differential);
+            var hasCopyOnly = node.Options.Any(o => o.OptionKind == BackupOptionKind.CopyOnly);
 
             if (hasDifferential && hasCopyOnly)
             {

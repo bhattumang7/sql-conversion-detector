@@ -20,23 +20,23 @@ public static class SchemaWithRejectedTypeScanner
         ];
     }
 
-    private static SchemaWithRejectedTypeKind? ClassifyOpenXmlColumn(SqlTypeCategory category) => category switch
-    {
-        SqlTypeCategory.HierarchyId or SqlTypeCategory.Geometry or SqlTypeCategory.Geography => SchemaWithRejectedTypeKind.OpenXmlClrType,
-        _ => null,
-    };
-
-    private static SchemaWithRejectedTypeKind? ClassifyOpenRowsetColumn(SqlTypeCategory category) => category switch
-    {
-        SqlTypeCategory.SqlVariant or SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image => SchemaWithRejectedTypeKind.OpenRowsetLegacyType,
-        SqlTypeCategory.HierarchyId or SqlTypeCategory.Geometry or SqlTypeCategory.Geography => SchemaWithRejectedTypeKind.OpenRowsetClrType,
-        SqlTypeCategory.Xml => SchemaWithRejectedTypeKind.OpenRowsetXml,
-        _ => null,
-    };
-
     private sealed class Visitor(string sourcePath, IReadOnlyDictionary<string, SqlType>? typeAliases) : TSqlFragmentVisitor
     {
         public List<SchemaWithRejectedTypeFinding> Findings { get; } = [];
+
+        private static SchemaWithRejectedTypeKind? ClassifyOpenXmlColumn(SqlTypeCategory category) => category switch
+        {
+            SqlTypeCategory.HierarchyId or SqlTypeCategory.Geometry or SqlTypeCategory.Geography => SchemaWithRejectedTypeKind.OpenXmlClrType,
+            _ => null,
+        };
+
+        private static SchemaWithRejectedTypeKind? ClassifyOpenRowsetColumn(SqlTypeCategory category) => category switch
+        {
+            SqlTypeCategory.SqlVariant or SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image => SchemaWithRejectedTypeKind.OpenRowsetLegacyType,
+            SqlTypeCategory.HierarchyId or SqlTypeCategory.Geometry or SqlTypeCategory.Geography => SchemaWithRejectedTypeKind.OpenRowsetClrType,
+            SqlTypeCategory.Xml => SchemaWithRejectedTypeKind.OpenRowsetXml,
+            _ => null,
+        };
 
         public override void ExplicitVisit(OpenXmlTableReference node)
         {

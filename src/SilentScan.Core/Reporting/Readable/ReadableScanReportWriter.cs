@@ -32,6 +32,20 @@ public static class ReadableScanReportWriter
 
     private const string IndexHeader = "Index";
 
+    private const string FunctionHeader = "Function";
+
+    private const string SourceHeader = "Source";
+
+    private const string ObjectHeader = "Object";
+
+    private const string TargetHeader = "Target";
+
+    private const string CalleeHeader = "Callee";
+
+    private const string CallerTypeHeader = "Caller type";
+
+    private const string CallerSideExpressionHeader = "Caller-side expression";
+
     private const string UnknownDisplay = "unknown";
 
     private const string DanglingObjectReferenceRuleId = "DanglingObjectReferenceScanner";
@@ -688,7 +702,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{ScalarUdfTitle(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ScalarUdfRuleId(group.Key)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Function", "Context", "Inlineable", "Depth", "Origin", DetailHeader],
+                [WhereHeader, FunctionHeader, "Context", "Inlineable", "Depth", "Origin", DetailHeader],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
@@ -805,7 +819,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ProcCallArgumentMismatchRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Callee", ParameterHeader, "Direction", "Caller-side expression", "Caller type", "Parameter type", "Risk"],
+            [WhereHeader, CalleeHeader, ParameterHeader, "Direction", CallerSideExpressionHeader, CallerTypeHeader, "Parameter type", "Risk"],
             [.. report.Find<ProcCallArgumentMismatchFinding>(nameof(ProcCallArgumentMismatchScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -832,7 +846,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TvfCallArgumentMismatchRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Callee", ParameterHeader, "Caller-side expression", "Caller type", "Parameter type", "Risk"],
+            [WhereHeader, CalleeHeader, ParameterHeader, CallerSideExpressionHeader, CallerTypeHeader, "Parameter type", "Risk"],
             [.. report.Find<TvfCallArgumentMismatchFinding>(nameof(TvfCallArgumentMismatchScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -858,7 +872,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ProcCallTableValuedArgumentMismatchRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Callee", ParameterHeader, "Column", "Caller-side expression", "Caller type", "Column type", "Risk"],
+            [WhereHeader, CalleeHeader, ParameterHeader, ColumnHeader, CallerSideExpressionHeader, CallerTypeHeader, "Column type", "Risk"],
             [.. report.Find<ProcCallTableValuedArgumentMismatchFinding>(nameof(ProcCallTableValuedArgumentMismatchScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -885,7 +899,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SpExecuteSqlParameterMismatchRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, ParameterHeader, "Direction", "Caller-side expression", "Caller type", "Declared parameter type", "Risk"],
+            [WhereHeader, ParameterHeader, "Direction", CallerSideExpressionHeader, CallerTypeHeader, "Declared parameter type", "Risk"],
             [.. report.Find<SpExecuteSqlParameterMismatchFinding>(nameof(SpExecuteSqlParameterMismatchScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1115,7 +1129,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NativelyCompiledUnsupportedBuiltinRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Module", "Function"],
+            [WhereHeader, ModuleHeader, FunctionHeader],
             [.. report.Find<NativelyCompiledUnsupportedBuiltinFinding>(nameof(NativelyCompiledUnsupportedBuiltinScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1137,7 +1151,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NativelyCompiledClrTypeRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Module", "Kind", "Name", "Type"],
+            [WhereHeader, ModuleHeader, "Kind", "Name", "Type"],
             [.. report.Find<NativelyCompiledClrTypeFinding>(nameof(NativelyCompiledClrTypeScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1161,7 +1175,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NativelyCompiledErrorOutsideCatchRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Module", "Function"],
+            [WhereHeader, ModuleHeader, FunctionHeader],
             [.. report.Find<NativelyCompiledErrorOutsideCatchFinding>(nameof(NativelyCompiledErrorOutsideCatchScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1183,7 +1197,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NativelyCompiledInterpretedCalleeRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Module", "Kind", "Callee"],
+            [WhereHeader, ModuleHeader, "Kind", CalleeHeader],
             [.. report.Find<NativelyCompiledInterpretedCalleeFinding>(nameof(NativelyCompiledInterpretedCalleeScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1206,7 +1220,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MemoryOptimizedLedgerConflictRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table"],
+            [WhereHeader, TableHeader],
             [.. report.Find<MemoryOptimizedLedgerConflictFinding>(nameof(MemoryOptimizedLedgerConflictScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1231,7 +1245,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{MemoryOptimizedUnsupportedIndexOptionTitle(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MemoryOptimizedUnsupportedIndexOptionRuleId(group.Key)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Table", "Index"],
+                [WhereHeader, TableHeader, "Index"],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1297,7 +1311,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MemoryOptimizedSchemaOnlyDurabilityRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table"],
+            [WhereHeader, TableHeader],
             [.. report.Find<MemoryOptimizedSchemaOnlyDurabilityFinding>(nameof(MemoryOptimizedSchemaOnlyDurabilityScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1357,7 +1371,7 @@ public static class ReadableScanReportWriter
                 "Oracle-confirmed (Msg 7696): the numeric LCID isn't one of the language resources SQL Server ships (sys.fulltext_languages) - CREATE FULLTEXT INDEX never deploys.");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind.InvalidLanguageId)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, ColumnHeader, "Detail"],
+                [WhereHeader, ColumnHeader, DetailHeader],
                 [.. invalidLanguage.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1374,7 +1388,7 @@ public static class ReadableScanReportWriter
                 "Oracle-confirmed (Msg 9928): a nonpersisted computed column indexed by a full-text index must be deterministic - never fires on a PERSISTED computed column, since SQL Server already forces those to be deterministic at ALTER/CREATE TABLE time.");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind.NonDeterministicComputedColumn)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, ColumnHeader, "Detail"],
+                [WhereHeader, ColumnHeader, DetailHeader],
                 [.. nonDeterministic.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1391,7 +1405,7 @@ public static class ReadableScanReportWriter
                 "A single CREATE FULLTEXT INDEX statement's column list exceeds the documented 1,024-column full-text index limit.");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind.TooManyIndexedColumns)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Table", "Detail"],
+                [WhereHeader, TableHeader, DetailHeader],
                 [.. tooManyColumns.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1413,7 +1427,7 @@ public static class ReadableScanReportWriter
                 "Oracle-confirmed (Msg 41202): SEMANTICKEYPHRASETABLE, SEMANTICSIMILARITYTABLE, and SEMANTICSIMILARITYDETAILSTABLE all require the source table to have a full-text index column enabled with STATISTICAL_SEMANTICS - none does here, so the call fails.");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SemanticSearchRuleId(SemanticSearchFindingKind.TableNotSemanticFullTextIndexed)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Table", "Detail"],
+                [WhereHeader, TableHeader, DetailHeader],
                 [.. tableNotIndexed.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1430,7 +1444,7 @@ public static class ReadableScanReportWriter
                 "Oracle-confirmed (Msg 41203): the column named in the call must itself be full-text indexed with STATISTICAL_SEMANTICS, even if another column on the same table qualifies.");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SemanticSearchRuleId(SemanticSearchFindingKind.ColumnNotSemanticFullTextIndexed)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, ColumnHeader, "Detail"],
+                [WhereHeader, ColumnHeader, DetailHeader],
                 [.. columnNotIndexed.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2041,7 +2055,7 @@ public static class ReadableScanReportWriter
             "An Always Encrypted column is assigned a plaintext literal, or from a column whose encryption state differs (encrypted vs. plaintext, or a different encryption type) - the statement does not compile (Msg 206), regardless of which side is the source.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Target column", "Source", DetailHeader],
+            [WhereHeader, "Target column", SourceHeader, DetailHeader],
             [.. report.Find<AlwaysEncryptedAssignmentMismatchFinding>(nameof(AlwaysEncryptedAssignmentMismatchScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2066,7 +2080,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.RestrictedImplicitAssignmentRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Target", "Source", DetailHeader],
+            [WhereHeader, TargetHeader, SourceHeader, DetailHeader],
             [.. report.Find<RestrictedImplicitAssignmentFinding>(nameof(RestrictedImplicitAssignmentScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2132,7 +2146,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.AlwaysEncryptedKeyColumnRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Object", "Kind"],
+            [WhereHeader, ColumnHeader, ObjectHeader, "Kind"],
             [.. report.Find<AlwaysEncryptedKeyColumnFinding>(nameof(AlwaysEncryptedKeyColumnScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2240,7 +2254,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{DropProtectedObjectTitle(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.DropProtectedObjectRuleId(group.Key)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Object"],
+                [WhereHeader, ObjectHeader],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2273,7 +2287,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{OnlineRebuildLegacyLobTitle(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.OnlineRebuildLegacyLobRuleId(group.Key)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Table", "Column", "Type"],
+                [WhereHeader, TableHeader, ColumnHeader, "Type"],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2306,7 +2320,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.UnpivotExactTypeMismatchRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Reference column", "Reference type", "Mismatched column", "Mismatched type"],
+            [WhereHeader, TableHeader, "Reference column", "Reference type", "Mismatched column", "Mismatched type"],
             [.. report.Find<UnpivotExactTypeMismatchFinding>(nameof(UnpivotExactTypeMismatchScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2331,7 +2345,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SchemaboundAliasTypeRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Function", "Kind", "Member", "Alias type"],
+            [WhereHeader, FunctionHeader, "Kind", "Member", "Alias type"],
             [.. report.Find<SchemaboundAliasTypeFinding>(nameof(SchemaboundAliasTypeScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2355,7 +2369,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SparseColumnDisallowedTypeRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Column", "Type"],
+            [WhereHeader, TableHeader, ColumnHeader, "Type"],
             [.. report.Find<SparseColumnDisallowedTypeFinding>(nameof(SparseColumnDisallowedTypeScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2378,7 +2392,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.LegacyLobUtf8CollationRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Column", "Type", "Collation"],
+            [WhereHeader, TableHeader, ColumnHeader, "Type", "Collation"],
             [.. report.Find<LegacyLobUtf8CollationFinding>(nameof(LegacyLobUtf8CollationScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2430,7 +2444,7 @@ public static class ReadableScanReportWriter
             "A VECTOR_DISTANCE/VECTOR_NORM/VECTORPROPERTY call's vector-position argument is not a VECTOR(n)-typed value, or VECTOR_DISTANCE's two vector arguments declare different dimensions - the statement never compiles or never succeeds at execution, regardless of the actual data.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Function", "Argument", "Type", DetailHeader],
+            [WhereHeader, FunctionHeader, "Argument", "Type", DetailHeader],
             [.. findings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2501,7 +2515,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ChangeTrackingEncryptedPrimaryKeyRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Encrypted primary key column"],
+            [WhereHeader, TableHeader, "Encrypted primary key column"],
             [.. findings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2548,7 +2562,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.XmlSchemaCollectionMismatchRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Target", "Source"],
+            [WhereHeader, TargetHeader, SourceHeader],
             [.. findings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2760,7 +2774,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.NonUniqueUpdateSourceRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Target", "Source", "Join columns", "SET columns"],
+            [WhereHeader, TargetHeader, SourceHeader, "Join columns", "SET columns"],
             [.. report.Find<NonUniqueUpdateSourceFinding>(nameof(NonUniqueUpdateSourceScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -3136,7 +3150,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.RecursiveCteAnchorTypeMismatchRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "CTE", "Column", "Anchor type", "Recursive member type"],
+            [WhereHeader, "CTE", ColumnHeader, "Anchor type", "Recursive member type"],
             [.. report.Find<RecursiveCteAnchorTypeMismatchFinding>(nameof(RecursiveCteAnchorTypeMismatchScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -3317,7 +3331,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SelfReferencingDmlRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Statement", "Target", DetailHeader],
+            [WhereHeader, "Statement", TargetHeader, DetailHeader],
             [.. report.Find<SelfReferencingDmlFinding>(nameof(SelfReferencingDmlScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -3455,7 +3469,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.WindowFunctionArgumentRuleId(group.Key)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Function", "Argument"],
+                [WhereHeader, FunctionHeader, "Argument"],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -3482,7 +3496,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.StringSplitArgumentRuleId(group.Key)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Argument", "Detail"],
+                [WhereHeader, "Argument", DetailHeader],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -3509,7 +3523,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{HumanizeKindName(group.Key.ToString())} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.BoundedStringBuiltinTruncationRuleId(group.Key)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Function", "Computed length", "Cap"],
+                [WhereHeader, FunctionHeader, "Computed length", "Cap"],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -3595,7 +3609,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ViewCheckOptionContradictionRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "View", "Column"],
+            [WhereHeader, "View", ColumnHeader],
             [.. report.Find<ViewCheckOptionContradictionFinding>(nameof(ViewCheckOptionContradictionScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -3645,7 +3659,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.GraphPseudoColumnAssignmentRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Column", "Statement"],
+            [WhereHeader, ColumnHeader, "Statement"],
             [.. report.Find<GraphPseudoColumnAssignmentFinding>(nameof(GraphPseudoColumnAssignmentScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -3694,7 +3708,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ViewOrderingRuleId(group.Key)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Object"],
+                [WhereHeader, ObjectHeader],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -3757,7 +3771,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MissingStatisticsRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, TableHeader, "Column"],
+            [WhereHeader, TableHeader, ColumnHeader],
             [.. report.Find<MissingStatisticsFinding>(nameof(MissingStatisticsScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -4048,7 +4062,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.OuterJoinPredicateCollapseRuleId));
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Join kind", "Table", "Column"],
+            [WhereHeader, "Join kind", TableHeader, ColumnHeader],
             [.. report.Find<OuterJoinPredicateCollapseFinding>(nameof(OuterJoinPredicateCollapseScanner)).Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -4245,7 +4259,7 @@ public static class ReadableScanReportWriter
         }
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Object"],
+            [WhereHeader, "Kind", ObjectHeader],
             [.. unanalyzed.Select(u => new List<string>
             {
                 Where(u.SourcePath, u.StartLine, null, pathBase),

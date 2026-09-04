@@ -21,25 +21,17 @@ public static class DropProtectedObjectScanner
     {
         var findings = new List<DropProtectedObjectFinding>();
 
-        foreach (var dropSchema in catalog.DropSchemaEvents)
-        {
-            if (catalog.SchemaOwnsAnyKnownObject(dropSchema.SchemaName))
-            {
-                findings.Add(new DropProtectedObjectFinding(
-                    DropProtectedObjectKind.SchemaNotEmpty, dropSchema.SchemaName,
-                    dropSchema.SourcePath, dropSchema.SourceLine, dropSchema.SourceColumn));
-            }
-        }
+        findings.AddRange(catalog.DropSchemaEvents
+            .Where(dropSchema => catalog.SchemaOwnsAnyKnownObject(dropSchema.SchemaName))
+            .Select(dropSchema => new DropProtectedObjectFinding(
+                DropProtectedObjectKind.SchemaNotEmpty, dropSchema.SchemaName,
+                dropSchema.SourcePath, dropSchema.SourceLine, dropSchema.SourceColumn)));
 
-        foreach (var dropRole in catalog.DropRoleEvents)
-        {
-            if (FixedDatabaseRoleNames.Contains(dropRole.RoleName))
-            {
-                findings.Add(new DropProtectedObjectFinding(
-                    DropProtectedObjectKind.FixedDatabaseRole, dropRole.RoleName,
-                    dropRole.SourcePath, dropRole.SourceLine, dropRole.SourceColumn));
-            }
-        }
+        findings.AddRange(catalog.DropRoleEvents
+            .Where(dropRole => FixedDatabaseRoleNames.Contains(dropRole.RoleName))
+            .Select(dropRole => new DropProtectedObjectFinding(
+                DropProtectedObjectKind.FixedDatabaseRole, dropRole.RoleName,
+                dropRole.SourcePath, dropRole.SourceLine, dropRole.SourceColumn)));
 
         return
         [

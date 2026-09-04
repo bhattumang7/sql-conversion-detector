@@ -853,17 +853,25 @@ public static class CatalogBuilder
                     continue;
                 }
 
-                if (clause is DropIndexClause { } modernClause && IsOnline(modernClause.Options))
-                {
-                    var droppedIndex = existing.Indexes.FirstOrDefault(i => string.Equals(i.Name, indexName, StringComparison.OrdinalIgnoreCase));
-                    if (droppedIndex is { IsClustered: true, Kind: CatalogIndexKind.Index })
-                    {
-                        catalog.AddDropIndexOnlineEvent(new CatalogDropIndexOnlineEvent(
-                            qualifiedName, indexName, sourcePath, dropIndex.StartLine, dropIndex.StartColumn));
-                    }
-                }
+                RecordDropIndexOnlineEvent(clause, existing, qualifiedName, indexName, dropIndex);
 
                 catalog.AddOrReplace(existing with { Indexes = remainingIndexes }, writeScope);
+            }
+        }
+
+        private void RecordDropIndexOnlineEvent(
+            DropIndexClauseBase clause, CatalogTable existing, string qualifiedName, string indexName, DropIndexStatement dropIndex)
+        {
+            if (clause is not DropIndexClause modernClause || !IsOnline(modernClause.Options))
+            {
+                return;
+            }
+
+            var droppedIndex = existing.Indexes.FirstOrDefault(i => string.Equals(i.Name, indexName, StringComparison.OrdinalIgnoreCase));
+            if (droppedIndex is { IsClustered: true, Kind: CatalogIndexKind.Index })
+            {
+                catalog.AddDropIndexOnlineEvent(new CatalogDropIndexOnlineEvent(
+                    qualifiedName, indexName, sourcePath, dropIndex.StartLine, dropIndex.StartColumn));
             }
         }
 

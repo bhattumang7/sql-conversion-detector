@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Common;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.TypeInference;
@@ -32,35 +33,24 @@ public static class RevertCookieTypeMismatchScanner
 
     internal sealed class Rule(string sourcePath, DatabaseCatalog catalog) : IModuleRule
     {
-        private readonly Dictionary<string, SqlType> variableTypes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly VariableTypeTracker _variableTypes = new(catalog);
 
         public List<RevertCookieTypeMismatchFinding> Findings { get; } = [];
 
-        public void OnEnterTSqlBatch(TSqlBatch node, ModuleWalker walker) => variableTypes.Clear();
+        public void OnEnterTSqlBatch(TSqlBatch node, ModuleWalker walker) => _variableTypes.Clear();
 
-        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker)
-        {
-            variableTypes.Clear();
-            foreach (var parameter in node.Parameters)
-            {
-                Track(parameter.VariableName.Value, parameter.DataType);
-            }
-        }
+        public void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node, ModuleWalker walker) =>
+            _variableTypes.TrackParameters(node);
 
-        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) => variableTypes.Clear();
+        public void OnEnterTriggerBody(TriggerStatementBody node, ModuleWalker walker) => _variableTypes.Clear();
 
-        public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)
-        {
-            foreach (var declaration in node.Declarations)
-            {
-                Track(declaration.VariableName.Value, declaration.DataType);
-            }
-        }
+        public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker) =>
+            _variableTypes.TrackDeclarations(node);
 
         public void OnEnterRevertStatement(RevertStatement node, ModuleWalker walker)
         {
             if (node.Cookie is not VariableReference cookie
-                || !variableTypes.TryGetValue(cookie.Name, out var cookieType)
+                || !_variableTypes.TryGetValue(cookie.Name, out var cookieType)
                 || IsValidCookieType(cookieType))
             {
                 return;
@@ -72,15 +62,6 @@ public static class RevertCookieTypeMismatchScanner
                 sourcePath,
                 node.StartLine,
                 node.StartColumn));
-        }
-
-        private void Track(string variableName, DataTypeReference dataType)
-        {
-            var resolved = SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null, catalog.TypeAliases);
-            if (resolved is not null)
-            {
-                variableTypes[variableName] = resolved;
-            }
         }
 
         private static bool IsValidCookieType(SqlType type) =>

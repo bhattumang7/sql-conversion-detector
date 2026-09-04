@@ -63,7 +63,7 @@ public static class AlwaysEncryptedAssignmentMismatchScanner
             {
                 if (actionClause.Action is InsertMergeAction insert)
                 {
-                    InspectInsertColumns(table, insert.Columns, insert.Source as ValuesInsertSource);
+                    InspectInsertColumns(table, insert.Columns, insert.Source);
                 }
             }
         }
@@ -84,9 +84,9 @@ public static class AlwaysEncryptedAssignmentMismatchScanner
                     continue;
                 }
 
-                foreach (var row in values.RowValues)
+                foreach (var columnValues in values.RowValues.Select(row => row.ColumnValues))
                 {
-                    if (i >= row.ColumnValues.Count || !IsNonNullLiteral(row.ColumnValues[i]))
+                    if (i >= columnValues.Count || !IsNonNullLiteral(columnValues[i]))
                     {
                         continue;
                     }
@@ -100,8 +100,8 @@ public static class AlwaysEncryptedAssignmentMismatchScanner
                         SourceColumnName: null,
                         SourceEncryptionTypeDisplay: null,
                         sourcePath,
-                        row.ColumnValues[i].StartLine,
-                        row.ColumnValues[i].StartColumn));
+                        columnValues[i].StartLine,
+                        columnValues[i].StartColumn));
                 }
             }
         }

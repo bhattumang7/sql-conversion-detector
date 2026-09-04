@@ -65,7 +65,7 @@ public static class ViewOrderingScanner
 
             if (ReferenceEquals(target, outer) && target is QuerySpecification { TopRowFilter: { } top })
             {
-                var isHundredPercent = top.Percent && IsHundredPercentLiteral(top.Expression);
+                var isHundredPercent = top.Percent && TopPercentLiteralHelper.IsHundredPercentLiteral(top.Expression);
                 if (isHundredPercent)
                 {
                     Findings.Add(new ViewOrderingFinding(
@@ -104,24 +104,5 @@ public static class ViewOrderingScanner
                 ? TrailingOrderedQueryExpression(binary.SecondQueryExpression)
                 : null;
         }
-
-        private static bool IsHundredPercentLiteral(ScalarExpression expression) =>
-            Unwrap(expression) switch
-            {
-                IntegerLiteral { Value: "100" } => true,
-                NumericLiteral { Value: var value } => IsExactlyOneHundred(value),
-                _ => false,
-            };
-
-        private static bool IsExactlyOneHundred(string value)
-        {
-            var dot = value.IndexOf('.', StringComparison.Ordinal);
-            var integerPart = dot < 0 ? value : value[..dot];
-            var fractionalPart = dot < 0 ? string.Empty : value[(dot + 1)..];
-            return integerPart == "100" && fractionalPart.All(c => c == '0');
-        }
-
-        private static ScalarExpression Unwrap(ScalarExpression expression) =>
-            expression is ParenthesisExpression parenthesis ? Unwrap(parenthesis.Expression) : expression;
     }
 }

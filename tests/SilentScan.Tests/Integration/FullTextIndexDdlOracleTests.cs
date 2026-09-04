@@ -51,7 +51,10 @@ public sealed class FullTextIndexDdlOracleTests : OracleTestFixture
     [Fact]
     public async Task ValidSupportedColumn_Deploys()
     {
-        await ExecuteAsync("CREATE FULLTEXT INDEX ON dbo.TypeCheck(Body) KEY INDEX PK_TypeCheck;");
+        var exception = await Record.ExceptionAsync(
+            () => ExecuteAsync("CREATE FULLTEXT INDEX ON dbo.TypeCheck(Body) KEY INDEX PK_TypeCheck;"));
+
+        Assert.Null(exception);
     }
 
     [Fact]

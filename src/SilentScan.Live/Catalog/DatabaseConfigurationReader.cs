@@ -220,7 +220,7 @@ public sealed class DatabaseConfigurationReader
                 databaseName,
                 AffectedObjectName: reader.GetString(0),
                 PlanGuideScopeType: reader.GetString(1),
-                PlanGuideHints: reader.IsDBNull(2) ? null : reader.GetString(2)));
+                PlanGuideHints: await reader.IsDBNullAsync(2, cancellationToken) ? null : reader.GetString(2)));
         }
     }
 

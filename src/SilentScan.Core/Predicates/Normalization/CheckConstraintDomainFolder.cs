@@ -5,8 +5,6 @@ namespace SilentScan.Core.Predicates.Normalization;
 
 internal static class CheckConstraintDomainFolder
 {
-    private enum CmpOp { Eq, Ne, Lt, Le, Gt, Ge }
-
     public static NumericValueRangeSet? TryBuildRangeSet(BooleanExpression node, string columnName, StringComparer comparer) => node switch
     {
         BooleanParenthesisExpression paren => TryBuildRangeSet(paren.Expression, columnName, comparer),
@@ -59,7 +57,7 @@ internal static class CheckConstraintDomainFolder
 
     public static NumericValueRangeSet? TryRangeSet(BooleanComparisonType comparisonType, ScalarExpression literalExpression, bool literalOnRight)
     {
-        var op = ToCmpOp(comparisonType);
+        var op = CmpOpHelper.ToCmpOp(comparisonType);
         if (op is null)
         {
             return null;
@@ -71,7 +69,7 @@ internal static class CheckConstraintDomainFolder
             return null;
         }
 
-        var effectiveOp = literalOnRight ? op.Value : Flip(op.Value);
+        var effectiveOp = literalOnRight ? op.Value : CmpOpHelper.Flip(op.Value);
         return ToRangeSet(effectiveOp, literal.Value);
     }
 
@@ -109,26 +107,6 @@ internal static class CheckConstraintDomainFolder
 
     private static decimal? ParseDecimal(string value) =>
         decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : null;
-
-    private static CmpOp? ToCmpOp(BooleanComparisonType type) => type switch
-    {
-        BooleanComparisonType.Equals => CmpOp.Eq,
-        BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation => CmpOp.Ne,
-        BooleanComparisonType.LessThan => CmpOp.Lt,
-        BooleanComparisonType.LessThanOrEqualTo or BooleanComparisonType.NotGreaterThan => CmpOp.Le,
-        BooleanComparisonType.GreaterThan => CmpOp.Gt,
-        BooleanComparisonType.GreaterThanOrEqualTo or BooleanComparisonType.NotLessThan => CmpOp.Ge,
-        _ => null,
-    };
-
-    private static CmpOp Flip(CmpOp op) => op switch
-    {
-        CmpOp.Lt => CmpOp.Gt,
-        CmpOp.Gt => CmpOp.Lt,
-        CmpOp.Le => CmpOp.Ge,
-        CmpOp.Ge => CmpOp.Le,
-        _ => op,
-    };
 
     private static NumericValueRangeSet ToRangeSet(CmpOp op, decimal value) => op switch
     {

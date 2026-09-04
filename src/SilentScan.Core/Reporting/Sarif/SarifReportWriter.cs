@@ -18,6 +18,7 @@ public static class SarifReportWriter
     private const string LevelError = "error";
     private const string LevelWarning = "warning";
     private const string LevelNote = "note";
+    private const string TopLevelBatchCallerLabel = "a top-level batch";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -363,7 +364,7 @@ public static class SarifReportWriter
 
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ProcCallArgumentMismatchRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
-        var callerLabel = finding.CallerScopeQualifiedName ?? "a top-level batch";
+        var callerLabel = finding.CallerScopeQualifiedName ?? TopLevelBatchCallerLabel;
         var message = finding.IsOutputWriteback
             ? $"EXEC '{finding.CalleeQualifiedName}': OUTPUT parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) writes its final value back into '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) in {callerLabel} - {DescribeWriteLossKind(finding.Kind)}."
             : $"EXEC '{finding.CalleeQualifiedName}': parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) receives '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) from {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";
@@ -375,7 +376,7 @@ public static class SarifReportWriter
     {
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TvfCallArgumentMismatchRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
-        var callerLabel = finding.CallerScopeQualifiedName ?? "a top-level batch";
+        var callerLabel = finding.CallerScopeQualifiedName ?? TopLevelBatchCallerLabel;
         var message = $"'{finding.CalleeQualifiedName}': parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) receives '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) from {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
@@ -386,7 +387,7 @@ public static class SarifReportWriter
 
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ProcCallTableValuedArgumentMismatchRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
-        var callerLabel = finding.CallerScopeQualifiedName ?? "a top-level batch";
+        var callerLabel = finding.CallerScopeQualifiedName ?? TopLevelBatchCallerLabel;
         var message = $"EXEC '{finding.CalleeQualifiedName}': table-valued parameter '{finding.FormalParameterName}' ({finding.TableTypeQualifiedName}) column '{finding.ColumnName}' ({finding.ColumnTypeDisplay}) was populated with '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) in {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
@@ -397,7 +398,7 @@ public static class SarifReportWriter
 
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SpExecuteSqlParameterMismatchRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
-        var callerLabel = finding.CallerScopeQualifiedName ?? "a top-level batch";
+        var callerLabel = finding.CallerScopeQualifiedName ?? TopLevelBatchCallerLabel;
         var message = finding.IsOutputWriteback
             ? $"sp_executesql: declared OUTPUT parameter '{finding.ParameterName}' ({finding.DeclaredParameterTypeDisplay}) writes its final value back into '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) in {callerLabel} - {DescribeWriteLossKind(finding.Kind)}."
             : $"sp_executesql: declared parameter '{finding.ParameterName}' ({finding.DeclaredParameterTypeDisplay}) receives '{finding.CallerExpressionDisplay}' ({finding.CallerTypeDisplay}) from {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";

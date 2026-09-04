@@ -28,8 +28,6 @@ public static class PredicateSurvivalAnalyzer
 
     private readonly record struct ColumnKey(string Qualifier, string Name);
 
-    private enum CmpOp { Eq, Ne, Lt, Le, Gt, Ge }
-
     private static (bool NeverTrue, bool AlwaysTrue, bool AlwaysFalse) Classify(
         BooleanExpression node, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
     {
@@ -231,7 +229,7 @@ public static class PredicateSurvivalAnalyzer
 
     private static (bool, bool, bool) ClassifyConstantComparison(BooleanComparisonExpression cmp)
     {
-        var op = ToCmpOp(cmp.ComparisonType);
+        var op = CmpOpHelper.ToCmpOp(cmp.ComparisonType);
         if (op is null)
         {
             return (false, false, false);
@@ -282,27 +280,6 @@ public static class PredicateSurvivalAnalyzer
         _ => null,
     };
 
-    private static CmpOp? ToCmpOp(BooleanComparisonType type) => type switch
-    {
-        BooleanComparisonType.Equals => CmpOp.Eq,
-        BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation => CmpOp.Ne,
-        BooleanComparisonType.LessThan => CmpOp.Lt,
-        BooleanComparisonType.LessThanOrEqualTo or BooleanComparisonType.NotGreaterThan => CmpOp.Le,
-        BooleanComparisonType.GreaterThan => CmpOp.Gt,
-        BooleanComparisonType.GreaterThanOrEqualTo or BooleanComparisonType.NotLessThan => CmpOp.Ge,
-
-        _ => null,
-    };
-
-    private static CmpOp Flip(CmpOp op) => op switch
-    {
-        CmpOp.Lt => CmpOp.Gt,
-        CmpOp.Gt => CmpOp.Lt,
-        CmpOp.Le => CmpOp.Ge,
-        CmpOp.Ge => CmpOp.Le,
-        _ => op,
-    };
-
     private static ColumnKey? TryGetColumnKey(ScalarExpression expr) =>
         expr is ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: > 0 } ids }
             ? new ColumnKey(
@@ -333,7 +310,7 @@ public static class PredicateSurvivalAnalyzer
 
     private static LiteralConstraint? TryGetLiteralConstraint(BooleanComparisonExpression cmp)
     {
-        var op = ToCmpOp(cmp.ComparisonType);
+        var op = CmpOpHelper.ToCmpOp(cmp.ComparisonType);
         if (op is null)
         {
             return null;
@@ -348,7 +325,7 @@ public static class PredicateSurvivalAnalyzer
         var leftLiteral = TryGetLiteralValue(cmp.FirstExpression);
         if (TryGetColumnKey(cmp.SecondExpression) is { } column2 && HasLiteralValue(leftLiteral))
         {
-            return new LiteralConstraint(column2, Flip(op.Value), leftLiteral.Numeric, leftLiteral.Str);
+            return new LiteralConstraint(column2, CmpOpHelper.Flip(op.Value), leftLiteral.Numeric, leftLiteral.Str);
         }
 
         return null;
