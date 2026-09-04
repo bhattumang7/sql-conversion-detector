@@ -1703,3 +1703,154 @@ WITH NATIVE_COMPILATION` module.
   `ExternalTableColumnDefinition` carries no per-column virtual/partition
   marker — out of scope under the decidable-from-SQL-Server-catalog rule,
   not a gap in this tool. Shipped as `ExternalTableUnsupportedColumnTypeRuleId`.
+
+* **Non-numeric JSON element (or a mismatched element count) inside a string
+  literal converted to native `VECTOR(n)` — shipped, broader than the
+  original "boolean element" framing.** Oracle-confirmed (SQL Server 2025):
+  a well-formed JSON array containing a boolean/string/null/object element
+  always fails at execution (Msg 13670: "Input JSON is not a valid Vector"),
+  identically whether reached via `CAST`/`CONVERT`, a `DECLARE` initializer,
+  or a `SET` assignment to a `VECTOR`-typed variable — the original item
+  only asked about booleans, but string/null/object are the same class of
+  bug, so all four are covered. A numeric array whose element count doesn't
+  match the declared dimension fails the same way (Msg 42204). A malformed
+  literal, a non-array top-level value, or a nested-array element are left
+  unflagged — the engine's own error text diverges for those (e.g. a bare
+  `'true'` reports "Boolean not supported" but a bare `'123'` reports
+  "Malformed JSON"), so guessing a specific message for them would be
+  overclaiming. Shipped as `VectorLiteralConversionRuleId` (two kinds).
+
+* **`CONTAINS`/`FREETEXT` inside an aggregate expression — shipped, real
+  restriction is unconditional, not GROUP BY-scoped.** Oracle-confirmed a
+  full-text predicate nested inside a non-windowed aggregate's own
+  expression (typically via `CASE WHEN CONTAINS(...) THEN 1 ELSE 0 END`)
+  never compiles (Msg 30082), with no `GROUP BY` needed to trigger it — the
+  original item's "aggregate/GROUP BY scope" framing conflated two things;
+  the actual restriction is purely about a full-text predicate nested
+  inside `SUM`/`COUNT`/`AVG`/`MIN`/`MAX`/`STRING_AGG`/etc.'s own expression
+  tree. Oracle-confirmed a full-text predicate inside a *windowed* aggregate
+  (one with an `OVER` clause) is unaffected and compiles fine — deliberately
+  excluded. Shipped as `FullTextPredicateInAggregateRuleId`.
+
+* **`CHANGE_TRACKING` restrictions — Always Encrypted primary key leg
+  shipped; legacy-LOB leg debunked, not shipped.** Oracle-confirmed (Docker,
+  SQL Server 2022): `ALTER TABLE ... ENABLE CHANGE_TRACKING` against a table
+  whose primary key includes an Always Encrypted column always fails (Msg
+  22118), regardless of encryption type or enclave support — a catalog-only
+  structural fact (primary key columns × Always Encrypted status are both
+  DDL-time facts). Shipped as `ChangeTrackingEncryptedPrimaryKeyRuleId`. The
+  "change tracking already enabled on a table carrying a legacy LOB column"
+  half does **not** reproduce: `ALTER TABLE ... ENABLE CHANGE_TRACKING`
+  (with or without `TRACK_COLUMNS_UPDATED = ON`) against a table with a
+  `TEXT`/`NTEXT`/`IMAGE` column deploys cleanly, and DML against that column
+  is tracked normally — the "real engine-emitted warning" the original item
+  cited (`sys.messages` 7657/7661/7673) is scoped to *full-text* change
+  tracking, an unrelated SQL Server feature that happens to share the
+  "change tracking" name with the table-level `CHANGE_TRACKING` feature this
+  item actually meant. Do not re-propose the LOB leg under this name.
+
+* **Joined table catalog-provably contributing nothing — won't do, design
+  question not a quick win.** Confirmed by inspection: the conservative
+  multiplicity/null-extension proof (no projected columns/predicates/
+  grouping/ordering referencing the join, plus FK/uniqueness/nullability
+  proving the join can't change row count or introduce NULL-extension) is
+  substantial engineering — a general-purpose proof engine, not a
+  bounded oracle-testable restriction. Left for a future pass if the project
+  wants to invest in that scale of static-analysis machinery.
+
+* **Linked-server/cross-database reference cardinality estimate — won't do,
+  the sharper "fixed exactly-1-row" claim is debunked.** Oracle-confirmed
+  (Docker, `SILENTSCAN_LOOPBACK` loopback linked server, SQL Server 2022,
+  `SET STATISTICS PROFILE`): a remote query through a linked server gets a
+  real, data-dependent cardinality estimate when the provider can reach
+  remote statistics — an unfiltered remote scan estimated exactly 500 rows
+  (the real row count), and a filtered scan estimated 22.36 rows (≈√500, the
+  engine's standard unknown-selectivity guess formula applied to a real base
+  cardinality) — never a fixed 1. The existing "close to a guess" framing in
+  `QueryAntiPatternLinkedServerOrCrossDatabaseReferenceRuleId`'s rationale is
+  accurate and is left unchanged; a sharper "always exactly 1 row" claim
+  would be wrong. Do not re-propose the fixed-1-row framing.
+
+* **CLR aggregate `Terminate`/`Accumulate` deferred-resolution after `ALTER
+  ASSEMBLY` — won't do, disproportionate setup cost for a rare pattern.**
+  Verifying this needs a real compiled CLR aggregate binary (an
+  `IBinarySerialize` implementation, `CREATE ASSEMBLY`, `CREATE AGGREGATE`,
+  then an `ALTER ASSEMBLY` swap to a binary missing the bound method) shipped
+  into the test suite - a materially different, heavier oracle-testing
+  investment than every other item in this pass, for a pattern the item's
+  own text already flags as rare (hand-authored CLR aggregates beyond none
+  of the built-ins are uncommon). Left for a future pass if CLR-aggregate
+  coverage becomes a priority.
+
+* **`CREATE`/`ALTER XML SCHEMA COLLECTION` disallowed-type restrictions —
+  shipped, real restriction is `NOTATION` (anywhere) and `ID`/`IDREF` (as an
+  element's own type or an extension/restriction base), not a `SPARSE`/typed
+  `xml` column shape.** The previous pass's probe was misdirected, per its
+  own note. Oracle-confirmed (Docker): the inline XSD text's `NOTATION`
+  type is rejected everywhere it appears (Msg 9337), and `ID`/`IDREF` (or a
+  type derived from either) is rejected specifically as an `xs:element`'s
+  own `type=` or an `xs:extension`/`xs:restriction`'s `base=` — but **not**
+  as an `xs:attribute`'s `type=`, which is the ordinary, expected use of
+  `ID`/`IDREF` in XSD and registers fine (Msg 6995 only for the
+  element/extension/restriction case). Namespace-aware detection (any
+  prefix bound to the XML Schema namespace, not just a literal `xs:`
+  prefix). Shipped as `XmlSchemaCollectionDisallowedTypeRuleId` (two kinds).
+
+* **CLR UDT catalog-metadata validity — won't do, disproportionate setup
+  cost for a rare pattern.** Same category of blocker as the CLR aggregate
+  item above: verifying UDT signature-interchangeability, method
+  resolution, array-conversion compatibility, and operator support all need
+  real compiled CLR UDT binaries shipped into the test suite, for a pattern
+  (hand-authored CLR UDTs beyond the built-in spatial types) the item's own
+  text already flags as rare. Left for a future pass.
+
+* **`sp_cursoropen`/`sp_cursorexecute` literal scroll-option bitmask/paramdef
+  restrictions — won't do, low value per the item's own framing.** Usually
+  client-driver-generated rather than hand-authored T-SQL, so a low
+  real-world hit rate for a static analyzer aimed at reviewed, checked-in
+  code. Left unshipped; re-propose only if a real hand-authored occurrence
+  surfaces.
+
+* **PolyBase/Hadoop external-table column-type restrictions — duplicate of
+  the already-shipped `ExternalTableUnsupportedColumnTypeRuleId` (see
+  above), not a separate item.** This item and "External file-format/
+  data-export partition column type restrictions" describe the same
+  engine behavior (`CREATE EXTERNAL TABLE`'s PolyBase type gate). No new
+  work needed.
+
+* **`DROP EXTERNAL DATA SOURCE`/`DROP EXTERNAL FILE FORMAT` blocked by a
+  dependent external table — won't do, infra-blocked in this environment.**
+  `CREATE EXTERNAL DATA SOURCE`/`CREATE EXTERNAL FILE FORMAT` both deploy
+  fine against a fake `HADOOP`-type location (confirmed, used throughout the
+  `ExternalTableUnsupportedColumnTypeRuleId` oracle tests), but an actual
+  `CREATE EXTERNAL TABLE` (any type, not just PolyBase's rejected-type set)
+  always fails and rolls back entirely in this Docker environment - the
+  PolyBase Java bridge needed to open a real Hadoop connection isn't
+  attached (`105019: The Remote Java Bridge has not been attached yet`), and
+  a native `BLOB_STORAGE`-type data source validates its URI at `CREATE
+  EXTERNAL DATA SOURCE` time too (`105080`), so there is no data-source type
+  that lets a table object actually persist against a fake location. Without
+  a persisted external table object, `DROP EXTERNAL DATA SOURCE`/`DROP
+  EXTERNAL FILE FORMAT` can never be tested against a real dependent-object
+  block in this environment. Do not re-propose until a real reachable
+  external storage endpoint (or a working PolyBase Hadoop/Java bridge) is
+  available to probe against.
+
+* **Ledger table `ALTER COLUMN`/`DROP COLUMN` restrictions — real
+  restrictions confirmed, won't ship this pass; needs new LEDGER
+  catalog modeling.** Further oracle work (beyond the previous pass's
+  inconclusive probe) found real, distinct restrictions: `DROP COLUMN`
+  naming one of the table's own ledger metadata columns (the
+  auto-generated `TRANSACTION_ID`/`SEQUENCE_NUMBER` `GENERATED ALWAYS`
+  columns SQL Server synthesizes for `WITH (LEDGER = ON)`) always fails
+  (Msg 37502); `ALTER TABLE ALTER COLUMN` against a ledger table fails once
+  the column carries immutable history data the change would need to
+  modify (Msg 37391, not reproduced by an empty table - explains the
+  previous pass's inconclusive result). Both are real and decidable, but
+  the catalog has no concept of a ledger table today - `WITH (LEDGER = ON
+  (...))` isn't parsed into hidden auto-generated columns, and there is no
+  `IsLedgerTable`/ledger-column-kind fact anywhere in `CatalogTable`/
+  `CatalogColumn`. Modeling that (table option parsing, synthesized hidden
+  columns with default-or-overridden names, an `ALTER TABLE ALTER COLUMN`
+  hook cross-referencing ledger-column-kind) is a real catalog extension,
+  not a quick win. Left for a future pass.

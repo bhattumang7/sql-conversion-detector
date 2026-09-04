@@ -220,6 +220,18 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterAlterTableChangeTrackingModificationStatement(AlterTableChangeTrackingModificationStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterCreateXmlSchemaCollectionStatement(CreateXmlSchemaCollectionStatement node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterAlterXmlSchemaCollectionStatement(AlterXmlSchemaCollectionStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterAlterSchemaStatement(AlterSchemaStatement node, ModuleWalker walker)
     {
     }

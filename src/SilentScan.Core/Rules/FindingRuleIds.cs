@@ -42,6 +42,15 @@ public static class FindingRuleIds
     };
     public const string ColumnstoreUnsupportedColumnTypeRuleId = "silentscan/catalog/columnstore-unsupported-column-type";
     public const string ExternalTableUnsupportedColumnTypeRuleId = "silentscan/predicates/external-table-unsupported-column-type";
+    public const string FullTextPredicateInAggregateRuleId = "silentscan/predicates/full-text-predicate-in-aggregate";
+    public const string ChangeTrackingEncryptedPrimaryKeyRuleId = "silentscan/predicates/change-tracking-encrypted-primary-key";
+    public const string XmlSchemaCollectionMismatchRuleId = "silentscan/predicates/xml-schema-collection-mismatch";
+    public static string XmlSchemaCollectionDisallowedTypeRuleId(XmlSchemaCollectionDisallowedTypeKind kind) => kind switch
+    {
+        XmlSchemaCollectionDisallowedTypeKind.NotationType => "silentscan/predicates/xml-schema-collection-notation-type",
+        XmlSchemaCollectionDisallowedTypeKind.IdOrIdRefType => "silentscan/predicates/xml-schema-collection-id-idref-type",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled XmlSchemaCollectionDisallowedTypeKind."),
+    };
     public static string SelectiveXmlIndexValueColumnRuleId(SelectiveXmlIndexValueColumnFindingKind kind) => kind switch
     {
         SelectiveXmlIndexValueColumnFindingKind.TooWide => "silentscan/catalog/selective-xml-index-value-column-too-wide",
@@ -88,6 +97,12 @@ public static class FindingRuleIds
         VectorFunctionArgumentFindingKind.NonVectorOperand => "silentscan/predicates/vector-function-non-vector-operand",
         VectorFunctionArgumentFindingKind.DimensionMismatch => "silentscan/predicates/vector-function-dimension-mismatch",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled VectorFunctionArgumentFindingKind."),
+    };
+    public static string VectorLiteralConversionRuleId(VectorLiteralConversionFindingKind kind) => kind switch
+    {
+        VectorLiteralConversionFindingKind.NonNumericJsonElement => "silentscan/predicates/vector-literal-non-numeric-element",
+        VectorLiteralConversionFindingKind.ElementCountMismatch => "silentscan/predicates/vector-literal-dimension-mismatch",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled VectorLiteralConversionFindingKind."),
     };
     public static string SchemaWithRejectedTypeRuleId(SchemaWithRejectedTypeKind kind) => kind switch
     {

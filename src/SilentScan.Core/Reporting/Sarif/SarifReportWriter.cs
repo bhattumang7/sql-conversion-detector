@@ -49,6 +49,11 @@ public static class SarifReportWriter
         results.AddRange(report.Find<MaxTypedColumnFinding>("MaxTypedColumnScanner").Select(ToResult));
         results.AddRange(report.Find<ColumnstoreUnsupportedColumnTypeFinding>("ColumnstoreUnsupportedColumnTypeScanner").Select(ToResult));
         results.AddRange(report.Find<ExternalTableUnsupportedColumnTypeFinding>(nameof(ExternalTableUnsupportedColumnTypeScanner)).Select(ToResult));
+        results.AddRange(report.Find<VectorLiteralConversionFinding>(nameof(VectorLiteralConversionScanner)).Select(ToResult));
+        results.AddRange(report.Find<FullTextPredicateInAggregateFinding>(nameof(FullTextPredicateInAggregateScanner)).Select(ToResult));
+        results.AddRange(report.Find<ChangeTrackingEncryptedPrimaryKeyFinding>(nameof(ChangeTrackingEncryptedPrimaryKeyScanner)).Select(ToResult));
+        results.AddRange(report.Find<XmlSchemaCollectionDisallowedTypeFinding>(nameof(XmlSchemaCollectionDisallowedTypeScanner)).Select(ToResult));
+        results.AddRange(report.Find<XmlSchemaCollectionMismatchFinding>(nameof(XmlSchemaCollectionMismatchScanner)).Select(ToResult));
         results.AddRange(report.Find<SelectiveXmlIndexValueColumnFinding>("SelectiveXmlIndexValueColumnScanner").Select(ToResult));
         results.AddRange(report.Find<OversizedParameterFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
         results.AddRange(report.Find<UnderLengthParameterFinding>(nameof(TypedPredicateExtractor)).Select(ToResult));
@@ -484,6 +489,50 @@ public static class SarifReportWriter
     {
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ExternalTableUnsupportedColumnTypeRuleId, finding.Confidence);
         var message = $"External table column '{finding.TableQualifiedName}.{finding.ColumnName}' is declared or resolves to {finding.TypeDisplay} - this type is not supported with external tables (Msg 46518/15877).";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(VectorLiteralConversionFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.VectorLiteralConversionRuleId(finding.Kind), finding.Confidence);
+        var message = finding.Kind == VectorLiteralConversionFindingKind.ElementCountMismatch
+            ? $"String literal '{finding.LiteralText}' converted to {finding.TargetTypeDisplay} has {finding.ActualElementCount} element(s), not {finding.DeclaredDimensions} - the vector dimensions do not match; the conversion fails at execution (Msg 42204)."
+            : $"String literal '{finding.LiteralText}' converted to {finding.TargetTypeDisplay} contains a {finding.ElementKind} element - the JSON array must contain only numbers; the conversion fails at execution (Msg 13670).";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(FullTextPredicateInAggregateFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FullTextPredicateInAggregateRuleId, finding.Confidence);
+        var message = $"{finding.AggregateFunctionName}(...) nests a {finding.FullTextFunctionName} full-text predicate - full-text predicates cannot appear in an aggregate expression; the statement does not compile (Msg 30082).";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(ChangeTrackingEncryptedPrimaryKeyFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ChangeTrackingEncryptedPrimaryKeyRuleId, finding.Confidence);
+        var message = $"ENABLE CHANGE_TRACKING targets '{finding.TableQualifiedName}', whose primary key column '{finding.ColumnName}' is Always Encrypted - change tracking does not support an encrypted primary key column; the statement fails (Msg 22118).";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(XmlSchemaCollectionDisallowedTypeFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.XmlSchemaCollectionDisallowedTypeRuleId(finding.Kind), finding.Confidence);
+        var message = finding.Kind == XmlSchemaCollectionDisallowedTypeKind.NotationType
+            ? $"XML schema collection '{finding.SchemaCollectionQualifiedName}' uses the XML Schema type NOTATION - this type is not supported; the schema collection never registers (Msg 9337)."
+            : $"XML schema collection '{finding.SchemaCollectionQualifiedName}' uses the built-in XML Schema type {finding.XsdTypeName} (or a type derived from it) as an element's type or an extension/restriction base - this is not permitted; the schema collection never registers (Msg 6995).";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(XmlSchemaCollectionMismatchFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.XmlSchemaCollectionMismatchRuleId, finding.Confidence);
+        var message = $"'{finding.TargetVariableName}' (XML({finding.TargetSchemaCollectionName})) is assigned directly from '{finding.SourceVariableName}' (XML({finding.SourceSchemaCollectionName})) - implicit conversion between XML types constrained by different schema collections is not allowed; the statement does not compile (Msg 527).";
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

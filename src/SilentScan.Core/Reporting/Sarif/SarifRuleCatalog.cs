@@ -42,6 +42,11 @@ public static class SarifRuleCatalog
     public static string MaxTypedColumnRuleId(NonIndexableColumnFindingKind kind) => FindingRuleIds.MaxTypedColumnRuleId(kind);
     public const string ColumnstoreUnsupportedColumnTypeRuleId = FindingRuleIds.ColumnstoreUnsupportedColumnTypeRuleId;
     public const string ExternalTableUnsupportedColumnTypeRuleId = FindingRuleIds.ExternalTableUnsupportedColumnTypeRuleId;
+    public static string VectorLiteralConversionRuleId(VectorLiteralConversionFindingKind kind) => FindingRuleIds.VectorLiteralConversionRuleId(kind);
+    public const string FullTextPredicateInAggregateRuleId = FindingRuleIds.FullTextPredicateInAggregateRuleId;
+    public const string ChangeTrackingEncryptedPrimaryKeyRuleId = FindingRuleIds.ChangeTrackingEncryptedPrimaryKeyRuleId;
+    public static string XmlSchemaCollectionDisallowedTypeRuleId(XmlSchemaCollectionDisallowedTypeKind kind) => FindingRuleIds.XmlSchemaCollectionDisallowedTypeRuleId(kind);
+    public const string XmlSchemaCollectionMismatchRuleId = FindingRuleIds.XmlSchemaCollectionMismatchRuleId;
     public static string SelectiveXmlIndexValueColumnRuleId(SelectiveXmlIndexValueColumnFindingKind kind) => FindingRuleIds.SelectiveXmlIndexValueColumnRuleId(kind);
     public static string FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind kind) => FindingRuleIds.FullTextIndexDdlRuleId(kind);
     public static string SemanticSearchRuleId(SemanticSearchFindingKind kind) => FindingRuleIds.SemanticSearchRuleId(kind);

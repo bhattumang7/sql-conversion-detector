@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Full Text Predicate In Aggregate - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Full Text Predicate In Aggregate</h1>
+  <p class="rule-key"><code>silentscan/predicates/full-text-predicate-in-aggregate</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A CONTAINS/FREETEXT full-text predicate is nested inside a non-windowed aggregate function&#x27;s expression (typically via CASE WHEN) - oracle-confirmed (Msg 30082: &quot;Full-text predicates cannot appear in an aggregate expression. Place the aggregate expression in a subquery.&quot;) the statement never compiles, regardless of the actual row data. A full-text predicate inside a windowed aggregate (one with an OVER clause) is unaffected - oracle-confirmed that form compiles and runs.</p>
+  <p class="rationale">A `CONTAINS`/`FREETEXT` full-text predicate cannot appear inside a non-windowed aggregate function&#x27;s own expression - most commonly reached via `SUM(CASE WHEN CONTAINS(...) THEN 1 ELSE 0 END)` or the equivalent with `COUNT`/`AVG`/`MIN`/`MAX`/ `STRING_AGG` and the other standard aggregates. Confirmed directly against a real SQL Server instance: this fails to compile with Msg 30082 (&quot;Full-text predicates cannot appear in an aggregate expression. Place the aggregate expression in a subquery.&quot;), with no GROUP BY required to trigger it - the restriction is purely about the full-text predicate being nested inside the aggregate&#x27;s own expression tree, not about query shape. A full-text predicate anywhere else in the same query (a WHERE clause, a HAVING clause referencing the aggregate result, or inside a windowed aggregate that carries an `OVER` clause) is unaffected and compiles fine.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Move the full-text predicate out of the aggregate - filter the rows with CONTAINS/ FREETEXT in a WHERE clause (or a derived table/subquery), then aggregate the already-filtered rows, instead of testing the predicate inside the aggregate&#x27;s own expression.</p>
+  <h3>CONTAINS inside SUM&#x27;s CASE expression never compiles</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>SELECT SUM(CASE WHEN CONTAINS(Notes, &#x27;urgent&#x27;) THEN 1 ELSE 0 END)&#xA;FROM dbo.Ticket;</code></pre></div>
+  <p class="example-explanation">CONTAINS is nested inside SUM&#x27;s own expression - this statement fails to compile with Msg 30082 every time it runs.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT COUNT(*)&#xA;FROM dbo.Ticket&#xA;WHERE CONTAINS(Notes, &#x27;urgent&#x27;);</code></pre></div>
+  <p class="example-explanation">CONTAINS filters the rows in a WHERE clause instead of appearing inside the aggregate - the statement compiles.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

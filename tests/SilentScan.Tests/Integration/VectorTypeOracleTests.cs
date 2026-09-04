@@ -169,4 +169,100 @@ public sealed class VectorTypeOracleTests : IAsyncLifetime
         Assert.Equal(VectorFunctionArgumentFindingKind.NonVectorOperand, finding.Kind);
         Assert.Equal("VECTORPROPERTY", finding.FunctionName);
     }
+
+    private static IReadOnlyList<VectorLiteralConversionFinding> ScanVectorLiteralConversions(string sql)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return VectorLiteralConversionScanner.Scan(result, new DatabaseCatalog());
+    }
+
+    [Fact]
+    public async Task CastToVector_WithBooleanJsonElement_FailsAtExecutionWithMsg13670_AndScannerFlagsIt()
+    {
+        const string Sql = "SELECT CAST('[1.0, true, 3.0]' AS VECTOR(3));";
+
+        await using var connection = new SqlConnection(Options.BuildConnectionString(_databaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = Sql;
+
+        var exception = await Assert.ThrowsAsync<SqlException>(() => command.ExecuteScalarAsync());
+        Assert.Equal(13670, exception.Number);
+
+        var finding = Assert.Single(ScanVectorLiteralConversions(Sql));
+        Assert.Equal(VectorLiteralConversionFindingKind.NonNumericJsonElement, finding.Kind);
+        Assert.Equal("boolean", finding.ElementKind);
+    }
+
+    [Fact]
+    public async Task DeclareVectorVariable_WithBooleanJsonInitializer_FailsAtExecutionWithMsg13670_AndScannerFlagsIt()
+    {
+        const string Sql = "DECLARE @v VECTOR(3) = '[1.0, true, 3.0]'; SELECT @v;";
+
+        await using var connection = new SqlConnection(Options.BuildConnectionString(_databaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = Sql;
+
+        var exception = await Assert.ThrowsAsync<SqlException>(() => command.ExecuteScalarAsync());
+        Assert.Equal(13670, exception.Number);
+
+        var finding = Assert.Single(ScanVectorLiteralConversions(Sql));
+        Assert.Equal(VectorLiteralConversionFindingKind.NonNumericJsonElement, finding.Kind);
+    }
+
+    [Fact]
+    public async Task SetVectorVariable_WithBooleanJsonAssignment_FailsAtExecutionWithMsg13670_AndScannerFlagsIt()
+    {
+        const string Sql = """
+            DECLARE @v VECTOR(3);
+            SET @v = '[1.0, true, 3.0]';
+            SELECT @v;
+            """;
+
+        await using var connection = new SqlConnection(Options.BuildConnectionString(_databaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = Sql;
+
+        var exception = await Assert.ThrowsAsync<SqlException>(() => command.ExecuteScalarAsync());
+        Assert.Equal(13670, exception.Number);
+
+        var finding = Assert.Single(ScanVectorLiteralConversions(Sql));
+        Assert.Equal(VectorLiteralConversionFindingKind.NonNumericJsonElement, finding.Kind);
+    }
+
+    [Fact]
+    public async Task CastToVector_WithElementCountMismatch_FailsAtExecutionWithMsg42204_AndScannerFlagsIt()
+    {
+        const string Sql = "SELECT CAST('[1.0, 2.0]' AS VECTOR(3));";
+
+        await using var connection = new SqlConnection(Options.BuildConnectionString(_databaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = Sql;
+
+        var exception = await Assert.ThrowsAsync<SqlException>(() => command.ExecuteScalarAsync());
+        Assert.Equal(42204, exception.Number);
+
+        var finding = Assert.Single(ScanVectorLiteralConversions(Sql));
+        Assert.Equal(VectorLiteralConversionFindingKind.ElementCountMismatch, finding.Kind);
+        Assert.Equal(2, finding.ActualElementCount);
+        Assert.Equal(3, finding.DeclaredDimensions);
+    }
+
+    [Fact]
+    public async Task CastToVector_WithAllNumericElementsMatchingDimension_SucceedsAndScannerDoesNotFlagIt()
+    {
+        const string Sql = "SELECT CAST('[1.0, 2.0, 3.0]' AS VECTOR(3));";
+
+        await using var connection = new SqlConnection(Options.BuildConnectionString(_databaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = Sql;
+        await command.ExecuteScalarAsync();
+
+        Assert.Empty(ScanVectorLiteralConversions(Sql));
+    }
 }

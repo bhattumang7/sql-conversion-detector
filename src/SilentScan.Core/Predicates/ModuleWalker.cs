@@ -550,6 +550,27 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
         base.ExplicitVisit(node);
     }
 
+    public sealed override void ExplicitVisit(AlterTableChangeTrackingModificationStatement node)
+    {
+        Dispatch(rule => rule.OnEnterAlterTableChangeTrackingModificationStatement(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(CreateXmlSchemaCollectionStatement node)
+    {
+        Dispatch(rule => rule.OnEnterCreateXmlSchemaCollectionStatement(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
+    public sealed override void ExplicitVisit(AlterXmlSchemaCollectionStatement node)
+    {
+        Dispatch(rule => rule.OnEnterAlterXmlSchemaCollectionStatement(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
     public sealed override void ExplicitVisit(AlterSchemaStatement node)
     {
         Dispatch(rule => rule.OnEnterAlterSchemaStatement(node, this));

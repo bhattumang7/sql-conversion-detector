@@ -290,6 +290,46 @@ internal sealed class ExternalTableUnsupportedColumnTypeRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => ExternalTableUnsupportedColumnTypeScanner.Harvest((ExternalTableUnsupportedColumnTypeScanner.Rule)moduleRule);
 }
 
+internal sealed class VectorLiteralConversionRule : IPerFileRule
+{
+    public string Id => "VectorLiteralConversionScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => VectorLiteralConversionScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => VectorLiteralConversionScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => VectorLiteralConversionScanner.Harvest((VectorLiteralConversionScanner.Rule)moduleRule);
+}
+
+internal sealed class FullTextPredicateInAggregateRule : IPerFileRule
+{
+    public string Id => "FullTextPredicateInAggregateScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => FullTextPredicateInAggregateScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => FullTextPredicateInAggregateScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => FullTextPredicateInAggregateScanner.Harvest((FullTextPredicateInAggregateScanner.Rule)moduleRule);
+}
+
+internal sealed class ChangeTrackingEncryptedPrimaryKeyRule : IPerFileRule
+{
+    public string Id => "ChangeTrackingEncryptedPrimaryKeyScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => ChangeTrackingEncryptedPrimaryKeyScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => ChangeTrackingEncryptedPrimaryKeyScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => ChangeTrackingEncryptedPrimaryKeyScanner.Harvest((ChangeTrackingEncryptedPrimaryKeyScanner.Rule)moduleRule);
+}
+
+internal sealed class XmlSchemaCollectionDisallowedTypeRule : IPerFileRule
+{
+    public string Id => "XmlSchemaCollectionDisallowedTypeScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => XmlSchemaCollectionDisallowedTypeScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => XmlSchemaCollectionDisallowedTypeScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => XmlSchemaCollectionDisallowedTypeScanner.Harvest((XmlSchemaCollectionDisallowedTypeScanner.Rule)moduleRule);
+}
+
+internal sealed class XmlSchemaCollectionMismatchRule : IPerFileRule
+{
+    public string Id => "XmlSchemaCollectionMismatchScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => XmlSchemaCollectionMismatchScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => XmlSchemaCollectionMismatchScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => XmlSchemaCollectionMismatchScanner.Harvest((XmlSchemaCollectionMismatchScanner.Rule)moduleRule);
+}
+
 internal sealed class ExecuteAtLargeObjectParameterRule : IPerFileRule
 {
     public string Id => "ExecuteAtLargeObjectParameterScanner";

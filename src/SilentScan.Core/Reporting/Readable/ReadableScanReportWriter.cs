@@ -87,6 +87,11 @@ public static class ReadableScanReportWriter
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
         blocks.AddRange(ColumnstoreUnsupportedColumnType(report, headingLevel, pathBase));
         blocks.AddRange(ExternalTableUnsupportedColumnType(report, headingLevel, pathBase));
+        blocks.AddRange(VectorLiteralConversion(report, headingLevel, pathBase));
+        blocks.AddRange(FullTextPredicateInAggregate(report, headingLevel, pathBase));
+        blocks.AddRange(ChangeTrackingEncryptedPrimaryKey(report, headingLevel, pathBase));
+        blocks.AddRange(XmlSchemaCollectionDisallowedType(report, headingLevel, pathBase));
+        blocks.AddRange(XmlSchemaCollectionMismatch(report, headingLevel, pathBase));
         blocks.AddRange(SelectiveXmlIndexValueColumn(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUnsupportedColumnType(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedUtf8Collation(report, headingLevel, pathBase));
@@ -252,6 +257,11 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Legacy large-object columns (can never appear in any index)", report.Find<MaxTypedColumnFinding>(nameof(MaxTypedColumnScanner)).Count(f => f.Kind == NonIndexableColumnFindingKind.LegacyLargeObject));
         AddCount(counts, "Columnstore-unsupported-type columns participating in a columnstore index (does not deploy)", report.Find<ColumnstoreUnsupportedColumnTypeFinding>(nameof(ColumnstoreUnsupportedColumnTypeScanner)).Count);
         AddCount(counts, "CREATE EXTERNAL TABLE columns declared with a PolyBase-unsupported type (does not deploy)", report.Find<ExternalTableUnsupportedColumnTypeFinding>(nameof(ExternalTableUnsupportedColumnTypeScanner)).Count);
+        AddCount(counts, "String literals converted to VECTOR(n) that always fail at execution", report.Find<VectorLiteralConversionFinding>(nameof(VectorLiteralConversionScanner)).Count);
+        AddCount(counts, "Full-text predicates nested inside a non-windowed aggregate expression", report.Find<FullTextPredicateInAggregateFinding>(nameof(FullTextPredicateInAggregateScanner)).Count);
+        AddCount(counts, "ENABLE CHANGE_TRACKING targeting a table with an Always Encrypted primary key column", report.Find<ChangeTrackingEncryptedPrimaryKeyFinding>(nameof(ChangeTrackingEncryptedPrimaryKeyScanner)).Count);
+        AddCount(counts, "XML schema collections using a disallowed built-in XSD type", report.Find<XmlSchemaCollectionDisallowedTypeFinding>(nameof(XmlSchemaCollectionDisallowedTypeScanner)).Count);
+        AddCount(counts, "Typed XML variables assigned across mismatched schema collections", report.Find<XmlSchemaCollectionMismatchFinding>(nameof(XmlSchemaCollectionMismatchScanner)).Count);
         AddCount(counts, "Secondary selective XML indexes over an oversized/large-object value column (does not deploy)", report.Find<SelectiveXmlIndexValueColumnFinding>(nameof(SelectiveXmlIndexValueColumnScanner)).Count);
         AddCount(counts, "Unsupported column type on a memory-optimized table (does not deploy)", report.Find<MemoryOptimizedUnsupportedColumnTypeFinding>(nameof(MemoryOptimizedUnsupportedColumnTypeScanner)).Count);
         AddCount(counts, "UTF-8 collation on a memory-optimized table column (does not deploy)", report.Find<MemoryOptimizedUtf8CollationFinding>(nameof(MemoryOptimizedUtf8CollationScanner)).Count);
@@ -2402,6 +2412,122 @@ public static class ReadableScanReportWriter
                 f.ArgumentDescription,
                 f.OtherTypeDisplay is null ? f.TypeDisplay : $"{f.TypeDisplay} vs {f.OtherTypeDisplay}",
                 RuleDocSite.Url(SarifRuleCatalog.VectorFunctionArgumentRuleId(f.Kind)),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> VectorLiteralConversion(ScanReport report, int level, string? pathBase)
+    {
+        var findings = report.Find<VectorLiteralConversionFinding>(nameof(VectorLiteralConversionScanner));
+        if (findings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"String literals converted to VECTOR(n) that always fail at execution ({findings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A string literal converted to VECTOR(n) (via CAST/CONVERT, a DECLARE initializer, or a SET assignment) is a well-formed JSON array containing a non-numeric element, or a numeric array whose element count does not match the declared dimension - oracle-confirmed (SQL Server 2025) the conversion always fails at execution (Msg 13670 or Msg 42204), regardless of the row.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Literal", "Target type", DetailHeader],
+            [.. findings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.LiteralText,
+                f.TargetTypeDisplay,
+                RuleDocSite.Url(SarifRuleCatalog.VectorLiteralConversionRuleId(f.Kind)),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> FullTextPredicateInAggregate(ScanReport report, int level, string? pathBase)
+    {
+        var findings = report.Find<FullTextPredicateInAggregateFinding>(nameof(FullTextPredicateInAggregateScanner));
+        if (findings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Full-text predicates nested inside a non-windowed aggregate expression ({findings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A CONTAINS/FREETEXT full-text predicate appears inside a non-windowed aggregate function's expression (typically via CASE WHEN) - oracle-confirmed this never compiles (Msg 30082: \"Full-text predicates cannot appear in an aggregate expression. Place the aggregate expression in a subquery.\"). The same aggregate with an OVER clause is unaffected.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FullTextPredicateInAggregateRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Aggregate", "Full-text predicate"],
+            [.. findings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.AggregateFunctionName,
+                f.FullTextFunctionName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ChangeTrackingEncryptedPrimaryKey(ScanReport report, int level, string? pathBase)
+    {
+        var findings = report.Find<ChangeTrackingEncryptedPrimaryKeyFinding>(nameof(ChangeTrackingEncryptedPrimaryKeyScanner));
+        if (findings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"ENABLE CHANGE_TRACKING targeting a table with an Always Encrypted primary key column ({findings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "ALTER TABLE ... ENABLE CHANGE_TRACKING targets a table whose primary key includes an Always Encrypted column - oracle-confirmed this always fails (Msg 22118: \"Change tracking is not supported when the primary key contains encrypted columns.\"), regardless of the encryption type.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ChangeTrackingEncryptedPrimaryKeyRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Encrypted primary key column"],
+            [.. findings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.ColumnName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> XmlSchemaCollectionDisallowedType(ScanReport report, int level, string? pathBase)
+    {
+        var findings = report.Find<XmlSchemaCollectionDisallowedTypeFinding>(nameof(XmlSchemaCollectionDisallowedTypeScanner));
+        if (findings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"XML schema collections using a disallowed built-in XSD type ({findings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A CREATE/ALTER XML SCHEMA COLLECTION's inline XSD text uses NOTATION anywhere, or uses ID/IDREF (or a type derived from either) as an element's own type or an extension/restriction base - oracle-confirmed the schema collection never registers (Msg 9337 or Msg 6995).");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.XmlSchemaCollectionDisallowedTypeRuleId(XmlSchemaCollectionDisallowedTypeKind.NotationType)));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Schema collection", "XSD type", DetailHeader],
+            [.. findings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.SchemaCollectionQualifiedName,
+                f.XsdTypeName,
+                RuleDocSite.Url(SarifRuleCatalog.XmlSchemaCollectionDisallowedTypeRuleId(f.Kind)),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> XmlSchemaCollectionMismatch(ScanReport report, int level, string? pathBase)
+    {
+        var findings = report.Find<XmlSchemaCollectionMismatchFinding>(nameof(XmlSchemaCollectionMismatchScanner));
+        if (findings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Typed XML variables assigned across mismatched schema collections ({findings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A typed XML variable/parameter is assigned directly from another typed XML variable/parameter declared against a different named schema collection, with no CONVERT in between - oracle-confirmed this does not compile (Msg 527: \"Implicit conversion between XML types constrained by different XML schema collections is not allowed.\").");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.XmlSchemaCollectionMismatchRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Target", "Source"],
+            [.. findings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TargetVariableName} (XML({f.TargetSchemaCollectionName}))",
+                $"{f.SourceVariableName} (XML({f.SourceSchemaCollectionName}))",
             })]);
     }
 
