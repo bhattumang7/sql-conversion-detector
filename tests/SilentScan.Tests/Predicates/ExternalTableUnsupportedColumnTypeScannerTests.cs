@@ -120,4 +120,52 @@ public sealed class ExternalTableUnsupportedColumnTypeScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void CreateExternalTableAsSelect_WithCte_ResolvesThroughCteRelation()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Src (Id INT NOT NULL, Notes XML NULL);
+            CREATE EXTERNAL TABLE dbo.Ext
+            WITH (LOCATION = '/x/', DATA_SOURCE = ExtSrc, FILE_FORMAT = ExtFmt)
+            AS WITH Cte AS (SELECT Id, Notes FROM dbo.Src)
+            SELECT Id, Notes FROM Cte;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Notes", finding.ColumnName);
+    }
+
+    [Fact]
+    public void CreateExternalTableAsSelect_WithUnionArmProjectingUnsupportedType_Fires()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Src (Id INT NOT NULL, Notes NVARCHAR(4000) NULL);
+            CREATE TABLE dbo.OtherSrc (Id INT NOT NULL, Notes XML NULL);
+            CREATE EXTERNAL TABLE dbo.Ext
+            WITH (LOCATION = '/x/', DATA_SOURCE = ExtSrc, FILE_FORMAT = ExtFmt)
+            AS SELECT Id, Notes FROM dbo.Src
+            UNION ALL
+            SELECT Id, Notes FROM dbo.OtherSrc;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Notes", finding.ColumnName);
+    }
+
+    [Fact]
+    public void CreateExternalTableAsSelect_WithAllUnionArmsSupported_DoesNotFire()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Src (Id INT NOT NULL, Notes NVARCHAR(4000) NULL);
+            CREATE TABLE dbo.OtherSrc (Id INT NOT NULL, Notes NVARCHAR(4000) NULL);
+            CREATE EXTERNAL TABLE dbo.Ext
+            WITH (LOCATION = '/x/', DATA_SOURCE = ExtSrc, FILE_FORMAT = ExtFmt)
+            AS SELECT Id, Notes FROM dbo.Src
+            UNION ALL
+            SELECT Id, Notes FROM dbo.OtherSrc;
+            """);
+
+        Assert.Empty(findings);
+    }
 }

@@ -1684,9 +1684,17 @@ WITH NATIVE_COMPILATION` module.
   sanctioned `Lineage/ScalarExpressionResolver.ResolveScalarType` (the
   same entry point `TypedPredicateExtractor`'s `WriteLossFinding` path
   uses), which already covers column references, `CAST`/`CONVERT`, and
-  literals — a CETAS with `UNION`/CTE at the top level (`QueryExpression`
-  not a plain `QuerySpecification`) is left unrecognized rather than
-  guessed at. The "virtual column"/`PARTITION_COLUMNS` half of the item
+  literals. A CETAS whose top-level query is a CTE (`WITH ... SELECT`)
+  is recognized without any extra work, since the outer body is still a
+  plain `QuerySpecification` and the CTE relation flows through the
+  walker's normal scope-chain machinery. A top-level `UNION`/`UNION
+  ALL`/`EXCEPT`/`INTERSECT` (`QueryExpression` is a `BinaryQueryExpression`,
+  optionally wrapped in `QueryParenthesisExpression`) is also covered now:
+  the statement's `QueryExpression` tree is flattened to its leaf
+  `QuerySpecification` arms and each arm is recorded and resolved
+  independently, oracle-confirmed (`UNION ALL`) that the engine rejects
+  on any single arm's column type regardless of the others. The "virtual
+  column"/`PARTITION_COLUMNS` half of the item
   is a Synapse dedicated-SQL-pool CETAS feature, not a SQL Server one:
   ScriptDom 180.102.0's `ExternalTableOptionKind` enum has no
   partition-columns member (`Distribution`, `FileFormat`, `Location`,

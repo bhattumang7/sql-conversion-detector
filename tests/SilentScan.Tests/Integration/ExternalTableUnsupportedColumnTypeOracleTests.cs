@@ -17,6 +17,7 @@ public sealed class ExternalTableUnsupportedColumnTypeOracleTests : OracleTestFi
         CREATE EXTERNAL DATA SOURCE ExtSrc WITH (LOCATION = 'hdfs://namenode:8020', TYPE = HADOOP);
         CREATE EXTERNAL FILE FORMAT ExtFmt WITH (FORMAT_TYPE = DELIMITEDTEXT);
         CREATE TABLE dbo.Src (Id INT NOT NULL, Payload XML NULL, Notes NVARCHAR(4000) NULL);
+        CREATE TABLE dbo.OtherSrc (Id INT NOT NULL, Payload XML NULL, Notes NVARCHAR(4000) NULL);
         """;
 
     private static IReadOnlyList<ExternalTableUnsupportedColumnTypeFinding> Scan(string sql)
@@ -113,5 +114,34 @@ public sealed class ExternalTableUnsupportedColumnTypeOracleTests : OracleTestFi
             """;
 
         Assert.Empty(Scan(ScannerSql));
+    }
+
+    [Fact]
+    public async Task CetasWithUnsupportedTypeInUnionArm_FailsToDeployWithMsg15877_AndScannerFlagsIt()
+    {
+        const string Sql = """
+            CREATE EXTERNAL TABLE dbo.CetasUnionExt
+            WITH (LOCATION = '/z/', DATA_SOURCE = ExtSrc, FILE_FORMAT = ExtFmt)
+            AS SELECT Id, Notes FROM dbo.Src
+            UNION ALL
+            SELECT Id, Payload AS Notes FROM dbo.OtherSrc;
+            """;
+
+        var exception = await ExecuteExpectingFailureAsync(Sql);
+        Assert.Equal(15877, exception.Number);
+
+        const string ScannerSql = """
+            CREATE TABLE dbo.Src (Id INT NOT NULL, Payload XML NULL, Notes NVARCHAR(4000) NULL);
+            CREATE TABLE dbo.OtherSrc (Id INT NOT NULL, Payload XML NULL, Notes NVARCHAR(4000) NULL);
+
+            CREATE EXTERNAL TABLE dbo.CetasUnionExt
+            WITH (LOCATION = '/z/', DATA_SOURCE = ExtSrc, FILE_FORMAT = ExtFmt)
+            AS SELECT Id, Notes FROM dbo.Src
+            UNION ALL
+            SELECT Id, Payload AS Notes FROM dbo.OtherSrc;
+            """;
+
+        var finding = Assert.Single(Scan(ScannerSql));
+        Assert.Equal("Notes", finding.ColumnName);
     }
 }

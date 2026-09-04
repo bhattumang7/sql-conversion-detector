@@ -76,9 +76,31 @@ public static class ExternalTableUnsupportedColumnTypeScanner
                     tableName, columnName, type.ToString(), sourcePath, column.StartLine, column.StartColumn));
             }
 
-            if (node.SelectStatement?.QueryExpression is QuerySpecification querySpecification)
+            if (node.SelectStatement?.QueryExpression is { } queryExpression)
             {
-                pendingCetasQueries[querySpecification] = tableName;
+                var arms = new List<QuerySpecification>();
+                CollectQuerySpecifications(queryExpression, arms);
+                foreach (var arm in arms)
+                {
+                    pendingCetasQueries[arm] = tableName;
+                }
+            }
+        }
+
+        private static void CollectQuerySpecifications(QueryExpression expression, List<QuerySpecification> sink)
+        {
+            switch (expression)
+            {
+                case QuerySpecification querySpecification:
+                    sink.Add(querySpecification);
+                    break;
+                case BinaryQueryExpression binaryQueryExpression:
+                    CollectQuerySpecifications(binaryQueryExpression.FirstQueryExpression, sink);
+                    CollectQuerySpecifications(binaryQueryExpression.SecondQueryExpression, sink);
+                    break;
+                case QueryParenthesisExpression queryParenthesisExpression:
+                    CollectQuerySpecifications(queryParenthesisExpression.QueryExpression, sink);
+                    break;
             }
         }
 

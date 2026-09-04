@@ -22,7 +22,10 @@ internal static class ExternalTableUnsupportedColumnType
             SELECT` (CETAS) column whose select-list source expression resolves to one of
             these types (`Msg 15877`, also oracle-confirmed) - this rule covers that form too,
             wherever the source expression's type is statically resolvable (a plain column
-            reference, a `CAST`/`CONVERT`, or a literal).
+            reference, a `CAST`/`CONVERT`, or a literal), including through a CTE and across
+            every arm of a top-level `UNION`/`UNION ALL`/`EXCEPT`/`INTERSECT` - each arm is
+            checked independently, oracle-confirmed that the engine rejects on any single arm's
+            column type regardless of what the other arms project.
 
             This is exactly the class of bug static analysis exists to catch before it reaches
             a deployment pipeline: the DDL parses fine and reads fine - PolyBase's whole
