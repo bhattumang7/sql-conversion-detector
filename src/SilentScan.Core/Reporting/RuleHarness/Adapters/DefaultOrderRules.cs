@@ -286,6 +286,8 @@ internal sealed class ExternalTableUnsupportedColumnTypeRule : IPerFileRule
 {
     public string Id => "ExternalTableUnsupportedColumnTypeScanner";
     public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => ExternalTableUnsupportedColumnTypeScanner.Scan(parseResult, context.Catalog);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => ExternalTableUnsupportedColumnTypeScanner.CreateRule(parseResult.SourcePath, context.Catalog);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => ExternalTableUnsupportedColumnTypeScanner.Harvest((ExternalTableUnsupportedColumnTypeScanner.Rule)moduleRule);
 }
 
 internal sealed class ExecuteAtLargeObjectParameterRule : IPerFileRule

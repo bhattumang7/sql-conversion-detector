@@ -4,4 +4,6 @@ EXEC sp_configure 'polybase enabled', 1;
 RECONFIGURE;
 EXEC sp_configure 'hadoop connectivity', 7;
 RECONFIGURE;
+EXEC sp_configure 'allow polybase export', 1;
+RECONFIGURE;
 GO

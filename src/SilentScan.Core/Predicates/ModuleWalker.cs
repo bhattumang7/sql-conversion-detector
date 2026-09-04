@@ -640,6 +640,13 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
         base.ExplicitVisit(node);
     }
 
+    public sealed override void ExplicitVisit(CreateExternalTableStatement node)
+    {
+        Dispatch(rule => rule.OnEnterCreateExternalTableStatement(node, this));
+
+        base.ExplicitVisit(node);
+    }
+
     public sealed override void ExplicitVisit(CreateIndexStatement node)
     {
         Dispatch(rule => rule.OnEnterCreateIndexStatement(node, this));

@@ -1001,9 +1001,9 @@ public static class ReadableScanReportWriter
             yield break;
         }
 
-        yield return new ReadableBlock.Heading(level, $"CREATE EXTERNAL TABLE columns declared with a PolyBase-unsupported type ({findings.Count})");
+        yield return new ReadableBlock.Heading(level, $"CREATE EXTERNAL TABLE columns declared or inferred with a PolyBase-unsupported type ({findings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "A CREATE EXTERNAL TABLE column's own declared type is checked against a fixed PolyBase allow-list before the engine ever opens the external data source - oracle-confirmed real DDL execution fails with Msg 46518 (\"The type '...' is not supported with external tables.\"), independent of the file format, DATA_SOURCE, or whether the referenced location exists.");
+            "A CREATE EXTERNAL TABLE column's declared type (or, for CETAS, its select-list source expression's resolved type) is checked against a fixed PolyBase allow-list before the engine ever opens the external data source - oracle-confirmed real DDL execution fails with Msg 46518 (\"The type '...' is not supported with external tables.\") for the explicit-column form, or Msg 15877 for CETAS, independent of the file format, DATA_SOURCE, or whether the referenced location exists.");
 
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ExternalTableUnsupportedColumnTypeRuleId));
         yield return new ReadableBlock.Table(

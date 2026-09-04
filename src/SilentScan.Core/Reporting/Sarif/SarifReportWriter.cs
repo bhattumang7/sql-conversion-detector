@@ -483,7 +483,7 @@ public static class SarifReportWriter
     private static SarifResult ToResult(ExternalTableUnsupportedColumnTypeFinding finding)
     {
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ExternalTableUnsupportedColumnTypeRuleId, finding.Confidence);
-        var message = $"External table column '{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} - this type is not supported with external tables (Msg 46518).";
+        var message = $"External table column '{finding.TableQualifiedName}.{finding.ColumnName}' is declared or resolves to {finding.TypeDisplay} - this type is not supported with external tables (Msg 46518/15877).";
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

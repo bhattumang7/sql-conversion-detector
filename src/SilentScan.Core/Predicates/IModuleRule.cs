@@ -272,6 +272,10 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterCreateExternalTableStatement(CreateExternalTableStatement node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterCreateIndexStatement(CreateIndexStatement node, ModuleWalker walker)
     {
     }

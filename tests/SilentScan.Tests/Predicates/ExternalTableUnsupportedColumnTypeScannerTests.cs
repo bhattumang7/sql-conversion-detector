@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 
@@ -9,7 +10,8 @@ public sealed class ExternalTableUnsupportedColumnTypeScannerTests
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
-        return ExternalTableUnsupportedColumnTypeScanner.Scan(result);
+        var catalog = CatalogBuilder.Build([result]);
+        return ExternalTableUnsupportedColumnTypeScanner.Scan(result, catalog);
     }
 
     [Theory]
@@ -67,9 +69,50 @@ public sealed class ExternalTableUnsupportedColumnTypeScannerTests
     }
 
     [Fact]
-    public void CreateExternalTableAsSelect_DoesNotFire()
+    public void CreateExternalTableAsSelect_WithUnresolvableSourceTypes_DoesNotFire()
     {
         var findings = Scan("""
+            CREATE EXTERNAL TABLE dbo.Ext
+            WITH (LOCATION = '/x/', DATA_SOURCE = ExtSrc, FILE_FORMAT = ExtFmt)
+            AS SELECT Id, Notes FROM dbo.Src;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CreateExternalTableAsSelect_WithUnsupportedSourceColumnType_Fires()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Src (Id INT NOT NULL, Notes XML NULL);
+            CREATE EXTERNAL TABLE dbo.Ext
+            WITH (LOCATION = '/x/', DATA_SOURCE = ExtSrc, FILE_FORMAT = ExtFmt)
+            AS SELECT Id, Notes FROM dbo.Src;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Notes", finding.ColumnName);
+    }
+
+    [Fact]
+    public void CreateExternalTableAsSelect_WithAliasedUnsupportedExpression_UsesAliasAsColumnName()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Src (Id INT NOT NULL, Notes NVARCHAR(4000) NULL);
+            CREATE EXTERNAL TABLE dbo.Ext
+            WITH (LOCATION = '/x/', DATA_SOURCE = ExtSrc, FILE_FORMAT = ExtFmt)
+            AS SELECT Id, Wide = CAST(Notes AS NVARCHAR(MAX)) FROM dbo.Src;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Wide", finding.ColumnName);
+    }
+
+    [Fact]
+    public void CreateExternalTableAsSelect_WithSupportedSourceColumnType_DoesNotFire()
+    {
+        var findings = Scan("""
+            CREATE TABLE dbo.Src (Id INT NOT NULL, Notes NVARCHAR(4000) NULL);
             CREATE EXTERNAL TABLE dbo.Ext
             WITH (LOCATION = '/x/', DATA_SOURCE = ExtSrc, FILE_FORMAT = ExtFmt)
             AS SELECT Id, Notes FROM dbo.Src;
