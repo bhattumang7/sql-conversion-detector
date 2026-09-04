@@ -1854,3 +1854,67 @@ WITH NATIVE_COMPILATION` module.
   columns with default-or-overridden names, an `ALTER TABLE ALTER COLUMN`
   hook cross-referencing ledger-column-kind) is a real catalog extension,
   not a quick win. Left for a future pass.
+
+* **`ScalarUdfInlineabilityScanner` coverage gap - shipped, via a working
+  oracle-verification method.** The previous pass's `OBJECTPROPERTYEX(id,
+  'IsInlineable')` probe returned `NULL` for both a trivial and a
+  non-inlineable function and was abandoned as unusable. The working
+  signal turned out to already exist in this codebase:
+  `ScalarUdfVerifier`/`PlanXmlCapture` compiles a real invocation and
+  checks the actual plan XML for a `<UserDefinedFunction>` element -
+  present means the engine did not inline the call, absent means it did.
+  Reusing that exact technique against real SQL Server: `@@ROWCOUNT`,
+  `@@ERROR`, `@@NESTLEVEL`, and `@@PROCID` each block inlining (a plan
+  with `<UserDefinedFunction>` every time), the same way the
+  already-covered `@@DBTS` does - none of the four were in the scanner's
+  blocker list. `@@IDENTITY`, `@@TRANCOUNT`, `@@SPID`, `@@OPTIONS`,
+  `ERROR_NUMBER()`, and `CHECKSUM()` were also probed and confirmed to
+  inline cleanly - not blockers, correctly left uncovered.
+  `RAND()`/`NEWID()`/`RAISERROR`/temp-table access inside a scalar
+  function are outright compile-time rejects (Msg 443/2772) regardless of
+  inlining, so a function using any of them can never exist to be
+  misclassified - not a scanner gap. Shipped by widening
+  `ScalarUdfInlineabilityScanner`'s existing `GlobalVariableExpression`
+  check from the single `@@DBTS` name to the five-name set.
+
+* **Item 4's encryption-state leg - shipped as a new
+  `AlwaysEncryptedAssignmentMismatchRuleId` family; legacy-LOB leg
+  redirected to a declaration-time reject, also shipped.** Oracle-confirmed
+  (Docker, SQL Server 2022) two distinct Msg 206 ("Operand type clash")
+  shapes for Always Encrypted columns, both regardless of which
+  encryption type/key is on either side: (1) a bare literal assigned into
+  an encrypted column via `INSERT ... VALUES` or an `UPDATE`/`MERGE` `SET`
+  clause always fails - the server cannot encrypt a plaintext literal
+  without a column-encryption-aware client; a `NULL` literal is exempt.
+  (2) a column-to-column assignment between two columns whose encryption
+  state differs - encrypted vs. plaintext in either direction, or
+  deterministic vs. randomized even under the same key - always fails.
+  Same-column self-assignment and matching-encryption-type assignments
+  compile and run fine. A parameter/variable source is never flagged -
+  the client driver is expected to encrypt it appropriately before
+  sending it. Shipped as `AlwaysEncryptedAssignmentMismatchScanner`,
+  covering `UPDATE`/`MERGE SET` (via the existing `AssignmentSetClause`
+  hook, resolving both sides through the query's own scope chain so
+  joins/aliases work) and `INSERT ... VALUES` (including `MERGE`'s
+  `INSERT` action) literal targets. `INSERT ... SELECT` column-to-column
+  mapping across a source table was scoped out - the target-column-list
+  tracking `TypedPredicateExtractor` already does for `WriteLossFinding`
+  would need to be duplicated to resolve it safely, disproportionate for
+  this pass. The legacy-LOB leg, as originally framed ("an assignment
+  whose source type cannot legally convert"), does not exist: oracle
+  probing found `DECLARE @x TEXT`/`NTEXT`/`IMAGE` fails to compile
+  unconditionally (Msg 2739, "invalid for local variables") regardless of
+  whether the variable is ever assigned - the same shape as the
+  collation leg's debunk (illegal syntax, not an assignment-time
+  restriction). Table columns and table-variable columns of these types,
+  and procedure/function parameters, remain legal. `IMAGE`'s own implicit
+  conversion behavior against character/XML types was also probed and
+  found genuinely asymmetric and inconsistent enough (e.g. `IMAGE`
+  accepts an implicit assignment from `VARCHAR(MAX)` but not from `TEXT`,
+  while the reverse direction rejects both) to risk false positives if
+  modeled from `SqlType` category alone - not shipped, deprioritized
+  behind the declaration-time reject, which is unconditional and safe.
+  Shipped the declaration-time fact as a new `DeprecatedSyntaxFindingKind.
+  LegacyLobLocalVariable` (High confidence, unlike this scanner's other
+  style-level findings, since it is a guaranteed compile failure, not a
+  deprecation warning).

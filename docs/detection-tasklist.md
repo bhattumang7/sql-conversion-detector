@@ -19,54 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **Lower-confidence/niche backlog from the 2026-08-22 gap survey — one
-      line each, group before scoping.** These didn't clear the bar for a
-      full write-up above (medium/low survey confidence, a narrower feature
-      area, or "verify it isn't already covered" rather than a clean new
-      gap) but are real enough not to drop silently. Each still needs its
-      own oracle confirmation before design.
-
-      2. `ScalarUdfInlineabilityScanner`: the survey claims it covers only
-        about half the engine's real inlineability checks; beyond the two
-        gaps already written up above (compat-level gate, re-eval-count
-        threshold), enumerate the remaining checks against the scanner's
-        own visitor one at a time rather than acting on the vague aggregate
-        figure. **FINDING:** attempted, inconclusive. `OBJECTPROPERTYEX(id,
-        'IsInlineable')` returned `NULL` for both a trivial function and a
-        non-inlineable one (using `ERROR_NUMBER()`) on SQL Server 2022 —
-        not a usable oracle signal as tried. Needs a different verification
-        method (e.g. checking actual plan inlining) before scoping.
-
-      4. New family: an assignment (`SET`/`INSERT`/`UPDATE`) whose source
-        type cannot legally implicit-convert to the target at all
-        (encryption-state mismatch, illegal collation coercion, legacy-LOB
-        ineligibility) is a compile-time reject, a stronger and distinct
-        claim from `WriteLossFinding`'s "compiles but silently loses data".
-        **FINDING: collation-coercion leg is false as an assignment claim.**
-        Local variables don't support a `DECLARE ... COLLATE` clause at all
-        on this engine build (`Msg 156`) — that's not a code-side gap to
-        chase, it's simply not legal syntax. Tested instead with two real
-        columns carrying different collations: a cross-collation column
-        assignment (`UPDATE b SET b.v = a.v`) is silently allowed (implicit
-        conversion to the target's collation, no error) — so assignment
-        itself is *not* a hard reject for collation. The genuine hard
-        reject (`Msg 468`, unresolvable collation conflict) only fires on a
-        *comparison* predicate (`a.v = b.v` in a JOIN/WHERE), which is
-        already `CollationConflictRuleId`'s territory, not a new assignment
-        family. `sql_variant = xml` (item 3) remains the one confirmed
-        "cannot implicit-convert at all" case; encryption-state and
-        legacy-LOB legs still unverified. **Shipped, broadened beyond the
-        original leg:** oracle probing the `sql_variant`/`xml` pairing
-        further found the true restriction is bigger than "these two types
-        clash" - a `sql_variant` source can never be read directly into any
-        differently-typed target (Msg 257 for ordinary types, Msg 206 for
-        xml specifically), and an `xml` target only accepts an implicit
-        assignment from another `xml` value or a character/binary-family
-        source, never anything else (Msg 206). Shipped as
-        `RestrictedImplicitAssignmentRuleId` covering both general
-        restrictions for local variable and parameter assignments.
-        Encryption-state and legacy-LOB legs remain open.
-
 ---
 
 ## Out of scope

@@ -249,6 +249,7 @@ public static class DeprecatedSyntaxScanner
     private static DeprecatedSyntaxFinding BuildComparisonFinding(DeprecatedSyntaxFindingKind kind, TSqlFragment node, string detail, string sourcePath) =>
         new(kind, sourcePath, sourcePath, node.StartLine, node.StartColumn, detail,
             kind is DeprecatedSyntaxFindingKind.EqualsNullComparison or DeprecatedSyntaxFindingKind.NotEqualsNullComparison
+                or DeprecatedSyntaxFindingKind.LegacyLobLocalVariable
                 ? FindingConfidence.High
                 : FindingConfidence.Medium);
 
@@ -377,6 +378,18 @@ public static class DeprecatedSyntaxScanner
         {
             Add(DeprecatedSyntaxFindingKind.DeprecatedSetRowcount, node,
                 "SET ROWCOUNT silently caps rows affected/returned by every subsequent statement in the session right now, not just in some future release - oracle-confirmed (a nonzero SET ROWCOUNT before a multi-row insert makes a later SELECT COUNT(*) return the capped count, not the true one). It is also deprecated - use TOP (n) instead; Microsoft documents it as not honored by INSERT/UPDATE/DELETE in a future release.");
+        }
+
+        public void OnEnterDeclareVariableStatement(DeclareVariableStatement node, ModuleWalker walker)
+        {
+            foreach (var declaration in node.Declarations)
+            {
+                if (declaration.DataType is SqlDataTypeReference { SqlDataTypeOption: SqlDataTypeOption.Text or SqlDataTypeOption.NText or SqlDataTypeOption.Image })
+                {
+                    Add(DeprecatedSyntaxFindingKind.LegacyLobLocalVariable, declaration,
+                        $"@{declaration.VariableName.Value} is declared with the deprecated text/ntext/image large-object types, which are invalid for local variables (Msg 2739) - migrate the column to VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX).");
+                }
+            }
         }
 
         public void OnEnterReadTextStatement(ReadTextStatement node, ModuleWalker walker)

@@ -43,6 +43,20 @@ public sealed class ScalarUdfVerifierTests : IAsyncLifetime
                 RETURN GETDATE();
             END;
             GO
+            CREATE FUNCTION dbo.fn_RowCountBlocked(@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN ISNULL(@@ROWCOUNT, 0) + @x;
+            END;
+            GO
+            CREATE FUNCTION dbo.fn_IdentityAllowed(@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN ISNULL(@@IDENTITY, 0) + @x;
+            END;
+            GO
             """;
         await new ScriptDeployer(_options).DeployAsync(ddl, DatabaseName);
     }
@@ -116,6 +130,26 @@ public sealed class ScalarUdfVerifierTests : IAsyncLifetime
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
 
         Assert.Equal(ScalarUdfOutcome.NotConfirmed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_RowCountBlockedFunctionClaimedNotInlineable_Confirmed()
+    {
+        var finding = Finding("dbo.fn_RowCountBlocked", ScalarUdfInlineability.NotInlineable);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(ScalarUdfOutcome.Confirmed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_IdentityAllowedFunctionClaimedInlineable_Confirmed()
+    {
+        var finding = Finding("dbo.fn_IdentityAllowed", ScalarUdfInlineability.Inlineable);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(ScalarUdfOutcome.Confirmed, result.Outcome);
     }
 
     [Fact]

@@ -15,6 +15,11 @@ public static class ScalarUdfInlineabilityScanner
         "value", "query", "exist",
     };
 
+    private static readonly HashSet<string> NonInlineableGlobalVariables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "@@DBTS", "@@ROWCOUNT", "@@ERROR", "@@NESTLEVEL", "@@PROCID",
+    };
+
     public static (string? Blocker, int TableReferenceCount) FindBlocker(
         StatementList? body, string ownQualifiedName, DatabaseCatalog catalog, IList<ProcedureParameter>? parameters = null)
     {
@@ -196,9 +201,9 @@ public static class ScalarUdfInlineabilityScanner
 
         public override void ExplicitVisit(GlobalVariableExpression node)
         {
-            if (string.Equals(node.Name, "@@DBTS", StringComparison.OrdinalIgnoreCase))
+            if (node.Name is { } name && NonInlineableGlobalVariables.Contains(name))
             {
-                Report("@@DBTS");
+                Report(name.ToUpperInvariant());
             }
 
             base.ExplicitVisit(node);

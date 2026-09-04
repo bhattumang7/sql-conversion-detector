@@ -66,6 +66,12 @@ public static class FindingRuleIds
     public const string FloatEqualityRuleId = "silentscan/predicates/float-equality";
     public const string FloatOrderDependentAggregateRuleId = "silentscan/predicates/float-order-dependent-aggregate";
     public const string AlwaysEncryptedOrderByRuleId = "silentscan/predicates/always-encrypted-order-by";
+    public static string AlwaysEncryptedAssignmentMismatchRuleId(AlwaysEncryptedAssignmentMismatchKind kind) => kind switch
+    {
+        AlwaysEncryptedAssignmentMismatchKind.LiteralSource => "silentscan/predicates/always-encrypted-assignment-literal-source",
+        AlwaysEncryptedAssignmentMismatchKind.EncryptionStateMismatch => "silentscan/predicates/always-encrypted-assignment-state-mismatch",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled AlwaysEncryptedAssignmentMismatchKind."),
+    };
     public const string RestrictedImplicitAssignmentRuleId = "silentscan/predicates/restricted-implicit-assignment";
     public const string RevertCookieTypeMismatchRuleId = "silentscan/predicates/revert-cookie-type-mismatch";
     public const string ForXmlExplicitInlineXsdRuleId = "silentscan/predicates/for-xml-explicit-inline-xsd";
@@ -263,6 +269,7 @@ public static class FindingRuleIds
     public const string DeprecatedSyntaxDeprecatedSetRowcountRuleId = "silentscan/deprecated-syntax/deprecated-set-rowcount";
     public const string DeprecatedSyntaxLegacyLobStatementRuleId = "silentscan/deprecated-syntax/legacy-lob-statement";
     public const string DeprecatedSyntaxLegacyLobFunctionRuleId = "silentscan/deprecated-syntax/legacy-lob-function";
+    public const string DeprecatedSyntaxLegacyLobLocalVariableRuleId = "silentscan/deprecated-syntax/legacy-lob-local-variable";
     public const string StatementShapeInsertWithoutColumnListRuleId = "silentscan/statement-shape/insert-without-column-list";
     public const string StatementShapeOrdinalOrderByRuleId = "silentscan/statement-shape/ordinal-order-by";
     public const string StatementShapeTableWithNoPrimaryKeyRuleId = "silentscan/statement-shape/table-with-no-primary-key";
@@ -583,6 +590,7 @@ public static class FindingRuleIds
         DeprecatedSyntaxFindingKind.DeprecatedSetRowcount => DeprecatedSyntaxDeprecatedSetRowcountRuleId,
         DeprecatedSyntaxFindingKind.LegacyLobStatement => DeprecatedSyntaxLegacyLobStatementRuleId,
         DeprecatedSyntaxFindingKind.LegacyLobFunction => DeprecatedSyntaxLegacyLobFunctionRuleId,
+        DeprecatedSyntaxFindingKind.LegacyLobLocalVariable => DeprecatedSyntaxLegacyLobLocalVariableRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DeprecatedSyntaxFindingKind."),
     };
     public static string StatementShapeRuleId(StatementShapeFindingKind kind) => kind switch

@@ -34,6 +34,7 @@ public static class RuleRegistry
         new FloatEqualityPredicateRule(),
         new FloatOrderDependentAggregateRule(),
         new AlwaysEncryptedOrderByRule(),
+        new AlwaysEncryptedAssignmentMismatchRule(),
         new RestrictedImplicitAssignmentRule(),
         new RevertCookieTypeMismatchRule(),
         new ForXmlExplicitInlineXsdRule(),

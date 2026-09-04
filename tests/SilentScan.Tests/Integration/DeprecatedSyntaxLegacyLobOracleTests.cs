@@ -169,6 +169,33 @@ public sealed class DeprecatedSyntaxLegacyLobOracleTests : OracleTestFixture
         Assert.Contains(lobFindings, f => f.Kind == DeprecatedSyntaxFindingKind.LegacyLobStatement && f.DetailText.Contains("READTEXT", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("TEXT")]
+    [InlineData("NTEXT")]
+    [InlineData("IMAGE")]
+    public async Task RealServer_LocalVariableDeclaredWithLegacyLobType_FailsWithMsg2739_AndScannerFlagsIt(string typeName)
+    {
+        var exception = await Assert.ThrowsAsync<SqlException>(
+            () => ExecuteNonQueryAsync($"DECLARE @x {typeName}; SELECT @x;"));
+
+        Assert.Equal(2739, exception.Number);
+
+        var findings = Scan($"DECLARE @x {typeName}; SELECT @x;");
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.LegacyLobLocalVariable);
+    }
+
+    [Fact]
+    public async Task RealServer_ProcedureParameterDeclaredAsText_Succeeds_AndScannerDoesNotFlagIt()
+    {
+        var exception = await Record.ExceptionAsync(
+            () => ExecuteNonQueryAsync("CREATE OR ALTER PROCEDURE dbo.TakesLobParam @x TEXT AS SELECT @x;"));
+
+        Assert.Null(exception);
+
+        var findings = Scan("CREATE PROCEDURE dbo.TakesLobParam @x TEXT AS SELECT @x;");
+        Assert.DoesNotContain(findings, f => f.Kind == DeprecatedSyntaxFindingKind.LegacyLobLocalVariable);
+    }
+
     private async Task<long> ReadCounterAsync(string instanceName)
     {
         await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));

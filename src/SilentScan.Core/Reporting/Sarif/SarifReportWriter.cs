@@ -120,6 +120,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<FloatOrderDependentAggregateFinding>("FloatOrderDependentAggregateScanner").Select(ToResult));
         results.AddRange(report.Find<DynamicDataMaskingFinding>(nameof(DynamicDataMaskingScanner)).Select(ToResult));
         results.AddRange(report.Find<AlwaysEncryptedOrderByFinding>("AlwaysEncryptedOrderByScanner").Select(ToResult));
+        results.AddRange(report.Find<AlwaysEncryptedAssignmentMismatchFinding>(nameof(AlwaysEncryptedAssignmentMismatchScanner)).Select(ToResult));
         results.AddRange(report.Find<RestrictedImplicitAssignmentFinding>("RestrictedImplicitAssignmentScanner").Select(ToResult));
         results.AddRange(report.Find<RevertCookieTypeMismatchFinding>("RevertCookieTypeMismatchScanner").Select(ToResult));
         results.AddRange(report.Find<ForXmlExplicitInlineXsdFinding>("ForXmlExplicitInlineXsdScanner").Select(ToResult));
@@ -1645,6 +1646,16 @@ public static class SarifReportWriter
 
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AlwaysEncryptedOrderByRuleId, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.EncryptionTypeDisplay}) is referenced in this ORDER BY clause - an Always Encrypted column can never be sorted on; the statement does not compile.";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(AlwaysEncryptedAssignmentMismatchFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AlwaysEncryptedAssignmentMismatchRuleId(finding.Kind), finding.Confidence);
+        var message = finding.Kind == AlwaysEncryptedAssignmentMismatchKind.LiteralSource
+            ? $"'{finding.TargetTableQualifiedName}.{finding.TargetColumnName}' ({finding.TargetEncryptionTypeDisplay}) is assigned a literal value directly - the server cannot encrypt a plaintext literal without a column-encryption-aware client; the statement does not compile."
+            : $"'{finding.TargetTableQualifiedName}.{finding.TargetColumnName}' ({finding.TargetEncryptionTypeDisplay}) is assigned from '{finding.SourceTableQualifiedName}.{finding.SourceColumnName}' ({finding.SourceEncryptionTypeDisplay}) - the Always Encrypted state differs between source and target; the statement does not compile.";
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

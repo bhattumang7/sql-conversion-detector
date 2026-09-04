@@ -571,6 +571,42 @@ public sealed class ScalarUdfInfoTests
         Assert.Contains("@@DBTS", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("@@ROWCOUNT")]
+    [InlineData("@@ERROR")]
+    [InlineData("@@NESTLEVEL")]
+    [InlineData("@@PROCID")]
+    public void Build_FunctionReferencingNonInlineableGlobalVariable_RecordsInlineabilityBlocker(string globalVariable)
+    {
+        var catalog = BuildFrom($$"""
+            CREATE FUNCTION dbo.fn_Global (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN ISNULL({{globalVariable}}, 0) + @x;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Global", out var info));
+        Assert.Contains(globalVariable, info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionReferencingIdentityGlobalVariable_DoesNotRecordInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_Identity (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN ISNULL(@@IDENTITY, 0) + @x;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Identity", out var info));
+        Assert.Null(info!.InlineabilityBlocker);
+    }
+
     [Fact]
     public void Build_ClrFunction_RegistersClrKindAndSkipsBlockerScan()
     {

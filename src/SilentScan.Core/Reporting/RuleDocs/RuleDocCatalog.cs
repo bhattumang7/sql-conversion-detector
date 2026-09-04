@@ -151,6 +151,8 @@ public static class RuleDocCatalog
         [Predicates.DynamicDataMaskingPredicateExposure.RuleId] = Predicates.DynamicDataMaskingPredicateExposure.Content,
         [Predicates.DynamicDataMaskingComputedExpressionCollapse.RuleId] = Predicates.DynamicDataMaskingComputedExpressionCollapse.Content,
         [Predicates.AlwaysEncryptedOrderBy.RuleId] = Predicates.AlwaysEncryptedOrderBy.Content,
+        [Predicates.AlwaysEncryptedAssignmentMismatch.LiteralSource.RuleId] = Predicates.AlwaysEncryptedAssignmentMismatch.LiteralSource.Content,
+        [Predicates.AlwaysEncryptedAssignmentMismatch.EncryptionStateMismatch.RuleId] = Predicates.AlwaysEncryptedAssignmentMismatch.EncryptionStateMismatch.Content,
         [Predicates.RestrictedImplicitAssignment.RuleId] = Predicates.RestrictedImplicitAssignment.Content,
         [Predicates.RevertCookieTypeMismatch.RuleId] = Predicates.RevertCookieTypeMismatch.Content,
         [Predicates.ForXmlExplicitInlineXsd.RuleId] = Predicates.ForXmlExplicitInlineXsd.Content,
@@ -369,6 +371,7 @@ public static class RuleDocCatalog
         [DeprecatedSyntax.DeprecatedSetRowcount.RuleId] = DeprecatedSyntax.DeprecatedSetRowcount.Content,
         [DeprecatedSyntax.LegacyLobStatement.RuleId] = DeprecatedSyntax.LegacyLobStatement.Content,
         [DeprecatedSyntax.LegacyLobFunction.RuleId] = DeprecatedSyntax.LegacyLobFunction.Content,
+        [DeprecatedSyntax.LegacyLobLocalVariable.RuleId] = DeprecatedSyntax.LegacyLobLocalVariable.Content,
 
         [Duplication.CommentedOutCode.RuleId] = Duplication.CommentedOutCode.Content,
         [Duplication.DuplicatedStringLiteral.RuleId] = Duplication.DuplicatedStringLiteral.Content,

@@ -439,4 +439,31 @@ public sealed class DeprecatedSyntaxScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DeprecatedSyntaxFindingKind.DeprecatedSetRowcount);
     }
+
+    [Theory]
+    [InlineData("TEXT")]
+    [InlineData("NTEXT")]
+    [InlineData("IMAGE")]
+    public void LocalVariableDeclaredWithLegacyLobType_Fires(string typeName)
+    {
+        var findings = Scan($"DECLARE @x {typeName}; SELECT @x;");
+
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.LegacyLobLocalVariable);
+    }
+
+    [Fact]
+    public void LocalVariableDeclaredWithVarcharMax_NeverFiresLegacyLob()
+    {
+        var findings = Scan("DECLARE @x NVARCHAR(MAX); SELECT @x;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == DeprecatedSyntaxFindingKind.LegacyLobLocalVariable);
+    }
+
+    [Fact]
+    public void TableColumnDeclaredAsText_NeverFiresLegacyLobLocalVariable()
+    {
+        var findings = Scan("CREATE TABLE dbo.T (Notes TEXT);");
+
+        Assert.DoesNotContain(findings, f => f.Kind == DeprecatedSyntaxFindingKind.LegacyLobLocalVariable);
+    }
 }

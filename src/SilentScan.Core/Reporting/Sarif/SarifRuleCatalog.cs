@@ -47,6 +47,7 @@ public static class SarifRuleCatalog
     public const string ChangeTrackingEncryptedPrimaryKeyRuleId = FindingRuleIds.ChangeTrackingEncryptedPrimaryKeyRuleId;
     public static string XmlSchemaCollectionDisallowedTypeRuleId(XmlSchemaCollectionDisallowedTypeKind kind) => FindingRuleIds.XmlSchemaCollectionDisallowedTypeRuleId(kind);
     public const string XmlSchemaCollectionMismatchRuleId = FindingRuleIds.XmlSchemaCollectionMismatchRuleId;
+    public static string AlwaysEncryptedAssignmentMismatchRuleId(AlwaysEncryptedAssignmentMismatchKind kind) => FindingRuleIds.AlwaysEncryptedAssignmentMismatchRuleId(kind);
     public static string SelectiveXmlIndexValueColumnRuleId(SelectiveXmlIndexValueColumnFindingKind kind) => FindingRuleIds.SelectiveXmlIndexValueColumnRuleId(kind);
     public static string FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind kind) => FindingRuleIds.FullTextIndexDdlRuleId(kind);
     public static string SemanticSearchRuleId(SemanticSearchFindingKind kind) => FindingRuleIds.SemanticSearchRuleId(kind);
@@ -184,6 +185,7 @@ public static class SarifRuleCatalog
     public const string DeprecatedSyntaxDeprecatedSetRowcountRuleId = FindingRuleIds.DeprecatedSyntaxDeprecatedSetRowcountRuleId;
     public const string DeprecatedSyntaxLegacyLobStatementRuleId = FindingRuleIds.DeprecatedSyntaxLegacyLobStatementRuleId;
     public const string DeprecatedSyntaxLegacyLobFunctionRuleId = FindingRuleIds.DeprecatedSyntaxLegacyLobFunctionRuleId;
+    public const string DeprecatedSyntaxLegacyLobLocalVariableRuleId = FindingRuleIds.DeprecatedSyntaxLegacyLobLocalVariableRuleId;
     public const string StatementShapeInsertWithoutColumnListRuleId = FindingRuleIds.StatementShapeInsertWithoutColumnListRuleId;
     public const string StatementShapeOrdinalOrderByRuleId = FindingRuleIds.StatementShapeOrdinalOrderByRuleId;
     public const string StatementShapeTableWithNoPrimaryKeyRuleId = FindingRuleIds.StatementShapeTableWithNoPrimaryKeyRuleId;
