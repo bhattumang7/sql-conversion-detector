@@ -1,4 +1,3 @@
-using SilentScan.Core.Catalog;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
 using SilentScan.Core.TypeInference;
@@ -138,7 +137,15 @@ public sealed class CorpusFindingVerifier
         }
 
         var hasDynamicRangeSeek = planXml.Contains("GetRangeThroughConvert", StringComparison.Ordinal);
-        return $"Column converted as predicted, but GetRangeThroughConvert was {(hasDynamicRangeSeek ? "present" : "absent")}, which does not match verdict {verdict}.";
+        return $"Column converted as predicted, but GetRangeThroughConvert was {(hasDynamicRangeSeek ? "present" : "absent")}, which does not match verdict {verdict}.{DescribePlanAffectingConvertCorroboration(planXml)}";
+    }
+
+    private static string DescribePlanAffectingConvertCorroboration(string planXml)
+    {
+        var issues = PlanAffectingConvertDetector.FindWarnings(planXml).Select(w => w.ConvertIssue).Distinct(StringComparer.Ordinal).ToList();
+        return issues.Count == 0
+            ? " The engine raised no PlanAffectingConvert warning for this plan."
+            : $" The engine raised PlanAffectingConvert ({string.Join(", ", issues)}) for this plan.";
     }
 
     private static string NotProbeableReason(TypedPredicateFinding finding) =>

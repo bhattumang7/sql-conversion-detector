@@ -1,4 +1,3 @@
-using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
@@ -157,6 +156,25 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
 
         Assert.Equal(CorpusFindingOutcome.NotConfirmed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ConflictingCollationColumn_RangeSeekVerdictButPlanIsActuallyScanForced_DetailRecordsPlanAffectingConvertWarning()
+    {
+
+        var finding = new TypedPredicateFinding(
+            Verdict.RangeSeek,
+            ColumnOperand("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")), indexed: true),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("Latin1_General_CI_AS"))),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.NotConfirmed, result.Outcome);
+        Assert.Contains("The engine raised PlanAffectingConvert (Seek Plan) for this plan.", result.Detail, StringComparison.Ordinal);
     }
 
     [Fact]
