@@ -59,6 +59,29 @@ internal sealed class NumericValueRangeSet
     public NumericValueRangeSet Union(NumericValueRangeSet other) =>
         new(Coalesce([.. _ranges, .. other._ranges]), NullPossible || other.NullPossible);
 
+    public bool IsSubsetOf(NumericValueRangeSet other)
+    {
+        if (NullPossible && !other.NullPossible)
+        {
+            return false;
+        }
+
+        return _ranges.All(range => other._ranges.Any(candidate => Covers(candidate, range)));
+    }
+
+    private static bool Covers(Range outer, Range inner)
+    {
+        var lowerOk = outer.Lower is null
+            || (inner.Lower is { } innerLower
+                && (innerLower > outer.Lower.Value || (innerLower == outer.Lower.Value && (outer.LowerInclusive || !inner.LowerInclusive))));
+
+        var upperOk = outer.Upper is null
+            || (inner.Upper is { } innerUpper
+                && (innerUpper < outer.Upper.Value || (innerUpper == outer.Upper.Value && (outer.UpperInclusive || !inner.UpperInclusive))));
+
+        return lowerOk && upperOk;
+    }
+
     private static (decimal? Value, bool Inclusive) TighterLower(decimal? a, bool aIncl, decimal? b, bool bIncl)
     {
         if (a is null)

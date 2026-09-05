@@ -1,11 +1,12 @@
 using System.Globalization;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates.Normalization;
 
 public static class PredicateSurvivalAnalyzer
 {
-    public readonly record struct ColumnFacts(bool? IsNotNull, bool? CollationGuaranteesDistinctLiterals);
+    public readonly record struct ColumnFacts(bool? IsNotNull, bool? CollationGuaranteesDistinctLiterals, bool IsLegacyLargeObject = false);
 
     public static IReadOnlySet<TSqlFragment> FindDeadComparisons(
         BooleanExpression? searchCondition, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
@@ -26,7 +27,7 @@ public static class PredicateSurvivalAnalyzer
         orMembers.Count > 0
         && (orMembers.Any(member => Classify(member, resolveColumnFacts).AlwaysTrue) || DetectTautology(orMembers, resolveColumnFacts));
 
-    private readonly record struct ColumnKey(string Qualifier, string Name);
+    private readonly record struct ColumnKey(string Qualifier, string Name, string? Wrapper = null);
 
     private static (bool NeverTrue, bool AlwaysTrue, bool AlwaysFalse) Classify(
         BooleanExpression node, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
@@ -98,6 +99,40 @@ public static class PredicateSurvivalAnalyzer
         }
     }
 
+    private static void MarkSubsumedDisjuncts(IReadOnlyList<BooleanExpression> disjuncts, HashSet<TSqlFragment> dead)
+    {
+        var byColumn = new Dictionary<ColumnKey, List<(BooleanExpression Node, NumericValueRangeSet Range)>>();
+        foreach (var disjunct in disjuncts)
+        {
+            if (disjunct is not BooleanComparisonExpression cmp
+                || TryGetLiteralConstraint(cmp) is not { Numeric: { } value } constraint)
+            {
+                continue;
+            }
+
+            if (!byColumn.TryGetValue(constraint.Column, out var list))
+            {
+                byColumn[constraint.Column] = list = [];
+            }
+
+            list.Add((disjunct, ToRangeSet(constraint.Op, value)));
+        }
+
+        foreach (var group in byColumn.Values.Where(g => g.Count > 1))
+        {
+            NumericValueRangeSet? coveredSoFar = null;
+            foreach (var (node, range) in group)
+            {
+                if (coveredSoFar is not null && range.IsSubsetOf(coveredSoFar))
+                {
+                    dead.Add(node);
+                }
+
+                coveredSoFar = coveredSoFar is null ? range : coveredSoFar.Union(range);
+            }
+        }
+    }
+
     private static bool SamePredicate(BooleanExpression left, BooleanExpression right)
     {
         if (left is BooleanComparisonExpression a && right is BooleanComparisonExpression b
@@ -150,7 +185,9 @@ public static class PredicateSurvivalAnalyzer
                 break;
 
             case BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.Or }:
-                foreach (var d in Flatten(node, BooleanBinaryExpressionType.Or))
+                var disjuncts = Flatten(node, BooleanBinaryExpressionType.Or);
+                MarkSubsumedDisjuncts(disjuncts, dead);
+                foreach (var d in disjuncts)
                 {
                     MarkDead(d, resolveColumnFacts, dead);
                 }
@@ -280,12 +317,74 @@ public static class PredicateSurvivalAnalyzer
         _ => null,
     };
 
-    private static ColumnKey? TryGetColumnKey(ScalarExpression expr) =>
-        expr is ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: > 0 } ids }
-            ? new ColumnKey(
+    private static ColumnKey? TryGetColumnKey(ScalarExpression expr)
+    {
+        if (expr is ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: > 0 } ids })
+        {
+            return new ColumnKey(
                 string.Join(".", ids.Take(ids.Count - 1).Select(i => i.Value.ToLowerInvariant())),
-                ids[^1].Value.ToLowerInvariant())
-            : null;
+                ids[^1].Value.ToLowerInvariant());
+        }
+
+        if (TryGetWrappedColumnOperand(expr) is not { } wrapped || TryGetColumnKey(wrapped) is not { } innerKey)
+        {
+            return null;
+        }
+
+        return innerKey with { Wrapper = FragmentTextRenderer.Render(expr) };
+    }
+
+    private static ColumnReferenceExpression? TryGetBareColumnReference(ScalarExpression expr)
+    {
+        if (expr is ColumnReferenceExpression colRef)
+        {
+            return colRef;
+        }
+
+        return TryGetWrappedColumnOperand(expr) is { } wrapped ? TryGetBareColumnReference(wrapped) : null;
+    }
+
+    private static ScalarExpression? TryGetWrappedColumnOperand(ScalarExpression expr) => expr switch
+    {
+        CastCall cast => cast.Parameter,
+        ConvertCall convert => convert.Parameter,
+        FunctionCall { CallTarget: null } func => SingleColumnArgument(func.Parameters),
+        BinaryExpression bin => SingleColumnSide(bin),
+        _ => null,
+    };
+
+    private static ScalarExpression? SingleColumnArgument(IList<ScalarExpression> parameters)
+    {
+        ScalarExpression? found = null;
+        foreach (var parameter in parameters)
+        {
+            if (parameter is not ColumnReferenceExpression)
+            {
+                continue;
+            }
+
+            if (found is not null)
+            {
+                return null;
+            }
+
+            found = parameter;
+        }
+
+        return found;
+    }
+
+    private static ScalarExpression? SingleColumnSide(BinaryExpression bin)
+    {
+        var firstIsColumn = bin.FirstExpression is ColumnReferenceExpression;
+        var secondIsColumn = bin.SecondExpression is ColumnReferenceExpression;
+        if (firstIsColumn == secondIsColumn)
+        {
+            return null;
+        }
+
+        return firstIsColumn ? bin.FirstExpression : bin.SecondExpression;
+    }
 
     private static decimal? TryGetNumericLiteral(ScalarExpression expr) => expr switch
     {
@@ -362,6 +461,11 @@ public static class PredicateSurvivalAnalyzer
         IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
     {
         var confirmedNotNull = IsColumnNotNull(leaves, resolveColumnFacts) == true;
+        if (IsColumnLegacyLargeObject(leaves, resolveColumnFacts))
+        {
+            return (false, false);
+        }
+
         var literalConstraints = leaves.Select(c => c.Constraint).Where(c => c is not null).Select(c => c!.Value).ToList();
         if (leaves.Any(c => c.IsNull) && literalConstraints.Count > 0)
         {
@@ -409,7 +513,7 @@ public static class PredicateSurvivalAnalyzer
 
     private static bool IsGroupTautology(IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
     {
-        if (IsColumnNotNull(leaves, resolveColumnFacts) != true)
+        if (IsColumnNotNull(leaves, resolveColumnFacts) != true || IsColumnLegacyLargeObject(leaves, resolveColumnFacts))
         {
             return false;
         }
@@ -491,7 +595,7 @@ public static class PredicateSurvivalAnalyzer
                     break;
 
                 case BooleanComparisonExpression cmp when TryGetLiteralConstraint(cmp) is { } constraint:
-                    var colRef2 = cmp.FirstExpression as ColumnReferenceExpression ?? cmp.SecondExpression as ColumnReferenceExpression;
+                    var colRef2 = TryGetBareColumnReference(cmp.FirstExpression) ?? TryGetBareColumnReference(cmp.SecondExpression);
                     if (colRef2 is not null)
                     {
                         Add(constraint.Column, new GroupedLeaf(false, false, constraint, colRef2));
@@ -525,6 +629,10 @@ public static class PredicateSurvivalAnalyzer
     private static bool? IsColumnNotNull(
         IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>
         leaves.Count > 0 ? resolveColumnFacts(leaves[0].ColumnRef).IsNotNull : null;
+
+    private static bool IsColumnLegacyLargeObject(
+        IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>
+        leaves.Count > 0 && resolveColumnFacts(leaves[0].ColumnRef).IsLegacyLargeObject;
 
     private static bool? ColumnGuaranteesDistinctLiterals(
         IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>

@@ -516,4 +516,112 @@ public sealed class PredicateSurvivalAnalyzerTests
         var (dead, leaves) = Analyze(whereExpr);
         Assert.All(leaves, l => Assert.Contains(l, dead));
     }
+
+    [Fact]
+    public void SameCastWrappedColumnConflictingEquality_BothMarkedDead()
+    {
+        var (dead, leaves) = Analyze("CAST(NotNullCol AS INT) = 1 AND CAST(NotNullCol AS INT) = 2");
+
+        Assert.Equal(2, leaves.Count);
+        Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
+
+    [Fact]
+    public void SameConvertWrappedColumnConflictingEquality_BothMarkedDead()
+    {
+        var (dead, leaves) = Analyze("CONVERT(INT, NotNullCol) = 1 AND CONVERT(INT, NotNullCol) = 2");
+        Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
+
+    [Fact]
+    public void SameFunctionWrappedColumnConflictingEquality_BothMarkedDead()
+    {
+        var (dead, leaves) = Analyze("YEAR(NotNullCol) = 2020 AND YEAR(NotNullCol) = 2021");
+        Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
+
+    [Fact]
+    public void SameArithmeticWrappedColumnConflictingEquality_BothMarkedDead()
+    {
+        var (dead, leaves) = Analyze("NotNullCol + 1 = 5 AND NotNullCol + 1 = 6");
+        Assert.All(leaves, l => Assert.Contains(l, dead));
+    }
+
+    [Fact]
+    public void DifferentCastTargetTypes_NeverConflated()
+    {
+        var (dead, _) = Analyze("CAST(NotNullCol AS INT) = 1 AND CAST(NotNullCol AS BIGINT) = 2");
+        Assert.Empty(dead);
+    }
+
+    [Fact]
+    public void DifferentFunctionWraps_NeverConflated()
+    {
+        var (dead, _) = Analyze("YEAR(NotNullCol) = 2020 AND MONTH(NotNullCol) = 12");
+        Assert.Empty(dead);
+    }
+
+    [Fact]
+    public void BareColumnAndCastWrappedColumn_NeverConflated()
+    {
+        var (dead, _) = Analyze("NotNullCol = 1 AND CAST(NotNullCol AS INT) = 2");
+        Assert.Empty(dead);
+    }
+
+    [Fact]
+    public void ColumnToColumnArithmetic_NeverTreatedAsWrappedColumnOperand()
+    {
+        var (dead, _) = Analyze("NotNullCol + NullableCol = 5 AND NotNullCol + NullableCol = 6");
+        Assert.Empty(dead);
+    }
+
+    [Fact]
+    public void SameCastWrappedColumnAgreeingEquality_NotDead()
+    {
+        Assert.Empty(Analyze("CAST(NotNullCol AS INT) = 1 AND CAST(NotNullCol AS INT) = 1").Dead);
+    }
+
+    [Fact]
+    public void WiderRangeDisjunctFirst_NarrowerLaterDisjunctSubsumed_MarkedDead()
+    {
+        var (dead, leaves) = Analyze("NotNullCol >= 3 OR NotNullCol > 5");
+
+        Assert.Equal(2, leaves.Count);
+        Assert.Contains(leaves[1], dead);
+        Assert.DoesNotContain(leaves[0], dead);
+    }
+
+    [Fact]
+    public void NarrowerRangeDisjunctFirst_LaterWiderDisjunctNeverMarkedDead()
+    {
+        var (dead, leaves) = Analyze("NotNullCol > 5 OR NotNullCol >= 3");
+
+        Assert.Equal(2, leaves.Count);
+        Assert.DoesNotContain(leaves[0], dead);
+        Assert.DoesNotContain(leaves[1], dead);
+    }
+
+    [Fact]
+    public void DisjointRangeDisjuncts_NeitherMarkedDead()
+    {
+        var (dead, _) = Analyze("NotNullCol > 5 OR NotNullCol < 3");
+        Assert.Empty(dead);
+    }
+
+    [Fact]
+    public void DifferentColumnsAcrossOrDisjuncts_NeverConflatedForSubsumption()
+    {
+        var (dead, _) = Analyze("NotNullCol >= 3 OR NullableCol > 5");
+        Assert.Empty(dead);
+    }
+
+    [Fact]
+    public void RepeatedIdenticalRangeDisjunct_OnlyLaterOccurrenceMarkedDead()
+    {
+        var (dead, leaves) = Analyze("NotNullCol > 5 OR NotNullCol > 5");
+
+        Assert.Equal(2, leaves.Count);
+        Assert.DoesNotContain(leaves[0], dead);
+        Assert.Contains(leaves[1], dead);
+    }
 }
