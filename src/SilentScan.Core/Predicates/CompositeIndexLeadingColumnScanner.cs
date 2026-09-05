@@ -35,6 +35,10 @@ public static class CompositeIndexLeadingColumnScanner
 
         protected override void InspectStatement(ConstrainedStatement statement)
         {
+            if (statement.WhereConditionIsUnsatisfiable())
+            {
+                return;
+            }
 
             var anyReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.For(Catalog));
             var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, anyReferencedColumns, Catalog);

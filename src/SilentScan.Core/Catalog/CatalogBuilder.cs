@@ -695,7 +695,7 @@ public static class CatalogBuilder
             var isSchemaBound = node.Options.Any(option => option.OptionKind == FunctionOptionKind.SchemaBinding);
             var (blocker, tableReferenceCount) = isClr
                 ? (null, 0)
-                : ScalarUdfInlineabilityScanner.FindBlocker(node.StatementList, qualifiedName, catalog, node.Parameters);
+                : ScalarUdfInlineabilityScanner.FindBlocker(node.StatementList, qualifiedName, catalog, node.Parameters, node.Options);
 
             catalog.AddScalarUdfInfo(
                 qualifiedName,

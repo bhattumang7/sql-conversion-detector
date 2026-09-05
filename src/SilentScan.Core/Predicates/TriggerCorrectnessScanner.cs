@@ -4,6 +4,7 @@ using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
 using SilentScan.Core.Predicates.Normalization;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
 
@@ -328,7 +329,10 @@ public static class TriggerCorrectnessScanner
                 }
 
                 var catalogColumn = catalog.Find(targetQualifiedName)?.FindColumn(last.Value, catalog.IdentifierComparer);
-                return new PredicateSurvivalAnalyzer.ColumnFacts(catalogColumn is null ? null : !catalogColumn.IsNullable, null);
+                return new PredicateSurvivalAnalyzer.ColumnFacts(
+                    catalogColumn is null ? null : !catalogColumn.IsNullable,
+                    null,
+                    catalogColumn?.Type?.Category is SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image);
             }
 
             return PredicateSurvivalAnalyzer.IsTautology(searchConditions, ResolveInsertedColumnFacts);

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Common;
 
@@ -5,6 +6,8 @@ namespace SilentScan.Core.Catalog;
 
 public static class ScalarUdfInlineabilityScanner
 {
+    private const int MaxNestingDepth = 32;
+
     private static readonly HashSet<string> TimeDependentIntrinsics = new(StringComparer.OrdinalIgnoreCase)
     {
         "GETDATE", "GETUTCDATE", "SYSDATETIME", "SYSUTCDATETIME", "SYSDATETIMEOFFSET", "CURRENT_TIMESTAMP",
@@ -20,8 +23,11 @@ public static class ScalarUdfInlineabilityScanner
         "@@DBTS", "@@ROWCOUNT", "@@ERROR", "@@NESTLEVEL", "@@PROCID",
     };
 
+    private static readonly ConditionalWeakTable<DatabaseCatalog, List<(string Caller, string Callee)>> CallGraphsByCatalog = [];
+
     public static (string? Blocker, int TableReferenceCount) FindBlocker(
-        StatementList? body, string ownQualifiedName, DatabaseCatalog catalog, IList<ProcedureParameter>? parameters = null)
+        StatementList? body, string ownQualifiedName, DatabaseCatalog catalog,
+        IList<ProcedureParameter>? parameters = null, IList<FunctionOption>? options = null)
     {
         if (parameters is not null)
         {
@@ -33,6 +39,11 @@ public static class ScalarUdfInlineabilityScanner
                     return ($"table-valued parameter {parameter.VariableName.Value}", 0);
                 }
             }
+        }
+
+        if (options is not null && options.Any(option => option.OptionKind == FunctionOptionKind.ExecuteAs))
+        {
+            return ("EXECUTE AS clause", 0);
         }
 
         if (body is null)
@@ -48,6 +59,7 @@ public static class ScalarUdfInlineabilityScanner
     private sealed class Visitor(string ownQualifiedName, DatabaseCatalog catalog) : TSqlFragmentVisitor
     {
         private int _returnStatementCount;
+        private int _nestingDepth;
 
         public string? Blocker { get; private set; }
 
@@ -56,13 +68,31 @@ public static class ScalarUdfInlineabilityScanner
         public override void ExplicitVisit(WhileStatement node)
         {
             Report("WHILE loop");
+            EnterNestedBlock();
             base.ExplicitVisit(node);
+            ExitNestedBlock();
         }
 
         public override void ExplicitVisit(TryCatchStatement node)
         {
             Report("TRY/CATCH");
+            EnterNestedBlock();
             base.ExplicitVisit(node);
+            ExitNestedBlock();
+        }
+
+        public override void ExplicitVisit(BeginEndBlockStatement node)
+        {
+            EnterNestedBlock();
+            base.ExplicitVisit(node);
+            ExitNestedBlock();
+        }
+
+        public override void ExplicitVisit(IfStatement node)
+        {
+            EnterNestedBlock();
+            base.ExplicitVisit(node);
+            ExitNestedBlock();
         }
 
         public override void ExplicitVisit(DeclareTableVariableStatement node)
@@ -160,10 +190,14 @@ public static class ScalarUdfInlineabilityScanner
                 {
                     Report("recursive self-reference");
                 }
-                else if (catalog.TryGetScalarUdfInfo(qualifiedName, out var calleeInfo)
-                    && calleeInfo is { InlineabilityBlocker: { Length: > 0 } } or { EngineIsInlineable: false })
+                else if (catalog.TryGetScalarUdfInfo(qualifiedName, out var calleeInfo))
                 {
-                    Report($"references non-inlineable UDF {qualifiedName}");
+                    if (calleeInfo is { InlineabilityBlocker: { Length: > 0 } } or { EngineIsInlineable: false })
+                    {
+                        Report($"references non-inlineable UDF {qualifiedName}");
+                    }
+
+                    RecordCallAndCheckForMutualRecursion(qualifiedName);
                 }
             }
             else if (node.FunctionName is { Value: { } aggName } && string.Equals(aggName, "STRING_AGG", StringComparison.OrdinalIgnoreCase))
@@ -209,6 +243,17 @@ public static class ScalarUdfInlineabilityScanner
             base.ExplicitVisit(node);
         }
 
+        private void EnterNestedBlock()
+        {
+            _nestingDepth++;
+            if (_nestingDepth >= MaxNestingDepth)
+            {
+                Report($"statement/block nesting depth reached {MaxNestingDepth}");
+            }
+        }
+
+        private void ExitNestedBlock() => _nestingDepth--;
+
         private static bool ReferencesVariable(ScalarExpression expression, string variableName)
         {
             var finder = new VariableReferenceFinder(variableName);
@@ -229,6 +274,43 @@ public static class ScalarUdfInlineabilityScanner
 
                 base.ExplicitVisit(node);
             }
+        }
+
+        private void RecordCallAndCheckForMutualRecursion(string calleeQualifiedName)
+        {
+            var edges = CallGraphEdges(catalog);
+            edges.Add((ownQualifiedName, calleeQualifiedName));
+
+            if (CanReach(edges, calleeQualifiedName, ownQualifiedName, catalog.IdentifierComparer))
+            {
+                Report($"mutual recursion through {calleeQualifiedName}");
+            }
+        }
+
+        private static List<(string Caller, string Callee)> CallGraphEdges(DatabaseCatalog catalog) =>
+            CallGraphsByCatalog.GetValue(catalog, static _ => []);
+
+        private static bool CanReach(List<(string Caller, string Callee)> edges, string from, string to, StringComparer comparer)
+        {
+            var visited = new HashSet<string>(comparer) { from };
+            var stack = new Stack<string>();
+            stack.Push(from);
+
+            while (stack.Count > 0)
+            {
+                var current = stack.Pop();
+                if (comparer.Equals(current, to))
+                {
+                    return true;
+                }
+
+                foreach (var edge in edges.Where(edge => comparer.Equals(edge.Caller, current) && visited.Add(edge.Callee)))
+                {
+                    stack.Push(edge.Callee);
+                }
+            }
+
+            return false;
         }
 
         private void Report(string reason) => Blocker ??= reason;

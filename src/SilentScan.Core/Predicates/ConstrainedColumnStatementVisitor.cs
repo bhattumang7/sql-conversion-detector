@@ -1,6 +1,7 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
+using SilentScan.Core.Predicates.Normalization;
 
 namespace SilentScan.Core.Predicates;
 
@@ -10,7 +11,13 @@ internal sealed record ConstrainedStatement(
     IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> ScopeChain,
     IReadOnlyList<QualifiedJoin> JoinNodes,
     BooleanExpression? WhereCondition,
-    TSqlFragment Node);
+    TSqlFragment Node,
+    ModuleWalker Walker)
+{
+    public bool WhereConditionIsUnsatisfiable() =>
+        PredicateSurvivalAnalyzer.IsUnsatisfiable(
+            WhereCondition, columnRef => Walker.ResolveColumnFacts(columnRef, ScopeChain));
+}
 
 internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, DatabaseCatalog catalog) : IModuleRule
 {
@@ -30,7 +37,7 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
         var spec = node.UpdateSpecification;
         var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, Catalog, EmptyResolvedViews, SourcePath, ledger: null);
         var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
-        Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node);
+        Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node, walker);
     }
 
     public void OnEnterDeleteStatementScope(DeleteStatement node, ScopeChain scopeChain, ModuleWalker walker)
@@ -38,7 +45,7 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
         var spec = node.DeleteSpecification;
         var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, Catalog, EmptyResolvedViews, SourcePath, ledger: null);
         var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
-        Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node);
+        Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node, walker);
     }
 
     private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
@@ -52,12 +59,12 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
         }
 
         var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, ResolutionContext(walker.CurrentCteRelations()));
-        Inspect(byAlias, ordered, fromClause, whereCondition, node);
+        Inspect(byAlias, ordered, fromClause, whereCondition, node, walker);
     }
 
     private void Inspect(
         IReadOnlyDictionary<string, ScopeEntry> byAlias, IReadOnlyList<ScopeEntry> ordered,
-        FromClause? fromClause, BooleanExpression? whereCondition, TSqlFragment node)
+        FromClause? fromClause, BooleanExpression? whereCondition, TSqlFragment node, ModuleWalker walker)
     {
         var baseTables = ordered
             .Where(e => !e.IsViewLayer && e.Relation.QualifiedName is not null)
@@ -84,6 +91,6 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
             .ToHashSet(TableColumnKeyComparer.For(Catalog));
 
         InspectStatement(new ConstrainedStatement(
-            baseTables, andConstrainedColumns, scopeChain, joinNodes, whereCondition, node));
+            baseTables, andConstrainedColumns, scopeChain, joinNodes, whereCondition, node, walker));
     }
 }

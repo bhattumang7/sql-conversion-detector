@@ -1278,7 +1278,7 @@ public static class QueryAntiPatternScanner
 
             foreach (var cte in ctes)
             {
-                if (!CteResolver.ReferencesSelf(cte.QueryExpression, cte.ExpressionName.Value))
+                if (!CteResolver.ReferencesSelf(cte.QueryExpression, cte.ExpressionName.Value, catalog.IdentifierComparer))
                 {
                     continue;
                 }

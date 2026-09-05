@@ -1,3 +1,5 @@
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 
@@ -20,6 +22,16 @@ public sealed class NonSargablePredicateScannerTests
         var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return NonSargablePredicateScanner.Scan(result);
+    }
+
+    private static IReadOnlyList<SargabilityFinding> ScanSqlWithCatalog(string sql)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([result]);
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        return NonSargablePredicateScanner.Scan(result, catalog, lineage);
     }
 
     [Fact]
@@ -70,6 +82,70 @@ public sealed class NonSargablePredicateScannerTests
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_isnull_clean.sql");
 
         Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CastOnColumn_NoOpCastToSameCategory_DoesNotFire()
+    {
+        var sql = """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Quantity INT NOT NULL);
+            GO
+            CREATE INDEX IX_Orders_Quantity ON dbo.Orders(Quantity);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CAST(Quantity AS INT) = 5;
+            """;
+        var findings = ScanSqlWithCatalog(sql);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void ConvertOnColumn_NoOpConvertToSameCategory_DoesNotFire()
+    {
+        var sql = """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Quantity INT NOT NULL);
+            GO
+            CREATE INDEX IX_Orders_Quantity ON dbo.Orders(Quantity);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CONVERT(INT, Quantity) = 5;
+            """;
+        var findings = ScanSqlWithCatalog(sql);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CastOnColumn_CastChangesCategory_StillFires()
+    {
+        var sql = """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Quantity INT NOT NULL);
+            GO
+            CREATE INDEX IX_Orders_Quantity ON dbo.Orders(Quantity);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CAST(Quantity AS BIGINT) = 5;
+            """;
+        var findings = ScanSql(sql);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.CastOrConvertOnColumn, finding.Kind);
+        Assert.Equal("Quantity", finding.ColumnName);
+    }
+
+    [Fact]
+    public void CastOnColumn_NoOpCastOnArithmeticExpression_StillFires()
+    {
+        var sql = """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Quantity INT NOT NULL);
+            GO
+            CREATE INDEX IX_Orders_Quantity ON dbo.Orders(Quantity);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CAST(Quantity + 1 AS INT) = 5;
+            """;
+        var findings = ScanSql(sql);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.CastOrConvertOnColumn, finding.Kind);
+        Assert.Equal("Quantity", finding.ColumnName);
     }
 
     [Fact]
@@ -267,6 +343,55 @@ public sealed class NonSargablePredicateScannerTests
     public void LeadingWildcardLike_TrailingWildcardOnly_DoesNotFire()
     {
         var findings = ScanFixture("LEADING_WILDCARD_LIKE_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void LeadingWildcardLike_LeadingSingleCharWildcard_Fires()
+    {
+        var sql = """
+            CREATE TABLE dbo.Users (UserId INT NOT NULL PRIMARY KEY, DisplayName NVARCHAR(40) NOT NULL);
+            GO
+            CREATE INDEX IX_Users_DisplayName ON dbo.Users(DisplayName);
+            GO
+            SELECT UserId FROM dbo.Users WHERE DisplayName LIKE '_ozar';
+            """;
+        var findings = ScanSql(sql);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.LeadingWildcardLike, finding.Kind);
+        Assert.Equal("DisplayName", finding.ColumnName);
+    }
+
+    [Fact]
+    public void LeadingWildcardLike_LeadingCharacterClassWildcard_Fires()
+    {
+        var sql = """
+            CREATE TABLE dbo.Users (UserId INT NOT NULL PRIMARY KEY, DisplayName NVARCHAR(40) NOT NULL);
+            GO
+            CREATE INDEX IX_Users_DisplayName ON dbo.Users(DisplayName);
+            GO
+            SELECT UserId FROM dbo.Users WHERE DisplayName LIKE '[ab]ozar';
+            """;
+        var findings = ScanSql(sql);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.LeadingWildcardLike, finding.Kind);
+        Assert.Equal("DisplayName", finding.ColumnName);
+    }
+
+    [Fact]
+    public void LeadingWildcardLike_PatternHasEscapeClause_DoesNotFire()
+    {
+        var sql = """
+            CREATE TABLE dbo.Users (UserId INT NOT NULL PRIMARY KEY, DisplayName NVARCHAR(40) NOT NULL);
+            GO
+            CREATE INDEX IX_Users_DisplayName ON dbo.Users(DisplayName);
+            GO
+            SELECT UserId FROM dbo.Users WHERE DisplayName LIKE '_ozar' ESCAPE '$';
+            """;
+        var findings = ScanSql(sql);
 
         Assert.Empty(findings);
     }

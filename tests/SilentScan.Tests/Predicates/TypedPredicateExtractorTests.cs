@@ -238,6 +238,18 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_CastWrappedColumnContradiction_EliminatesSiblingScanForcedFinding()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Id INT NOT NULL, Code VARCHAR(20) NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE CAST(Id AS BIGINT) = 1 AND CAST(Id AS BIGINT) = 2 AND Code = N'x';");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Equal(3, result.SkippedConstructs.Count(s => s.ConstructKind == "predicate eliminated by normalization"));
+    }
+
+    [Fact]
     public void Extract_OrDisjunctOutsideTheContradiction_StillReportsNormally()
     {
 

@@ -8,6 +8,7 @@ using SilentScan.Core.Common;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Predicates.Normalization;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
 
@@ -115,7 +116,8 @@ public sealed class ModuleWalker : TSqlFragmentVisitor
         var catalogColumn = _catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.FindColumn(baseColumn.ColumnName, _catalog.IdentifierComparer);
         return new PredicateSurvivalAnalyzer.ColumnFacts(
             catalogColumn is null || baseColumn.IsNullableSide ? null : !catalogColumn.IsNullable,
-            baseColumn.Type?.Collation?.GuaranteesDistinctLiteralsAreUnequal);
+            baseColumn.Type?.Collation?.GuaranteesDistinctLiteralsAreUnequal,
+            baseColumn.Type?.Category is SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image);
     }
 
     public (string TableQualifiedName, CatalogColumn Column)? ResolveCatalogColumn(ColumnReferenceExpression columnRef, ScopeChain scopeChain)

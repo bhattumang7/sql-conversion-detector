@@ -179,6 +179,15 @@ public sealed class CompositeIndexLeadingColumnScannerTests
     }
 
     [Fact]
+    public void ContradictionOnUnrelatedColumn_MakesWhereClauseUnsatisfiable_Suppresses()
+    {
+        var findings = Scan(
+            "SELECT 1 FROM dbo.Orders WHERE Status = 5 AND OrderId = 1 AND OrderId = 2;", CatalogWithComposite());
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void ThreeColumnIndex_ViolatingColumnAtLaterPosition_ReportsCorrectPosition()
     {
         var threeCol = new CatalogIndex("IX_Orders_A_B_C", CatalogIndexKind.Index, IsUnique: false, KeyColumns: ["Region", "Status", "OrderId"], IncludedColumns: []);

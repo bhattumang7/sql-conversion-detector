@@ -551,6 +551,34 @@ public sealed class QueryAntiPatternScannerTests
     }
 
     [Fact]
+    public void RecursiveCteSelfReference_UnderCaseSensitiveCollation_MismatchedCaseDoesNotSelfReference()
+    {
+        var result = SqlScriptParser.ParseText("test.sql", $"{Ddl}\nGO\n"
+            + "WITH r AS (SELECT Id FROM dbo.A WHERE Id = 1 UNION ALL SELECT a.Id FROM dbo.A a JOIN R ON a.Id = R.Id + 1) "
+            + "SELECT Id FROM r;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([result], manifestDeclaredCollation: "Latin1_General_CS_AS");
+        var findings = QueryAntiPatternScanner.Scan(result, catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion);
+    }
+
+    [Fact]
+    public void RecursiveCteSelfReference_UnderCaseInsensitiveCollation_MismatchedCaseStillSelfReferences()
+    {
+        var result = SqlScriptParser.ParseText("test.sql", $"{Ddl}\nGO\n"
+            + "WITH r AS (SELECT Id FROM dbo.A WHERE Id = 1 UNION ALL SELECT a.Id FROM dbo.A a JOIN R ON a.Id = R.Id + 1) "
+            + "SELECT Id FROM r;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([result], manifestDeclaredCollation: "SQL_Latin1_General_CP1_CI_AS");
+        var findings = QueryAntiPatternScanner.Scan(result, catalog);
+
+        Assert.Contains(findings, f => f.Kind == QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion);
+    }
+
+    [Fact]
     public void CubeOverTwelveColumns_Fires()
     {
         var columns = string.Join(", ", Enumerable.Repeat("Id", 13));

@@ -620,6 +620,124 @@ public sealed class ScalarUdfInfoTests
     }
 
     [Fact]
+    public void Build_FunctionWithExecuteAsClause_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_ExecAsCaller (@x INT)
+            RETURNS INT
+            WITH EXECUTE AS CALLER
+            AS
+            BEGIN
+                RETURN @x + 1;
+            END
+            GO
+            CREATE FUNCTION dbo.fn_ExecAsNone (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN @x + 1;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_ExecAsCaller", out var withClause));
+        Assert.Contains("EXECUTE AS", withClause!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_ExecAsNone", out var withoutClause));
+        Assert.Null(withoutClause!.InlineabilityBlocker);
+    }
+
+    private static string NestedIfBody(int depth)
+    {
+        var body = "RETURN @x;";
+        for (var i = 0; i < depth; i++)
+        {
+            body = $"IF @x = @x\nBEGIN\n{body}\nEND";
+        }
+
+        return body;
+    }
+
+    [Fact]
+    public void Build_FunctionNestedAtOrAboveThirtyTwoLevels_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom($"""
+            CREATE FUNCTION dbo.fn_DeepNest (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                {NestedIfBody(16)}
+            END
+            GO
+            CREATE FUNCTION dbo.fn_ShallowNest (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                {NestedIfBody(14)}
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_DeepNest", out var deep));
+        Assert.Contains("nesting", deep!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_ShallowNest", out var shallow));
+        Assert.Null(shallow!.InlineabilityBlocker);
+    }
+
+    [Fact]
+    public void Build_MutuallyRecursiveFunctions_RecordsInlineabilityBlockerOnClosingDefinition()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_MutualA (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN @x;
+            END
+            GO
+            CREATE FUNCTION dbo.fn_MutualB (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN dbo.fn_MutualA(@x);
+            END
+            GO
+            ALTER FUNCTION dbo.fn_MutualA (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN dbo.fn_MutualB(@x);
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_MutualA", out var info));
+        Assert.Contains("mutual recursion", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("fn_MutualB", info.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_OneWayFunctionCallChain_DoesNotRecordMutualRecursionBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_ChainLeaf (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN @x;
+            END
+            GO
+            CREATE FUNCTION dbo.fn_ChainRoot (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN dbo.fn_ChainLeaf(@x);
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_ChainRoot", out var info));
+        Assert.Null(info!.InlineabilityBlocker);
+    }
+
+    [Fact]
     public void Build_DropFunction_RemovesScalarUdfInfo()
     {
         var catalog = BuildFrom("""

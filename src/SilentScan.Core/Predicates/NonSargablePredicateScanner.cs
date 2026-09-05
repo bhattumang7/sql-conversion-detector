@@ -133,10 +133,7 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
-            while (side is ParenthesisExpression parenthesized)
-            {
-                side = parenthesized.Expression;
-            }
+            side = UnwrapParentheses(side);
 
             if (side is not FunctionCall { Parameters: [ColumnReferenceExpression columnRef, StringLiteral pathLiteral] } functionCall
                 || !JsonComputedColumnMatcher.IsJsonValueFunction(functionCall.FunctionName.Value)
@@ -183,7 +180,8 @@ public static class NonSargablePredicateScanner
 
             switch (node.SecondExpression)
             {
-                case StringLiteral { Value: ['%', ..] } literal:
+                case StringLiteral { Value: [var firstPatternChar, ..] } literal
+                    when node.EscapeExpression is null && IsLikeWildcardChar(firstPatternChar):
                     Add(SargabilityFindingKind.LeadingWildcardLike, columnName, literal.Value, node, columnRef, scopeChain, walker);
                     break;
                 case StringLiteral:
@@ -196,13 +194,35 @@ public static class NonSargablePredicateScanner
             }
         }
 
-        private void InspectSide(ScalarExpression expression, ScopeChain scopeChain, ModuleWalker walker)
-        {
+        private static bool IsLikeWildcardChar(char value) => value is '%' or '_' or '[';
 
+        private static ScalarExpression UnwrapParentheses(ScalarExpression expression)
+        {
             while (expression is ParenthesisExpression parenthesized)
             {
                 expression = parenthesized.Expression;
             }
+
+            return expression;
+        }
+
+        private static ColumnReferenceExpression? AsDirectColumn(ScalarExpression expression) =>
+            UnwrapParentheses(expression) as ColumnReferenceExpression;
+
+        private bool IsNoOpConversion(DataTypeReference targetDataType, SqlType? sourceType)
+        {
+            if (sourceType is null)
+            {
+                return false;
+            }
+
+            var targetType = SqlTypeReferenceResolver.Resolve(targetDataType, columnCollation: null, catalog.TypeAliases);
+            return targetType is not null && !targetType.NeedsConversionFrom(sourceType);
+        }
+
+        private void InspectSide(ScalarExpression expression, ScopeChain scopeChain, ModuleWalker walker)
+        {
+            expression = UnwrapParentheses(expression);
 
             switch (expression)
             {
@@ -212,24 +232,38 @@ public static class NonSargablePredicateScanner
                     break;
 
                 case CastCall castCall when FindAnyColumn(castCall.Parameter) is { } found:
-                    if (ResolveIndexInfo(found.Ref, scopeChain, walker).TableQualifiedName is { } castTable
-                        && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, castTable, castCall))
+                {
+                    var (castTableQualifiedName, _, castSourceType) = ResolveIndexInfo(found.Ref, scopeChain, walker);
+                    if (castTableQualifiedName is { } castTable && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, castTable, castCall))
+                    {
+                        break;
+                    }
+
+                    if (AsDirectColumn(castCall.Parameter) is not null && IsNoOpConversion(castCall.DataType, castSourceType))
                     {
                         break;
                     }
 
                     Add(SargabilityFindingKind.CastOrConvertOnColumn, found.Name, "CAST", castCall, found.Ref, scopeChain, walker);
                     break;
+                }
 
                 case ConvertCall convertCall when FindAnyColumn(convertCall.Parameter) is { } found:
-                    if (ResolveIndexInfo(found.Ref, scopeChain, walker).TableQualifiedName is { } convertTable
-                        && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, convertTable, convertCall))
+                {
+                    var (convertTableQualifiedName, _, convertSourceType) = ResolveIndexInfo(found.Ref, scopeChain, walker);
+                    if (convertTableQualifiedName is { } convertTable && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, convertTable, convertCall))
+                    {
+                        break;
+                    }
+
+                    if (AsDirectColumn(convertCall.Parameter) is not null && IsNoOpConversion(convertCall.DataType, convertSourceType))
                     {
                         break;
                     }
 
                     Add(SargabilityFindingKind.CastOrConvertOnColumn, found.Name, "CONVERT", convertCall, found.Ref, scopeChain, walker);
                     break;
+                }
 
                 case BinaryExpression binary:
                     InspectArithmetic(binary, scopeChain, walker);
@@ -368,15 +402,8 @@ public static class NonSargablePredicateScanner
 
         private bool TryAddCharindexOrLeftFinding(ScalarExpression candidateSide, ScalarExpression otherSide, BooleanComparisonType comparisonType, ScopeChain scopeChain, ModuleWalker walker)
         {
-            while (candidateSide is ParenthesisExpression parenthesized)
-            {
-                candidateSide = parenthesized.Expression;
-            }
-
-            while (otherSide is ParenthesisExpression otherParenthesized)
-            {
-                otherSide = otherParenthesized.Expression;
-            }
+            candidateSide = UnwrapParentheses(candidateSide);
+            otherSide = UnwrapParentheses(otherSide);
 
             if (candidateSide is LeftFunctionCall leftCall)
             {
