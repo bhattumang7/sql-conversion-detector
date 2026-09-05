@@ -151,7 +151,92 @@ confirmed independently of any one tool's output.
   (source-text comparison, no data inspection), since either outcome is a
   real risk.
 
+- **The full `binary`/`varbinary`/`char`/`varchar`/`nchar`/`nvarchar`
+  precedence order is a single total order with no ties**, confirmed
+  directly against a live instance (self-contained `UNION ALL` probes
+  comparing every pair both ways): `binary < varbinary < char < varchar <
+  nchar < nvarchar`, matching `SqlTypeCategory`'s own enum declaration
+  order exactly. There is no divergence from the published precedence
+  table for this group.
+
+- **`json`, `hierarchyid`, `geometry`, `geography`, and `vector` have no
+  implicit-conversion path to `xml`, `sql_variant`, a user-defined CLR
+  type, or to each other.** Oracle-confirmed directly: every cross-type
+  comparison among these categories fails to compile ("Operand type clash",
+  "The data types ... are incompatible in the ... operator", or "Invalid
+  operator for data type"), regardless of which side is which. Their
+  relative position in a general type-precedence table is therefore
+  real but behaviorally inert for any implicit-conversion decision - no
+  input can ever exercise it, so there is nothing for a sargability or
+  type-inference rule to get wrong here.
+
+- **A `CASE`/`UNION`-style branch merge that lands two character-family
+  branches in the same collation-coercibility tier with different actual
+  collation names is the real "cannot resolve the collation conflict"
+  trigger - not merely "the two branches have different collations."**
+  An explicit `COLLATE` clause on one branch sits in a strictly higher
+  coercibility tier than an ordinary column's collation, which in turn
+  outranks a database-default collation; the higher tier always wins
+  outright and silently, with no error, regardless of which branch it
+  appears in. Only a genuine tie (same tier, different collation name) is
+  ambiguous. A rule that treats every same-category, differently-collated
+  branch pair as unresolvable will false-positive on the common case of one
+  branch carrying an explicit `COLLATE` clause.
+
+- **A legacy large-object type (`text`/`ntext`/`image`) is not a legal
+  conversion target when its own collation is UTF-8 or supplementary
+  -character-aware** (collation names ending `_UTF8` or `_SC`/`_SC_UTF8`
+  respectively) - **the same collations are perfectly legal on a modern
+  `varchar(max)`/`nvarchar(max)` target.** This is a property of the legacy
+  LOB type family specifically, not of UTF-8/supplementary-character
+  collations in general.
+
+- **An explicit `COLLATE` clause always outranks the collation of whatever
+  it's applied to, regardless of which kind of expression carries it** -
+  not just literals. `COLLATE` can be written directly after a column
+  reference, a function call, a parenthesized expression, a variable, or a
+  literal, and in every case it wins over that expression's own inherited
+  collation, the same coercibility ordering that governs `CASE`/`UNION`
+  branch merges above.
+
+- **`SUM`/`AVG` of a `decimal`/`numeric` argument always widen the result's
+  precision to 38, regardless of the input precision** - oracle-confirmed
+  directly, this is not the "input precision + 10, capped at 38" formula
+  documented for some other contexts. `SUM` keeps the input's own scale;
+  `AVG` widens scale to `max(input scale, 6)` on top of the precision jump
+  (the same scale floor plain decimal division uses). `MIN`/`MAX` of the
+  same argument do not widen precision or scale at all.
+
 ## Sargability and index eligibility
+
+- **A column-side implicit conversion in a comparison surfaces as a
+  `<PlanAffectingConvert>` element inside the plan's own `<Warnings>` (a
+  direct child of `<QueryPlan>`, not of the individual `<RelOp>` the
+  conversion lives under) - a second, independent showplan signal alongside
+  the `<Convert Implicit="1">` AST node wrapping the column, but the two do
+  not always agree.** A cross-type-family conversion (e.g. `char` compared
+  against an `int`) always raises a `Cardinality Estimate`-flavoured warning
+  regardless of row count, indexing, or heap-vs-clustered storage - confirmed
+  at row counts from zero to several thousand. A same-family, *same-collation*
+  string widening (`varchar` compared against `nvarchar`, matching collation,
+  no numeric family crossing) produces no `<Warnings>` element at all even
+  though the AST still carries the same `<Convert Implicit="1">` node. **A
+  genuine collation *conflict* between two same-category string operands
+  (two different, incompatible collation names forcing the engine to convert
+  both sides) is a distinct trigger from either of the above: it raises a
+  `Seek Plan`-flavoured warning immediately, confirmed even against a
+  near-empty table - it is not gated by the 500-row threshold at all.** A
+  separate, `Seek Plan`-flavoured warning additionally appears for the
+  cross-type-family case once the table's cardinality estimate crosses a
+  fixed threshold of 500 rows (confirmed to flip exactly between 499 and 500
+  rows with fresh full-scan statistics) - so the 500-row gate is specific to
+  the cross-family scenario; a same-category collation conflict is
+  ungated. Because the warning is plan-level rather than
+  operator-scoped and its `Expression` text renders the column reference
+  using whatever qualification the query itself used (a bare alias if the
+  query aliased the table), the element's presence is a reliable
+  corroborating signal but its text cannot be reliably parsed back to a
+  specific column when a plan has more than one candidate conversion.
 
 - **The engine's comparison-operator sargability gate treats every non-bare-column operand
   identically - there is no per-wrapper-type unwrapping.** A column wrapped in a function call,
@@ -243,6 +328,14 @@ confirmed independently of any one tool's output.
   as a strong preference the optimizer could still outbid. If the hinted index's own leading key
   column isn't bound, there is structurally no other access path available to that node.
 
+- **A composite index cannot be range-seeked at all when the predicate set has no comparison on
+  the index's own leading key column, even when a later key column is fully constrained.** Oracle-
+  confirmed directly (Docker SQL Server 2022): a two-column composite index `(A, B)` compiles a
+  `WHERE B = <value>` predicate to an Index Scan, while `WHERE A = <value>` on the identical index
+  compiles to an Index Seek - confirming the mechanism `CompositeIndexLeadingColumnScanner`'s
+  finding depends on (no predicate on the leading column forces a scan) directly from a real plan,
+  not only from an unread engine-internal function.
+
 - **`XML` parses to its own dedicated ScriptDom node
   (`XmlDataTypeReference`), never a `SqlDataTypeReference`.** Before this was
   handled explicitly, an XML column's type resolved to `null` (the same path
@@ -270,6 +363,17 @@ confirmed independently of any one tool's output.
   outright at the primary `CREATE SELECTIVE XML INDEX` statement itself (Msg 6375, "data type ...
   is not allowed") - a distinct, simpler, already-primary-time failure, out of scope for the
   value-column-width rule.
+
+- **`REGEXP_LIKE` cannot currently be modeled as a sargability rule at all, because it is a
+  boolean predicate (like `CONTAINS`/`FREETEXT`), not a general scalar function.** Oracle-confirmed
+  (Docker, SQL Server 2025 RTM-CU8): `SELECT REGEXP_LIKE(...)` and any use of it as a value
+  expression (`x = REGEXP_LIKE(...)`) both fail with the engine's own syntax error; only
+  `SELECT ... WHERE REGEXP_LIKE(...)` is accepted, matching the existing MAX-argument finding
+  above. The ScriptDom parser version this project is pinned to has no dedicated predicate AST
+  node for this construct at all (no `Regex`-named type anywhere in its public surface, unlike
+  the dedicated node full-text predicates get) - so a script using this syntax cannot currently be
+  represented in the AST this project scans over. No sargability rule can be built for it until
+  the parser dependency adds support; this is a tooling-availability gap, not a modeling decision.
 
 ## Predicate survival (normalization/simplification)
 
@@ -401,37 +505,142 @@ sargability-relevant, with no check for whether shapes 1-3 above would
 eliminate that leaf, or the branch it lives in, before the optimizer ever
 scores it:
 
-- `TypedPredicateExtractor` (`src/SilentScan.Core/Predicates/TypedPredicateExtractor.cs:349`,
-  `ExplicitVisit(WhereClause)`) - the shared per-predicate typed-comparison
-  feed every sargability/conversion finding stream is built from. Highest
-  blast radius: a contradiction-eliminated leaf here propagates into every
-  downstream consumer, not just one rule.
-- `NonSargablePredicateScanner` (`src/SilentScan.Core/Predicates/NonSargablePredicateScanner.cs:200`,
-  `ExplicitVisit(WhereClause)`) - same generic-walk shape as above, same
-  exposure.
-- `CatchAllPredicateScanner` (`src/SilentScan.Core/Predicates/CatchAllPredicateScanner.cs:193`
-  `FlattenOr`/`InspectOrClause`) - already OR-aware for its own narrow
-  `(Col = @p OR @p IS NULL)` idiom, but has no general OR-tautology check
-  (shape 2); a hand-written `x = @p OR x <> @p`-shaped guard elsewhere in the
-  same clause would not be recognized as dead.
-- `DuplicationScanner` (`src/SilentScan.Core/Predicates/DuplicationScanner.cs:834`,
-  local `FlattenAnd`) - already calls `LiteralComparisonFolder` for its own
-  "always true/false literal comparison" check per its doc comment, but only
-  literal-vs-literal, never column-vs-literal same-column contradiction
-  (shape 1) across the flattened set.
-- `PartialCompositeForeignKeyJoinScanner` (`src/SilentScan.Core/Predicates/PartialCompositeForeignKeyJoinScanner.cs:146-188`) -
-  flattens a JOIN's `ON` and the statement's `WHERE` into one leaf set
-  without checking whether a `WHERE`-side contradiction (shape 1 or 3) makes
-  the whole branch dead, which would make a "partial composite key join"
-  finding derived from it moot.
-- `QueryAntiPatternScanner` (`src/SilentScan.Core/Predicates/QueryAntiPatternScanner.cs:1307,1383`) -
-  same exposure for its `HAVING`- and join-column-derived checks.
-- `JoinKeyUniqueness` / `NotInNullableSubqueryScanner` (`JoinKeyUniqueness.cs:35`,
-  `NotInNullableSubqueryScanner.cs:94,148`) - lower priority: both already
-  reason narrowly about a specific idiom (join-key uniqueness, `NOT IN`
-  correlated-NULL), so a stray same-column contradiction elsewhere in the
-  same clause is less likely to change their verdict, but not confirmed
-  immune.
+- `TypedPredicateExtractor` (`src/SilentScan.Core/Predicates/TypedPredicateExtractor.cs`) -
+  closed: every `BooleanComparisonExpression`/`BETWEEN`/`LIKE`/`IN`/`= ANY`
+  leaf checks `ModuleWalker.IsDeadPredicate` before it is classified, and that
+  flag is populated from the same `PredicateSurvivalAnalyzer.FindDeadComparisons`
+  call `NonSargablePredicateScanner` uses, for every `WHERE`/`HAVING`/JOIN
+  search condition (`ModuleWalker.WithPredicateLocation`). This is the shared
+  per-predicate typed-comparison feed every sargability/conversion finding
+  stream is built from, so the fix below closes it too - confirmed end-to-end
+  with a dedicated regression test rather than assumed from the wiring alone.
+  A `MERGE` statement's `ON`/`WHEN` search conditions are not covered by this
+  push (`ExplicitVisit(MergeSpecification)`/`ExplicitVisit(MergeActionClause)`
+  never call `WithPredicateLocation`) - a narrow, separately-scoped gap shared
+  identically by `NonSargablePredicateScanner`'s own `MergeStatement` handling
+  (it always passes `dead: false` there too), not unique to this extractor.
+- `NonSargablePredicateScanner` (`src/SilentScan.Core/Predicates/NonSargablePredicateScanner.cs`) -
+  closed: every predicate location now runs its flattened condition through
+  the same-column-AND/`IS NULL`/range contradiction detector first and skips
+  a leaf the detector marks dead before classifying it as non-sargable.
+- `CatchAllPredicateScanner` - closed for its own narrow
+  `(Col = @p OR @p IS NULL)` idiom via the same dead-comparison check; still
+  has no general OR-tautology sweep across an unrelated hand-written
+  `x = @p OR x <> @p` guard elsewhere in the same clause, but that shape isn't
+  this scanner's own claim to make.
+- `DuplicationScanner` - its own `DuplicationRedundantAndConditionRuleId`/
+  `DuplicationMutuallyExclusiveAndConditionRuleId` findings independently
+  implement the column-vs-literal same-column contradiction/redundancy check
+  (shape 1) directly against numeric bounds; only its separate
+  "always true/false literal comparison" check stays literal-vs-literal only,
+  which is its own documented scope, not a gap.
+- `PartialCompositeForeignKeyJoinScanner` - closed: a `WHERE`-side
+  contradiction now short-circuits the finding before the JOIN's column-pair
+  coverage is even inspected.
+- `QueryAntiPatternScanner` - closed for its `HAVING`-derived
+  (non-aggregate-`HAVING`-predicate) and join-column-derived
+  (`MERGE ... USING` non-unique-source, `DISTINCT`-masking join-fan-out)
+  checks; each now runs the same dead-comparison/unsatisfiability check
+  before reporting.
+- `NonUniqueUpdateSourceScanner`, `NotInNullableSubqueryScanner` - both already
+  short-circuit on an unsatisfiable `WHERE`/search condition before reporting;
+  closed.
+- `JoinKeyUniqueness` - lower priority: reasons narrowly about a specific
+  idiom (join-key uniqueness), so a stray same-column contradiction elsewhere
+  in the same clause is less likely to change its verdict, but not confirmed
+  immune. Still open, low priority.
+
+### Rule-by-rule survival verdicts
+
+The rules below carry the highest-falsifiability claims (a `never`/`forces`/
+`cannot`/`only` absolute about a predicate's shape) among rules whose
+rationale involves a comparison, predicate, or sargability/index-seek claim.
+Each is checked against the contradiction/tautology detector above:
+**Survives** (the trigger shape can't be normalized away), **At-risk** (a
+plausible rescue exists and isn't guarded against yet - a real candidate
+false positive), or **Needs oracle check** (plausible on paper, not
+confirmed against a live instance).
+
+**At-risk:**
+
+- `COMPOSITE_INDEX_LEADING_COLUMN` - oracle-confirmed (Docker SQL Server): a
+  same-column literal contradiction anywhere in the `WHERE` clause - even on a
+  column completely unrelated to the composite index in question - compiles
+  to a bare `Constant Scan` with no `Table Scan`/`Index Scan`/`Index Seek`
+  operator at all (`SELECT * FROM t WHERE ColB = 5 AND ColC = 1 AND ColC = 2`
+  against a table with a nonclustered `(ColA, ColB)` index, `ColC` unindexed
+  and unrelated: plan is `Constant Scan`, versus `Table Scan` for
+  `WHERE ColB = 5` alone). `CompositeIndexLeadingColumnScanner`'s "this index
+  can never be seek-used for this predicate, forcing a scan" claim was moot
+  once any such contradiction made the branch dead - the predicate never
+  reaches any table or index at all, so there was no scan to have forced.
+  Fixed: `CompositeIndexLeadingColumnScanner.cs` now carries a
+  `PredicateSurvivalAnalyzer.IsUnsatisfiable` guard over the whole `WHERE`
+  clause, the same pattern `PartialCompositeForeignKeyJoinScanner` and
+  `NonUniqueUpdateSourceScanner` already use, and suppresses the finding
+  whenever it fires.
+
+**Survives (selected, representative of the rest of the reviewed set):**
+
+- `CAST_CONVERT_ON_COLUMN`, `FUNCTION_WRAPPED_COLUMN`, `COLUMN_ARITHMETIC`,
+  `DATE_YEAR_ON_COLUMN`/date-part family, `CASE_FOLD_ON_COLUMN`,
+  `CHARINDEX_PREFIX_MATCH`/`LEFT_PREFIX_MATCH` (all `NonSargablePredicateScanner`
+  Tier-1 findings), and `SCAN_FORCED`/`RANGE_SEEK`/`Verdict.Unknown`
+  (`TypedPredicateExtractor`'s typed-comparison feed) - previously at-risk:
+  the contradiction detector's column-identity match only recognized a bare
+  column reference as an operand, so `CAST(x AS int) = 1 AND CAST(x AS int) = 2`
+  was invisible to it on either side of an AND and both wrapped-column
+  findings still fired on a branch that can never return a row. Fixed by
+  widening `PredicateSurvivalAnalyzer`'s `GroupByColumn`/`TryGetColumnKey` to
+  recognize an identical wrapping expression (same `CAST`/`CONVERT` target
+  type, same function, or same-literal-arithmetic, over the same inner
+  column) as the same grouping operand, not just an identical bare column;
+  `TypedPredicateExtractor` needed no separate change since it already reuses
+  this analyzer's verdict via `ModuleWalker.IsDeadPredicate`.
+- Same wrapped/bare-column `NonSargablePredicateScanner`/`TypedPredicateExtractor`
+  findings as above, for the OR-shaped case - previously at-risk: an `OR`
+  branch whose numeric range is already fully covered by an earlier `OR`
+  branch on the same column (e.g. `Col >= 3 OR Col > 5`) is provably
+  redundant, but the dead-predicate detector had no subsumption check, only
+  contradiction/tautology. Fixed by adding `NumericValueRangeSet.IsSubsetOf`
+  and `PredicateSurvivalAnalyzer.MarkSubsumedDisjuncts`, which marks a later
+  `OR` disjunct dead when its range is a subset of the union of earlier
+  disjuncts' ranges on the same column; consumed the same way as the
+  contradiction fix above, via `ModuleWalker.IsDeadPredicate`.
+- `Verdict.OperandClash` - an oracle-probed type pair that never compiles as
+  a comparison at all is a bind-time fact, resolved before the normalize/
+  simplify pass this whole audit is about even runs; no runtime predicate
+  fold changes whether two types are comparable.
+- `Verdict.SeekPreserved` - explicitly excluded from `ScanReportBuilder`'s
+  actionable findings; a normalization rescue here has no precision cost
+  since nothing is asserted as broken.
+- `LEADING_WILDCARD_LIKE`, `LIKE_PATTERN_NOT_LITERAL` - neither shape has a
+  known engine fold: two wildcard `LIKE` patterns on the same column aren't
+  provably contradictory from their text alone, and a non-literal pattern
+  isn't known at compile time for the engine to fold in the first place.
+  Nothing to rescue.
+- `CARTESIAN_JOIN`'s always-false-inner-join-predicate finding - this rule
+  fires *because* it runs the same contradiction detector to prove the `ON`
+  predicate unsatisfiable; it is the normalization-aware implementation, not
+  a candidate for being rescued by one.
+- `CATCH_ALL_PREDICATE`, `CHECK_CONSTRAINT_PREDICATE_CONTRADICTION_INTERVAL`,
+  `NOT_NULL_PREDICATE_CONTRADICTION`, `VIEW_CHECK_OPTION_CONTRADICTION`,
+  `CHECK_CONSTRAINT_NULL_NOT_HANDLED` - already oracle-confirmed and scoped
+  narrowly per the sections above; no additional rescue scenario found.
+- `OUTER_JOIN_PREDICATE_COLLAPSE` - documents the engine's own null-rejection
+  behavior for a `WHERE`-clause predicate over an outer join's null-supplying
+  side; this is what the engine does, not a shape any fold eliminates.
+- `SECURITY_PREDICATE_INDEX`, `COMPOSITE_INDEX_LEADING_COLUMN`'s catalog/index
+  facts - a Row-Level Security filter predicate's own bound-column-to-index
+  relationship and an index's own leading-key-column identity are static
+  schema facts independent of any one query's `WHERE`-clause normalization.
+- `DuplicationDuplicateSiblingConditionRuleId`,
+  `DuplicationNegatedComparisonAsOppositeRuleId`,
+  `DuplicationIdenticalBinaryOperandsRuleId` - these reason about procedural
+  `IF`/`CASE` control flow, not a boolean expression tree the query
+  optimizer's own normalize/simplify pass ever evaluates; the four
+  normalization categories in scope for this audit don't apply to them at
+  all.
 
 ## Built-in function determinism
 
@@ -535,6 +744,18 @@ confirmed discrepancy:
   deterministic straight from the engine's own metadata) - a second,
   independent confirmation that Microsoft's docs page is wrong for that one
   function, not just a quirk of this project's own oracle probe.
+
+Non-determinism is not only a property of a directly-called function - a
+plain column reference inherits it when the column itself is a
+non-deterministic computed column (or, transitively, a view column built
+on one). The lineage layer's `ColumnProvenance.BaseColumn` now carries this
+as a flag sourced from the same computed-column check, and it propagates
+through casts, expressions, and set-operation branches the same way type
+information already does. No shipped rule currently reads it - it exists so
+a future determinism-sensitive rule (e.g. one that needs to know a query
+result is non-deterministic because it selects from a non-deterministic
+computed/indexed-view column, not because it calls `NEWID()` itself) does
+not have to re-derive column ancestry from scratch.
 
 ## Halloween Protection bypasses for self-referencing DML
 
