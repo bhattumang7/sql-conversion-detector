@@ -1,5 +1,4 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
-using SilentScan.Core.Catalog;
 using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.TypeInference;
@@ -298,6 +297,53 @@ public sealed class ExpressionTypeInferencerTests
     }
 
     [Fact]
+    public void Resolve_SearchedCase_OracleVerified_SameCoercibilityDifferingCollationNames_NullsWholeResult()
+    {
+
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS", CollationSource.ColumnExplicit)),
+            ["B"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("Latin1_General_BIN", CollationSource.ColumnExplicit)),
+        };
+
+        var result = Resolve("CASE WHEN 1 = 1 THEN A ELSE B END", typesByName);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Resolve_SearchedCase_OracleVerified_ExplicitCollateBranchOutranksColumnCollation_NoAmbiguity()
+    {
+
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("Latin1_General_BIN", CollationSource.ExplicitCollateClause)),
+            ["B"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS", CollationSource.ColumnExplicit)),
+        };
+
+        var result = Resolve("CASE WHEN 1 = 1 THEN A ELSE B END", typesByName);
+
+        Assert.NotNull(result);
+        Assert.Equal("Latin1_General_BIN", result!.Collation!.Name);
+    }
+
+    [Fact]
+    public void Resolve_SearchedCase_OracleVerified_ExplicitCollateBranchWinsRegardlessOfPosition()
+    {
+
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS", CollationSource.ColumnExplicit)),
+            ["B"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("Latin1_General_BIN", CollationSource.ExplicitCollateClause)),
+        };
+
+        var result = Resolve("CASE WHEN 1 = 1 THEN A ELSE B END", typesByName);
+
+        Assert.NotNull(result);
+        Assert.Equal("Latin1_General_BIN", result!.Collation!.Name);
+    }
+
+    [Fact]
     public void Resolve_CrossCategoryStringMerge_LengthUnknownRatherThanImplicitlyNulled()
     {
 
@@ -591,5 +637,104 @@ public sealed class ExpressionTypeInferencerTests
 
         Assert.Equal(SqlTypeCategory.VarChar, result!.Category);
         Assert.False(result.LengthKnown);
+    }
+
+    [Fact]
+    public void Resolve_ExplicitCollateOnColumnReference_OverridesTheColumnsOwnCollation()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = VarCharType };
+
+        var result = Resolve("A COLLATE Latin1_General_BIN", typesByName);
+
+        Assert.Equal(SqlTypeCategory.VarChar, result!.Category);
+        Assert.Equal("Latin1_General_BIN", result.Collation!.Name);
+    }
+
+    [Fact]
+    public void Resolve_WithoutExplicitCollate_ColumnKeepsItsOwnCollation()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = VarCharType };
+
+        var result = Resolve("A", typesByName);
+
+        Assert.Equal(VarCharType.Collation!.Name, result!.Collation!.Name);
+    }
+
+    [Fact]
+    public void Resolve_ExplicitCollateOnColumnReference_OutranksTheOtherSidesColumnCollation_InAComparisonMerge()
+    {
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS", CollationSource.ColumnExplicit)),
+            ["B"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS", CollationSource.ColumnExplicit)),
+        };
+
+        var result = Resolve("CASE WHEN 1 = 1 THEN A COLLATE Latin1_General_BIN ELSE B END", typesByName);
+
+        Assert.NotNull(result);
+        Assert.Equal("Latin1_General_BIN", result!.Collation!.Name);
+    }
+
+    [Theory]
+    [InlineData(30, 4)]
+    [InlineData(5, 2)]
+    [InlineData(2, 0)]
+    public void Resolve_Sum_OracleVerified_AlwaysWidensPrecisionToThirtyEightPreservingScale(int precision, int scale)
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(precision, scale) };
+
+        var result = Resolve("SUM(A)", typesByName);
+
+        Assert.Equal(SqlTypeCategory.Decimal, result!.Category);
+        Assert.Equal(38, result.Precision);
+        Assert.Equal(scale, result.Scale);
+    }
+
+    [Theory]
+    [InlineData(5, 2, 6)]
+    [InlineData(2, 0, 6)]
+    [InlineData(30, 4, 6)]
+    [InlineData(20, 10, 10)]
+    [InlineData(15, 9, 9)]
+    public void Resolve_Avg_OracleVerified_WidensPrecisionToThirtyEightAndScaleToAtLeastSix(int precision, int scale, int expectedScale)
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(precision, scale) };
+
+        var result = Resolve("AVG(A)", typesByName);
+
+        Assert.Equal(SqlTypeCategory.Decimal, result!.Category);
+        Assert.Equal(38, result.Precision);
+        Assert.Equal(expectedScale, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Min_OracleVerified_DoesNotWidenDecimalPrecisionUnlikeSumAndAvg()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(5, 2) };
+
+        var result = Resolve("MIN(A)", typesByName);
+
+        Assert.Equal(5, result!.Precision);
+        Assert.Equal(2, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_IntPlusMoney_CategoryPrecedenceWinnerIsMoney()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = IntType, ["B"] = new SqlType(SqlTypeCategory.Money) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(SqlTypeCategory.Money, result!.Category);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_BitPlusTinyInt_CategoryPrecedenceWinnerIsTinyInt()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = new SqlType(SqlTypeCategory.Bit), ["B"] = new SqlType(SqlTypeCategory.TinyInt) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(SqlTypeCategory.TinyInt, result!.Category);
     }
 }

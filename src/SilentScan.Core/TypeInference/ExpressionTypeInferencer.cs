@@ -1,13 +1,20 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
-using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
-using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.TypeInference;
 
 public static class ExpressionTypeInferencer
 {
     public static SqlType? Resolve(
+        ScalarExpression expression, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases)
+    {
+        var baseType = ResolveCore(expression, resolveLeaf, typeAliases);
+        return expression is PrimaryExpression { Collation.Value: { } collationName } && baseType is { IsStringFamily: true }
+            ? baseType with { Collation = new Collation(collationName, CollationSource.ExplicitCollateClause) }
+            : baseType;
+    }
+
+    private static SqlType? ResolveCore(
         ScalarExpression expression, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases) => expression switch
     {
         Literal literal => LiteralTypeResolver.Resolve(literal),
@@ -147,12 +154,12 @@ public static class ExpressionTypeInferencer
             return Combine(left, right);
         }
 
-        if (left.Collation is not null && right.Collation is not null && left.Collation.Name != right.Collation.Name)
+        if (IsAmbiguousCollationConflict(left.Collation, right.Collation))
         {
             return null;
         }
 
-        var collation = left.Collation ?? right.Collation;
+        var collation = DominantCollation(left.Collation, right.Collation);
         if (left.IsMax || right.IsMax)
         {
             return new SqlType(left.Category, Collation: collation, IsMax: true);
@@ -215,17 +222,29 @@ public static class ExpressionTypeInferencer
         }
 
         var winner = left.Category > right.Category ? left : right;
-        return winner.IsStringFamily ? new SqlType(winner.Category, Collation: winner.Collation, LengthKnown: false) : new SqlType(winner.Category);
-    }
+        if (!winner.IsStringFamily)
+        {
+            return new SqlType(winner.Category);
+        }
 
-    private static SqlType? CombineSameCategoryStrings(SqlType left, SqlType right)
-    {
-        if (left.Collation is not null && right.Collation is not null && left.Collation.Name != right.Collation.Name)
+        var loser = ReferenceEquals(winner, left) ? right : left;
+        if (loser.IsStringFamily && IsAmbiguousCollationConflict(left.Collation, right.Collation))
         {
             return null;
         }
 
-        var collation = left.Collation ?? right.Collation;
+        var collation = loser.IsStringFamily ? DominantCollation(left.Collation, right.Collation) : winner.Collation;
+        return new SqlType(winner.Category, Collation: collation, LengthKnown: false);
+    }
+
+    private static SqlType? CombineSameCategoryStrings(SqlType left, SqlType right)
+    {
+        if (IsAmbiguousCollationConflict(left.Collation, right.Collation))
+        {
+            return null;
+        }
+
+        var collation = DominantCollation(left.Collation, right.Collation);
         if (left.IsMax || right.IsMax)
         {
             return new SqlType(left.Category, Collation: collation, IsMax: true);
@@ -233,5 +252,30 @@ public static class ExpressionTypeInferencer
 
         var length = left.Length is { } l && right.Length is { } r ? Math.Max(l, r) : left.Length ?? right.Length;
         return new SqlType(left.Category, Length: length, Collation: collation);
+    }
+
+    private static bool IsAmbiguousCollationConflict(Collation? left, Collation? right) =>
+        left is not null && right is not null
+        && !string.Equals(left.Name, right.Name, StringComparison.OrdinalIgnoreCase)
+        && left.CoercibilityRank == right.CoercibilityRank;
+
+    private static Collation? DominantCollation(Collation? left, Collation? right)
+    {
+        if (left is null)
+        {
+            return right;
+        }
+
+        if (right is null)
+        {
+            return left;
+        }
+
+        if (string.Equals(left.Name, right.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            return left;
+        }
+
+        return left.CoercibilityRank >= right.CoercibilityRank ? left : right;
     }
 }

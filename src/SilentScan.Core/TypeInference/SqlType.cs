@@ -26,6 +26,16 @@ public sealed record SqlType(
 
     public bool IsBinaryFamily => Category is SqlTypeCategory.Binary or SqlTypeCategory.VarBinary;
 
+    public bool IsLegacyLob => Category is SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image;
+
+    public bool IsLegalLegacyLobConversionTarget =>
+        !IsLegacyLob || Collation is not { } collation || (!collation.IsUtf8 && !collation.IsSupplementaryCharacterAware);
+
+    public bool NeedsConversionFrom(SqlType source) =>
+        Category != source.Category
+        || (IsStringFamily && Collation is { } targetCollation && source.Collation is { } sourceCollation
+            && !string.Equals(targetCollation.Name, sourceCollation.Name, StringComparison.OrdinalIgnoreCase));
+
     public bool IsFractionalSecondsFamily => Category is SqlTypeCategory.Time
         or SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset;
 

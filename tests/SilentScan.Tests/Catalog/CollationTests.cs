@@ -1,4 +1,3 @@
-using SilentScan.Core.Catalog;
 using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Catalog;
@@ -78,5 +77,32 @@ public sealed class CollationTests
     public void GuaranteesDistinctLiteralsAreUnequal_CaseInsensitiveOrAccentInsensitive_ReturnsFalse(string name)
     {
         Assert.False(new Collation(name).GuaranteesDistinctLiteralsAreUnequal);
+    }
+
+    [Fact]
+    public void CoercibilityRank_ExplicitCollateClause_OutranksColumnCollation()
+    {
+        var explicitCollate = new Collation("Latin1_General_BIN", CollationSource.ExplicitCollateClause);
+        var column = new Collation("SQL_Latin1_General_CP1_CI_AS", CollationSource.ColumnExplicit);
+
+        Assert.True(explicitCollate.CoercibilityRank > column.CoercibilityRank);
+    }
+
+    [Fact]
+    public void CoercibilityRank_ColumnCollation_OutranksDatabaseDefault()
+    {
+        var column = new Collation("SQL_Latin1_General_CP1_CI_AS", CollationSource.ColumnExplicit);
+        var databaseDefault = new Collation("Latin1_General_CI_AS", CollationSource.DatabaseDefaultFromDdl);
+
+        Assert.True(column.CoercibilityRank > databaseDefault.CoercibilityRank);
+    }
+
+    [Fact]
+    public void CoercibilityRank_TwoColumnCollations_AreTheSameRank()
+    {
+        var a = new Collation("SQL_Latin1_General_CP1_CI_AS", CollationSource.ColumnExplicit);
+        var b = new Collation("Latin1_General_CI_AS", CollationSource.ColumnExplicit);
+
+        Assert.Equal(a.CoercibilityRank, b.CoercibilityRank);
     }
 }

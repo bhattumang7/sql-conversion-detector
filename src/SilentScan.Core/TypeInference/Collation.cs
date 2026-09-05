@@ -7,10 +7,21 @@ public enum CollationSource
     DatabaseDefaultFromDdl,
 
     DatabaseDefaultFromManifest,
+
+    ExplicitCollateClause,
 }
 
 public sealed record Collation(string Name, CollationSource Source = CollationSource.ColumnExplicit)
 {
+    public int CoercibilityRank => Source switch
+    {
+        CollationSource.ExplicitCollateClause => 3,
+        CollationSource.ColumnExplicit => 2,
+        CollationSource.DatabaseDefaultFromDdl => 1,
+        CollationSource.DatabaseDefaultFromManifest => 1,
+        _ => 1,
+    };
+
     public bool IsSqlFamily => Name.StartsWith("SQL_", StringComparison.OrdinalIgnoreCase);
 
     public bool IsWindowsFamily => !IsSqlFamily;

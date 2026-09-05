@@ -1,5 +1,4 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
-using SilentScan.Core.Catalog;
 using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.TypeInference;
@@ -116,6 +115,14 @@ public sealed class LiteralTypeResolverTests
 
         Assert.Equal(SqlTypeCategory.NVarChar, type!.Category);
         Assert.Equal("SQL_Latin1_General_CP1_CI_AS", type.Collation!.Name);
+    }
+
+    [Fact]
+    public void Resolve_StringLiteralWithExplicitCollate_OracleVerified_RanksAtCastCoercibility()
+    {
+        var type = LiteralTypeResolver.Resolve(ParseLiteral("'hello' COLLATE Latin1_General_CI_AS"));
+
+        Assert.Equal(CollationSource.ExplicitCollateClause, type!.Collation!.Source);
     }
 
     [Fact]

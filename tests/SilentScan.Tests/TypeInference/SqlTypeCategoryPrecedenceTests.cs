@@ -57,4 +57,15 @@ public sealed class SqlTypeCategoryPrecedenceTests
     {
         Assert.All(DocumentedPrecedenceLowestToHighest, other => Assert.True((int)other < (int)SqlTypeCategory.Json));
     }
+
+    [Theory]
+    [InlineData(SqlTypeCategory.Binary, SqlTypeCategory.VarBinary)]
+    [InlineData(SqlTypeCategory.VarBinary, SqlTypeCategory.Char)]
+    [InlineData(SqlTypeCategory.Char, SqlTypeCategory.VarChar)]
+    [InlineData(SqlTypeCategory.VarChar, SqlTypeCategory.NChar)]
+    [InlineData(SqlTypeCategory.NChar, SqlTypeCategory.NVarChar)]
+    public void OracleVerified_SixMemberStringBinaryGroup_MatchesEnumDeclarationOrder(SqlTypeCategory lower, SqlTypeCategory higher)
+    {
+        Assert.True((int)lower < (int)higher);
+    }
 }

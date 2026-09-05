@@ -1,6 +1,3 @@
-using SilentScan.Core.Catalog;
-using SilentScan.Core.TypeInference;
-
 namespace SilentScan.Core.TypeInference;
 
 public static class BuiltinFunctionTypeResolver
@@ -47,6 +44,15 @@ public static class BuiltinFunctionTypeResolver
         ["DB_NAME"] = new SqlType(SqlTypeCategory.NVarChar, Length: 128),
         ["HOST_NAME"] = new SqlType(SqlTypeCategory.NVarChar, Length: 128),
         ["ORIGINAL_LOGIN"] = new SqlType(SqlTypeCategory.NVarChar, Length: 4000),
+
+        ["UNICODE"] = new SqlType(SqlTypeCategory.Int),
+        ["CHAR"] = new SqlType(SqlTypeCategory.Char, Length: 1),
+        ["NCHAR"] = new SqlType(SqlTypeCategory.NChar, Length: 1),
+        ["SPACE"] = new SqlType(SqlTypeCategory.VarChar, LengthKnown: false),
+        ["QUOTENAME"] = new SqlType(SqlTypeCategory.NVarChar, Length: 258),
+        ["SOUNDEX"] = new SqlType(SqlTypeCategory.VarChar, Length: 5),
+        ["DIFFERENCE"] = new SqlType(SqlTypeCategory.Int),
+        ["ISJSON"] = new SqlType(SqlTypeCategory.Int),
     };
 
     private static readonly Dictionary<string, SqlType> GlobalVariableTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -83,13 +89,15 @@ public static class BuiltinFunctionTypeResolver
         ["SUM"] = 0,
         ["AVG"] = 0,
         ["DATEADD"] = 2,
+        ["TRIM"] = 0,
+        ["TRANSLATE"] = 0,
     };
 
     private static readonly HashSet<string> IntegerWideningAggregates = new(StringComparer.OrdinalIgnoreCase) { "SUM", "AVG" };
 
     private static readonly HashSet<string> LengthUnknownAfterArgumentType = new(StringComparer.OrdinalIgnoreCase)
     {
-        "LEFT", "RIGHT", "SUBSTRING", "STUFF", "REPLACE",
+        "LEFT", "RIGHT", "SUBSTRING", "STUFF", "REPLACE", "TRANSLATE",
     };
 
     public static bool ResultLengthDiffersFromArgument(string functionName) =>
@@ -100,7 +108,7 @@ public static class BuiltinFunctionTypeResolver
 
     private static readonly HashSet<string> DemotesFixedWidthSourceCategory = new(StringComparer.OrdinalIgnoreCase)
     {
-        "UPPER", "LOWER", "LTRIM", "RTRIM", "REVERSE", "REPLACE", "LEFT", "RIGHT", "SUBSTRING", "STUFF",
+        "UPPER", "LOWER", "LTRIM", "RTRIM", "REVERSE", "REPLACE", "LEFT", "RIGHT", "SUBSTRING", "STUFF", "TRIM", "TRANSLATE",
     };
 
     public static bool DemotesFixedWidthArgumentCategory(string functionName) =>
@@ -126,7 +134,10 @@ public static class BuiltinFunctionTypeResolver
 
         if (WidensIntegerAggregateArgument(functionName))
         {
-            return WidenIntegerAggregateResult(argumentType);
+            var widened = WidenIntegerAggregateResult(argumentType);
+            return IsAverageAggregate(functionName) && widened is { Category: SqlTypeCategory.Decimal, Scale: { } avgScale }
+                ? widened with { Scale = Math.Max(avgScale, 6) }
+                : widened;
         }
 
         if (RequiresDateAddResultAdjustment(functionName))
@@ -161,10 +172,15 @@ public static class BuiltinFunctionTypeResolver
     public static bool WidensIntegerAggregateArgument(string functionName) =>
         IntegerWideningAggregates.Contains(functionName);
 
-    public static SqlType WidenIntegerAggregateResult(SqlType argumentType) =>
-        argumentType.Category is SqlTypeCategory.TinyInt or SqlTypeCategory.SmallInt
-            ? new SqlType(SqlTypeCategory.Int)
-            : argumentType;
+    public static SqlType WidenIntegerAggregateResult(SqlType argumentType) => argumentType.Category switch
+    {
+        SqlTypeCategory.TinyInt or SqlTypeCategory.SmallInt => new SqlType(SqlTypeCategory.Int),
+        SqlTypeCategory.Decimal => argumentType with { Precision = 38 },
+        _ => argumentType,
+    };
+
+    private static bool IsAverageAggregate(string functionName) =>
+        string.Equals(functionName, "AVG", StringComparison.OrdinalIgnoreCase);
 
     public static SqlType? ResolveGlobalVariable(string name) =>
         GlobalVariableTypes.GetValueOrDefault(name);

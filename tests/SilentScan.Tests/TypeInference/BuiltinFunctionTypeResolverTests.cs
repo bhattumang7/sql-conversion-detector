@@ -1,4 +1,3 @@
-using SilentScan.Core.Catalog;
 using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.TypeInference;
@@ -131,5 +130,69 @@ public sealed class BuiltinFunctionTypeResolverTests
         var result = BuiltinFunctionTypeResolver.ResolveStringAggResult(new SqlType(SqlTypeCategory.Int));
 
         Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData("UNICODE", SqlTypeCategory.Int)]
+    [InlineData("CHAR", SqlTypeCategory.Char)]
+    [InlineData("NCHAR", SqlTypeCategory.NChar)]
+    [InlineData("SPACE", SqlTypeCategory.VarChar)]
+    [InlineData("QUOTENAME", SqlTypeCategory.NVarChar)]
+    [InlineData("SOUNDEX", SqlTypeCategory.VarChar)]
+    [InlineData("DIFFERENCE", SqlTypeCategory.Int)]
+    [InlineData("ISJSON", SqlTypeCategory.Int)]
+    public void ResolveFixedReturnType_OracleVerified_NewlyCoveredBuiltins_ResolveToDocumentedCategory(string functionName, SqlTypeCategory expectedCategory)
+    {
+        var result = BuiltinFunctionTypeResolver.ResolveFixedReturnType(functionName);
+
+        Assert.Equal(expectedCategory, result!.Category);
+    }
+
+    [Fact]
+    public void ResolveFixedReturnType_OracleVerified_Quotename_CapsAtTwoHundredFiftyEight()
+    {
+        var result = BuiltinFunctionTypeResolver.ResolveFixedReturnType("QUOTENAME");
+
+        Assert.Equal(258, result!.Length);
+    }
+
+    [Fact]
+    public void ResolveFixedReturnType_OracleVerified_Soundex_ReturnsLengthFiveNotFour()
+    {
+        var result = BuiltinFunctionTypeResolver.ResolveFixedReturnType("SOUNDEX");
+
+        Assert.Equal(5, result!.Length);
+    }
+
+    [Theory]
+    [InlineData("TRIM")]
+    [InlineData("TRANSLATE")]
+    public void TryGetArgumentTypeIndex_OracleVerified_NewlyCoveredBuiltins_ResolveFromFirstArgument(string functionName)
+    {
+        Assert.Equal(0, BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(functionName));
+    }
+
+    [Fact]
+    public void DemotesFixedWidthArgumentCategory_OracleVerified_Trim_TrueLikeLtrimRtrim()
+    {
+        Assert.True(BuiltinFunctionTypeResolver.DemotesFixedWidthArgumentCategory("TRIM"));
+    }
+
+    [Fact]
+    public void ResultLengthDiffersFromArgument_OracleVerified_Trim_FalseBecauseLengthIsPreserved()
+    {
+        Assert.False(BuiltinFunctionTypeResolver.ResultLengthDiffersFromArgument("TRIM"));
+    }
+
+    [Fact]
+    public void ResultLengthDiffersFromArgument_OracleVerified_Translate_TrueBecauseResultCapsAtMaximumWidth()
+    {
+        Assert.True(BuiltinFunctionTypeResolver.ResultLengthDiffersFromArgument("TRANSLATE"));
+    }
+
+    [Fact]
+    public void DemotesFixedWidthArgumentCategory_OracleVerified_Translate_True()
+    {
+        Assert.True(BuiltinFunctionTypeResolver.DemotesFixedWidthArgumentCategory("TRANSLATE"));
     }
 }
