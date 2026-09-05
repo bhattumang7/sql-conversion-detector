@@ -1,4 +1,3 @@
-using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.TypeInference;
 
@@ -67,6 +66,55 @@ public sealed class ColumnProvenanceAnalysisTests
         var nested = new ColumnProvenance.Union([new ColumnProvenance.Union([Base, other]), cast]);
 
         Assert.True(ColumnProvenanceAnalysis.IsExpressionDerived(nested));
+    }
+
+    [Fact]
+    public void IsNonDeterministic_OrdinaryBaseColumn_False()
+    {
+        Assert.False(ColumnProvenanceAnalysis.IsNonDeterministic(Base));
+    }
+
+    [Fact]
+    public void IsNonDeterministic_BaseColumnFlaggedNonDeterministic_True()
+    {
+        var computed = new ColumnProvenance.BaseColumn("dbo.Orders", "Total", new SqlType(SqlTypeCategory.Money), IsNonDeterministic: true);
+
+        Assert.True(ColumnProvenanceAnalysis.IsNonDeterministic(computed));
+    }
+
+    [Fact]
+    public void IsNonDeterministic_ExpressionReferencingNonDeterministicColumn_PropagatesTrue()
+    {
+        var computed = new ColumnProvenance.BaseColumn("dbo.Orders", "Total", new SqlType(SqlTypeCategory.Money), IsNonDeterministic: true);
+        var expression = new ColumnProvenance.Expression(InferredType: null, Inputs: [Base, computed]);
+
+        Assert.True(ColumnProvenanceAnalysis.IsNonDeterministic(expression));
+    }
+
+    [Fact]
+    public void IsNonDeterministic_ExpressionOverOnlyDeterministicColumns_False()
+    {
+        var expression = new ColumnProvenance.Expression(InferredType: null, Inputs: [Base]);
+
+        Assert.False(ColumnProvenanceAnalysis.IsNonDeterministic(expression));
+    }
+
+    [Fact]
+    public void IsNonDeterministic_CastOfNonDeterministicColumn_PropagatesTrue()
+    {
+        var computed = new ColumnProvenance.BaseColumn("dbo.Orders", "Total", new SqlType(SqlTypeCategory.Money), IsNonDeterministic: true);
+        var cast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), computed);
+
+        Assert.True(ColumnProvenanceAnalysis.IsNonDeterministic(cast));
+    }
+
+    [Fact]
+    public void IsNonDeterministic_UnionWithOneNonDeterministicBranch_PropagatesTrue()
+    {
+        var computed = new ColumnProvenance.BaseColumn("dbo.Orders", "Total", new SqlType(SqlTypeCategory.Money), IsNonDeterministic: true);
+        var union = new ColumnProvenance.Union([Base, computed]);
+
+        Assert.True(ColumnProvenanceAnalysis.IsNonDeterministic(union));
     }
 
     [Fact]

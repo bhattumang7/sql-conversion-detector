@@ -2,7 +2,6 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.TypeInference;
-using SilentScan.Core.Common;
 
 namespace SilentScan.Tests.Lineage;
 
@@ -755,6 +754,35 @@ public sealed class LineageResolverTests
         Assert.DoesNotContain("dbo.Foo", lineage.CyclicViews);
         var view = lineage.Find("dbo.Foo")!;
         Assert.IsType<ColumnProvenance.BaseColumn>(view.FindColumn("OrderId")!.Provenance);
+    }
+
+    [Fact]
+    public void Resolve_DollarIdentityPseudoColumnInSelectList_DegradesToUnknownRatherThanCrashing()
+    {
+
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL IDENTITY);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT $IDENTITY FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        var column = Assert.Single(view.Columns);
+
+        Assert.IsType<ColumnProvenance.Unknown>(column.Provenance);
+    }
+
+    [Fact]
+    public void Resolve_UdtInstanceMethodCall_DoesNotMisattributeReturnTypeFromASameNamedScalarUdf()
+    {
+
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Shapes (Geom GEOMETRY NOT NULL);",
+            "CREATE FUNCTION dbo.STAsText() RETURNS INT AS BEGIN RETURN 1 END;",
+            "CREATE VIEW dbo.vw_Shapes AS SELECT Geom.STAsText() AS GeomText FROM dbo.Shapes;");
+
+        var view = lineage.Find("dbo.vw_Shapes")!;
+        var expr = Assert.IsType<ColumnProvenance.Expression>(view.FindColumn("GeomText")!.Provenance);
+
+        Assert.Null(expr.InferredType);
     }
 
     [Fact]

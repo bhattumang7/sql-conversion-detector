@@ -90,6 +90,12 @@ public static class ScalarExpressionResolver
     private static ColumnProvenance.Expression ResolveFunctionCall(FunctionCall functionCall, ExpressionContext context)
     {
         var inputs = CollectColumnInputs(functionCall, context);
+
+        if (functionCall.CallTarget is ExpressionCallTarget)
+        {
+            return new ColumnProvenance.Expression(InferredType: null, inputs, context.SourcePath, functionCall.StartLine);
+        }
+
         var name = functionCall.FunctionName.Value;
 
         if (string.Equals(name, "STRING_AGG", StringComparison.OrdinalIgnoreCase) && functionCall.Parameters.Count == 2)
@@ -191,15 +197,20 @@ public static class ScalarExpressionResolver
         SkipLedger? ledger,
         DatabaseCatalog? catalog = null)
     {
-        var identifiers = columnRef.MultiPartIdentifier.Identifiers;
-        var columnName = identifiers[^1].Value;
-        var identifierComparer = catalog?.IdentifierComparer;
-
         ColumnProvenance.Unknown Unresolved(string reason)
         {
             ledger?.Record(AnalysisPass.Lineage, sourcePath, columnRef.StartLine, columnRef.StartColumn, "column reference", reason);
             return new ColumnProvenance.Unknown(reason);
         }
+
+        if (columnRef.MultiPartIdentifier is not { Identifiers.Count: > 0 })
+        {
+            return Unresolved($"'{columnRef.ColumnType}' pseudo-column is not resolved by name lookup");
+        }
+
+        var identifiers = columnRef.MultiPartIdentifier.Identifiers;
+        var columnName = identifiers[^1].Value;
+        var identifierComparer = catalog?.IdentifierComparer;
 
         if (identifiers.Count >= 2)
         {
@@ -246,6 +257,11 @@ public static class ScalarExpressionResolver
         IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
         DatabaseCatalog? catalog = null)
     {
+        if (columnRef.MultiPartIdentifier is not { Identifiers.Count: > 0 })
+        {
+            return null;
+        }
+
         var identifiers = columnRef.MultiPartIdentifier.Identifiers;
         var columnName = identifiers[^1].Value;
         var identifierComparer = catalog?.IdentifierComparer;

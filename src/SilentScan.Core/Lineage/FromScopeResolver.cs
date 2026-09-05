@@ -476,7 +476,7 @@ public static class FromScopeResolver
         return new ResolvedRelation(qualifiedName, [.. table.Columns.Select(c => new ResolvedColumn(
             c.Name,
             c.Type is { } type
-                ? new ColumnProvenance.BaseColumn(qualifiedName, c.Name, type)
+                ? new ColumnProvenance.BaseColumn(qualifiedName, c.Name, type, IsNonDeterministic: c.IsComputedNonDeterministic)
                 : new ColumnProvenance.Unknown($"column {c.Name} has an unresolved declared type")))]);
     }
 

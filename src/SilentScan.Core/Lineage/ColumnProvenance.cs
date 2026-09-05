@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using SilentScan.Core.Catalog;
 using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Lineage;
@@ -17,7 +16,7 @@ public abstract record ColumnProvenance
     {
     }
 
-    public sealed record BaseColumn(string TableQualifiedName, string ColumnName, SqlType? Type, int Depth = 0, bool IsNullableSide = false) : ColumnProvenance;
+    public sealed record BaseColumn(string TableQualifiedName, string ColumnName, SqlType? Type, int Depth = 0, bool IsNullableSide = false, bool IsNonDeterministic = false) : ColumnProvenance;
 
     public sealed record Declared(SqlType Type, string? TableQualifiedName = null, int Depth = 0) : ColumnProvenance;
 

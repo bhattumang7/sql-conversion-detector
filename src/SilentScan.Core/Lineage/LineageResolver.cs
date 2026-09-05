@@ -59,9 +59,16 @@ public static class LineageResolver
         }
 
         return [.. elements.OfType<SelectScalarExpression>()
-            .Select(e => e.ColumnName?.Value ?? (e.Expression as ColumnReferenceExpression)?.MultiPartIdentifier.Identifiers[^1].Value)
+            .Select(e => e.ColumnName?.Value ?? InferColumnReferenceName(e.Expression))
             .Where(n => n is not null)
             .Select(n => n!)];
+    }
+
+    private static string? InferColumnReferenceName(ScalarExpression expression)
+    {
+        return expression is ColumnReferenceExpression { MultiPartIdentifier.Identifiers: [.., { Value: { } lastIdentifier }] }
+            ? lastIdentifier
+            : null;
     }
 
     private static ResolvedRelation ResolveView(ViewDefinition view, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, SkipLedger ledger)

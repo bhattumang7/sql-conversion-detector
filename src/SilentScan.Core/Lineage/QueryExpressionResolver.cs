@@ -110,5 +110,7 @@ public static class QueryExpressionResolver
         entry.Relation.Columns.Select(c => c with { Provenance = ScalarExpressionResolver.BumpDepthIfViewLayer(c.Provenance, entry.IsViewLayer) });
 
     private static string? InferName(ScalarExpression expression) =>
-        expression is ColumnReferenceExpression columnRef ? columnRef.MultiPartIdentifier.Identifiers[^1].Value : null;
+        expression is ColumnReferenceExpression { MultiPartIdentifier.Identifiers: [.., { Value: { } lastIdentifier }] }
+            ? lastIdentifier
+            : null;
 }
