@@ -7,7 +7,8 @@ internal static class ComputedColumnDeterminismChecker
     private static readonly HashSet<string> AlwaysNonDeterministicFunctionNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "NEWID", "NEWSEQUENTIALID", "GETDATE", "GETUTCDATE",
-        "SYSDATETIME", "SYSUTCDATETIME", "SYSDATETIMEOFFSET", "CURRENT_TIMESTAMP",
+        "SYSDATETIME", "SYSUTCDATETIME", "SYSDATETIMEOFFSET",
+        "FORMAT", "PARSENAME",
     };
 
     public static bool IsNonDeterministic(ScalarExpression expression)
@@ -34,6 +35,18 @@ internal static class ComputedColumnDeterminismChecker
         }
 
         public override void ExplicitVisit(GlobalVariableExpression node)
+        {
+            Found = true;
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(AtTimeZoneCall node)
+        {
+            Found = true;
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(ParameterlessCall node)
         {
             Found = true;
             base.ExplicitVisit(node);

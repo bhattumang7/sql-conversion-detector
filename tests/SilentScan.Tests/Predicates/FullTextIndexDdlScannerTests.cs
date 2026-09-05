@@ -101,6 +101,29 @@ public sealed class FullTextIndexDdlScannerTests
         Assert.Equal(FullTextIndexDdlFindingKind.NonDeterministicComputedColumn, finding.Kind);
     }
 
+    [Theory]
+    [InlineData("FORMAT(Id, 'N')")]
+    [InlineData("PARSENAME(Body, 1)")]
+    [InlineData("CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'UTC' AS VARCHAR(50))")]
+    [InlineData("CURRENT_TIMESTAMP")]
+    [InlineData("CURRENT_DATE")]
+    [InlineData("CURRENT_USER")]
+    [InlineData("SESSION_USER")]
+    [InlineData("SYSTEM_USER")]
+    [InlineData("USER")]
+    public void NonDeterministicBuiltin_InNonpersistedComputedColumn_Fires(string expression)
+    {
+        var findings = Scan(
+            $"""
+            CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY, Body VARCHAR(200) NULL, Stamped AS ({expression}));
+            CREATE FULLTEXT INDEX ON dbo.T(Stamped) KEY INDEX PK_T;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(FullTextIndexDdlFindingKind.NonDeterministicComputedColumn, finding.Kind);
+        Assert.Equal("Stamped", finding.ColumnName);
+    }
+
     [Fact]
     public void MoreThan1024IndexedColumns_Fires()
     {
