@@ -22,6 +22,9 @@ public sealed class MemoryOptimizedUnsupportedColumnTypeScannerTests
     [InlineData("NTEXT")]
     [InlineData("IMAGE")]
     [InlineData("ROWVERSION")]
+    [InlineData("HIERARCHYID")]
+    [InlineData("GEOMETRY")]
+    [InlineData("GEOGRAPHY")]
     public void UnsupportedType_OnMemoryOptimizedTable_Fires(string type)
     {
         var findings = Scan(

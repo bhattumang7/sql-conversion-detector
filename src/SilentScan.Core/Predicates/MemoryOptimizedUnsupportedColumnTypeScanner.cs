@@ -13,6 +13,9 @@ public static class MemoryOptimizedUnsupportedColumnTypeScanner
         SqlTypeCategory.NText,
         SqlTypeCategory.Image,
         SqlTypeCategory.Timestamp,
+        SqlTypeCategory.HierarchyId,
+        SqlTypeCategory.Geometry,
+        SqlTypeCategory.Geography,
     ];
 
     public static IReadOnlyList<MemoryOptimizedUnsupportedColumnTypeFinding> Scan(DatabaseCatalog catalog)

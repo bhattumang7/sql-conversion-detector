@@ -9,7 +9,8 @@ internal static class MemoryOptimizedUnsupportedColumnType
     public static RuleDocContent Content { get; } = new(
         WhyItMatters: """
             A memory-optimized table (CREATE TABLE ... WITH (MEMORY_OPTIMIZED = ON)) declares a
-            column typed xml, sql_variant, text, ntext, image, or timestamp/rowversion.
+            column typed xml, sql_variant, text, ntext, image, timestamp/rowversion, hierarchyid,
+            geometry, or geography.
             Oracle-confirmed (Msg 10794): none of these types are supported on a memory-optimized
             table at all, so the CREATE/ALTER TABLE statement never deploys - this is a hard
             structural incompatibility, not a performance concern. This is a catalog-only fact,

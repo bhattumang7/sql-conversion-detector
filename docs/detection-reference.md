@@ -433,6 +433,109 @@ scores it:
   same clause is less likely to change their verdict, but not confirmed
   immune.
 
+## Built-in function determinism
+
+`ComputedColumnDeterminismChecker` (feeds
+`FullTextIndexDdlFindingKind.NonDeterministicComputedColumn`, the only
+consumer) walks a computed column's expression for nondeterministic
+constructs. Microsoft's own "Deterministic and Nondeterministic Functions"
+reference page enumerates the built-in function determinism classification
+directly - a genuine closed, documented list, not a free-text source - and is
+the right starting point before reaching for the engine's own internal
+per-function determinism metadata (unverified at the individual-flag level
+and a strictly weaker source than Microsoft's own stated behavior). Every
+addition below is still oracle-
+confirmed independently (Msg 4936 on a `PERSISTED` computed column, the
+cheapest reproduction of the same determinism check `FullTextIndexDdlRuleId`
+depends on) rather than taken from the docs page alone, because of one
+confirmed discrepancy:
+
+- **`FORMAT`, `PARSENAME`, and `AT TIME ZONE` are oracle-confirmed
+  nondeterministic** (Msg 4936 rejects each in a `PERSISTED` computed
+  column) and are now covered - `FORMAT`/`PARSENAME` as `FunctionCall`
+  names, `AT TIME ZONE` via its own `AtTimeZoneCall` ScriptDom node (not a
+  `FunctionCall`). Each is also oracle-confirmed to reach the checker's one
+  real consumer: a nonpersisted computed column built from it blocks
+  `CREATE FULLTEXT INDEX` with Msg 9928, matching the scanner's own finding.
+- **`TEXTPTR` is oracle-confirmed nondeterministic (Msg 4936) but was NOT
+  added** - it is unreachable through the checker's only consumer.
+  `TEXTPTR` always returns a fixed `VARBINARY(16)`, and a full-text index
+  built on any `TEXTPTR`-rooted computed column fails with Msg 7670
+  ("not a character-based, XML, image or varbinary(max) type column")
+  before the engine's own determinism check is ever reached - oracle-
+  confirmed directly, the same DDL shape that reaches Msg 9928 for
+  `FORMAT`/`PARSENAME`/`AT TIME ZONE` instead produces Msg 7670 here.
+  `FullTextIndexDdlScanner` can't produce that finding either: it never
+  infers a computed column's own result type (`CatalogColumn.Type` is
+  always null for a computed column), so `UnsupportedColumnType` can never
+  fire for one - a separate, unscoped modeling gap, not addressed here.
+  Adding `TEXTPTR` to the determinism denylist would be true but dead code
+  through the one real caller; left out until a second consumer or the
+  computed-column-type-inference gap makes it reachable.
+- **`MIN_ACTIVE_ROWVERSION` is documented as always-nondeterministic but
+  oracle-confirmed NOT rejected** in a `PERSISTED` computed column (Docker,
+  SQL Server 2025) - the docs page is wrong for this one function. Not
+  added; re-confirm oracle-side before ever trusting this specific entry
+  from the docs page again.
+- **`CHECKSUM(*)` and `NEXT VALUE FOR` can never appear in a computed column
+  expression at all** (Msg 1789 and Msg 11719 respectively, unconditional
+  parse/bind-time rejections) - neither is reachable through this rule's
+  computed-column-expression shape regardless of determinism, so neither
+  was added to the checker.
+- **Ranking/analytic window functions** (`RANK`, `DENSE_RANK`, `ROW_NUMBER`,
+  `NTILE`, `LAG`, `LEAD`, `FIRST_VALUE`, `LAST_VALUE`, `PERCENTILE_CONT`,
+  `PERCENTILE_DISC`, `PERCENT_RANK`, `CUME_DIST`) require an `OVER` clause,
+  which a computed column expression can never contain (windowed functions
+  are restricted to the `SELECT`/`ORDER BY` list) - unreachable here for the
+  same reason as `NEXT VALUE FOR`, not oracle-reprobed individually.
+- **`GET_TRANSMISSION_STATUS`** (Service Broker, requires a conversation
+  handle argument) was not oracle-probed - too narrow a real-world surface
+  inside a computed column to be worth the setup cost; left off the
+  checker's list pending an actual need.
+- `CAST`/`CONVERT`'s conditional determinism (nondeterministic only for
+  specific target-type/style combinations) and `CHECKSUM`'s bare-column-list
+  form (deterministic, oracle-confirmed) were not modeled - the existing
+  checker's precision bar treats them as an unclassified pass-through
+  (matching prior behavior), and a wrong-direction rule here would be a
+  false positive, the higher-cost mistake for this project.
+- **`CURRENT_TIMESTAMP`, `CURRENT_DATE`, `CURRENT_USER`, `SESSION_USER`,
+  `SYSTEM_USER`, and bare `USER` never parse as a `FunctionCall` at all -
+  ScriptDom gives them their own dedicated node, `ParameterlessCall`, with a
+  closed `ParameterlessCallType` enum covering exactly these six.** The
+  checker's prior `CURRENT_TIMESTAMP` entry in the `FunctionCall`-name
+  denylist was therefore dead code - that node type is never visited for a
+  parameterless keyword call, so the check could never fire. Replaced with
+  an `ExplicitVisit(ParameterlessCall)` override that flags the whole node
+  type unconditionally; all six enum members are oracle-confirmed
+  nondeterministic (Msg 4936, `PERSISTED` computed column), so there is no
+  deterministic member to carve out. `CURRENT_DATE` is a SQL Server 2025+
+  addition - oracle-confirmed absent on a 2022 engine (Msg 156, "Incorrect
+  syntax near the keyword 'CURRENT_DATE'") despite the same ScriptDom
+  `TSql160Parser` (2022 grammar) parsing it without error - the grammar
+  accepting a keyword is not evidence the connected engine implements it,
+  the same lesson `StringSplitArgumentRuleId`'s engine-version gate already
+  encodes for a different construct.
+- **The engine's own internal builtin-determinism metadata is real and
+  directly readable (a fixed-size, per-function descriptor table, one
+  determinism bit per entry), but several function names appear more than
+  once with conflicting flags** (`year`, `month`, `round`, `concat`,
+  `current_time`, and one spatial-method name observed) - multiple internal
+  registrations sharing one surface name, not distinct overloads: a
+  descriptor field that looked like a possible arity discriminator turned
+  out to just be the name's own character length (used by the engine's own
+  name-hashing step), identical across every duplicate. The engine's own
+  name-lookup structure always favors the most-recently-registered
+  descriptor for a given name (newest insertion wins ties) - so for a
+  duplicate name, the highest-registration-order entry is the one any real
+  by-name call actually resolves to. Deduplicating on that basis reproduced
+  every function this project already ships or oracle-confirmed exactly
+  (`year`/`month`/`round` deterministic, `format`/`getdate`/`newid`/`rand`
+  nondeterministic) and independently reproduced the `MIN_ACTIVE_ROWVERSION`
+  docs-page discrepancy above (a single, non-duplicated entry, read as
+  deterministic straight from the engine's own metadata) - a second,
+  independent confirmation that Microsoft's docs page is wrong for that one
+  function, not just a quirk of this project's own oracle probe.
+
 ## Halloween Protection bypasses for self-referencing DML
 
 `SelfReferencingDmlRuleId`'s scanner excludes any INSERT/UPDATE/DELETE/MERGE
@@ -488,11 +591,14 @@ real `WITH (MEMORY_OPTIMIZED = ON)` table.
   custom `IDENTITY` seed/increment other than `(1,1)` (a separate,
   independently confirmed restriction, Msg 12339 - not yet built into a
   rule) are all legal on a memory-optimized table; do not flag them.
-- `hierarchyid`/`geography`/`geometry` are also documented as unsupported on
-  a memory-optimized table, but this codebase's type resolver has no way to
-  distinguish them from an arbitrary CLR UDT (both resolve to an unresolved/
-  null `SqlType`) - not implemented for these three pending that modeling
-  gap, to avoid conflating them with a genuinely unrelated CLR UDT column.
+- **`hierarchyid`/`geometry`/`geography` also always fail (Msg 10794)** on a
+  memory-optimized table, identical to the other unsupported types above -
+  oracle-confirmed directly. The type resolver already distinguishes these
+  three built-in CLR-backed types by name from an arbitrary CLR UDT (they
+  resolve to their own `SqlTypeCategory` members, not an unresolved/null
+  `SqlType`), so `MemoryOptimizedUnsupportedColumnTypeScanner`'s denylist
+  covers them alongside `xml`/`sql_variant`/`text`/`ntext`/`image`/
+  `timestamp`.
 - **A `char`/`varchar` column carrying a UTF-8 collation (`_UTF8` suffix)
   always fails (Msg 12356)** - independent of whether the table is ever
   touched by a natively compiled module; the CREATE/ALTER TABLE statement

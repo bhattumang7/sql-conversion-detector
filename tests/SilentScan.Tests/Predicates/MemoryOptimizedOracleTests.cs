@@ -48,6 +48,20 @@ public sealed class MemoryOptimizedOracleTests : OracleTestFixture
         Assert.Equal(10794, exception.Number);
     }
 
+    [Theory]
+    [InlineData("HIERARCHYID")]
+    [InlineData("GEOMETRY")]
+    [InlineData("GEOGRAPHY")]
+    public async Task SpatialOrHierarchyIdColumn_OnMemoryOptimizedTable_FailsToDeploy(string type)
+    {
+        var exception = await AssertDeployFailsAsync(
+            $"""
+            CREATE TABLE dbo.SpatialWidgets (Id INT NOT NULL PRIMARY KEY NONCLUSTERED, Tag {type} NULL) WITH (MEMORY_OPTIMIZED = ON);
+            """);
+
+        Assert.Equal(10794, exception.Number);
+    }
+
     [Fact]
     public async Task SameColumnType_OnOrdinaryTable_DeploysCleanly()
     {
