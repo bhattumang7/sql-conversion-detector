@@ -46,6 +46,25 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_SparseColumnWithMaskingFunction_CapturesBothStorageAndMasking()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Id  INT       NOT NULL PRIMARY KEY,
+                Ssn CHAR(9)   SPARSE MASKED WITH (FUNCTION = 'default()') NULL
+            );
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+        var ssn = table.FindColumn("Ssn")!;
+
+        Assert.True(ssn.IsSparse);
+        Assert.True(ssn.IsMasked);
+        Assert.Equal("default", ssn.MaskingFunctionName);
+    }
+
+    [Fact]
     public void Build_ColumnLevelPrimaryKey_IsIndexed()
     {
         var catalog = BuildFrom("CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY, Name VARCHAR(50) NULL);");
