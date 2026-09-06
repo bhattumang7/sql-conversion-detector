@@ -51,6 +51,15 @@ public sealed class NonUniqueUpdateSourceScannerTests
     }
 
     [Fact]
+    public void JoinOnClauseItselfUnsatisfiable_NeverFires()
+    {
+        var findings = Scan(
+            "UPDATE t SET t.Val = s.Val FROM dbo.TargetT t JOIN dbo.SourceNonUnique s ON t.Id = s.TargetId AND s.TargetId = 1 AND s.TargetId = 2;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void UpdateThroughCteNamedLikeTheRealTargetTable_NeverFires()
     {
 

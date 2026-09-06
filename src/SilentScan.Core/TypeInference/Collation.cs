@@ -17,9 +17,9 @@ public sealed record Collation(string Name, CollationSource Source = CollationSo
     {
         CollationSource.ExplicitCollateClause => 3,
         CollationSource.ColumnExplicit => 2,
-        CollationSource.DatabaseDefaultFromDdl => 1,
-        CollationSource.DatabaseDefaultFromManifest => 1,
-        _ => 1,
+        CollationSource.DatabaseDefaultFromDdl => 2,
+        CollationSource.DatabaseDefaultFromManifest => 2,
+        _ => 2,
     };
 
     public bool IsSqlFamily => Name.StartsWith("SQL_", StringComparison.OrdinalIgnoreCase);

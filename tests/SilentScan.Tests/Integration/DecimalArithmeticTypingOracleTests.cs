@@ -82,6 +82,20 @@ public sealed class DecimalArithmeticTypingOracleTests
     }
 
     [Theory]
+    [InlineData("CAST(1 AS DECIMAL(5,2)) % CAST(1 AS DECIMAL(5,2))", 5, 2)]
+    [InlineData("CAST(1 AS DECIMAL(9,2)) % CAST(1 AS DECIMAL(5,4))", 5, 4)]
+    [InlineData("CAST(1 AS INT) % CAST(1 AS DECIMAL(5,2))", 5, 2)]
+    [InlineData("CAST(1 AS DECIMAL(38,0)) % CAST(1 AS DECIMAL(38,38))", 38, 38)]
+    [InlineData("CAST(1 AS DECIMAL(38,38)) % CAST(1 AS DECIMAL(1,0))", 38, 38)]
+    public async Task Modulo_FollowsItsOwnDistinctFormula_NotDivide(string expressionSql, int expectedPrecision, int expectedScale)
+    {
+        var (precision, scale) = await DescribeExpressionType(expressionSql);
+
+        Assert.Equal(expectedPrecision, precision);
+        Assert.Equal(expectedScale, scale);
+    }
+
+    [Theory]
     [InlineData("CAST(1 AS FLOAT) + CAST(1 AS DECIMAL(5,2))")]
     [InlineData("CAST(1 AS INT) + CAST(1 AS BIGINT)")]
     public async Task NonExactOrPureIntegerArithmetic_NeverProducesADecimalCappedByThisFormula(string expressionSql)

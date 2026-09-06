@@ -85,7 +85,7 @@ public static class ExpressionTypeInferencer
 
     private static SqlType? ResolveExactArithmetic(BinaryExpressionType op, SqlType? left, SqlType? right)
     {
-        if (op is not (BinaryExpressionType.Add or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply or BinaryExpressionType.Divide))
+        if (op is not (BinaryExpressionType.Add or BinaryExpressionType.Subtract or BinaryExpressionType.Multiply or BinaryExpressionType.Divide or BinaryExpressionType.Modulo))
         {
             return null;
         }
@@ -115,6 +115,10 @@ public static class ExpressionTypeInferencer
             case BinaryExpressionType.Multiply:
                 unboundedPrecision = p1 + p2 + 1;
                 unboundedScale = s1 + s2;
+                break;
+            case BinaryExpressionType.Modulo:
+                unboundedScale = Math.Max(s1, s2);
+                unboundedPrecision = Math.Min(p1 - s1, p2 - s2) + unboundedScale;
                 break;
             default:
                 unboundedScale = Math.Max(6, s1 + p2 + 1);

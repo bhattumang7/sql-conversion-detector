@@ -28,6 +28,34 @@ confirmed independently of any one tool's output.
   (`VarChar` > `Char`, `NVarChar` > `NChar`, `VarBinary` > `Binary`) and
   exactly what `ExpressionTypeInferencer.Combine` already implements.
 
+- **Collation coercibility for CASE/dominant-type merging has exactly three
+  tiers, and a column's own DDL-level `COLLATE` clause carries the *same*
+  tier as a column that merely inherits the database's default collation -
+  there is no fourth, stronger tier for a column with its own explicit
+  per-column `COLLATE`.** Oracle-confirmed directly (Docker SQL Server 2025):
+  a `CASE` merging one column with its own `COLLATE Latin1_General_CS_AS` and
+  one plain column that inherits a differently-named database-default
+  collation raises Msg 457 ("collation of the value is unresolved due to a
+  collation conflict") exactly like two differently-collated
+  DDL-`COLLATE`'d columns do - the database-default column's collation is
+  never silently overridden by the other side's. The three real tiers,
+  weakest to strongest: no collation/coercible-default (a literal or
+  expression result with no name of its own - modeled as a `null` `Collation`
+  rather than a numbered rank, since it always defers to whichever operand
+  does carry one), "implicit" (any column's own effective collation,
+  regardless of whether that name came from the column's own DDL `COLLATE`
+  clause or the database default - a single tier), and an explicit `COLLATE`
+  clause on the expression itself (strongest - always wins outright, and two
+  different explicit `COLLATE` clauses in direct conflict raise Msg 468
+  unconditionally, no tie-break). `Collation.CoercibilityRank` previously
+  modeled the column-DDL-explicit and database-default sources as two
+  different ranks (implicitly claiming a DDL `COLLATE` on a column outranks
+  the database default) - `ExpressionTypeInferencer`'s CASE merge is the only
+  consumer of this rank, and the wrong two-rank model meant a genuine
+  Msg-457-shaped conflict between such a pair would have been silently
+  resolved to the DDL-explicit column's collation instead of correctly
+  flagged as ambiguous. Fixed by collapsing both sources to the same rank.
+
 - **A compile-time-constant CASE/IIF condition (e.g. `WHEN 1=1`) is folded
   before dominant-type selection runs**, so the untaken branch's type never
   enters the merge - the result is just the taken branch's own declared
@@ -564,10 +592,19 @@ scores it:
 - `NonUniqueUpdateSourceScanner`, `NotInNullableSubqueryScanner` - both already
   short-circuit on an unsatisfiable `WHERE`/search condition before reporting;
   closed.
-- `JoinKeyUniqueness` - lower priority: reasons narrowly about a specific
-  idiom (join-key uniqueness), so a stray same-column contradiction elsewhere
-  in the same clause is less likely to change its verdict, but not confirmed
-  immune. Still open, low priority.
+- `JoinKeyUniqueness` - closed: `NonUniqueUpdateSourceScanner`'s own
+  join-inspection path (`UPDATE ... FROM ... JOIN`) checked the statement's
+  `WHERE` clause for unsatisfiability but never the join's own `ON` clause,
+  unlike its `MERGE ... USING` sibling in `QueryAntiPatternScanner`, which
+  already did. Oracle-confirmed (Docker SQL Server 2025): an `UPDATE ... FROM
+  t INNER JOIN s ON t.Id = s.Id AND s.Id = 1 AND s.Id = 2` (a same-column
+  contradiction inside the `ON` clause, not the `WHERE` clause) updates zero
+  rows regardless of how many non-unique rows `s` has for a given `Id` - the
+  join never produces a match at all, so the "non-unique source could
+  duplicate-update the target row" claim was moot. Fixed:
+  `NonUniqueUpdateSourceScanner.InspectJoin` now runs the same
+  `PredicateSurvivalAnalyzer.IsUnsatisfiable` guard over `join.SearchCondition`
+  that its `WHERE`-clause and `MERGE`-source siblings already use.
 
 ### Rule-by-rule survival verdicts
 

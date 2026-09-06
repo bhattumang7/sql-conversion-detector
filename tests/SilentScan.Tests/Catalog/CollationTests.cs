@@ -89,12 +89,12 @@ public sealed class CollationTests
     }
 
     [Fact]
-    public void CoercibilityRank_ColumnCollation_OutranksDatabaseDefault()
+    public void CoercibilityRank_ColumnCollation_AndDatabaseDefault_AreTheSameRank()
     {
         var column = new Collation("SQL_Latin1_General_CP1_CI_AS", CollationSource.ColumnExplicit);
         var databaseDefault = new Collation("Latin1_General_CI_AS", CollationSource.DatabaseDefaultFromDdl);
 
-        Assert.True(column.CoercibilityRank > databaseDefault.CoercibilityRank);
+        Assert.Equal(column.CoercibilityRank, databaseDefault.CoercibilityRank);
     }
 
     [Fact]

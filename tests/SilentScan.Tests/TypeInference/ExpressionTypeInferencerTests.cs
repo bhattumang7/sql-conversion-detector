@@ -312,6 +312,21 @@ public sealed class ExpressionTypeInferencerTests
     }
 
     [Fact]
+    public void Resolve_SearchedCase_OracleVerified_ColumnExplicitAndDatabaseDefaultCollation_AreTheSameCoercibilityTier_NullsWholeResult()
+    {
+
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS", CollationSource.ColumnExplicit)),
+            ["B"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("Latin1_General_CI_AS", CollationSource.DatabaseDefaultFromDdl)),
+        };
+
+        var result = Resolve("CASE WHEN 1 = 1 THEN A ELSE B END", typesByName);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
     public void Resolve_SearchedCase_OracleVerified_ExplicitCollateBranchOutranksColumnCollation_NoAmbiguity()
     {
 
@@ -453,6 +468,28 @@ public sealed class ExpressionTypeInferencerTests
 
         Assert.Equal(19, result!.Precision);
         Assert.Equal(8, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_ModuloMixedPrecisionScale()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(9, 2), ["B"] = Decimal(5, 4) };
+
+        var result = Resolve("A % B", typesByName);
+
+        Assert.Equal(5, result!.Precision);
+        Assert.Equal(4, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_ModuloNeverFallsBackToLeftOperandVerbatim()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(10, 3), ["B"] = Decimal(6, 2) };
+
+        var result = Resolve("A % B", typesByName);
+
+        Assert.Equal(7, result!.Precision);
+        Assert.Equal(3, result.Scale);
     }
 
     [Fact]
