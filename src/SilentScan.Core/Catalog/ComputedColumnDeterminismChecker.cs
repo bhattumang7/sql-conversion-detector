@@ -43,6 +43,13 @@ internal static class ComputedColumnDeterminismChecker
         "ASYMKEY_ID", "ASYMKEYPROPERTY", "SYMKEYPROPERTY", "SIGNBYASYMKEY",
 
         "CHANGE_TRACKING_CURRENT_VERSION", "CHANGE_TRACKING_MIN_VALID_VERSION",
+
+        "ISDATE", "SQL_VARIANT_PROPERTY",
+    };
+
+    private static readonly HashSet<string> NonDeterministicDateParts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "weekday", "dw", "week", "wk", "ww",
     };
 
     private static readonly HashSet<int> NonDeterministicDateStyles =
@@ -65,7 +72,8 @@ internal static class ComputedColumnDeterminismChecker
         {
             var name = node.FunctionName.Value;
             if (AlwaysNonDeterministicFunctionNames.Contains(name)
-                || (node.Parameters.Count == 0 && string.Equals(name, "RAND", StringComparison.OrdinalIgnoreCase)))
+                || (node.Parameters.Count == 0 && string.Equals(name, "RAND", StringComparison.OrdinalIgnoreCase))
+                || (string.Equals(name, "DATEPART", StringComparison.OrdinalIgnoreCase) && IsNonDeterministicDatePart(node.Parameters)))
             {
                 Found = true;
             }
@@ -173,6 +181,10 @@ internal static class ComputedColumnDeterminismChecker
             ParenthesisExpression inner => ResolveSourceType(inner.Expression),
             _ => null,
         };
+
+        private static bool IsNonDeterministicDatePart(IList<ScalarExpression> parameters) =>
+            parameters is [IdentifierLiteral datePart, ..]
+            && NonDeterministicDateParts.Contains(datePart.Value);
 
         private static int? TryGetStyle(ScalarExpression? style) =>
             style is IntegerLiteral literal && int.TryParse(literal.Value, out var value) ? value : null;

@@ -2079,4 +2079,89 @@ public sealed class CatalogBuilderTests
         Assert.False(table.FindColumn("Total")!.IsComputedNonDeterministic);
     }
 
+    [Fact]
+    public void Build_ComputedColumnWithDatePartWeekday_IsFlaggedNonDeterministic()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Id  INT NOT NULL PRIMARY KEY,
+                D   DATETIME NOT NULL,
+                Wd  AS (DATEPART(weekday, D))
+            );
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+
+        Assert.True(table.FindColumn("Wd")!.IsComputedNonDeterministic);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithDatePartWeek_IsFlaggedNonDeterministic()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Id  INT NOT NULL PRIMARY KEY,
+                D   DATETIME NOT NULL,
+                Wk  AS (DATEPART(week, D))
+            );
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+
+        Assert.True(table.FindColumn("Wk")!.IsComputedNonDeterministic);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithDatePartMonth_IsNotFlaggedNonDeterministic()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Id INT NOT NULL PRIMARY KEY,
+                D  DATETIME NOT NULL,
+                Mo AS (DATEPART(month, D))
+            );
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+
+        Assert.False(table.FindColumn("Mo")!.IsComputedNonDeterministic);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithIsDate_IsFlaggedNonDeterministic()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Id INT NOT NULL PRIMARY KEY,
+                S  VARCHAR(50) NOT NULL,
+                Ok AS (ISDATE(S))
+            );
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+
+        Assert.True(table.FindColumn("Ok")!.IsComputedNonDeterministic);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithSqlVariantProperty_IsFlaggedNonDeterministic()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Id INT NOT NULL PRIMARY KEY,
+                V  SQL_VARIANT NULL,
+                Bt AS (SQL_VARIANT_PROPERTY(V, 'BaseType'))
+            );
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+
+        Assert.True(table.FindColumn("Bt")!.IsComputedNonDeterministic);
+    }
+
 }
