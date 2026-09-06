@@ -609,8 +609,7 @@ public static class ReadableScanReportWriter
         SargabilityFindingKind.CaseFoldOnColumn => "UPPER/LOWER applied to the column",
         SargabilityFindingKind.DateFunctionOnColumn => "Date-part function applied to the column",
         SargabilityFindingKind.CharindexOrLeftOnColumn => "CHARINDEX/LEFT applied to the column",
-        SargabilityFindingKind.LikePatternNotLiteral => "LIKE with a non-literal pattern",
-        SargabilityFindingKind.RegexpPatternNotLiteral => "REGEXP_LIKE with a non-literal pattern",
+        SargabilityFindingKind.RegexpPatternNoLiteralPrefix => "REGEXP_LIKE pattern has no anchored literal prefix",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SargabilityFindingKind."),
     };
 

@@ -272,7 +272,7 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.Tier1RuleId(finding.Kind), finding.Confidence);
 
         var isConfirmedIndexed = finding.Indexed == true;
-        var level = isConfirmedIndexed && finding.Kind is not (SargabilityFindingKind.LikePatternNotLiteral or SargabilityFindingKind.RegexpPatternNotLiteral) ? LevelWarning : LevelNote;
+        var level = isConfirmedIndexed ? LevelWarning : LevelNote;
         level = FloorLevelForConfidence(level, finding.Confidence);
         var detail = finding.Detail is null ? string.Empty : $" ({finding.Detail})";
         var indexNote = finding.TableQualifiedName is { } table

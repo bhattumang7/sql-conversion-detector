@@ -10,9 +10,7 @@ public enum SargabilityFindingKind
 
     LeadingWildcardLike,
 
-    LikePatternNotLiteral,
-
-    RegexpPatternNotLiteral,
+    RegexpPatternNoLiteralPrefix,
 
     CaseFoldOnColumn,
 

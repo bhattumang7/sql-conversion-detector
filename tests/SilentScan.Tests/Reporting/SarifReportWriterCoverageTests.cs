@@ -5,7 +5,6 @@ using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Reporting.Sarif;
-using SilentScan.Core.Rules;
 using SilentScan.Core.TypeInference;
 using SilentScan.Tests.Support;
 
@@ -65,7 +64,7 @@ public sealed class SarifReportWriterCoverageTests
     }
 
     [Fact]
-    public void Write_SargabilityFindingConfirmedIndexed_MapsToWarningUnlessLikePatternNotLiteral()
+    public void Write_SargabilityFindingConfirmedIndexed_MapsToWarningLevel()
     {
         var indexed = new SargabilityFinding(SargabilityFindingKind.FunctionWrappedColumn, "Col", null, "test.sql", 1, 1, TableQualifiedName: "dbo.T", Indexed: true);
         var report = TestScanReports.Build(Tier1Findings: [indexed]);
@@ -75,23 +74,13 @@ public sealed class SarifReportWriterCoverageTests
     }
 
     [Fact]
-    public void Write_SargabilityFindingLikePatternNotLiteralEvenWhenIndexed_MapsToNoteLevel()
+    public void Write_SargabilityFindingRegexpPatternNoLiteralPrefixWhenIndexed_MapsToWarningLevel()
     {
-        var indexed = new SargabilityFinding(SargabilityFindingKind.LikePatternNotLiteral, "Col", null, "test.sql", 1, 1, TableQualifiedName: "dbo.T", Indexed: true);
+        var indexed = new SargabilityFinding(SargabilityFindingKind.RegexpPatternNoLiteralPrefix, "Col", null, "test.sql", 1, 1, TableQualifiedName: "dbo.T", Indexed: true);
         var report = TestScanReports.Build(Tier1Findings: [indexed]);
 
         var result = FirstResult(report);
-        Assert.Equal("note", result.GetProperty("level").GetString());
-    }
-
-    [Fact]
-    public void Write_SargabilityFindingRegexpPatternNotLiteralEvenWhenIndexed_MapsToNoteLevel()
-    {
-        var indexed = new SargabilityFinding(SargabilityFindingKind.RegexpPatternNotLiteral, "Col", null, "test.sql", 1, 1, TableQualifiedName: "dbo.T", Indexed: true);
-        var report = TestScanReports.Build(Tier1Findings: [indexed]);
-
-        var result = FirstResult(report);
-        Assert.Equal("note", result.GetProperty("level").GetString());
+        Assert.Equal("warning", result.GetProperty("level").GetString());
     }
 
     [Theory]

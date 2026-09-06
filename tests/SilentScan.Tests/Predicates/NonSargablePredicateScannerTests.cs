@@ -436,40 +436,45 @@ public sealed class NonSargablePredicateScannerTests
     }
 
     [Fact]
-    public void LikePattern_Parameter_FiresAsNotLiteral()
+    public void LikePattern_Parameterized_DoesNotFire()
     {
-        var findings = ScanFixture("LIKE_PATTERN_NOT_LITERAL_fires.sql");
+        var findings = ScanFixture("LIKE_PATTERN_PARAMETERIZED_clean.sql");
 
-        var finding = Assert.Single(findings);
-        Assert.Equal(SargabilityFindingKind.LikePatternNotLiteral, finding.Kind);
-        Assert.Equal("DisplayName", finding.ColumnName);
+        Assert.Empty(findings);
     }
 
     [Fact]
     public void LikePattern_LiteralWithoutLeadingWildcard_DoesNotFire()
     {
-
-        var findings = ScanFixture("LIKE_PATTERN_NOT_LITERAL_clean.sql");
+        var findings = ScanFixture("LIKE_PATTERN_LITERAL_NO_WILDCARD_clean.sql");
 
         Assert.Empty(findings);
     }
 
     [Fact]
-    public void RegexpLikePattern_Parameter_FiresAsNotLiteral()
+    public void RegexpLikePattern_Parameterized_DoesNotFire()
     {
-        var findings = ScanFixture("REGEXP_PATTERN_NOT_LITERAL_fires.sql");
+        var findings = ScanFixture("REGEXP_PATTERN_PARAMETERIZED_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void RegexpLikePattern_AnchoredLiteral_DoesNotFire()
+    {
+        var findings = ScanFixture("REGEXP_PATTERN_NO_LITERAL_PREFIX_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void RegexpLikePattern_LiteralWithoutAnchoredPrefix_FiresAsNoLiteralPrefix()
+    {
+        var findings = ScanFixture("REGEXP_PATTERN_NO_LITERAL_PREFIX_fires.sql");
 
         var finding = Assert.Single(findings);
-        Assert.Equal(SargabilityFindingKind.RegexpPatternNotLiteral, finding.Kind);
+        Assert.Equal(SargabilityFindingKind.RegexpPatternNoLiteralPrefix, finding.Kind);
         Assert.Equal("DisplayName", finding.ColumnName);
-    }
-
-    [Fact]
-    public void RegexpLikePattern_Literal_DoesNotFire()
-    {
-        var findings = ScanFixture("REGEXP_PATTERN_NOT_LITERAL_clean.sql");
-
-        Assert.Empty(findings);
     }
 
     [Fact]
@@ -605,7 +610,7 @@ public sealed class NonSargablePredicateScannerTests
             SELECT OrderId FROM dbo.Orders WHERE UPPER(Notes) LIKE '%X';
             """);
 
-        Assert.DoesNotContain(findings, f => f.Kind is SargabilityFindingKind.LeadingWildcardLike or SargabilityFindingKind.LikePatternNotLiteral);
+        Assert.DoesNotContain(findings, f => f.Kind is SargabilityFindingKind.LeadingWildcardLike);
     }
 
     [Fact]

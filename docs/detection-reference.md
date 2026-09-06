@@ -364,14 +364,20 @@ confirmed independently of any one tool's output.
   is not allowed") - a distinct, simpler, already-primary-time failure, out of scope for the
   value-column-width rule.
 
-- **`REGEXP_LIKE`'s pattern must be a compile-time literal for the optimizer to reason about it at
-  all - a non-literal pattern (a variable or parameter) is flagged the same way a non-literal
-  `LIKE` pattern already is.** `REGEXP_LIKE` is a boolean predicate (like `CONTAINS`/`FREETEXT`),
-  not a general scalar function: oracle-confirmed (Docker, SQL Server 2025 RTM-CU8) that
-  `SELECT REGEXP_LIKE(...)` and any use of it as a value expression (`x = REGEXP_LIKE(...)`) both
-  fail with the engine's own syntax error; only `SELECT ... WHERE REGEXP_LIKE(...)` is accepted,
-  matching the existing MAX-argument finding above. This project's ScriptDom parser dependency
-  parses it into its own dedicated predicate AST node, which the rule below is built against.
+- **`REGEXP_LIKE` can produce a real Index Seek even when the pattern is a variable or parameter
+  - the engine derives the seek range at runtime via dedicated range-bound intrinsics, not only at
+  compile time from a literal.** Oracle-confirmed (Docker, SQL Server 2025 RTM-CU8, `SHOWPLAN_XML`)
+  against an indexed column: a parameterized `REGEXP_LIKE(Col, @p)` compiles to an Index Seek whose
+  bounds are computed per-execution from the parameter's actual value; the plan shape does not wait
+  to know what the pattern will be. What actually forces a scan is a *literal* pattern that isn't
+  reducible to a leading anchor (`^`) followed by nothing but literal characters - any other
+  construct anywhere in the pattern (missing anchor, wildcard, character class, a trailing anchor)
+  defeats the derivation and forces an Index Scan even with a supporting index in place. `REGEXP_LIKE`
+  is a boolean predicate (like `CONTAINS`/`FREETEXT`), not a general scalar function: oracle-confirmed
+  that `SELECT REGEXP_LIKE(...)` and any use of it as a value expression (`x = REGEXP_LIKE(...)`)
+  both fail with the engine's own syntax error; only `SELECT ... WHERE REGEXP_LIKE(...)` is accepted,
+  matching the existing MAX-argument finding above. This project's ScriptDom parser dependency parses
+  it into its own dedicated predicate AST node, which the rule below is built against.
 
 ## Predicate survival (normalization/simplification)
 
@@ -612,11 +618,17 @@ confirmed against a live instance).
 - `Verdict.SeekPreserved` - explicitly excluded from `ScanReportBuilder`'s
   actionable findings; a normalization rescue here has no precision cost
   since nothing is asserted as broken.
-- `LEADING_WILDCARD_LIKE`, `LIKE_PATTERN_NOT_LITERAL` - neither shape has a
-  known engine fold: two wildcard `LIKE` patterns on the same column aren't
-  provably contradictory from their text alone, and a non-literal pattern
-  isn't known at compile time for the engine to fold in the first place.
-  Nothing to rescue.
+- `LEADING_WILDCARD_LIKE` - a literal leading-wildcard pattern has no known
+  engine fold: two wildcard `LIKE` patterns on the same column aren't provably
+  contradictory from their text alone. Nothing to rescue.
+- A `LIKE` predicate whose pattern is a variable or parameter rather than a
+  literal used to have a dedicated finding claiming a leading wildcard "can't
+  be ruled out statically, forcing a scan." Oracle-confirmed (`SHOWPLAN_XML`
+  against a live instance) that this is wrong: a parameterized `LIKE`
+  predicate always compiles to an attempted Index Seek with a
+  runtime-computed range, even when the actual pattern turns out to have a
+  leading wildcard at execution time. The engine never falls back to a scan
+  for this shape, so the finding was removed rather than rescued.
 - `CARTESIAN_JOIN`'s always-false-inner-join-predicate finding - this rule
   fires *because* it runs the same contradiction detector to prove the `ON`
   predicate unsatisfiable; it is the normalization-aware implementation, not

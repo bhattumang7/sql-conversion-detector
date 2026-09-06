@@ -1,3 +1,4 @@
+using System.Buffers;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
@@ -191,14 +192,12 @@ public static class NonSargablePredicateScanner
                 case StringLiteral:
 
                     break;
-                default:
-
-                    Add(SargabilityFindingKind.LikePatternNotLiteral, columnName, detail: null, node, columnRef, scopeChain, walker);
-                    break;
             }
         }
 
         private static bool IsLikeWildcardChar(char value) => value is '%' or '_' or '[';
+
+        private static readonly SearchValues<char> RegexMetacharacters = SearchValues.Create("$*+.?()[]{}|\\^");
 
         private void InspectRegexpLikePredicate(RegexpLikePredicate node, ScopeChain scopeChain, ModuleWalker walker)
         {
@@ -207,11 +206,14 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
-            if (node.Pattern is not StringLiteral)
+            if (node.Pattern is StringLiteral literal && !HasAnchoredLiteralPrefix(literal.Value))
             {
-                Add(SargabilityFindingKind.RegexpPatternNotLiteral, columnName, detail: null, node, columnRef, scopeChain, walker);
+                Add(SargabilityFindingKind.RegexpPatternNoLiteralPrefix, columnName, detail: null, node, columnRef, scopeChain, walker);
             }
         }
+
+        private static bool HasAnchoredLiteralPrefix(string pattern) =>
+            pattern.Length > 0 && pattern[0] == '^' && pattern.AsSpan(1).IndexOfAny(RegexMetacharacters) < 0;
 
         private static ScalarExpression UnwrapParentheses(ScalarExpression expression)
         {

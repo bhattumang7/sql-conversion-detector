@@ -1,5 +1,5 @@
--- Near-miss sibling of REGEXP_PATTERN_NOT_LITERAL_fires.sql: the same predicate with a
--- literal pattern instead of a parameter. Must NOT fire.
+-- A literal LIKE pattern with no leading wildcard: statically known to be seekable, and no
+-- other tier-1 rule fires on it either. Must NOT fire.
 CREATE TABLE dbo.Users
 (
     UserId      INT           NOT NULL PRIMARY KEY,
@@ -11,4 +11,4 @@ GO
 
 SELECT UserId
 FROM dbo.Users
-WHERE REGEXP_LIKE(DisplayName, '^John');
+WHERE DisplayName LIKE 'John%';

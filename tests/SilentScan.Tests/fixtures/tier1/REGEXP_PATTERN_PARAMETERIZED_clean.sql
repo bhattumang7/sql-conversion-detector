@@ -1,7 +1,6 @@
--- REGEXP_LIKE analogue of LIKE_PATTERN_NOT_LITERAL_fires.sql: when the pattern is a
--- parameter rather than a literal, whether the predicate can seek at all can't be
--- determined statically, so it must be flagged as unanalyzable rather than silently
--- passed as clean.
+-- Oracle-confirmed (silentscan-sql2025, SHOWPLAN_XML): a parameterized REGEXP_LIKE pattern
+-- still compiles to a real Index Seek, with the seek's bounds computed at runtime from the
+-- parameter via engine intrinsics. A non-literal pattern is not a reason to flag this predicate.
 CREATE TABLE dbo.Users
 (
     UserId      INT           NOT NULL PRIMARY KEY,

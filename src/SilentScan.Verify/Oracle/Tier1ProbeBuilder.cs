@@ -14,7 +14,7 @@ public static class Tier1ProbeBuilder
 
         var table = BracketQualifiedName(tableQualifiedName);
 
-        if (finding.Kind is SargabilityFindingKind.LeadingWildcardLike or SargabilityFindingKind.LikePatternNotLiteral or SargabilityFindingKind.RegexpPatternNotLiteral)
+        if (finding.Kind is SargabilityFindingKind.LeadingWildcardLike or SargabilityFindingKind.RegexpPatternNoLiteralPrefix)
         {
 
             return $"SELECT 1 FROM {table} WHERE {fragmentText};";
