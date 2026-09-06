@@ -64,6 +64,15 @@ published. This holds regardless of scope changes above.
   `vendor/sql2025/reading_from_folder.md`. Do the high-confidence work only —
   don't skip things that would cost more later. Being correct and thorough
   matters most.
+- **Always favor reading `vendor/sql2025` code before deciding anything** —
+  before concluding a claim is correct, before declaring a task/investigation
+  done, before trusting an existing test or public docs as sufficient. Public
+  docs and existing tests describe intended or previously-assumed behavior,
+  not necessarily what the engine's real code does; `vendor/sql2025` can
+  hold detail neither surfaces, and oracle probing alone can miss a
+  divergence a probe simply wasn't shaped to catch. Read the real code first,
+  then oracle-verify the resulting claim — never the other way around, and
+  never skip the code read because a docs page or a test already agrees.
   
 ## Codebase map — what is where
   - src/SilentScan.Core/Predicates/ — one <Name>Finding.cs (enum+record) and <Name>Scanner.cs
