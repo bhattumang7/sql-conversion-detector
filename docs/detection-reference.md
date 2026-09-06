@@ -371,8 +371,7 @@ confirmed independently of any one tool's output.
   `SELECT REGEXP_LIKE(...)` and any use of it as a value expression (`x = REGEXP_LIKE(...)`) both
   fail with the engine's own syntax error; only `SELECT ... WHERE REGEXP_LIKE(...)` is accepted,
   matching the existing MAX-argument finding above. This project's ScriptDom parser dependency
-  didn't originally carry a dedicated predicate AST node for this construct at all - a version
-  bump added one, unblocking the rule below.
+  parses it into its own dedicated predicate AST node, which the rule below is built against.
 
 ## Predicate survival (normalization/simplification)
 
