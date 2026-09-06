@@ -13,6 +13,12 @@ public static class NativelyCompiledUnsupportedBuiltinScanner
         "UPPER", "LOWER", "REPLACE", "CHARINDEX", "STUFF", "REVERSE", "PATINDEX", "QUOTENAME",
         "DATALENGTH", "ISNUMERIC", "ISDATE", "HASHBYTES", "CONCAT", "FORMAT", "SOUNDEX",
         "STDEV", "STDEVP", "VAR", "VARP", "STRING_SPLIT",
+
+        "COMPRESS", "DECOMPRESS", "CHECKSUM", "BINARY_CHECKSUM", "PARSENAME", "FORMATMESSAGE",
+        "APP_NAME", "TYPE_NAME", "COL_NAME", "OBJECT_ID", "OBJECT_NAME", "DB_ID", "DB_NAME",
+        "SCHEMA_ID", "SCHEMA_NAME", "PERMISSIONS", "HAS_PERMS_BY_NAME", "CURRENT_TIMEZONE",
+        "IDENT_CURRENT", "STATS_DATE", "OBJECTPROPERTY", "COLLATIONPROPERTY", "FILE_ID",
+        "INDEXPROPERTY",
     };
 
     public static IReadOnlyList<NativelyCompiledUnsupportedBuiltinFinding> Scan(SqlParseResult parseResult)

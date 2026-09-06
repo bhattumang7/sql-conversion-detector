@@ -83,4 +83,27 @@ public sealed class NativelyCompiledUnsupportedBuiltinOracleTests : OracleTestFi
         var finding = Assert.Single(Scan(Sql));
         Assert.Equal("UPPER", finding.FunctionName);
     }
+
+    [Theory]
+    [InlineData("VARBINARY(100)", "COMPRESS(N'a')", "COMPRESS")]
+    [InlineData("INT", "OBJECT_ID(N'dbo.Codes')", "OBJECT_ID")]
+    [InlineData("NVARCHAR(128)", "APP_NAME()", "APP_NAME")]
+    public async Task MetadataOrCryptoFunction_InNativelyCompiledProcedure_StillFailsWithMsg10794_AndScannerFlagsIt(
+        string variableType, string expression, string expectedFunctionName)
+    {
+        string sql = $$"""
+            CREATE PROCEDURE dbo.ComputeCode
+            WITH NATIVE_COMPILATION, SCHEMABINDING
+            AS
+            BEGIN ATOMIC WITH (TRANSACTION ISOLATION LEVEL = SNAPSHOT, LANGUAGE = N'us_english')
+                DECLARE @x {{variableType}} = {{expression}};
+            END;
+            """;
+
+        var exception = await ExecuteExpectingFailureAsync(sql);
+        Assert.Equal(10794, exception.Number);
+
+        var finding = Assert.Single(Scan(sql));
+        Assert.Equal(expectedFunctionName, finding.FunctionName);
+    }
 }
