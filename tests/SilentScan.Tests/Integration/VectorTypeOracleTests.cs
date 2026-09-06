@@ -234,6 +234,24 @@ public sealed class VectorTypeOracleTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CastToVector_WithNestedArrayElement_FailsAtExecutionWithMsg13670_AndScannerFlagsIt()
+    {
+        const string Sql = "SELECT CAST('[1.0, [2.0], 3.0]' AS VECTOR(3));";
+
+        await using var connection = new SqlConnection(Options.BuildConnectionString(_databaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = Sql;
+
+        var exception = await Assert.ThrowsAsync<SqlException>(() => command.ExecuteScalarAsync());
+        Assert.Equal(13670, exception.Number);
+
+        var finding = Assert.Single(ScanVectorLiteralConversions(Sql));
+        Assert.Equal(VectorLiteralConversionFindingKind.NonNumericJsonElement, finding.Kind);
+        Assert.Equal("Array", finding.ElementKind);
+    }
+
+    [Fact]
     public async Task CastToVector_WithElementCountMismatch_FailsAtExecutionWithMsg42204_AndScannerFlagsIt()
     {
         const string Sql = "SELECT CAST('[1.0, 2.0]' AS VECTOR(3));";

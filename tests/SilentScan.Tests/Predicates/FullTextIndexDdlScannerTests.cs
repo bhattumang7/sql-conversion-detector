@@ -67,6 +67,20 @@ public sealed class FullTextIndexDdlScannerTests
     }
 
     [Fact]
+    public void JsonColumn_UnsupportedColumnType_Fires()
+    {
+        var findings = Scan(
+            """
+            CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY, Body JSON NULL);
+            CREATE FULLTEXT INDEX ON dbo.T(Body) KEY INDEX PK_T;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(FullTextIndexDdlFindingKind.UnsupportedColumnType, finding.Kind);
+        Assert.Equal("Body", finding.ColumnName);
+    }
+
+    [Fact]
     public void PersistedNonDeterministicComputedColumn_NeverFires()
     {
         var findings = Scan(

@@ -9,7 +9,7 @@ namespace SilentScan.Core.Predicates;
 
 public static class RevertCookieTypeMismatchScanner
 {
-    private const int RequiredCookieLength = 100;
+    private const int MinimumCookieLength = 50;
 
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
@@ -65,6 +65,6 @@ public static class RevertCookieTypeMismatchScanner
         }
 
         private static bool IsValidCookieType(SqlType type) =>
-            type.Category == SqlTypeCategory.VarBinary && !type.IsMax && type.Length == RequiredCookieLength;
+            type.Category == SqlTypeCategory.VarBinary && !type.IsMax && type.Length is { } length && length >= MinimumCookieLength;
     }
 }

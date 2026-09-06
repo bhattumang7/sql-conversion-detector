@@ -76,6 +76,41 @@ public sealed class XmlSchemaCollectionDisallowedTypeOracleTests : OracleTestFix
     }
 
     [Fact]
+    public async Task IdRefsAsElementType_FailsToRegisterWithMsg6995_AndScannerFlagsIt()
+    {
+        const string Sql = """
+            CREATE XML SCHEMA COLLECTION dbo.RefsSchema AS N'
+            <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+              <xs:element name="RefsRoot" type="xs:IDREFS"/>
+            </xs:schema>';
+            """;
+
+        var exception = await ExecuteExpectingFailureAsync(Sql);
+        Assert.Equal(6995, exception.Number);
+
+        var finding = Assert.Single(Scan(Sql));
+        Assert.Equal(XmlSchemaCollectionDisallowedTypeKind.IdOrIdRefType, finding.Kind);
+    }
+
+    [Fact]
+    public async Task IdRefsAsAttributeType_RegistersCleanly_AndScannerDoesNotFlagIt()
+    {
+        const string Sql = """
+            CREATE XML SCHEMA COLLECTION dbo.RefsAttrSchema AS N'
+            <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+              <xs:complexType name="MyType">
+                <xs:attribute name="a" type="xs:IDREFS"/>
+              </xs:complexType>
+              <xs:element name="Root" type="MyType"/>
+            </xs:schema>';
+            """;
+
+        await ExecuteAsync(Sql);
+
+        Assert.Empty(Scan(Sql));
+    }
+
+    [Fact]
     public async Task IdAsAttributeType_RegistersCleanly_AndScannerDoesNotFlagIt()
     {
         const string Sql = """

@@ -645,7 +645,7 @@ public sealed class ReadableScanReportWriterTests
         var report = Blank().WithFindings("MaxTypedColumnScanner", findings);
 
         var blocks = BuildBlocks(report);
-        var maxLengthTable = TableAfterHeading(blocks, "MAX-typed columns");
+        var maxLengthTable = TableAfterHeading(blocks, "MAX-typed/json columns");
         var legacyTable = TableAfterHeading(blocks, "Legacy large-object columns");
 
         Assert.Equal("dbo.T.BigVarchar", Assert.Single(maxLengthTable.Rows)[1]);

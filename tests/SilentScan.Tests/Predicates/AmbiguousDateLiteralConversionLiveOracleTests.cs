@@ -42,4 +42,29 @@ public sealed class AmbiguousDateLiteralConversionLiveOracleTests
 
         Assert.Empty(report.Find<AmbiguousDateLiteralConversionFinding>("AmbiguousDateLiteralConversionScanner"));
     }
+
+    [Fact]
+    public async Task LiveDeployment_YearFirstAmbiguousLiteral_CastToDatetime_FiresBecauseDateformatSwapsMonthAndDay()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            SELECT CAST('2026-04-03' AS datetime);
+            """,
+            minimumConfidence: FindingConfidence.Low);
+
+        var finding = Assert.Single(report.Find<AmbiguousDateLiteralConversionFinding>("AmbiguousDateLiteralConversionScanner"));
+        Assert.Equal("2026-04-03", finding.LiteralText);
+    }
+
+    [Fact]
+    public async Task LiveDeployment_YearFirstAmbiguousLiteral_CastToDate_NeverFiresBecauseIsoFormatIsAlwaysUnambiguousForDate()
+    {
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            """
+            SELECT CAST('2026-04-03' AS date);
+            """,
+            minimumConfidence: FindingConfidence.Low);
+
+        Assert.Empty(report.Find<AmbiguousDateLiteralConversionFinding>("AmbiguousDateLiteralConversionScanner"));
+    }
 }

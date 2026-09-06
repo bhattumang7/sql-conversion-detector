@@ -8,6 +8,7 @@ public static class AlwaysEncryptedUnsupportedColumnScanner
     private static readonly HashSet<SqlTypeCategory> UnsupportedDataTypeCategories =
     [
         SqlTypeCategory.Xml,
+        SqlTypeCategory.Json,
         SqlTypeCategory.Timestamp,
         SqlTypeCategory.Image,
         SqlTypeCategory.Text,

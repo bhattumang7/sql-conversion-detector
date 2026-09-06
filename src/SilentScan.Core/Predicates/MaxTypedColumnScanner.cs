@@ -20,7 +20,7 @@ public static class MaxTypedColumnScanner
 
                 NonIndexableColumnFindingKind kind;
 
-                if (type.IsMax)
+                if (type.IsMax || type.Category == SqlTypeCategory.Json)
                 {
                     kind = NonIndexableColumnFindingKind.MaxLength;
                 }

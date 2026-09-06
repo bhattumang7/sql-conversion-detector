@@ -7,7 +7,6 @@ public static class RuleRegistry
     public static IReadOnlyList<IRule> All { get; } =
     [
         new WaitForRule(),
-        new BackupOptionConflictRule(),
         new NativelyCompiledUnsupportedBuiltinRule(),
         new RestoreOptionConflictRule(),
         new ViewCheckOptionContradictionRule(),

@@ -9,12 +9,14 @@ internal static class MemoryOptimizedUnsupportedColumnType
     public static RuleDocContent Content { get; } = new(
         WhyItMatters: """
             A memory-optimized table (CREATE TABLE ... WITH (MEMORY_OPTIMIZED = ON)) declares a
-            column typed xml, sql_variant, text, ntext, image, timestamp/rowversion, hierarchyid,
-            geometry, or geography.
+            column typed xml, json, sql_variant, text, ntext, image, timestamp/rowversion,
+            hierarchyid, geometry, or geography.
             Oracle-confirmed (Msg 10794): none of these types are supported on a memory-optimized
             table at all, so the CREATE/ALTER TABLE statement never deploys - this is a hard
-            structural incompatibility, not a performance concern. This is a catalog-only fact,
-            detectable purely from the table's own column declarations with no query needed.
+            structural incompatibility, not a performance concern. SQL Server 2025's native `json`
+            type is rejected the same way as `xml`, oracle-confirmed directly, even though it is
+            the newest type in this list. This is a catalog-only fact, detectable purely from the
+            table's own column declarations with no query needed.
             """,
         HowToFixIt: """
             Retype the column to a type memory-optimized tables support (e.g. NVARCHAR(MAX) instead

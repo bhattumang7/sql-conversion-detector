@@ -1217,9 +1217,8 @@ WITH NATIVE_COMPILATION` module.
   CONTAINMENT = PARTIAL WITH CATALOG_COLLATION = DATABASE_DEFAULT` always
   fails with Msg 12845 ("cannot specify both CONTAINMENT = PARTIAL and
   CATALOG_COLLATION"), decidable purely from the statement's own option
-  list, the same shape as `BackupOptionConflictRuleId`/
-  `RestoreOptionConflictRuleId` — closes the `CREATE DATABASE` leg of
-  item 49 alongside those two. The conflict fires before the server-level
+  list, the same shape as `RestoreOptionConflictRuleId` — closes the
+  `CREATE DATABASE` leg of item 49. The conflict fires before the server-level
   "contained database authentication" check (confirmed with that
   `sp_configure` value at 0), so it isn't gated by server config. Also
   tested and found to **not** conflict: `FILESTREAM` + `LEDGER`,
@@ -1250,9 +1249,30 @@ WITH NATIVE_COMPILATION` module.
   `STANDBY` pairwise conflicts on `RESTORE`.** Oracle-confirmed (Docker):
   every pairing among the three always fails with Msg 3031 ("Option '...'
   conflicts with option(s) '...'"), decidable purely from the statement's own
-  `WITH` clause, the same shape as the shipped
-  `BackupOptionConflictRuleId` (`DIFFERENTIAL`/`COPY_ONLY`). `RESTORE...
-  CREATE DATABASE` forbidden option combinations remain open.
+  `WITH` clause. `RESTORE...CREATE DATABASE` forbidden option combinations
+  remain open.
+
+* **`BackupOptionConflictRuleId` (`BACKUP DATABASE ... WITH DIFFERENTIAL,
+  COPY_ONLY`) — shipped, then removed as a false premise found by reading
+  real code and re-verifying against a real engine.** The rule assumed
+  `DIFFERENTIAL` + `COPY_ONLY` on the same `BACKUP DATABASE` statement always
+  fails (Msg 3035, "no current database backup") purely from the statement's
+  own option list. Oracle-confirmed (Docker) that premise is false: once a
+  prior full backup of the database exists, `BACKUP DATABASE ... WITH
+  DIFFERENTIAL, COPY_ONLY` succeeds and produces a genuine copy-only
+  differential backup (`msdb.dbo.backupset` shows `is_copy_only = 1` and a
+  populated `differential_base_lsn` on the same row). Msg 3035 fires
+  identically with or without `COPY_ONLY` on a database that has never had a
+  full backup at all — the failure is a fact about backup *history*
+  (runtime/database state), not the statement's own text, so it is not
+  decidable the way the rule assumed and falls outside this tool's
+  catalog/AST-only scope. The existing regression test only ever exercised a
+  fresh scratch database with no prior full backup, so it could not have
+  distinguished "COPY_ONLY causes this" from "no full backup exists yet
+  causes this" - exactly the missing negative/control case test-check.md
+  calls for. Removed end-to-end (scanner, finding, SARIF/Readable/RuleCatalog
+  wiring, rule doc, tests) rather than patched, since the rule's only check
+  was this one false premise.
 
 * **UTF8-collation VARCHAR/CHAR target — a declared-length byte cap, not a
   character cap; a candidate `WriteLossKind` for it does not clear the

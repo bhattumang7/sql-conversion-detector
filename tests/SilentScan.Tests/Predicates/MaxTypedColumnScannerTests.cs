@@ -30,6 +30,17 @@ public sealed class MaxTypedColumnScannerTests
         Assert.Equal(NonIndexableColumnFindingKind.MaxLength, finding.Kind);
     }
 
+    [Fact]
+    public void JsonColumn_Fires()
+    {
+        var findings = Scan("CREATE TABLE dbo.Documents (Body JSON NOT NULL);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Documents", finding.TableQualifiedName);
+        Assert.Equal("Body", finding.ColumnName);
+        Assert.Equal(NonIndexableColumnFindingKind.MaxLength, finding.Kind);
+    }
+
     [Theory]
     [InlineData("VARCHAR(8000)")]
     [InlineData("NVARCHAR(4000)")]

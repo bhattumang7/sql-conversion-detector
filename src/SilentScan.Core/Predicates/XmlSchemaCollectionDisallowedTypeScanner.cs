@@ -114,7 +114,7 @@ public static class XmlSchemaCollectionDisallowedTypeScanner
                 return;
             }
 
-            if (isElementTypeAttribute && local is "ID" or "IDREF")
+            if (isElementTypeAttribute && local is "ID" or "IDREF" or "IDREFS")
             {
                 Findings.Add(new XmlSchemaCollectionDisallowedTypeFinding(
                     schemaCollectionName, local, XmlSchemaCollectionDisallowedTypeKind.IdOrIdRefType,

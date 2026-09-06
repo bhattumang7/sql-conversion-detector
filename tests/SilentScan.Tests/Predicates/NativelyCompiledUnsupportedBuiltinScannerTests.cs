@@ -116,6 +116,23 @@ public sealed class NativelyCompiledUnsupportedBuiltinScannerTests
     }
 
     [Fact]
+    public void StringAgg_InNativelyCompiledProcedure_NeverFires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.SummarizeCodes
+            WITH NATIVE_COMPILATION, SCHEMABINDING
+            AS
+            BEGIN ATOMIC WITH (TRANSACTION ISOLATION LEVEL = SNAPSHOT, LANGUAGE = N'us_english')
+                DECLARE @codes NVARCHAR(100);
+                SELECT @codes = STRING_AGG(name, N',') FROM sys.objects;
+            END;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void MultipleUnsupportedCalls_AllFire()
     {
         var findings = Scan(

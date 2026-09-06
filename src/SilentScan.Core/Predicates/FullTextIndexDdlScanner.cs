@@ -18,7 +18,6 @@ public static class FullTextIndexDdlScanner
         SqlTypeCategory.NText,
         SqlTypeCategory.Xml,
         SqlTypeCategory.Image,
-        SqlTypeCategory.Json,
     ];
 
     public static IReadOnlyList<FullTextIndexDdlFinding> Scan(DatabaseCatalog catalog)

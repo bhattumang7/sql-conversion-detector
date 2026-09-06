@@ -12,7 +12,7 @@ public static class NativelyCompiledUnsupportedBuiltinScanner
     {
         "UPPER", "LOWER", "REPLACE", "CHARINDEX", "STUFF", "REVERSE", "PATINDEX", "QUOTENAME",
         "DATALENGTH", "ISNUMERIC", "ISDATE", "HASHBYTES", "CONCAT", "FORMAT", "SOUNDEX",
-        "STDEV", "STDEVP", "VAR", "VARP", "STRING_AGG", "STRING_SPLIT",
+        "STDEV", "STDEVP", "VAR", "VARP", "STRING_SPLIT",
     };
 
     public static IReadOnlyList<NativelyCompiledUnsupportedBuiltinFinding> Scan(SqlParseResult parseResult)

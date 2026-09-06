@@ -15,8 +15,9 @@ internal static class AlwaysEncryptedUnsupportedColumn
             sort, or aggregate over it through the client driver rather than the engine itself. That
             requires the driver to know how to serialize the plaintext value into the wire format the
             encryption algorithm expects, and a handful of data types have no such serialization path
-            at all: `xml`, `timestamp`/`rowversion`, `image`, `text`, `ntext`, `sql_variant`,
-            `hierarchyid`, `geography`, and `geometry`. None of these are workarounds away from being
+            at all: `xml`, `json`, `timestamp`/`rowversion`, `image`, `text`, `ntext`, `sql_variant`,
+            `hierarchyid`, `geography`, and `geometry` - SQL Server 2025's native `json` type is
+            rejected the same way as `xml`, oracle-confirmed directly. None of these are workarounds away from being
             supported - the engine rejects the CREATE/ALTER outright the moment `ENCRYPTED WITH` is
             attached to a column of one of these types (oracle-confirmed, Msg 33280: "Cannot create or
             alter encrypted column '...' because data type '...' is not supported for encryption"),

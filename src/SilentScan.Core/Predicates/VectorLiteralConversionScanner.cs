@@ -112,7 +112,7 @@ public static class VectorLiteralConversionScanner
 
                 var elementKinds = document.RootElement.EnumerateArray().Select(e => e.ValueKind).ToList();
                 var elementCount = elementKinds.Count;
-                var firstNonNumericIndex = elementKinds.FindIndex(k => k is not (JsonValueKind.Number or JsonValueKind.Array));
+                var firstNonNumericIndex = elementKinds.FindIndex(k => k is not JsonValueKind.Number);
                 if (firstNonNumericIndex >= 0)
                 {
                     Findings.Add(new VectorLiteralConversionFinding(

@@ -152,7 +152,6 @@ public static class ReadableScanReportWriter
         blocks.AddRange(StringSplitArgument(report, headingLevel, pathBase));
         blocks.AddRange(BoundedStringBuiltinTruncation(report, headingLevel, pathBase));
         blocks.AddRange(WaitFor(report, headingLevel, pathBase));
-        blocks.AddRange(BackupOptionConflict(report, headingLevel, pathBase));
         blocks.AddRange(RestoreOptionConflict(report, headingLevel, pathBase));
         blocks.AddRange(ViewCheckOptionContradiction(report, headingLevel, pathBase));
         blocks.AddRange(CreateDatabaseOptionConflict(report, headingLevel, pathBase));
@@ -270,7 +269,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "sp_executesql call-site arguments risking silent data loss against their own declared parameter type", report.Find<SpExecuteSqlParameterMismatchFinding>(nameof(SpExecuteSqlParameterMismatchScanner)).Count);
         AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.Find<TemporalBoundaryPrecisionFinding>(nameof(NonSargablePredicateScanner)).Count);
         AddCount(counts, "JSON_VALUE equality predicates eligible for a JSON_CONTAINS index rewrite", report.Find<JsonIndexRewriteFinding>(nameof(NonSargablePredicateScanner)).Count);
-        AddCount(counts, "MAX-typed columns (can never be an index key)", report.Find<MaxTypedColumnFinding>(nameof(MaxTypedColumnScanner)).Count(f => f.Kind == NonIndexableColumnFindingKind.MaxLength));
+        AddCount(counts, "MAX-typed/json columns (can never be an index key)", report.Find<MaxTypedColumnFinding>(nameof(MaxTypedColumnScanner)).Count(f => f.Kind == NonIndexableColumnFindingKind.MaxLength));
         AddCount(counts, "Legacy large-object columns (can never appear in any index)", report.Find<MaxTypedColumnFinding>(nameof(MaxTypedColumnScanner)).Count(f => f.Kind == NonIndexableColumnFindingKind.LegacyLargeObject));
         AddCount(counts, "Columnstore-unsupported-type columns participating in a columnstore index (does not deploy)", report.Find<ColumnstoreUnsupportedColumnTypeFinding>(nameof(ColumnstoreUnsupportedColumnTypeScanner)).Count);
         AddCount(counts, "CREATE EXTERNAL TABLE columns declared with a PolyBase-unsupported type (does not deploy)", report.Find<ExternalTableUnsupportedColumnTypeFinding>(nameof(ExternalTableUnsupportedColumnTypeScanner)).Count);
@@ -376,7 +375,6 @@ public static class ReadableScanReportWriter
         AddCount(counts, "STRING_SPLIT argument validation", report.Find<StringSplitArgumentFinding>(nameof(StringSplitArgumentScanner)).Count);
         AddCount(counts, "REPLICATE/REPLACE/SPACE constant-provable result truncation", report.Find<BoundedStringBuiltinTruncationFinding>(nameof(BoundedStringBuiltinTruncationScanner)).Count);
         AddCount(counts, "WAITFOR DELAY/TIME", report.Find<WaitForFinding>(nameof(WaitForScanner)).Count);
-        AddCount(counts, "BACKUP DATABASE WITH DIFFERENTIAL, COPY_ONLY", report.Find<BackupOptionConflictFinding>(nameof(BackupOptionConflictScanner)).Count);
         AddCount(counts, "RESTORE WITH conflicting RECOVERY/NORECOVERY/STANDBY", report.Find<RestoreOptionConflictFinding>(nameof(RestoreOptionConflictScanner)).Count);
         AddCount(counts, "WITH CHECK OPTION view write contradicted by a literal", report.Find<ViewCheckOptionContradictionFinding>(nameof(ViewCheckOptionContradictionScanner)).Count);
         AddCount(counts, "CREATE DATABASE WITH CONTAINMENT = PARTIAL and CATALOG_COLLATION", report.Find<CreateDatabaseOptionConflictFinding>(nameof(CreateDatabaseOptionConflictScanner)).Count);
@@ -966,9 +964,9 @@ public static class ReadableScanReportWriter
         var maxLength = report.Find<MaxTypedColumnFinding>(nameof(MaxTypedColumnScanner)).Where(f => f.Kind == NonIndexableColumnFindingKind.MaxLength).ToList();
         if (maxLength.Count > 0)
         {
-            yield return new ReadableBlock.Heading(level, $"MAX-typed columns ({maxLength.Count})");
+            yield return new ReadableBlock.Heading(level, $"MAX-typed/json columns ({maxLength.Count})");
             yield return new ReadableBlock.Paragraph(
-                "A structural catalog fact, not a comparison: VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) columns can never be an index key column at all (SQL Server rejects them at CREATE INDEX time), so no predicate or join on them can ever seek, regardless of how they're used.");
+                "A structural catalog fact, not a comparison: VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX)/JSON columns can never be an index key column at all (SQL Server rejects them at CREATE INDEX time), so no predicate or join on them can ever seek, regardless of how they're used.");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.MaxTypedColumnRuleId(NonIndexableColumnFindingKind.MaxLength)));
 
             yield return new ReadableBlock.Table(
@@ -3556,26 +3554,6 @@ public static class ReadableScanReportWriter
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.IsInsideTransaction ? "Yes" : "No",
-            })]);
-    }
-
-    private static IEnumerable<ReadableBlock> BackupOptionConflict(ScanReport report, int level, string? pathBase)
-    {
-        if (report.Find<BackupOptionConflictFinding>(nameof(BackupOptionConflictScanner)).Count == 0)
-        {
-            yield break;
-        }
-
-        yield return new ReadableBlock.Heading(level, $"BACKUP DATABASE WITH DIFFERENTIAL, COPY_ONLY ({report.Find<BackupOptionConflictFinding>(nameof(BackupOptionConflictScanner)).Count})");
-        yield return new ReadableBlock.Paragraph(
-            "COPY_ONLY and DIFFERENTIAL are mutually exclusive - a copy-only backup never registers as a differential base, so this combination always fails (Msg 3035).");
-
-        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.BackupOptionConflictRuleId));
-        yield return new ReadableBlock.Table(
-            [WhereHeader],
-            [.. report.Find<BackupOptionConflictFinding>(nameof(BackupOptionConflictScanner)).Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
             })]);
     }
 

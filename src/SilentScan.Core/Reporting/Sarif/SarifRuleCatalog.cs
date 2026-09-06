@@ -246,7 +246,6 @@ public static class SarifRuleCatalog
     public static string StringSplitArgumentRuleId(StringSplitArgumentFindingKind kind) => FindingRuleIds.StringSplitArgumentRuleId(kind);
     public static string BoundedStringBuiltinTruncationRuleId(BoundedStringBuiltinTruncationFindingKind kind) => FindingRuleIds.BoundedStringBuiltinTruncationRuleId(kind);
     public const string WaitForRuleId = FindingRuleIds.WaitForRuleId;
-    public const string BackupOptionConflictRuleId = FindingRuleIds.BackupOptionConflictRuleId;
     public const string RestoreOptionConflictRuleId = FindingRuleIds.RestoreOptionConflictRuleId;
     public const string CreateDatabaseOptionConflictRuleId = FindingRuleIds.CreateDatabaseOptionConflictRuleId;
     public const string ViewCheckOptionContradictionRuleId = FindingRuleIds.ViewCheckOptionContradictionRuleId;

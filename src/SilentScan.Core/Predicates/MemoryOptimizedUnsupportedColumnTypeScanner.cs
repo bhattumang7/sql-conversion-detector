@@ -8,6 +8,7 @@ public static class MemoryOptimizedUnsupportedColumnTypeScanner
     private static readonly SqlTypeCategory[] UnsupportedCategories =
     [
         SqlTypeCategory.Xml,
+        SqlTypeCategory.Json,
         SqlTypeCategory.SqlVariant,
         SqlTypeCategory.Text,
         SqlTypeCategory.NText,

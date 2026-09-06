@@ -11,14 +11,6 @@ internal sealed class WaitForRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => WaitForScanner.Harvest((WaitForScanner.Rule)moduleRule);
 }
 
-internal sealed class BackupOptionConflictRule : IPerFileRule
-{
-    public string Id => "BackupOptionConflictScanner";
-    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => BackupOptionConflictScanner.Scan(parseResult);
-    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => BackupOptionConflictScanner.CreateRule(parseResult.SourcePath);
-    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => BackupOptionConflictScanner.Harvest((BackupOptionConflictScanner.Rule)moduleRule);
-}
-
 internal sealed class NativelyCompiledUnsupportedBuiltinRule : IPerFileRule
 {
     public string Id => "NativelyCompiledUnsupportedBuiltinScanner";

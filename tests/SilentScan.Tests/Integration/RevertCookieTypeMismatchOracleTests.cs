@@ -35,6 +35,42 @@ public sealed class RevertCookieTypeMismatchOracleTests : OracleTestFixture
         Assert.Null(exception);
     }
 
+    [Fact]
+    public async Task JustBelowMinimumVarbinaryCookie_FailsWithInvalidRevertDataType()
+    {
+        var ex = await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync("""
+            DECLARE @cookie varbinary(49);
+            EXECUTE AS USER = 'dbo' WITH COOKIE INTO @cookie;
+            REVERT WITH COOKIE = @cookie;
+            """));
+
+        Assert.Equal(InvalidRevertDataTypeErrorNumber, ex.Number);
+    }
+
+    [Fact]
+    public async Task MinimumVarbinaryCookie_Succeeds()
+    {
+        var exception = await Record.ExceptionAsync(() => ExecuteAsync("""
+            DECLARE @cookie varbinary(50);
+            EXECUTE AS USER = 'dbo' WITH COOKIE INTO @cookie;
+            REVERT WITH COOKIE = @cookie;
+            """));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task WiderThanConventionalVarbinaryCookie_Succeeds()
+    {
+        var exception = await Record.ExceptionAsync(() => ExecuteAsync("""
+            DECLARE @cookie varbinary(200);
+            EXECUTE AS USER = 'dbo' WITH COOKIE INTO @cookie;
+            REVERT WITH COOKIE = @cookie;
+            """));
+
+        Assert.Null(exception);
+    }
+
     private async Task ExecuteAsync(string sql)
     {
         await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));

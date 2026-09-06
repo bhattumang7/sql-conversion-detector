@@ -99,4 +99,25 @@ public sealed class AmbiguousDateLiteralConversionScannerTests
 
         Assert.Single(findings);
     }
+
+    [Theory]
+    [InlineData("datetime")]
+    [InlineData("smalldatetime")]
+    public void YearFirstAmbiguousLiteral_CastToLegacyDateTimeFamily_Fires(string dataType)
+    {
+        var findings = Scan($"SELECT CAST('2026-04-03' AS {dataType});");
+
+        Assert.Single(findings);
+    }
+
+    [Theory]
+    [InlineData("date")]
+    [InlineData("datetime2")]
+    [InlineData("datetimeoffset")]
+    public void YearFirstAmbiguousLiteral_CastToIsoSafeType_NeverFires(string dataType)
+    {
+        var findings = Scan($"SELECT CAST('2026-04-03' AS {dataType});");
+
+        Assert.Empty(findings);
+    }
 }

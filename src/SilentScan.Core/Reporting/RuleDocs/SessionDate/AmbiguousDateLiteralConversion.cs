@@ -28,6 +28,13 @@ internal static class AmbiguousDateLiteralConversion
             A `CONVERT` call that supplies an explicit style code (for example, style 103 for
             `dd/mm/yyyy`) is unaffected: the style code fixes the interpretation regardless of session
             state, so it is not flagged.
+
+            A separated year-first literal like `'2026-04-03'` looks like ISO format but is not
+            always safe: oracle-confirmed it is still `DATEFORMAT`-dependent when cast to `DATETIME`
+            or `SMALLDATETIME` specifically, silently swapping month and day under `SET DATEFORMAT
+            dmy`. `DATE`, `DATETIME2`, and `DATETIMEOFFSET` always parse this exact same literal as
+            year-month-day regardless of `DATEFORMAT`, so it is only flagged for the two legacy
+            types.
             """,
         HowToFixIt: """
             Use an unambiguous ISO date literal format (YYYYMMDD) instead of a slash/dot/dash-

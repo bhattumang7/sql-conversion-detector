@@ -28,6 +28,13 @@ internal static class MaxTypedColumn
             moment the column is declared this way, independent of any query - the finding exists to
             flag that ceiling before someone spends time trying to index their way out of a slow
             predicate against a column that was never eligible to be seekable in the first place.
+
+            SQL Server 2025's native `json` type shares this exact profile even though it isn't
+            declared with a `(MAX)` length at all: oracle-confirmed a `json` column is rejected as an
+            index key column (Msg 1919) but accepted as a nonclustered index's `INCLUDE` column - the
+            same split as `VARCHAR(MAX)`/`NVARCHAR(MAX)`/`VARBINARY(MAX)`, and unlike `TEXT`/`NTEXT`/
+            `IMAGE`, which can't even be an `INCLUDE` column. `json` is grouped with the MAX-typed
+            columns here on that basis.
             """,
         Examples:
         [

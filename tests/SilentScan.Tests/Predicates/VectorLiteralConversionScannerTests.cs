@@ -66,11 +66,13 @@ public sealed class VectorLiteralConversionScannerTests
     }
 
     [Fact]
-    public void CastToVector_WithNestedArrayElement_DoesNotFire()
+    public void CastToVector_WithNestedArrayElement_Fires()
     {
         var findings = Scan("SELECT CAST('[1.0, [2.0], 3.0]' AS VECTOR(3));");
 
-        Assert.Empty(findings);
+        var finding = Assert.Single(findings);
+        Assert.Equal(VectorLiteralConversionFindingKind.NonNumericJsonElement, finding.Kind);
+        Assert.Equal("Array", finding.ElementKind);
     }
 
     [Fact]

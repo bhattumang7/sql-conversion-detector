@@ -11,14 +11,13 @@ internal static class VectorLiteralNonNumericElement
             SQL Server 2025's native `VECTOR(n)` type converts from a string literal by parsing it
             as a JSON array of numbers - via `CAST`/`CONVERT`, a `DECLARE` initializer, or a `SET`
             assignment to a `VECTOR`-typed variable. Confirmed directly against a real SQL Server
-            2025 instance: a well-formed JSON array containing a boolean, string, `null`, or object
-            element always fails at execution with Msg 13670 ("Input JSON is not a valid Vector"),
-            regardless of what the array's other elements are.
+            2025 instance: a well-formed JSON array containing a boolean, string, `null`, object,
+            or nested array element always fails at execution with Msg 13670 ("Input JSON is not a
+            valid Vector"), regardless of what the array's other elements are.
 
             Only a literal that parses as valid JSON and whose top-level value is a JSON array is
-            inspected; anything else - a malformed literal, a non-array top-level value, or a
-            nested array element - is left unflagged rather than guessed at, since the engine's own
-            error text diverges in those cases.
+            inspected; a malformed literal or a non-array top-level value is left unflagged rather
+            than guessed at, since the engine's own error text diverges in those cases.
             """,
         HowToFixIt: """
             Replace the non-numeric element with a JSON number, or build the vector from an

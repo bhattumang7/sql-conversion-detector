@@ -28,14 +28,36 @@ public sealed class RevertCookieTypeMismatchScannerTests
     }
 
     [Fact]
-    public void WiderVarbinaryCookie_Fires()
+    public void WiderVarbinaryCookie_NeverFires()
     {
         var findings = Scan("""
             DECLARE @cookie varbinary(200);
             REVERT WITH COOKIE = @cookie;
             """);
 
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void JustBelowMinimumVarbinaryCookie_Fires()
+    {
+        var findings = Scan("""
+            DECLARE @cookie varbinary(49);
+            REVERT WITH COOKIE = @cookie;
+            """);
+
         Assert.Single(findings);
+    }
+
+    [Fact]
+    public void MinimumVarbinaryCookie_NeverFires()
+    {
+        var findings = Scan("""
+            DECLARE @cookie varbinary(50);
+            REVERT WITH COOKIE = @cookie;
+            """);
+
+        Assert.Empty(findings);
     }
 
     [Fact]

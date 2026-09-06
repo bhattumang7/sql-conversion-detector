@@ -48,6 +48,21 @@ public sealed class XmlSchemaCollectionDisallowedTypeScannerTests
     }
 
     [Fact]
+    public void IdRefsAsElementType_Fires()
+    {
+        var findings = Scan("""
+            CREATE XML SCHEMA COLLECTION dbo.OrderSchema AS N'
+            <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+              <xs:element name="RefsRoot" type="xs:IDREFS"/>
+            </xs:schema>';
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(XmlSchemaCollectionDisallowedTypeKind.IdOrIdRefType, finding.Kind);
+        Assert.Equal("IDREFS", finding.XsdTypeName);
+    }
+
+    [Fact]
     public void IdAsExtensionBase_Fires()
     {
         var findings = Scan("""

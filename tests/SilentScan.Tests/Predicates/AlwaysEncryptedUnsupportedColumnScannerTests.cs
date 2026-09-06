@@ -34,6 +34,7 @@ public sealed class AlwaysEncryptedUnsupportedColumnScannerTests
     [InlineData("HIERARCHYID")]
     [InlineData("GEOGRAPHY")]
     [InlineData("GEOMETRY")]
+    [InlineData("JSON")]
     public void UnsupportedDataType_Encrypted_Fires(string typeName)
     {
         var findings = Scan(

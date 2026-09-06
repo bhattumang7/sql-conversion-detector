@@ -25,6 +25,7 @@ public sealed class MemoryOptimizedUnsupportedColumnTypeScannerTests
     [InlineData("HIERARCHYID")]
     [InlineData("GEOMETRY")]
     [InlineData("GEOGRAPHY")]
+    [InlineData("JSON")]
     public void UnsupportedType_OnMemoryOptimizedTable_Fires(string type)
     {
         var findings = Scan(

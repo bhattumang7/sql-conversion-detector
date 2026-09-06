@@ -17,8 +17,17 @@ public static partial class AmbiguousDateLiteralConversionScanner
         SqlDataTypeOption.DateTimeOffset,
     ];
 
+    private static readonly HashSet<SqlDataTypeOption> DateFormatDependentIsoLiteralTypes =
+    [
+        SqlDataTypeOption.DateTime,
+        SqlDataTypeOption.SmallDateTime,
+    ];
+
     [GeneratedRegex(@"^(\d{1,2})([/.\-])(\d{1,2})\2(\d{2}|\d{4})$")]
     private static partial Regex AmbiguousDatePattern { get; }
+
+    [GeneratedRegex(@"^\d{4}([/.\-])(\d{1,2})\1(\d{1,2})$")]
+    private static partial Regex AmbiguousYearFirstDatePattern { get; }
 
     internal static bool IsAmbiguousDateLiteral(string text)
     {
@@ -32,6 +41,20 @@ public static partial class AmbiguousDateLiteralConversionScanner
         var second = int.Parse(match.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
 
         return first is >= 1 and <= 12 && second is >= 1 and <= 12 && first != second;
+    }
+
+    internal static bool IsAmbiguousYearFirstDateLiteral(string text)
+    {
+        var match = AmbiguousYearFirstDatePattern.Match(text);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var month = int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var day = int.Parse(match.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
+
+        return month is >= 1 and <= 12 && day is >= 1 and <= 12 && month != day;
     }
 
     public static IReadOnlyList<AmbiguousDateLiteralConversionFinding> Scan(SqlParseResult parseResult)
@@ -78,7 +101,15 @@ public static partial class AmbiguousDateLiteralConversionScanner
                 return;
             }
 
-            if (parameter is not StringLiteral stringLiteral || !IsAmbiguousDateLiteral(stringLiteral.Value))
+            if (parameter is not StringLiteral stringLiteral)
+            {
+                return;
+            }
+
+            var isAmbiguous = IsAmbiguousDateLiteral(stringLiteral.Value)
+                || (DateFormatDependentIsoLiteralTypes.Contains(option) && IsAmbiguousYearFirstDateLiteral(stringLiteral.Value));
+
+            if (!isAmbiguous)
             {
                 return;
             }

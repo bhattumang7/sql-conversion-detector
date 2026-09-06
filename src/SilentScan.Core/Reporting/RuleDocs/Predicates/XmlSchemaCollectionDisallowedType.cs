@@ -56,21 +56,24 @@ internal static class XmlSchemaCollectionIdOrIdRefType
     public static RuleDocContent Content { get; } = new(
         WhyItMatters: """
             SQL Server's XML schema collection support does not permit the built-in XML Schema
-            types `ID`/`IDREF` (or a type derived from either) to be used as an `xs:element`'s own
-            declared type, or as the `base` of an `xs:extension`/`xs:restriction`. Confirmed
-            directly against a real SQL Server instance: `CREATE XML SCHEMA COLLECTION` fails with
-            Msg 6995 whenever an element's type - directly, or through a named simple/complex type
-            that derives from `ID`/`IDREF` by extension or restriction - resolves to one of these
-            built-ins.
+            types `ID`/`IDREF`/`IDREFS` (or a type derived from any of them) to be used as an
+            `xs:element`'s own declared type, or as the `base` of an `xs:extension`/`xs:restriction`.
+            Confirmed directly against a real SQL Server instance: `CREATE XML SCHEMA COLLECTION`
+            fails with Msg 6995 whenever an element's type - directly, or through a named
+            simple/complex type that derives from `ID`/`IDREF`/`IDREFS` by extension or restriction
+            - resolves to one of these built-ins. `IDREFS` fails under the same message even though
+            it is not named in the message text, since it is itself a list type derived from
+            `IDREF`.
 
-            An `xs:attribute` declared `type="xs:ID"`/`"xs:IDREF"` is unaffected - that is the
-            ordinary, expected use of these types in XSD, and is confirmed to register fine. Only
-            an element's own type (or an extension/restriction base) triggers the failure.
+            An `xs:attribute` declared `type="xs:ID"`/`"xs:IDREF"`/`"xs:IDREFS"` is unaffected -
+            that is the ordinary, expected use of these types in XSD, and is confirmed to register
+            fine. Only an element's own type (or an extension/restriction base) triggers the
+            failure.
             """,
         HowToFixIt: """
             Give the element a different declared type - a string-based simple type covers most
-            XML DML/element-identity use cases - instead of the built-in `ID`/`IDREF` type or a
-            type derived from it.
+            XML DML/element-identity use cases - instead of the built-in `ID`/`IDREF`/`IDREFS` type
+            or a type derived from it.
             """,
         Examples:
         [

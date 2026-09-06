@@ -86,7 +86,6 @@ public static class SarifReportWriter
         results.AddRange(report.Find<WindowFunctionArgumentFinding>("WindowFunctionArgumentScanner").Select(ToResult));
         results.AddRange(report.Find<StringSplitArgumentFinding>("StringSplitArgumentScanner").Select(ToResult));
         results.AddRange(report.Find<BoundedStringBuiltinTruncationFinding>("BoundedStringBuiltinTruncationScanner").Select(ToResult));
-        results.AddRange(report.Find<BackupOptionConflictFinding>("BackupOptionConflictScanner").Select(ToResult));
         results.AddRange(report.Find<RestoreOptionConflictFinding>("RestoreOptionConflictScanner").Select(ToResult));
         results.AddRange(report.Find<ViewCheckOptionContradictionFinding>("ViewCheckOptionContradictionScanner").Select(ToResult));
         results.AddRange(report.Find<CreateDatabaseOptionConflictFinding>("CreateDatabaseOptionConflictScanner").Select(ToResult));
@@ -1251,15 +1250,6 @@ public static class SarifReportWriter
                 $"SPACE's requested {finding.ComputedLength}-character result is over its fixed {finding.CapBytes}-byte cap - oracle-confirmed the excess is silently truncated away, with no error.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
         };
-
-        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
-    }
-
-    private static SarifResult ToResult(BackupOptionConflictFinding finding)
-    {
-        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.BackupOptionConflictRuleId, finding.Confidence);
-        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
-        const string message = "BACKUP DATABASE with both DIFFERENTIAL and COPY_ONLY always fails - a copy-only backup never registers as a differential base, so no differential can ever find a current backup to diff against (Msg 3035).";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }

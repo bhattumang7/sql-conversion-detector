@@ -11,13 +11,16 @@ internal static class FullTextIndexUnsupportedColumnType
         WhyItMatters: """
             CREATE FULLTEXT INDEX names a column whose declared type isn't one of the types SQL
             Server's full-text engine can index. Oracle-confirmed (Msg 7670, "cannot be used for
-            full-text search because it is not a character-based, XML, image, JSON or varbinary(max)
+            full-text search because it is not a character-based, XML, image or varbinary(max)
             type column or it is encrypted"): the statement never deploys, regardless of what data
             the column actually holds. The supported set is char, varchar, nchar, nvarchar, text,
-            ntext, xml, image, json, and varbinary(max) specifically - a fixed-length varbinary
-            (without MAX) is rejected the same as a numeric or datetime column would be. This is a
-            catalog-only fact: the target table's own column type, already known from its CREATE/
-            ALTER TABLE, decides it with no query needed.
+            ntext, xml, image, and varbinary(max) specifically - a fixed-length varbinary
+            (without MAX) is rejected the same as a numeric or datetime column would be.
+            SQL Server 2025's native `json` type is rejected the same way even though it is
+            character-based JSON text underneath - oracle-confirmed the engine's own message
+            doesn't list it among the supported types, unlike xml. This is a catalog-only fact:
+            the target table's own column type, already known from its CREATE/ALTER TABLE,
+            decides it with no query needed.
             """,
         HowToFixIt: """
             Retype the column to one of the supported full-text types (typically NVARCHAR(MAX) or
