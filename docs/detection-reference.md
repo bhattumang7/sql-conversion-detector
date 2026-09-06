@@ -623,6 +623,16 @@ confirmed against a live instance).
   fires *because* it runs the same contradiction detector to prove the `ON`
   predicate unsatisfiable; it is the normalization-aware implementation, not
   a candidate for being rescued by one.
+- `CARTESIAN_JOIN`'s join-predicate-empty-with-`WHERE`-clause finding - the
+  complementary case: the `ON` predicate alone is satisfiable, but combined
+  with the statement's `WHERE` clause the two sides of a direct equi-join
+  (`a.Col1 = b.Col2`) are provably constrained to disjoint value sets (e.g.
+  `... ON a.X = b.Y WHERE a.X = 5 AND b.Y = 10`). Oracle-confirmed the join
+  then returns zero rows unconditionally. Scoped deliberately to a single
+  equi-join edge between two named tables with numeric-literal constraints on
+  each side; wider generality (string literals, transitive multi-hop join
+  chains, composite keys) is real future work, not a rescue candidate for the
+  existing shape.
 - `CATCH_ALL_PREDICATE`, `CHECK_CONSTRAINT_PREDICATE_CONTRADICTION_INTERVAL`,
   `NOT_NULL_PREDICATE_CONTRADICTION`, `VIEW_CHECK_OPTION_CONTRADICTION`,
   `CHECK_CONSTRAINT_NULL_NOT_HANDLED` - already oracle-confirmed and scoped
@@ -666,21 +676,21 @@ confirmed discrepancy:
   `FunctionCall`). Each is also oracle-confirmed to reach the checker's one
   real consumer: a nonpersisted computed column built from it blocks
   `CREATE FULLTEXT INDEX` with Msg 9928, matching the scanner's own finding.
-- **`TEXTPTR` is oracle-confirmed nondeterministic (Msg 4936) but was NOT
-  added** - it is unreachable through the checker's only consumer.
-  `TEXTPTR` always returns a fixed `VARBINARY(16)`, and a full-text index
-  built on any `TEXTPTR`-rooted computed column fails with Msg 7670
-  ("not a character-based, XML, image or varbinary(max) type column")
-  before the engine's own determinism check is ever reached - oracle-
-  confirmed directly, the same DDL shape that reaches Msg 9928 for
-  `FORMAT`/`PARSENAME`/`AT TIME ZONE` instead produces Msg 7670 here.
-  `FullTextIndexDdlScanner` can't produce that finding either: it never
-  infers a computed column's own result type (`CatalogColumn.Type` is
-  always null for a computed column), so `UnsupportedColumnType` can never
-  fire for one - a separate, unscoped modeling gap, not addressed here.
-  Adding `TEXTPTR` to the determinism denylist would be true but dead code
-  through the one real caller; left out until a second consumer or the
-  computed-column-type-inference gap makes it reachable.
+- **`TEXTPTR` is oracle-confirmed nondeterministic (Msg 4936) but not added
+  to the determinism denylist** - a `TEXTPTR`-rooted computed column always
+  fails full-text indexing before the engine's own determinism check is
+  ever reached (Msg 7670, "not a character-based, XML, image or
+  varbinary(max) type column"; the same DDL shape that reaches Msg 9928 for
+  `FORMAT`/`PARSENAME`/`AT TIME ZONE` produces Msg 7670 here instead), so
+  the determinism entry would be true but dead code through the checker's
+  one real caller. The modeling gap this used to depend on is now closed:
+  `TEXTPTR` was added to `BuiltinFunctionTypeResolver`'s fixed-return-type
+  table (`VARBINARY(16)`, oracle-confirmed via `SQL_VARIANT_PROPERTY`), so
+  `ComputedColumnTypeResolver` now infers a `TEXTPTR`-rooted computed
+  column's type, and `FullTextIndexDdlScanner`'s `UnsupportedColumnType`
+  finding fires on it directly (oracle-confirmed, Msg 7670, tested) - a
+  sharper, earlier-catching finding than the determinism check would have
+  been anyway.
 - **`MIN_ACTIVE_ROWVERSION` is documented as always-nondeterministic but
   oracle-confirmed NOT rejected** in a `PERSISTED` computed column (Docker,
   SQL Server 2025) - the docs page is wrong for this one function. Not
@@ -701,12 +711,21 @@ confirmed discrepancy:
   handle argument) was not oracle-probed - too narrow a real-world surface
   inside a computed column to be worth the setup cost; left off the
   checker's list pending an actual need.
-- `CAST`/`CONVERT`'s conditional determinism (nondeterministic only for
-  specific target-type/style combinations) and `CHECKSUM`'s bare-column-list
-  form (deterministic, oracle-confirmed) were not modeled - the existing
-  checker's precision bar treats them as an unclassified pass-through
-  (matching prior behavior), and a wrong-direction rule here would be a
-  false positive, the higher-cost mistake for this project.
+- **`CAST`/`CONVERT` from a character type to a date/time-family type is
+  conditionally nondeterministic, and is now modeled.** A plain `CAST` (no
+  style parameter exists) is always nondeterministic. `CONVERT` depends
+  entirely on the style code: oracle-swept the full public style-code space
+  against a live instance (37 styles tested against `CONVERT(..., ..., n)`
+  targeting a date/time type) and found an exact boundary - no style, or
+  style `0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 100, 106, 107, 109, 113`, is
+  nondeterministic (Msg 4936 on `PERSISTED`); every other tested style
+  (`101, 103, 104, 105, 108, 110, 111, 112, 114, 120, 121, 126, 127, 130,
+  131`) is deterministic. A numeric-source conversion (e.g. `int`→
+  `datetime`) is deterministic regardless of style - the rule only applies
+  when the source is a character type, matching the well-known reason this
+  class of conversion is locale/date-format-dependent. `CHECKSUM`'s
+  bare-column-list form (deterministic, oracle-confirmed) was not modeled -
+  no consumer needs it and adding an unused fact isn't worth the churn.
 - **`CURRENT_TIMESTAMP`, `CURRENT_DATE`, `CURRENT_USER`, `SESSION_USER`,
   `SYSTEM_USER`, and bare `USER` never parse as a `FunctionCall` at all -
   ScriptDom gives them their own dedicated node, `ParameterlessCall`, with a
@@ -756,6 +775,92 @@ a future determinism-sensitive rule (e.g. one that needs to know a query
 result is non-deterministic because it selects from a non-deterministic
 computed/indexed-view column, not because it calls `NEWID()` itself) does
 not have to re-derive column ancestry from scratch.
+
+**Full sweep of the internal builtin-determinism metadata (closing the item
+above), every surviving delta oracle-confirmed via `PERSISTED` computed
+column rejection, not trusted from the internal flag alone.** The raw
+internal flag word is not reliable by itself - direct oracle testing found
+it flags several genuinely deterministic functions (`ROUND`, `CONCAT`, the
+native `MONTH`/`YEAR`/`DAY`, and the `%` modulo operator all compile fine in
+a `PERSISTED` computed column despite reading "nondeterministic" in the raw
+table; most likely the flag is shared with an unrelated ODBC-canonical
+function-escape alias of the same name, not the native T-SQL keyword form).
+Every candidate below was independently oracle-confirmed, not taken from the
+raw flag - ~80 additional functions added to `ComputedColumnDeterminismChecker`,
+grouped by why they're nondeterministic:
+- **Catalog/schema metadata** (can change via `ALTER`/`DROP`/rename):
+  `OBJECT_ID`, `OBJECT_NAME`, `OBJECTPROPERTY`, `OBJECTPROPERTYEX`, `DB_ID`,
+  `DB_NAME`, `DATABASEPROPERTY`, `DATABASEPROPERTYEX`, `SCHEMA_ID`,
+  `SCHEMA_NAME`, `COL_NAME`, `COL_LENGTH`, `TYPE_ID`, `TYPE_NAME`,
+  `TYPEPROPERTY`, `COLUMNPROPERTY`, `INDEXPROPERTY`, `FILEPROPERTY`,
+  `ASSEMBLYPROPERTY`, `COLLATIONPROPERTY`, `CONNECTIONPROPERTY`,
+  `SESSIONPROPERTY`, `SERVERPROPERTY`, `INDEX_COL`, `OBJECT_DEFINITION`,
+  `OBJECT_SCHEMA_NAME`.
+- **Session/connection/environment state:** `APP_NAME`, `HOST_ID`,
+  `HOST_NAME`, `PROGRAM_NAME`, `ORIGINAL_LOGIN`, `ORIGINAL_DB_NAME`,
+  `CONTEXT_INFO`, `SESSION_CONTEXT`, `CURRENT_TRANSACTION_ID`, `XACT_STATE`,
+  `CURRENT_TIMEZONE`, `CURRENT_TIMEZONE_ID`, `CURRENT_REQUEST_ID`,
+  `DATABASE_PRINCIPAL_ID`, `DEFAULT_DOMAIN`, `LOGINPROPERTY`.
+- **Permission/identity checks** (can change independent of the row):
+  `USER_ID`, `USER_NAME`, `SUSER_ID`, `SUSER_NAME`, `SUSER_SID`,
+  `SUSER_SNAME`, `IS_MEMBER`, `IS_ROLEMEMBER`, `IS_SRVROLEMEMBER`,
+  `HAS_PERMS_BY_NAME`, `HAS_DBACCESS`, `PERMISSIONS`.
+- **Identity/sequence/counter state:** `IDENT_CURRENT`, `IDENT_INCR`,
+  `IDENT_SEED`, `SCOPE_IDENTITY`, `ROWCOUNT_BIG`, `GETANSINULL`,
+  `STATS_DATE`, `CHANGE_TRACKING_CURRENT_VERSION`,
+  `CHANGE_TRACKING_MIN_VALID_VERSION`.
+- **Locking/lock-state:** `APPLOCK_MODE`, `APPLOCK_TEST`.
+- **Cryptography** (random IV/salt per call, or key-material state that can
+  change): `COMPRESS`, `DECOMPRESS`, `PWDENCRYPT`, `PWDCOMPARE`, `KEY_GUID`,
+  `KEY_ID`, `KEY_NAME`, `CERTPROPERTY`, `ASYMKEY_ID`, `ASYMKEYPROPERTY`,
+  `SYMKEYPROPERTY`, `SIGNBYASYMKEY`.
+- **Culture/locale-dependent formatting** (the same class of hazard as the
+  `CAST`/`CONVERT` style-dependence above, confirmed unconditional
+  regardless of the datepart argument): `DATENAME`, `FORMATMESSAGE`.
+- **SQL Server 2025 vector functions** (floating-point vector-similarity
+  math; a real, previously-undocumented-anywhere finding - a fixed-input
+  `VECTOR_DISTANCE`/`VECTOR_NORM`/`VECTOR_NORMALIZE` call still compiles fine
+  as a plain `CAST(... AS VECTOR(n))` computed column, ruling out the
+  `VECTOR` type itself as the cause): `VECTOR_DISTANCE`, `VECTOR_NORM`,
+  `VECTOR_NORMALIZE`, `VECTORPROPERTY`.
+- **`PARSE`/`TRY_PARSE`** - dedicated `ParseCall`/`TryParseCall` ScriptDom
+  node types, not generic `FunctionCall`, so they needed their own visitor
+  overrides, not a denylist entry; culture-dependent parsing, the same
+  underlying hazard class as `CONVERT`'s style-dependence.
+- **`TRY_CAST`/`TRY_CONVERT` char-to-date-family conversion** - a real,
+  previously-missed gap: the existing `CAST`/`CONVERT` style-dependent
+  date-conversion rule was never wired to the `TRY_` variants, which are
+  separate ScriptDom node types (`TryCastCall`/`TryConvertCall`) and follow
+  the identical style-code rule (oracle-confirmed: `TRY_CAST(varchar AS
+  date)` and `TRY_CONVERT(date, varchar, 9)` both reject; `TRY_CONVERT(date,
+  varchar, 112)` doesn't).
+- **Explicitly checked and excluded, not silently skipped:** `BIT_LENGTH`
+  and `OCTET_LENGTH` don't exist as callable functions in this engine
+  version despite appearing in the internal metadata table (likely
+  reserved/unimplemented ANSI-standard names); `JSON_ARRAYAGG`/
+  `JSON_OBJECTAGG` are aggregates and the engine rejects any aggregate in a
+  computed column expression outright (Msg 175), so their determinism is
+  structurally unreachable, matching the existing ranking/window-function
+  exclusion above.
+
+`AI_GENERATE_EMBEDDINGS` is now added and oracle-confirmed - the initial
+"couldn't be oracle-confirmed without a configured external model endpoint"
+assumption was wrong: the determinism check happens at bind time, before
+any real network call, so a throwaway `CREATE EXTERNAL MODEL` object
+pointing at a nonexistent endpoint was enough (Msg 4936 fires regardless of
+whether the model reference itself resolves). It's a dedicated
+`AIGenerateEmbeddingsFunctionCall` ScriptDom node (its `USE MODEL` clause
+isn't a normal argument list), not a generic `FunctionCall`, so it needed
+its own visitor override rather than a denylist string entry - the same
+class of gap `PARSE`/`TRY_PARSE` needed. The other SQL Server 2025 `AI_*`
+functions (`AI_GENERATE_RESPONSE`, `AI_SUMMARIZE`, `AI_CLASSIFY`,
+`AI_ANALYZE_SENTIMENT`, `AI_EXTRACT`, `AI_FIX_GRAMMAR`, `AI_TRANSLATE`) are
+not recognized by this specific engine build at all (`'AI_GENERATE_RESPONSE'
+is not a recognized built-in function name`, even though ScriptDom itself
+already has a dedicated `AIGenerateResponseFunctionCall` node type for it) -
+a parser/engine version mismatch, not a real-vs-fake question; left out
+until a build that actually implements them is available to confirm
+against, not added on inference alone.
 
 ## Halloween Protection bypasses for self-referencing DML
 
@@ -1303,6 +1408,44 @@ WITH NATIVE_COMPILATION` module.
   no-predicate cartesian-join gap detection already applies to its own
   cross-join case) — a nested/derived-table operand on either side declines
   rather than guesses a display name.
+
+* **`CartesianJoinRuleId(JoinPredicateEmptyWithWhereClause)` — shipped.**
+  Oracle-confirmed (Docker, SQL Server): an `INNER JOIN`'s `ON` predicate can
+  be satisfiable on its own yet still make the join provably empty once the
+  statement's `WHERE` clause is taken into account — e.g.
+  `... ON a.X = b.Y WHERE a.X = 5 AND b.Y = 10` returns zero rows every time,
+  since the join forces `a.X = b.Y` while the `WHERE` clause pins them to two
+  different constants. Scoped to a single direct equi-join edge
+  (`ColumnReferenceExpression = ColumnReferenceExpression`) between two
+  `NamedTableReference` operands, with numeric-literal comparisons on either
+  column drawn from the `ON`+`WHERE` clauses combined into a range set per
+  side; fires only when the two sides' ranges provably never overlap.
+  Deliberately does not attempt string-literal ranges, transitive multi-hop
+  join chains, or composite-key edges.
+
+* **`LegacyLobConversionTargetRuleId` — shipped.**
+  Oracle-confirmed (Docker, SQL Server, Msg 4189): a `CAST`/`CONVERT`/
+  `TRY_CAST`/`TRY_CONVERT` expression that targets `TEXT`/`NTEXT` and carries
+  a trailing `COLLATE` clause naming a UTF-8 or `_SC`
+  (supplementary-character-aware) collation never compiles - confirmed
+  unconditional regardless of the source value, and confirmed identical for
+  the `TRY_` variants (the failure is a target type/collation legality check,
+  not a runtime conversion outcome `TRY_CAST`/`TRY_CONVERT` could otherwise
+  swallow).
+
+* **`GroupByValidityRuleId(SelectList)`/`GroupByValidityRuleId(Having)`/
+  `GroupByValidityRuleId(OrderBy)` — shipped.**
+  Oracle-confirmed (Docker, SQL Server, Msg 8120/8121/8127): once a `SELECT`
+  has a plain `GROUP BY` clause, every select-list/`HAVING`/`ORDER BY`
+  expression must either be an aggregate function call or shape-identical to
+  one of the `GROUP BY` expressions - confirmed the engine's matching is
+  genuinely expression-shape based (`GROUP BY Id + 1` covers `SELECT Id + 1`
+  but not `SELECT Id + 2`), and confirmed SQL Server has no
+  functional-dependency-on-primary-key exception (grouping by a table's full
+  primary key does not exempt its other columns, unlike some other database
+  engines). Scoped to a plain `GROUP BY` (`GroupByOption.None`, no
+  `ROLLUP`/`CUBE`/`GROUPING SETS`, whose validity rules differ and were not
+  investigated).
 
 * **`OuterJoinPredicateCollapseRuleId` — shipped, scoped to the WHERE clause
   only, and to AND-conjuncts that are not themselves wrapped in an OR.**
@@ -2098,6 +2241,26 @@ WITH NATIVE_COMPILATION` module.
   accurate and is left unchanged; a sharper "always exactly 1 row" claim
   would be wrong. Do not re-propose the fixed-1-row framing.
 
+* **Linked-server predicate losing remote pushdown over a collation
+  mismatch — real, oracle-confirmed, but out of scope: not statically
+  decidable.** Built a throwaway linked server between the two local Docker
+  SQL instances (same Docker network, no new infrastructure needed) and read
+  real `SHOWPLAN_XML` output. Confirmed: a `WHERE` predicate comparing a
+  linked-server character column to a same-collation value gets embedded
+  directly in the query text sent to the remote server; a
+  differently-collated comparison instead produces a remote query with no
+  `WHERE` clause at all, plus a local `Filter` — the entire remote table
+  gets pulled and filtered locally, a real, silent performance hazard. Not
+  buildable as a SilentScan rule: the tool has no `CatalogTableKind` for a
+  linked-server-referenced table and no way to acquire one — it never
+  connects live and never has DDL for an external server, so a remote
+  column's actual collation is not decidable from the scanned source or
+  from this database's own catalog, the same boundary that already governs
+  every other linked-server rule in this project. Do not re-propose this as
+  buildable without also proposing a live-connection or user-supplied
+  remote-schema mechanism, which doesn't exist today and is a materially
+  different kind of feature than a static-analysis rule.
+
 * **CLR aggregate `Terminate`/`Accumulate` deferred-resolution after `ALTER
   ASSEMBLY` — won't do, disproportionate setup cost for a rare pattern.**
   Verifying this needs a real compiled CLR aggregate binary (an
@@ -2245,3 +2408,101 @@ WITH NATIVE_COMPILATION` module.
   LegacyLobLocalVariable` (High confidence, unlike this scanner's other
   style-level findings, since it is a guaranteed compile failure, not a
   deprecation warning).
+
+* **`sql_variant`/`bit` comparability restrictions - killed, no distinct
+  restriction exists beyond ordinary type incompatibility.** The type/predicate
+  rewrite's coverage ledger carried an open item modeled on the shipped
+  xml/json/legacy-large-object/spatial "operand not comparable" rule family:
+  the hypothesis that `sql_variant` and `bit` might carry their own
+  comparison restriction the same way those four types do. Oracle-checked
+  (Docker, SQL Server): `bit` compares cleanly against `float`, `varchar`, and
+  ordinary scalars with no restriction at all. `sql_variant` compares cleanly
+  against nearly everything (including itself, `ORDER BY`, and mixed-type
+  comparisons); the one failure found (`sql_variant` against `xml`/`image`,
+  Msg 206 "Operand type clash") is the same general implicit-conversion
+  incompatibility every unrelated type pair produces, not a distinct
+  comparability class - unlike xml/json/legacy-lob/spatial, which fail even
+  against themselves. No new rule family here; the existing "operand not
+  comparable" rules already cover the real restriction class correctly as
+  scoped.
+
+* **ANSI-padding/trim per-type facet on `SqlType` - not modeled, no
+  behavioral gap found.** The coverage ledger flagged a confirmed, trivial
+  internal per-type ANSI-trim/padding capability check (true only when a
+  specific facet bit is clear and the type is string/binary family) as a
+  candidate `SqlType` facet. No `SqlType` consumer needs this distinction
+  today - the shipped `AnsiPaddingOffColumnScanner`/`SetOptionScanner`
+  (`ANSI_PADDING`/`ANSI_NULLS`-off findings) already cover the real,
+  observable risk surface (`ANSI_PADDING OFF` silently trimming/altering
+  stored values, blocking indexed features) from the session/database-option
+  side, which is the side an author can actually control and get wrong; the
+  per-type facet this row describes is a lower-level implementation detail
+  the shipped rules don't need to re-derive. Not modeled; re-open only if a
+  future rule needs to distinguish comparability/trimming behavior by type
+  category specifically, not by session option.
+
+* **Literal connection-default-collation assignment - not modeled, existing
+  fallback already produces the correct outcome.** The real engine assigns
+  the connection's default collation to every character literal with no
+  explicit `COLLATE` clause at bind time. Checked every current consumer of
+  `LiteralTypeResolver`/`ExpressionTypeInferencer` in this codebase: none
+  thread an ambient default-collation value in, so a literal always resolves
+  with `Collation: null` today. This does not currently cause a wrong
+  verdict anywhere: `ExpressionTypeInferencer.DominantCollation`'s existing
+  null-collation fallback already picks whichever side carries a real
+  (column/explicit) collation over a literal's null one, which is the same
+  practical outcome the engine's own coercibility ordering produces (a
+  column or explicit `COLLATE` always outranks a literal's connection-default
+  collation) for every rule that currently reasons about collation. Not
+  modeled; would need a new ambient-collation parameter threaded through the
+  entire literal-resolution call surface for no currently observable benefit.
+
+* **Boolean (`AND`/`OR`/`NOT`) and assignment-expression type/nullability
+  derivation - not modeled, no consumer.** Two related, confirmed-trivial
+  engine mechanisms: boolean-expression nullability is pure three-valued-logic
+  propagation (nullable if any operand nullable), and an assignment
+  expression's result type is simply its left-hand side's own type, with no
+  conversion node inserted at the assignment itself. Neither is modeled in
+  `SqlType`/`ExpressionTypeInferencer`: nullability is tracked separately, at
+  the `CatalogColumn`/`ColumnProvenance` level, not as a `SqlType` facet, and
+  T-SQL `AND`/`OR`/`NOT` parse as ScriptDom's `BooleanExpression` hierarchy, a
+  structurally separate tree from the `ScalarExpression` tree
+  `ExpressionTypeInferencer` dispatches over - modeling either would mean
+  adding a parallel boolean-expression resolver and a new nullability-carrying
+  result type for facts nothing downstream currently consumes. Not modeled;
+  re-open only alongside a rule that specifically needs boolean-expression
+  nullability or assignment-expression typing.
+
+* **Computed-column lineage exposing its own real underlying source
+  columns - not modeled, checked for a concrete bug and found none.** The
+  real engine's optimizer rewrites a reference to a dependent-index-eligible
+  computed column into an explicit projection of its real source columns
+  before further binding. SilentScan's own lineage
+  (`ColumnProvenanceAnalysis.FindUnderlyingBaseColumns`) treats a computed
+  column as a terminal base-column leaf rather than walking through to its
+  defining expression's own source columns. Checked both real consumers
+  (`TypedPredicateExtractor`'s expression-derived-predicate finding,
+  `ModuleReachableObjectWalker`'s reachability walk) for a concrete wrong
+  answer this gap would cause: neither is wrong today - a persisted computed
+  column can itself carry a real index, so asking "is this column indexed"
+  about the computed column's own name (what both consumers do) is the
+  question that actually matters for their purpose, not "are its source
+  columns indexed." No demonstrated bug; not modeled. Would need a new
+  `CatalogColumn` field (the computed expression's own referenced source
+  columns, populated at catalog-build time) plus a `ColumnProvenanceAnalysis`
+  change to walk through it - real work, but speculative until a consumer
+  that needs the distinction is identified.
+
+* **Statement-wide scalar-UDF-inlining ceiling (100+ inlined subqueries in
+  one statement disables inlining) - not modeled, no realistic corpus
+  evidence.** Confirmed as a real, decidable, hard-coded threshold distinct
+  from the shipped per-call inlineability blockers (`EXECUTE AS`, recursion,
+  nesting depth, etc., in `ScalarUdfInlineabilityScanner`). Building it needs
+  a new statement-wide mechanism: count every otherwise-inlineable scalar UDF
+  invocation across an entire statement (not per function definition, which
+  is what the shipped scanner analyzes) and flag when the count exceeds 100.
+  No real T-SQL corpus evidence of any statement approaching this threshold
+  was found or expected - a statement with 100+ distinct inlineable scalar
+  UDF calls is an extreme, unrepresentative edge case. Not modeled; the
+  plumbing cost (a new cross-call-site counting pass) isn't justified without
+  a real corpus signal that any statement gets remotely close.

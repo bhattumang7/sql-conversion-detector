@@ -19,34 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **Computed-column result type is never inferred, so `UnsupportedColumnType`
-      can never fire on one.** Surfaced chasing a `TEXTPTR`-in-a-computed-column
-      oracle test for the determinism checker: a full-text index on a
-      `TEXTPTR`-rooted computed column actually fails with Msg 7670 ("not a
-      character-based, XML, image or varbinary(max) type column") because
-      `TEXTPTR` always returns a fixed `VARBINARY(16)` - but `CatalogColumn.Type`
-      is always `null` for a computed column (only declared-type columns get a
-      resolved `SqlType`), so `FullTextIndexDdlScanner`'s `UnsupportedColumnType`
-      branch (and any other scanner keyed off a column's own type) can never
-      see this. Needs computed-column expression type inference wired through
-      `CatalogBuilder` (likely via the existing `ExpressionTypeInferencer`) before
-      any type-shaped rule can reach a computed column at all - a modeling gap,
-      not a one-off fix.
-- [ ] **Systematic sweep of the full internal builtin-determinism metadata against
-      Microsoft's documented list and the shipped checker.** This session
-      extracted the engine's own real per-function determinism metadata (~646
-      deduplicated named entries, oracle-methodology recorded in
-      `detection-reference.md`'s "Built-in function determinism" section) and
-      only spot-checked a double-digit sample against
-      `ComputedColumnDeterminismChecker` - enough to find and fix the
-      `CURRENT_TIMESTAMP`/`ParameterlessCall` gap and corroborate the
-      `MIN_ACTIVE_ROWVERSION` docs error, not enough to call the list
-      exhaustively diffed. A full pass (every deduplicated entry, name
-      resolvable to a real user-callable T-SQL construct, cross-checked against
-      the docs page and the checker's current denylist, each surviving delta
-      oracle-confirmed via `PERSISTED` computed column rejection) could surface
-      more gaps the same way. The raw local extraction from the prior session
-      can be regenerated if needed - not repo-tracked.
 
 ---
 
