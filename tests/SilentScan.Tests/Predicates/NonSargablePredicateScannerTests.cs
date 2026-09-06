@@ -115,6 +115,40 @@ public sealed class NonSargablePredicateScannerTests
     }
 
     [Fact]
+    public void CastOnColumn_IdenticalStringType_StillFires()
+    {
+        var sql = """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Code VARCHAR(20) NOT NULL);
+            GO
+            CREATE INDEX IX_Orders_Code ON dbo.Orders(Code);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CAST(Code AS VARCHAR(20)) = 'C10';
+            """;
+        var findings = ScanSqlWithCatalog(sql);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.CastOrConvertOnColumn, finding.Kind);
+        Assert.Equal("Code", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ConvertOnColumn_IdenticalBinaryType_StillFires()
+    {
+        var sql = """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Tag VARBINARY(16) NOT NULL);
+            GO
+            CREATE INDEX IX_Orders_Tag ON dbo.Orders(Tag);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CONVERT(VARBINARY(16), Tag) = 0x01;
+            """;
+        var findings = ScanSqlWithCatalog(sql);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.CastOrConvertOnColumn, finding.Kind);
+        Assert.Equal("Tag", finding.ColumnName);
+    }
+
+    [Fact]
     public void CastOnColumn_CastChangesCategory_StillFires()
     {
         var sql = """

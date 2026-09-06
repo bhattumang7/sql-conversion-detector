@@ -230,7 +230,7 @@ public static class NonSargablePredicateScanner
 
         private bool IsNoOpConversion(DataTypeReference targetDataType, SqlType? sourceType)
         {
-            if (sourceType is null)
+            if (sourceType is null || sourceType.IsStringFamily || sourceType.IsBinaryFamily)
             {
                 return false;
             }

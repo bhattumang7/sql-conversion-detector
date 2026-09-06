@@ -247,14 +247,29 @@ confirmed independently of any one tool's output.
   loss is unconditional, matching every one of this project's own "wrapping a column blocks the
   seek" rules with no exception to account for.
 
+- **An explicit `CAST`/`CONVERT` of a column keeps a real `Convert` node in the plan - and loses
+  the seek - even when the source and target types are 100% identical, for string and binary
+  types specifically; numeric and date/time types are elided as true no-ops instead.**
+  Oracle-confirmed (`SHOWPLAN_XML`): `CAST(IntCol AS INT)`/`CONVERT(DECIMAL(10,2), DecimalCol)`
+  compile away entirely (no `Convert` node, still an Index Seek) when the target type matches the
+  source exactly, but `CAST(VarcharCol AS VARCHAR(<same length>))` and
+  `CONVERT(VARBINARY(<same length>), BinaryCol)` keep an explicit, `Implicit="0"` `Convert` node
+  and force a scan regardless. `CastOrConvertOnColumn`'s no-op-conversion suppression previously
+  matched on type category alone (ignoring this string/binary exception), producing a false
+  negative for an identical-type string or binary cast; fixed to never suppress for a
+  string-family or binary-family source type.
+
 - **`LIKE` sargability is decided by a dedicated range-transform step, separate from the general
-  comparison-operator gate above, and is stricter than "can't rule out a leading wildcard."** It
-  requires the pattern operand to be a literal constant node before any wildcard analysis even
-  runs - a variable/parameter pattern is rejected outright, not merely treated as unprovable. Only
-  after that does it inspect the literal text for a disqualifying wildcard; the sole exception is
-  the single-character pattern `%` alone, which builds a degenerate not-NULL predicate rather than
-  a range. Every other wildcard-containing literal pattern, and every non-literal pattern, yields
-  no seekable range.
+  comparison-operator gate above.** For a *literal* pattern, it inspects the text for a
+  disqualifying wildcard; the sole exception is the single-character pattern `%` alone, which
+  builds a degenerate not-NULL predicate rather than a range. Every other wildcard-containing
+  literal pattern yields no seekable range. **Corrected claim**: a *non-literal* (variable or
+  parameter) pattern is not rejected outright as previously documented here - oracle-confirmed
+  (`SHOWPLAN_XML` against a live instance) that the engine instead attempts an Index Seek with a
+  runtime-computed range for this shape, via a separate mechanism from the literal-text-inspection
+  path, even when the actual pattern turns out to have a leading wildcard at execution time. The
+  loss-of-sargability claim for a non-literal `LIKE` pattern was wrong and the corresponding
+  finding was removed rather than kept.
 
 - **An expression-derived column (a view/derived-table/TVF SELECT-list expression referenced
   downstream) can never reach the bare-column-operand sargability gate above, because view/TVF
