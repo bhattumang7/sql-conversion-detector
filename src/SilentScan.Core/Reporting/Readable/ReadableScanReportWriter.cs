@@ -118,7 +118,6 @@ public static class ReadableScanReportWriter
         blocks.AddRange(MemoryOptimizedForeignKey(report, headingLevel, pathBase));
         blocks.AddRange(MemoryOptimizedSchemaOnlyDurability(report, headingLevel, pathBase));
         blocks.AddRange(NonPersistedComputedColumn(report, headingLevel, pathBase));
-        blocks.AddRange(FullTextIndexDdl(report, headingLevel, pathBase));
         blocks.AddRange(SemanticSearch(report, headingLevel, pathBase));
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
         blocks.AddRange(UnderLengthParameter(report, headingLevel, pathBase));
@@ -283,7 +282,6 @@ public static class ReadableScanReportWriter
         AddCount(counts, "UTF-8 collation on a memory-optimized table column (does not deploy)", report.Find<MemoryOptimizedUtf8CollationFinding>(nameof(MemoryOptimizedUtf8CollationScanner)).Count);
         AddCount(counts, "Unsupported built-in function inside a natively compiled module (does not compile)", report.Find<NativelyCompiledUnsupportedBuiltinFinding>(nameof(NativelyCompiledUnsupportedBuiltinScanner)).Count);
         AddCount(counts, "CLR user-defined type parameter/variable inside a natively compiled module (does not compile)", report.Find<NativelyCompiledClrTypeFinding>(nameof(NativelyCompiledClrTypeScanner)).Count);
-        AddCount(counts, "Full-text index DDL that fails to deploy", report.Find<FullTextIndexDdlFinding>(nameof(FullTextIndexDdlScanner)).Count);
         AddCount(counts, "Semantic search function calls that fail at execution", report.Find<SemanticSearchFinding>(nameof(SemanticSearchScanner)).Count);
         AddCount(counts, "ERROR_* call outside a CATCH block inside a natively compiled module (does not compile)", report.Find<NativelyCompiledErrorOutsideCatchFinding>(nameof(NativelyCompiledErrorOutsideCatchScanner)).Count);
         AddCount(counts, "Interpreted (non-native) routine called from a natively compiled module (does not compile)", report.Find<NativelyCompiledInterpretedCalleeFinding>(nameof(NativelyCompiledInterpretedCalleeScanner)).Count);
@@ -1342,79 +1340,6 @@ public static class ReadableScanReportWriter
                 f.DefinitionText,
                 f.IsCoveredByIndex ? "Yes" : "No",
             })]);
-    }
-
-    private static IEnumerable<ReadableBlock> FullTextIndexDdl(ScanReport report, int level, string? pathBase)
-    {
-        var all = report.Find<FullTextIndexDdlFinding>(nameof(FullTextIndexDdlScanner));
-
-        var unsupportedType = all.Where(f => f.Kind == FullTextIndexDdlFindingKind.UnsupportedColumnType).ToList();
-        if (unsupportedType.Count > 0)
-        {
-            yield return new ReadableBlock.Heading(level, $"Full-text index on an unsupported column type ({unsupportedType.Count})");
-            yield return new ReadableBlock.Paragraph(
-                "Oracle-confirmed (Msg 7670): a full-text indexed column must be character-based, XML, JSON, image, or varbinary(max) - any other declared type means CREATE FULLTEXT INDEX never deploys.");
-            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind.UnsupportedColumnType)));
-            yield return new ReadableBlock.Table(
-                [WhereHeader, ColumnHeader, "Type"],
-                [.. unsupportedType.Select(f => new List<string>
-                {
-                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                    $"{f.TableQualifiedName}.{f.ColumnName}",
-                    f.Detail,
-                })]);
-        }
-
-        var invalidLanguage = all.Where(f => f.Kind == FullTextIndexDdlFindingKind.InvalidLanguageId).ToList();
-        if (invalidLanguage.Count > 0)
-        {
-            yield return new ReadableBlock.Heading(level, $"Full-text index column with an invalid LANGUAGE id ({invalidLanguage.Count})");
-            yield return new ReadableBlock.Paragraph(
-                "Oracle-confirmed (Msg 7696): the numeric LCID isn't one of the language resources SQL Server ships (sys.fulltext_languages) - CREATE FULLTEXT INDEX never deploys.");
-            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind.InvalidLanguageId)));
-            yield return new ReadableBlock.Table(
-                [WhereHeader, ColumnHeader, DetailHeader],
-                [.. invalidLanguage.Select(f => new List<string>
-                {
-                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                    $"{f.TableQualifiedName}.{f.ColumnName}",
-                    f.Detail,
-                })]);
-        }
-
-        var nonDeterministic = all.Where(f => f.Kind == FullTextIndexDdlFindingKind.NonDeterministicComputedColumn).ToList();
-        if (nonDeterministic.Count > 0)
-        {
-            yield return new ReadableBlock.Heading(level, $"Full-text index on a nondeterministic nonpersisted computed column ({nonDeterministic.Count})");
-            yield return new ReadableBlock.Paragraph(
-                "Oracle-confirmed (Msg 9928): a nonpersisted computed column indexed by a full-text index must be deterministic - never fires on a PERSISTED computed column, since SQL Server already forces those to be deterministic at ALTER/CREATE TABLE time.");
-            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind.NonDeterministicComputedColumn)));
-            yield return new ReadableBlock.Table(
-                [WhereHeader, ColumnHeader, DetailHeader],
-                [.. nonDeterministic.Select(f => new List<string>
-                {
-                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                    $"{f.TableQualifiedName}.{f.ColumnName}",
-                    f.Detail,
-                })]);
-        }
-
-        var tooManyColumns = all.Where(f => f.Kind == FullTextIndexDdlFindingKind.TooManyIndexedColumns).ToList();
-        if (tooManyColumns.Count > 0)
-        {
-            yield return new ReadableBlock.Heading(level, $"Full-text index over the 1,024-column limit ({tooManyColumns.Count})");
-            yield return new ReadableBlock.Paragraph(
-                "A single CREATE FULLTEXT INDEX statement's column list exceeds the documented 1,024-column full-text index limit.");
-            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind.TooManyIndexedColumns)));
-            yield return new ReadableBlock.Table(
-                [WhereHeader, TableHeader, DetailHeader],
-                [.. tooManyColumns.Select(f => new List<string>
-                {
-                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                    f.TableQualifiedName,
-                    f.Detail,
-                })]);
-        }
     }
 
     private static IEnumerable<ReadableBlock> SemanticSearch(ScanReport report, int level, string? pathBase)

@@ -162,7 +162,6 @@ public static class SarifReportWriter
         results.AddRange(report.Find<DanglingObjectReferenceFinding>("DanglingObjectReferenceScanner").Select(ToResult));
         results.AddRange(report.Find<TriggerOrderFinding>("TriggerOrderScanner").Select(ToResult));
         results.AddRange(report.Find<MissingStatisticsFinding>("MissingStatisticsScanner").Select(ToResult));
-        results.AddRange(report.Find<FullTextIndexDdlFinding>("FullTextIndexDdlScanner").Select(ToResult));
         results.AddRange(report.Find<SemanticSearchFinding>("SemanticSearchScanner").Select(ToResult));
 
         var notifications = BuildParseHealthNotifications(report.ParseHealth);
@@ -438,28 +437,6 @@ public static class SarifReportWriter
             : $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} - MAX-typed columns can never be an index key column, so no predicate/join on it can ever seek.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
-    }
-
-    private static SarifResult ToResult(FullTextIndexDdlFinding finding)
-    {
-
-        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FullTextIndexDdlRuleId(finding.Kind), finding.Confidence);
-        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
-        var location = finding.ColumnName is { } columnName ? $"'{finding.TableQualifiedName}.{columnName}'" : $"'{finding.TableQualifiedName}'";
-        var message = finding.Kind switch
-        {
-            FullTextIndexDdlFindingKind.UnsupportedColumnType =>
-                $"Full-text index on {location} indexes a column declared {finding.Detail} - not a character-based, XML, JSON, image, or varbinary(max) type, so CREATE FULLTEXT INDEX fails (Msg 7670).",
-            FullTextIndexDdlFindingKind.InvalidLanguageId =>
-                $"Full-text index on {location} specifies {finding.Detail} - not an LCID SQL Server's full-text language resources cover, so CREATE FULLTEXT INDEX fails (Msg 7696).",
-            FullTextIndexDdlFindingKind.NonDeterministicComputedColumn =>
-                $"Full-text index on {location} indexes a {finding.Detail} - CREATE FULLTEXT INDEX fails (Msg 9928).",
-            FullTextIndexDdlFindingKind.TooManyIndexedColumns =>
-                $"Full-text index on {location} lists {finding.Detail} - exceeds the full-text index column limit.",
-            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled FullTextIndexDdlFindingKind."),
-        };
-
-        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(SemanticSearchFinding finding)

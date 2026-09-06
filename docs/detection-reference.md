@@ -737,10 +737,16 @@ confirmed against a live instance).
 
 ## Built-in function determinism
 
-`ComputedColumnDeterminismChecker` (feeds
-`FullTextIndexDdlFindingKind.NonDeterministicComputedColumn`, the only
-consumer) walks a computed column's expression for nondeterministic
-constructs. Microsoft's own "Deterministic and Nondeterministic Functions"
+`ComputedColumnDeterminismChecker` (feeds a computed column's
+`IsComputedNonDeterministic` catalog fact, propagated through lineage via
+`FromScopeResolver`) walks a computed column's expression for nondeterministic
+constructs. A prior consumer, `FullTextIndexDdlScanner`, was removed - its
+findings (Msg 7670/7696/9928/column-count-limit on `CREATE`/`ALTER FULLTEXT
+INDEX`) can never be observed by this tool's only real entry point
+(`scan-db` against an already-deployed database): SQL Server refuses to let
+such DDL ever succeed in the first place, so a live catalog can never
+contain the broken state the scanner looked for. Microsoft's own
+"Deterministic and Nondeterministic Functions"
 reference page enumerates the built-in function determinism classification
 directly - a genuine closed, documented list, not a free-text source - and is
 the right starting point before reaching for the engine's own internal

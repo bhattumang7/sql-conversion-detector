@@ -750,14 +750,6 @@ public static class FindingRuleIds
         SargabilityFindingKind.CharindexOrLeftOnColumn => "silentscan/tier1/charindex-or-left-on-column",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SargabilityFindingKind."),
     };
-    public static string FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind kind) => kind switch
-    {
-        FullTextIndexDdlFindingKind.UnsupportedColumnType => "silentscan/catalog/full-text-index-unsupported-column-type",
-        FullTextIndexDdlFindingKind.InvalidLanguageId => "silentscan/catalog/full-text-index-invalid-language-id",
-        FullTextIndexDdlFindingKind.NonDeterministicComputedColumn => "silentscan/catalog/full-text-index-nondeterministic-computed-column",
-        FullTextIndexDdlFindingKind.TooManyIndexedColumns => "silentscan/catalog/full-text-index-too-many-columns",
-        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled FullTextIndexDdlFindingKind."),
-    };
     public static string SemanticSearchRuleId(SemanticSearchFindingKind kind) => kind switch
     {
         SemanticSearchFindingKind.TableNotSemanticFullTextIndexed => "silentscan/catalog/semantic-search-table-not-indexed",

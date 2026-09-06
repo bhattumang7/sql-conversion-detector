@@ -40,8 +40,6 @@ public sealed class DatabaseCatalog
 
     private readonly List<CatalogSecondarySelectiveXmlIndexReference> _secondarySelectiveXmlIndexReferences = [];
 
-    private readonly List<CatalogFullTextIndex> _fullTextIndexes = [];
-
     private readonly Dictionary<(string SchemeName, int PartitionNumber), string> _partitionFilegroupsBySchemeAndNumber = [];
 
     private Dictionary<string, IReadOnlyList<CatalogIndex>> _indexedViewIndexesByQualifiedName;
@@ -218,10 +216,6 @@ public sealed class DatabaseCatalog
     public void AddTemporalTablePair(TemporalTablePair pair) => _temporalTablePairs.Add(pair);
 
     public IReadOnlyList<TemporalTablePair> TemporalTablePairs => _temporalTablePairs;
-
-    public void AddFullTextIndex(CatalogFullTextIndex fullTextIndex) => _fullTextIndexes.Add(fullTextIndex);
-
-    public IReadOnlyList<CatalogFullTextIndex> FullTextIndexes => _fullTextIndexes;
 
     public void AddPartitionFilegroup(string schemeName, int partitionNumber, string filegroupName) =>
         _partitionFilegroupsBySchemeAndNumber[(schemeName.ToUpperInvariant(), partitionNumber)] = filegroupName;

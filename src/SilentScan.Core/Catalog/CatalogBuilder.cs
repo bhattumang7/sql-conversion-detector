@@ -10,7 +10,6 @@ public static class CatalogBuilder
 {
     private const string SpRenameConstructKind = "sp_rename";
 
-    private static readonly Dictionary<string, SqlType?> EmptyColumnTypes = [];
 
     public static DatabaseCatalog Build(
         IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null,
@@ -311,14 +310,6 @@ public static class CatalogBuilder
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
                     "full-text index", $"'{SchemaObjectNameHelper.Qualify(node.OnName)}': CREATE FULLTEXT INDEX is not modeled - supports CONTAINS/FREETEXT, not the comparison operators this tool classifies");
-
-                var columns = node.FullTextIndexColumns
-                    .Where(c => c.Name is not null)
-                    .Select(c => new CatalogFullTextIndexColumn(c.Name.Value, c.LanguageTerm?.Value, c.StatisticalSemantics))
-                    .ToList();
-
-                catalog.AddFullTextIndex(new CatalogFullTextIndex(
-                    SchemaObjectNameHelper.Qualify(node.OnName), columns, sourcePath, node.StartLine, node.StartColumn));
             }
 
             node.AcceptChildren(this);
@@ -1484,9 +1475,7 @@ public static class CatalogBuilder
             IsGeneratedAlwaysPeriod: columnDefinition.GeneratedAlways is GeneratedAlwaysType.RowStart or GeneratedAlwaysType.RowEnd,
             IsSparse: columnDefinition.StorageOptions?.SparseOption == SparseColumnOption.Sparse,
             IsComputedNonDeterministic: columnDefinition.ComputedColumnExpression is { } expressionForDeterminism
-                && ComputedColumnDeterminismChecker.IsNonDeterministic(expressionForDeterminism),
-            IsComputedImprecise: columnDefinition.ComputedColumnExpression is { } expressionForPrecision
-                && ComputedColumnTypeResolver.IsImprecise(expressionForPrecision, EmptyColumnTypes, context.TypeAliases));
+                && ComputedColumnDeterminismChecker.IsNonDeterministic(expressionForDeterminism));
     }
 
     private static ColumnEncryptionEnclaveSupport ResolveEnclaveSupport(ColumnEncryptionDefinition? encryption, DatabaseCatalog? catalog) =>
@@ -1517,10 +1506,6 @@ public static class CatalogBuilder
         columns = [.. columns.Select(c => computedExpressions.TryGetValue(c.Name, out var expression) && !c.IsComputedNonDeterministic
             && ComputedColumnDeterminismChecker.IsNonDeterministic(expression, name => typesByName.GetValueOrDefault(name))
                 ? c with { IsComputedNonDeterministic = true }
-                : c)];
-        columns = [.. columns.Select(c => computedExpressions.TryGetValue(c.Name, out var expression) && !c.IsComputedImprecise
-            && ComputedColumnTypeResolver.IsImprecise(expression, typesByName, context.TypeAliases)
-                ? c with { IsComputedImprecise = true }
                 : c)];
 
         if (context.SourcePath is null)
