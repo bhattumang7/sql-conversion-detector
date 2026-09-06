@@ -119,6 +119,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(MemoryOptimizedSchemaOnlyDurability(report, headingLevel, pathBase));
         blocks.AddRange(NonPersistedComputedColumn(report, headingLevel, pathBase));
         blocks.AddRange(FullTextIndexDdl(report, headingLevel, pathBase));
+        blocks.AddRange(ComputedColumnIndexKey(report, headingLevel, pathBase));
         blocks.AddRange(SemanticSearch(report, headingLevel, pathBase));
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
         blocks.AddRange(UnderLengthParameter(report, headingLevel, pathBase));
@@ -284,6 +285,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Unsupported built-in function inside a natively compiled module (does not compile)", report.Find<NativelyCompiledUnsupportedBuiltinFinding>(nameof(NativelyCompiledUnsupportedBuiltinScanner)).Count);
         AddCount(counts, "CLR user-defined type parameter/variable inside a natively compiled module (does not compile)", report.Find<NativelyCompiledClrTypeFinding>(nameof(NativelyCompiledClrTypeScanner)).Count);
         AddCount(counts, "Full-text index DDL that fails to deploy", report.Find<FullTextIndexDdlFinding>(nameof(FullTextIndexDdlScanner)).Count);
+        AddCount(counts, "Index DDL keying a nondeterministic or imprecise computed column", report.Find<ComputedColumnIndexKeyFinding>(nameof(ComputedColumnIndexKeyScanner)).Count);
         AddCount(counts, "Semantic search function calls that fail at execution", report.Find<SemanticSearchFinding>(nameof(SemanticSearchScanner)).Count);
         AddCount(counts, "ERROR_* call outside a CATCH block inside a natively compiled module (does not compile)", report.Find<NativelyCompiledErrorOutsideCatchFinding>(nameof(NativelyCompiledErrorOutsideCatchScanner)).Count);
         AddCount(counts, "Interpreted (non-native) routine called from a natively compiled module (does not compile)", report.Find<NativelyCompiledInterpretedCalleeFinding>(nameof(NativelyCompiledInterpretedCalleeScanner)).Count);
@@ -1385,9 +1387,9 @@ public static class ReadableScanReportWriter
         var nonDeterministic = all.Where(f => f.Kind == FullTextIndexDdlFindingKind.NonDeterministicComputedColumn).ToList();
         if (nonDeterministic.Count > 0)
         {
-            yield return new ReadableBlock.Heading(level, $"Full-text index on a nondeterministic nonpersisted computed column ({nonDeterministic.Count})");
+            yield return new ReadableBlock.Heading(level, $"Full-text index on a nondeterministic or imprecise nonpersisted computed column ({nonDeterministic.Count})");
             yield return new ReadableBlock.Paragraph(
-                "Oracle-confirmed (Msg 9928): a nonpersisted computed column indexed by a full-text index must be deterministic - never fires on a PERSISTED computed column, since SQL Server already forces those to be deterministic at ALTER/CREATE TABLE time.");
+                "Oracle-confirmed (Msg 9928): a nonpersisted computed column indexed by a full-text index must be both deterministic and precise (no float/real-typed value anywhere in its expression) - never fires on a PERSISTED computed column, since SQL Server already forces those to be deterministic at ALTER/CREATE TABLE time; imprecision alone does not block persisting.");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind.NonDeterministicComputedColumn)));
             yield return new ReadableBlock.Table(
                 [WhereHeader, ColumnHeader, DetailHeader],
@@ -1413,6 +1415,45 @@ public static class ReadableScanReportWriter
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                     f.TableQualifiedName,
                     f.Detail,
+                })]);
+        }
+    }
+
+    private static IEnumerable<ReadableBlock> ComputedColumnIndexKey(ScanReport report, int level, string? pathBase)
+    {
+        var all = report.Find<ComputedColumnIndexKeyFinding>(nameof(ComputedColumnIndexKeyScanner));
+
+        var nonDeterministic = all.Where(f => f.Kind == ComputedColumnIndexKeyFindingKind.NonDeterministic).ToList();
+        if (nonDeterministic.Count > 0)
+        {
+            yield return new ReadableBlock.Heading(level, $"Index keys a nondeterministic nonpersisted computed column ({nonDeterministic.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "Oracle-confirmed (Msg 2729): a nonpersisted computed column used as an index key column must be deterministic - never fires on a PERSISTED computed column, since SQL Server already forces those to be deterministic at ALTER/CREATE TABLE time.");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ComputedColumnIndexKeyRuleId(ComputedColumnIndexKeyFindingKind.NonDeterministic)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ColumnHeader, "Index"],
+                [.. nonDeterministic.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    $"{f.TableQualifiedName}.{f.ColumnName}",
+                    f.IndexName ?? string.Empty,
+                })]);
+        }
+
+        var imprecise = all.Where(f => f.Kind == ComputedColumnIndexKeyFindingKind.Imprecise).ToList();
+        if (imprecise.Count > 0)
+        {
+            yield return new ReadableBlock.Heading(level, $"Index keys an imprecise nonpersisted computed column ({imprecise.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "Oracle-confirmed (Msg 2799): a nonpersisted computed column used as an index key column must be precise (no float/real-typed value anywhere in its expression) - imprecision alone does not block PERSISTED, so this is decidable purely from the column's own expression.");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ComputedColumnIndexKeyRuleId(ComputedColumnIndexKeyFindingKind.Imprecise)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ColumnHeader, "Index"],
+                [.. imprecise.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    $"{f.TableQualifiedName}.{f.ColumnName}",
+                    f.IndexName ?? string.Empty,
                 })]);
         }
     }

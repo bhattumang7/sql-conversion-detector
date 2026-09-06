@@ -58,6 +58,7 @@ public static class RuleRegistry
         new SparseColumnDisallowedTypeRule(),
         new LegacyLobUtf8CollationRule(),
         new FullTextIndexDdlRule(),
+        new ComputedColumnIndexKeyRule(),
         new SemanticSearchRule(),
         new IndexCoverageRule(),
         new SelfReferencingDmlRule(),

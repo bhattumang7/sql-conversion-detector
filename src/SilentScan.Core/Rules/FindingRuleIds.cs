@@ -758,6 +758,12 @@ public static class FindingRuleIds
         FullTextIndexDdlFindingKind.TooManyIndexedColumns => "silentscan/catalog/full-text-index-too-many-columns",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled FullTextIndexDdlFindingKind."),
     };
+    public static string ComputedColumnIndexKeyRuleId(ComputedColumnIndexKeyFindingKind kind) => kind switch
+    {
+        ComputedColumnIndexKeyFindingKind.NonDeterministic => "silentscan/catalog/computed-column-index-key-nondeterministic",
+        ComputedColumnIndexKeyFindingKind.Imprecise => "silentscan/catalog/computed-column-index-key-imprecise",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled ComputedColumnIndexKeyFindingKind."),
+    };
     public static string SemanticSearchRuleId(SemanticSearchFindingKind kind) => kind switch
     {
         SemanticSearchFindingKind.TableNotSemanticFullTextIndexed => "silentscan/catalog/semantic-search-table-not-indexed",

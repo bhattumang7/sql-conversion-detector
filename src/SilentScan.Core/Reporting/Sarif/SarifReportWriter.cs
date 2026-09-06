@@ -163,6 +163,7 @@ public static class SarifReportWriter
         results.AddRange(report.Find<TriggerOrderFinding>("TriggerOrderScanner").Select(ToResult));
         results.AddRange(report.Find<MissingStatisticsFinding>("MissingStatisticsScanner").Select(ToResult));
         results.AddRange(report.Find<FullTextIndexDdlFinding>("FullTextIndexDdlScanner").Select(ToResult));
+        results.AddRange(report.Find<ComputedColumnIndexKeyFinding>("ComputedColumnIndexKeyScanner").Select(ToResult));
         results.AddRange(report.Find<SemanticSearchFinding>("SemanticSearchScanner").Select(ToResult));
 
         var notifications = BuildParseHealthNotifications(report.ParseHealth);
@@ -460,6 +461,24 @@ public static class SarifReportWriter
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(ComputedColumnIndexKeyFinding finding)
+    {
+
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ComputedColumnIndexKeyRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var indexRef = finding.IndexName is { } indexName ? $"index '{indexName}'" : "an index";
+        var message = finding.Kind switch
+        {
+            ComputedColumnIndexKeyFindingKind.NonDeterministic =>
+                $"{indexRef} on '{finding.TableQualifiedName}' keys a nonpersisted, nondeterministic computed column '{finding.ColumnName}' - CREATE INDEX fails (Msg 2729).",
+            ComputedColumnIndexKeyFindingKind.Imprecise =>
+                $"{indexRef} on '{finding.TableQualifiedName}' keys a nonpersisted, imprecise computed column '{finding.ColumnName}' - CREATE INDEX fails (Msg 2799).",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled ComputedColumnIndexKeyFindingKind."),
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
     }
 
     private static SarifResult ToResult(SemanticSearchFinding finding)

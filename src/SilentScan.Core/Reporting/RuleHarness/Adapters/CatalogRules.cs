@@ -147,6 +147,13 @@ internal sealed class NonPersistedComputedColumnRule : ICatalogRule
     public IReadOnlyList<IFinding> Scan(RuleContext context) => NonPersistedComputedColumnScanner.Scan(context.Catalog);
 }
 
+internal sealed class ComputedColumnIndexKeyRule : ICatalogRule
+{
+    public string Id => "ComputedColumnIndexKeyScanner";
+    public bool ApplyConfidenceFilter => false;
+    public IReadOnlyList<IFinding> Scan(RuleContext context) => ComputedColumnIndexKeyScanner.Scan(context.Catalog);
+}
+
 internal sealed class UntrustedConstraintRule : ICatalogRule
 {
     public string Id => "UntrustedConstraintScanner";
