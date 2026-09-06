@@ -2013,4 +2013,70 @@ public sealed class CatalogBuilderTests
         Assert.False(table.IsIndexedColumn("Id"));
     }
 
+    [Fact]
+    public void Build_ComputedColumnWithNonDeterministicCallInsideCaseBranch_IsFlaggedNonDeterministic()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Id    INT NOT NULL PRIMARY KEY,
+                Label AS (CASE WHEN Id > 0 THEN CONVERT(varchar(30), GETDATE()) ELSE '' END)
+            );
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+
+        Assert.True(table.FindColumn("Label")!.IsComputedNonDeterministic);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithNonDeterministicCallInsideConcatenation_IsFlaggedNonDeterministic()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Id    INT NOT NULL PRIMARY KEY,
+                Label AS ('x' + CONVERT(varchar(30), GETDATE()))
+            );
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+
+        Assert.True(table.FindColumn("Label")!.IsComputedNonDeterministic);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithNonDeterministicCallAsNestedFunctionArgument_IsFlaggedNonDeterministic()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Id     INT NOT NULL PRIMARY KEY,
+                Length AS (LEN(CONVERT(varchar(30), GETDATE())))
+            );
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+
+        Assert.True(table.FindColumn("Length")!.IsComputedNonDeterministic);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithDeterministicCaseAndArithmeticNesting_IsNotFlaggedNonDeterministic()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Id       INT NOT NULL PRIMARY KEY,
+                Quantity INT NOT NULL,
+                Price    INT NOT NULL,
+                Total    AS (CASE WHEN Id > 0 THEN (Quantity + Price) * 2 ELSE 0 END)
+            );
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+
+        Assert.False(table.FindColumn("Total")!.IsComputedNonDeterministic);
+    }
+
 }

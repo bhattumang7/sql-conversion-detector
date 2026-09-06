@@ -271,9 +271,30 @@ confirmed independently of any one tool's output.
   CAST/CONVERT, or arithmetic is rejected from range-seek eligibility by the same single check
   that requires an operand to be a bare column reference; none of these wrapper shapes gets any
   special-cased handling that would let it through. This confirms there is no case where the
-  engine quietly rescues a function-wrapped/CAST/arithmetic-wrapped predicate into a seek - the
-  loss is unconditional, matching every one of this project's own "wrapping a column blocks the
-  seek" rules with no exception to account for.
+  engine quietly rescues a function-wrapped/CAST/arithmetic-wrapped predicate into a seek *as
+  that same predicate* - the loss of the wrapped comparison's own seek eligibility is
+  unconditional. **This does not mean the query never seeks, for CAST/CONVERT specifically -
+  see the correction below.**
+
+- **Correction to the claim above: a CAST/CONVERT of an indexed column to another type in the
+  same numeric family or the same non-offset datetime family still produces an Index Seek in the
+  final plan, across essentially every category pair within that family (including
+  precision/scale-narrowing decimal casts and datetime2-to-date truncation) - the optimizer
+  pushes the conversion onto the constant side of the comparison (`GetRangeThroughConvert` in
+  the plan XML) and seeks a synthesized range, keeping the original wrapped comparison only as a
+  residual filter.** Oracle-confirmed (`SHOWPLAN_XML`, `PhysicalOp`) across int/bigint/decimal/
+  float/money and date/time/smalldatetime/datetime/datetime2 combinations in both narrowing and
+  widening directions. Two exceptions found: a `datetimeoffset` column cast *away* to
+  `datetime2`/`date` never seeks (the reverse direction - a non-offset column cast up to
+  `datetimeoffset` - does); and any conversion crossing into or out of the string family (numeric
+  or datetime column cast to a string type, or the reverse, or even a same-collation
+  same-semantics string-to-string widening) never seeks - only numeric-family and
+  non-offset-datetime-family conversions get this treatment. `CastOrConvertOnColumn`'s
+  suppression previously matched only same-category conversions (via `SqlType.NeedsConversionFrom`,
+  category equality plus a string-collation check), so any category-changing numeric or datetime
+  cast was flagged as blocking the seek when the real engine still seeks through it - a false
+  positive; fixed to also suppress whenever source and target are both numeric-family or both
+  datetime-family with the column side not `datetimeoffset`.
 
 - **An explicit `CAST`/`CONVERT` of a column keeps a real `Convert` node in the plan - and loses
   the seek - even when the source and target types are 100% identical, for string and binary

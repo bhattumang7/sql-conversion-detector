@@ -45,6 +45,11 @@ public sealed class CastOrConvertOnColumnOracleTests : IAsyncLifetime
                 SELECT Code FROM dbo.Orders WHERE CONVERT(INT, OrderNo) = @x;
             END
             GO
+            CREATE PROCEDURE dbo.ProbeCastToWiderNumericCategory @x BIGINT AS
+            BEGIN
+                SELECT Code FROM dbo.Orders WHERE CAST(OrderNo AS BIGINT) = @x;
+            END
+            GO
             CREATE PROCEDURE dbo.ProbeNoOpCastOnString @x VARCHAR(20) AS
             BEGIN
                 SELECT Code FROM dbo.Orders WHERE CAST(Code AS VARCHAR(20)) = @x;
@@ -75,6 +80,10 @@ public sealed class CastOrConvertOnColumnOracleTests : IAsyncLifetime
     [Fact]
     public async Task NoOpConvertOnNumericColumn_StillSeeks() =>
         Assert.True(await HasIndexSeek("EXEC dbo.ProbeNoOpConvertOnNumeric @x = 100;", "IX_Orders_OrderNo"));
+
+    [Fact]
+    public async Task CastToWiderNumericCategory_StillSeeks() =>
+        Assert.True(await HasIndexSeek("EXEC dbo.ProbeCastToWiderNumericCategory @x = 100;", "IX_Orders_OrderNo"));
 
     [Fact]
     public async Task NoOpCastOnIdenticalStringType_StillNeverSeeks() =>

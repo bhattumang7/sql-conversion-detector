@@ -228,7 +228,7 @@ public static class NonSargablePredicateScanner
         private static ColumnReferenceExpression? AsDirectColumn(ScalarExpression expression) =>
             UnwrapParentheses(expression) as ColumnReferenceExpression;
 
-        private bool IsNoOpConversion(DataTypeReference targetDataType, SqlType? sourceType)
+        private bool PreservesSeekability(DataTypeReference targetDataType, SqlType? sourceType)
         {
             if (sourceType is null || sourceType.IsStringFamily || sourceType.IsBinaryFamily)
             {
@@ -236,8 +236,18 @@ public static class NonSargablePredicateScanner
             }
 
             var targetType = SqlTypeReferenceResolver.Resolve(targetDataType, columnCollation: null, catalog.TypeAliases);
-            return targetType is not null && !targetType.NeedsConversionFrom(sourceType);
+            if (targetType is null)
+            {
+                return false;
+            }
+
+            return !targetType.NeedsConversionFrom(sourceType) || IsSeekableThroughConvert(targetType, sourceType);
         }
+
+        private static bool IsSeekableThroughConvert(SqlType targetType, SqlType sourceType) =>
+            (targetType.IsNumericFamily && sourceType.IsNumericFamily)
+            || (targetType.IsDateTimeFamily && sourceType.IsDateTimeFamily
+                && sourceType.Category != SqlTypeCategory.DateTimeOffset);
 
         private void InspectSide(ScalarExpression expression, ScopeChain scopeChain, ModuleWalker walker)
         {
@@ -258,7 +268,7 @@ public static class NonSargablePredicateScanner
                         break;
                     }
 
-                    if (AsDirectColumn(castCall.Parameter) is not null && IsNoOpConversion(castCall.DataType, castSourceType))
+                    if (AsDirectColumn(castCall.Parameter) is not null && PreservesSeekability(castCall.DataType, castSourceType))
                     {
                         break;
                     }
@@ -275,7 +285,7 @@ public static class NonSargablePredicateScanner
                         break;
                     }
 
-                    if (AsDirectColumn(convertCall.Parameter) is not null && IsNoOpConversion(convertCall.DataType, convertSourceType))
+                    if (AsDirectColumn(convertCall.Parameter) is not null && PreservesSeekability(convertCall.DataType, convertSourceType))
                     {
                         break;
                     }

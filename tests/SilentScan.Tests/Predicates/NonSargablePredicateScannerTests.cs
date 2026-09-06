@@ -149,7 +149,7 @@ public sealed class NonSargablePredicateScannerTests
     }
 
     [Fact]
-    public void CastOnColumn_CastChangesCategory_StillFires()
+    public void CastOnColumn_CastToWiderNumericCategory_DoesNotFire()
     {
         var sql = """
             CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Quantity INT NOT NULL);
@@ -158,7 +158,69 @@ public sealed class NonSargablePredicateScannerTests
             GO
             SELECT OrderId FROM dbo.Orders WHERE CAST(Quantity AS BIGINT) = 5;
             """;
-        var findings = ScanSql(sql);
+        var findings = ScanSqlWithCatalog(sql);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CastOnColumn_NarrowingDecimalCast_DoesNotFire()
+    {
+        var sql = """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Amount DECIMAL(18,4) NOT NULL);
+            GO
+            CREATE INDEX IX_Orders_Amount ON dbo.Orders(Amount);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CAST(Amount AS DECIMAL(5,0)) = 5;
+            """;
+        var findings = ScanSqlWithCatalog(sql);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CastOnColumn_DateTime2TruncatedToDate_DoesNotFire()
+    {
+        var sql = """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, CreatedAt DATETIME2(3) NOT NULL);
+            GO
+            CREATE INDEX IX_Orders_CreatedAt ON dbo.Orders(CreatedAt);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CAST(CreatedAt AS DATE) = '2021-01-01';
+            """;
+        var findings = ScanSqlWithCatalog(sql);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CastOnColumn_DateTimeOffsetCastAwayFromOffset_StillFires()
+    {
+        var sql = """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, CreatedAt DATETIMEOFFSET(3) NOT NULL);
+            GO
+            CREATE INDEX IX_Orders_CreatedAt ON dbo.Orders(CreatedAt);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CAST(CreatedAt AS DATETIME2) = '2021-01-01';
+            """;
+        var findings = ScanSqlWithCatalog(sql);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.CastOrConvertOnColumn, finding.Kind);
+        Assert.Equal("CreatedAt", finding.ColumnName);
+    }
+
+    [Fact]
+    public void CastOnColumn_NumericCastToVarchar_StillFires()
+    {
+        var sql = """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Quantity INT NOT NULL);
+            GO
+            CREATE INDEX IX_Orders_Quantity ON dbo.Orders(Quantity);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CAST(Quantity AS VARCHAR(20)) = '5';
+            """;
+        var findings = ScanSqlWithCatalog(sql);
 
         var finding = Assert.Single(findings);
         Assert.Equal(SargabilityFindingKind.CastOrConvertOnColumn, finding.Kind);
