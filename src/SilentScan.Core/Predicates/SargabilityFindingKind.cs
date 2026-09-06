@@ -12,6 +12,8 @@ public enum SargabilityFindingKind
 
     LikePatternNotLiteral,
 
+    RegexpPatternNotLiteral,
+
     CaseFoldOnColumn,
 
     DateFunctionOnColumn,

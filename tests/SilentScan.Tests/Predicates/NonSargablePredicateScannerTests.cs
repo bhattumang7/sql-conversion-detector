@@ -455,6 +455,24 @@ public sealed class NonSargablePredicateScannerTests
     }
 
     [Fact]
+    public void RegexpLikePattern_Parameter_FiresAsNotLiteral()
+    {
+        var findings = ScanFixture("REGEXP_PATTERN_NOT_LITERAL_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.RegexpPatternNotLiteral, finding.Kind);
+        Assert.Equal("DisplayName", finding.ColumnName);
+    }
+
+    [Fact]
+    public void RegexpLikePattern_Literal_DoesNotFire()
+    {
+        var findings = ScanFixture("REGEXP_PATTERN_NOT_LITERAL_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void WildcardColumnInFunction_HavingCountStar_DoesNotCrashAndDoesNotFire()
     {
 

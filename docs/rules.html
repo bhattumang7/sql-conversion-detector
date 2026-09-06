@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">376 rules. 287 carry fix guidance; 46 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">377 rules. 287 carry fix guidance; 47 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>backup</h2>
@@ -674,6 +674,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/tier1-function-wrapped-column.html">Function Wrapped Column</a> <code class="rule-key">silentscan/tier1/function-wrapped-column</code><span class="snippet">A column is wrapped in a function call inside a predicate, preventing an index seek.</span></li>
       <li><a class="id" href="rules/tier1-leading-wildcard-like.html">Leading Wildcard LIKE</a> <code class="rule-key">silentscan/tier1/leading-wildcard-like</code><span class="snippet">A LIKE predicate on a column starts with a wildcard, forcing a full scan.</span></li>
       <li><a class="id" href="rules/tier1-like-pattern-not-literal.html">LIKE Pattern Not Literal</a> <code class="rule-key">silentscan/tier1/like-pattern-not-literal</code><span class="snippet">A LIKE predicate&#x27;s pattern is not a literal, so a leading wildcard can&#x27;t be ruled out statically.</span></li>
+      <li><a class="id" href="rules/tier1-regexp-pattern-not-literal.html">Regexp Pattern Not Literal</a> <code class="rule-key">silentscan/tier1/regexp-pattern-not-literal</code><span class="snippet">A REGEXP_LIKE predicate&#x27;s pattern is not a literal, so whether it can seek at all can&#x27;t be ruled out statically.</span></li>
     </ul>
   </section>
 

@@ -746,6 +746,7 @@ public static class FindingRuleIds
         SargabilityFindingKind.ColumnArithmetic => "silentscan/tier1/column-arithmetic",
         SargabilityFindingKind.LeadingWildcardLike => "silentscan/tier1/leading-wildcard-like",
         SargabilityFindingKind.LikePatternNotLiteral => "silentscan/tier1/like-pattern-not-literal",
+        SargabilityFindingKind.RegexpPatternNotLiteral => "silentscan/tier1/regexp-pattern-not-literal",
         SargabilityFindingKind.CaseFoldOnColumn => "silentscan/tier1/case-fold-on-column",
         SargabilityFindingKind.DateFunctionOnColumn => "silentscan/tier1/date-function-on-column",
         SargabilityFindingKind.CharindexOrLeftOnColumn => "silentscan/tier1/charindex-or-left-on-column",

@@ -610,6 +610,7 @@ public static class ReadableScanReportWriter
         SargabilityFindingKind.DateFunctionOnColumn => "Date-part function applied to the column",
         SargabilityFindingKind.CharindexOrLeftOnColumn => "CHARINDEX/LEFT applied to the column",
         SargabilityFindingKind.LikePatternNotLiteral => "LIKE with a non-literal pattern",
+        SargabilityFindingKind.RegexpPatternNotLiteral => "REGEXP_LIKE with a non-literal pattern",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SargabilityFindingKind."),
     };
 

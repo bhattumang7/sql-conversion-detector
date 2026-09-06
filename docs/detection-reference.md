@@ -364,16 +364,15 @@ confirmed independently of any one tool's output.
   is not allowed") - a distinct, simpler, already-primary-time failure, out of scope for the
   value-column-width rule.
 
-- **`REGEXP_LIKE` cannot currently be modeled as a sargability rule at all, because it is a
-  boolean predicate (like `CONTAINS`/`FREETEXT`), not a general scalar function.** Oracle-confirmed
-  (Docker, SQL Server 2025 RTM-CU8): `SELECT REGEXP_LIKE(...)` and any use of it as a value
-  expression (`x = REGEXP_LIKE(...)`) both fail with the engine's own syntax error; only
-  `SELECT ... WHERE REGEXP_LIKE(...)` is accepted, matching the existing MAX-argument finding
-  above. The ScriptDom parser version this project is pinned to has no dedicated predicate AST
-  node for this construct at all (no `Regex`-named type anywhere in its public surface, unlike
-  the dedicated node full-text predicates get) - so a script using this syntax cannot currently be
-  represented in the AST this project scans over. No sargability rule can be built for it until
-  the parser dependency adds support; this is a tooling-availability gap, not a modeling decision.
+- **`REGEXP_LIKE`'s pattern must be a compile-time literal for the optimizer to reason about it at
+  all - a non-literal pattern (a variable or parameter) is flagged the same way a non-literal
+  `LIKE` pattern already is.** `REGEXP_LIKE` is a boolean predicate (like `CONTAINS`/`FREETEXT`),
+  not a general scalar function: oracle-confirmed (Docker, SQL Server 2025 RTM-CU8) that
+  `SELECT REGEXP_LIKE(...)` and any use of it as a value expression (`x = REGEXP_LIKE(...)`) both
+  fail with the engine's own syntax error; only `SELECT ... WHERE REGEXP_LIKE(...)` is accepted,
+  matching the existing MAX-argument finding above. This project's ScriptDom parser dependency
+  didn't originally carry a dedicated predicate AST node for this construct at all - a version
+  bump added one, unblocking the rule below.
 
 ## Predicate survival (normalization/simplification)
 

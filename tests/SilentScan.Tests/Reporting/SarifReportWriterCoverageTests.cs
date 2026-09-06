@@ -84,6 +84,16 @@ public sealed class SarifReportWriterCoverageTests
         Assert.Equal("note", result.GetProperty("level").GetString());
     }
 
+    [Fact]
+    public void Write_SargabilityFindingRegexpPatternNotLiteralEvenWhenIndexed_MapsToNoteLevel()
+    {
+        var indexed = new SargabilityFinding(SargabilityFindingKind.RegexpPatternNotLiteral, "Col", null, "test.sql", 1, 1, TableQualifiedName: "dbo.T", Indexed: true);
+        var report = TestScanReports.Build(Tier1Findings: [indexed]);
+
+        var result = FirstResult(report);
+        Assert.Equal("note", result.GetProperty("level").GetString());
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(null)]

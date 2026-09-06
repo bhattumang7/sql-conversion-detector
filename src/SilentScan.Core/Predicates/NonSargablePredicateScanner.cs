@@ -107,6 +107,10 @@ public static class NonSargablePredicateScanner
                 case LikePredicate likePredicate:
                     InspectLikePredicate(likePredicate, scopeChain, walker);
                     break;
+
+                case RegexpLikePredicate regexpLikePredicate:
+                    InspectRegexpLikePredicate(regexpLikePredicate, scopeChain, walker);
+                    break;
             }
         }
 
@@ -195,6 +199,19 @@ public static class NonSargablePredicateScanner
         }
 
         private static bool IsLikeWildcardChar(char value) => value is '%' or '_' or '[';
+
+        private void InspectRegexpLikePredicate(RegexpLikePredicate node, ScopeChain scopeChain, ModuleWalker walker)
+        {
+            if (node.Text is not ColumnReferenceExpression columnRef || ColumnName(columnRef) is not { } columnName)
+            {
+                return;
+            }
+
+            if (node.Pattern is not StringLiteral)
+            {
+                Add(SargabilityFindingKind.RegexpPatternNotLiteral, columnName, detail: null, node, columnRef, scopeChain, walker);
+            }
+        }
 
         private static ScalarExpression UnwrapParentheses(ScalarExpression expression)
         {
@@ -548,6 +565,12 @@ public static class NonSargablePredicateScanner
             }
 
             public override void ExplicitVisit(LikePredicate node)
+            {
+                Leaves.Add(node);
+                base.ExplicitVisit(node);
+            }
+
+            public override void ExplicitVisit(RegexpLikePredicate node)
             {
                 Leaves.Add(node);
                 base.ExplicitVisit(node);
