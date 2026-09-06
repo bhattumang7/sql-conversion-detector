@@ -352,6 +352,14 @@ public interface IModuleRule
     {
     }
 
+    void OnEnterTryConvertCall(TryConvertCall node, ModuleWalker walker)
+    {
+    }
+
+    void OnEnterTryCastCall(TryCastCall node, ModuleWalker walker)
+    {
+    }
+
     void OnEnterFetchCursorStatement(FetchCursorStatement node, ModuleWalker walker)
     {
     }

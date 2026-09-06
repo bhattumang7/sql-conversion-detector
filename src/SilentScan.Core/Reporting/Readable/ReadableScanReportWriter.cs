@@ -200,6 +200,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(SchemaboundAliasType(report, headingLevel, pathBase));
         blocks.AddRange(SparseColumnDisallowedType(report, headingLevel, pathBase));
         blocks.AddRange(LegacyLobUtf8Collation(report, headingLevel, pathBase));
+        blocks.AddRange(LegacyLobConversionTarget(report, headingLevel, pathBase));
+        blocks.AddRange(GroupByValidity(report, headingLevel, pathBase));
         blocks.AddRange(OperandComparability(report, headingLevel, pathBase));
         blocks.AddRange(VectorFunctionArgument(report, headingLevel, pathBase));
         blocks.AddRange(SchemaWithRejectedType(report, headingLevel, pathBase));
@@ -328,6 +330,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "WITH SCHEMABINDING function using an alias type", report.Find<SchemaboundAliasTypeFinding>(nameof(SchemaboundAliasTypeScanner)).Count);
         AddCount(counts, "SPARSE column of a disallowed type", report.Find<SparseColumnDisallowedTypeFinding>(nameof(SparseColumnDisallowedTypeScanner)).Count);
         AddCount(counts, "TEXT/NTEXT column with a UTF-8 or supplementary-character-aware collation", report.Find<LegacyLobUtf8CollationFinding>(nameof(LegacyLobUtf8CollationScanner)).Count);
+        AddCount(counts, "conversion targeting TEXT/NTEXT with a UTF-8 or supplementary-character-aware collation", report.Find<LegacyLobConversionTargetFinding>(nameof(LegacyLobConversionTargetScanner)).Count);
+        AddCount(counts, "GROUP BY-invalid column reference", report.Find<GroupByValidityFinding>(nameof(GroupByValidityScanner)).Count);
         AddCount(counts, "Operand not comparable (xml/json/legacy large object/spatial)", report.Find<OperandComparabilityFinding>(nameof(OperandComparabilityScanner)).Count);
         AddCount(counts, "Vector function argument type errors", report.Find<VectorFunctionArgumentFinding>(nameof(VectorFunctionArgumentScanner)).Count);
         AddCount(counts, "OPENXML/OPENROWSET WITH schema rejected column type", report.Find<SchemaWithRejectedTypeFinding>(nameof(SchemaWithRejectedTypeScanner)).Count);
@@ -3668,6 +3672,60 @@ public static class ReadableScanReportWriter
             })]);
     }
 
+    private static IEnumerable<ReadableBlock> LegacyLobConversionTarget(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<LegacyLobConversionTargetFinding>(nameof(LegacyLobConversionTargetScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"conversion targeting TEXT/NTEXT with a UTF-8 or supplementary-character-aware collation ({report.Find<LegacyLobConversionTargetFinding>(nameof(LegacyLobConversionTargetScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A CAST/CONVERT/TRY_CAST/TRY_CONVERT expression targets TEXT/NTEXT with a trailing COLLATE clause naming a UTF-8 or _SC collation - oracle-confirmed (Msg 4189) the statement never compiles.");
+
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.LegacyLobConversionTargetRuleId));
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Type", "Collation"],
+            [.. report.Find<LegacyLobConversionTargetFinding>(nameof(LegacyLobConversionTargetScanner)).Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TypeDisplay,
+                f.CollationName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> GroupByValidity(ScanReport report, int level, string? pathBase)
+    {
+        if (report.Find<GroupByValidityFinding>(nameof(GroupByValidityScanner)).Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"GROUP BY-invalid column reference ({report.Find<GroupByValidityFinding>(nameof(GroupByValidityScanner)).Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A column reference in the select list or HAVING clause is neither an aggregate function argument nor shape-identical to a GROUP BY expression - oracle-confirmed (Msg 8120/8121) the statement never compiles.");
+
+        foreach (var group in report.Find<GroupByValidityFinding>(nameof(GroupByValidityScanner)).GroupBy(f => f.Kind).OrderBy(g => g.Key))
+        {
+            var ordered = group.ToList();
+            var title = group.Key switch
+            {
+                GroupByValidityFindingKind.Having => "HAVING clause",
+                GroupByValidityFindingKind.OrderBy => "ORDER BY clause",
+                _ => "Select list",
+            };
+            yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.GroupByValidityRuleId(group.Key)));
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Expression"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.ExpressionText,
+                })]);
+        }
+    }
+
     private static IEnumerable<ReadableBlock> CursorCloseOnCommit(ScanReport report, int level, string? pathBase)
     {
         if (report.Find<CursorCloseOnCommitFinding>(nameof(CursorCloseOnCommitScanner)).Count == 0)
@@ -3899,6 +3957,7 @@ public static class ReadableScanReportWriter
             {
                 CartesianJoinKind.ExplicitCrossJoin => "Explicit CROSS JOIN",
                 CartesianJoinKind.AlwaysFalseInnerJoinPredicate => "INNER JOIN with an always-false ON predicate",
+                CartesianJoinKind.JoinPredicateEmptyWithWhereClause => "INNER JOIN whose ON predicate contradicts the WHERE clause",
                 _ => "Legacy comma-join",
             };
             yield return new ReadableBlock.Heading(level + 1, $"{title} ({ordered.Count})");

@@ -59,6 +59,22 @@ internal sealed class GraphPseudoColumnAssignmentRule : IPerFileRule
     public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => GraphPseudoColumnAssignmentScanner.Harvest((GraphPseudoColumnAssignmentScanner.Rule)moduleRule);
 }
 
+internal sealed class LegacyLobConversionTargetRule : IPerFileRule
+{
+    public string Id => "LegacyLobConversionTargetScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => LegacyLobConversionTargetScanner.Scan(parseResult);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => LegacyLobConversionTargetScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => LegacyLobConversionTargetScanner.Harvest((LegacyLobConversionTargetScanner.Rule)moduleRule);
+}
+
+internal sealed class GroupByValidityRule : IPerFileRule
+{
+    public string Id => "GroupByValidityScanner";
+    public IReadOnlyList<IFinding> Scan(SqlParseResult parseResult, RuleContext context, object? state) => GroupByValidityScanner.Scan(parseResult);
+    public IModuleRule CreateModuleRule(SqlParseResult parseResult, RuleContext context, object? state) => GroupByValidityScanner.CreateRule(parseResult.SourcePath);
+    public IReadOnlyList<IFinding> HarvestFindings(SqlParseResult parseResult, RuleContext context, object? state, IModuleRule moduleRule) => GroupByValidityScanner.Harvest((GroupByValidityScanner.Rule)moduleRule);
+}
+
 internal sealed class CursorCloseOnCommitRule : IPerFileRule
 {
     public string Id => "CursorCloseOnCommitScanner";

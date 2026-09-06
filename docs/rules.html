@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">371 rules. 282 carry fix guidance; 46 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">376 rules. 287 carry fix guidance; 46 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>backup</h2>
@@ -357,6 +357,15 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
   </section>
 
   <section class="family-section">
+    <h2>group-by</h2>
+    <ul class="rule-list">
+      <li><a class="id" href="rules/group-by-invalid-having-column.html">Invalid HAVING Column</a> <code class="rule-key">silentscan/group-by/invalid-having-column</code><span class="snippet">A plain GROUP BY&#x27;s HAVING clause references a column that is neither an aggregate function argument nor shape-identical to a GROUP BY expression.</span></li>
+      <li><a class="id" href="rules/group-by-invalid-order-by-column.html">Invalid Order By Column</a> <code class="rule-key">silentscan/group-by/invalid-order-by-column</code><span class="snippet">A plain GROUP BY&#x27;s ORDER BY clause references a column that is neither an aggregate function argument nor shape-identical to a GROUP BY expression.</span></li>
+      <li><a class="id" href="rules/group-by-invalid-select-list-column.html">Invalid Select List Column</a> <code class="rule-key">silentscan/group-by/invalid-select-list-column</code><span class="snippet">A plain GROUP BY&#x27;s select-list expression references a column that is neither an aggregate function argument nor shape-identical to a GROUP BY expression.</span></li>
+    </ul>
+  </section>
+
+  <section class="family-section">
     <h2>hint</h2>
     <ul class="rule-list">
       <li><a class="id" href="rules/hint-index-does-not-exist.html">Index Does Not Exist</a> <code class="rule-key">silentscan/hint/index-does-not-exist</code><span class="snippet">An INDEX(...) table hint names an index that does not exist in the catalog for this table.</span></li>
@@ -418,6 +427,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/join-always-false-inner-join-predicate.html">Always False Inner Join Predicate</a> <code class="rule-key">silentscan/join/always-false-inner-join-predicate</code><span class="snippet">An INNER JOIN&#x27;s own ON predicate folds.</span></li>
       <li><a class="id" href="rules/join-cartesian-comma-join.html">Cartesian Comma Join</a> <code class="rule-key">silentscan/join/cartesian-comma-join</code><span class="snippet">A legacy comma-join (FROM A, B) with no predicate anywhere in the statement.</span></li>
       <li><a class="id" href="rules/join-cartesian-cross-join.html">Cartesian Cross Join</a> <code class="rule-key">silentscan/join/cartesian-cross-join</code><span class="snippet">An explicit CROSS JOIN with no predicate anywhere in the statement connecting the two tables.</span></li>
+      <li><a class="id" href="rules/join-join-predicate-empty-with-where-clause.html">Join Predicate Empty With Where Clause</a> <code class="rule-key">silentscan/join/join-predicate-empty-with-where-clause</code><span class="snippet">An INNER JOIN&#x27;s own ON predicate is satisfiable in isolation, but combined with the statement&#x27;s WHERE clause the two never hold at the same time.</span></li>
       <li><a class="id" href="rules/join-outer-join-predicate-collapse.html">Outer Join Predicate Collapse</a> <code class="rule-key">silentscan/join/outer-join-predicate-collapse</code><span class="snippet">A WHERE-clause predicate compares a column from an OUTER JOIN&#x27;s null-supplying side using a NULL-rejecting operator (=, &lt;&gt;, &lt;, &lt;=, &gt;, &gt;=, LIKE, IN, BETWEEN) with no OR .</span></li>
       <li><a class="id" href="rules/join-partial-composite-fk.html">Partial Composite FK</a> <code class="rule-key">silentscan/join/partial-composite-fk</code><span class="snippet">A JOIN equates some but not all of a real composite foreign key&#x27;s column pairs.</span></li>
     </ul>
@@ -492,6 +502,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/predicates-for-xml-explicit-inline-xsd.html">For Xml Explicit Inline Xsd</a> <code class="rule-key">silentscan/predicates/for-xml-explicit-inline-xsd</code><span class="snippet">A FOR XML EXPLICIT query also specifies the XMLSCHEMA directive.</span></li>
       <li><a class="id" href="rules/predicates-full-text-predicate-in-aggregate.html">Full Text Predicate In Aggregate</a> <code class="rule-key">silentscan/predicates/full-text-predicate-in-aggregate</code><span class="snippet">A CONTAINS/FREETEXT full-text predicate is nested inside a non-windowed aggregate function&#x27;s expression (typically via CASE WHEN).</span></li>
       <li><a class="id" href="rules/predicates-json-operand-not-comparable.html">Json Operand Not Comparable</a> <code class="rule-key">silentscan/predicates/json-operand-not-comparable</code><span class="snippet">A json column is used in a comparison, IN list, BETWEEN, NULLIF, ORDER BY, GROUP BY, SELECT DISTINCT, or a window function&#x27;s PARTITION BY.</span></li>
+      <li><a class="id" href="rules/predicates-legacy-lob-conversion-target.html">Legacy Lob Conversion Target</a> <code class="rule-key">silentscan/predicates/legacy-lob-conversion-target</code><span class="snippet">A CAST/CONVERT/TRY_CAST/TRY_CONVERT expression targets a legacy TEXT/NTEXT type with a trailing COLLATE clause naming a UTF-8 or _SC (supplementary-character-aware) collation.</span></li>
       <li><a class="id" href="rules/predicates-legacy-lob-operand-not-comparable.html">Legacy Lob Operand Not Comparable</a> <code class="rule-key">silentscan/predicates/legacy-lob-operand-not-comparable</code><span class="snippet">A TEXT/NTEXT/IMAGE column is used in a comparison, IN list, BETWEEN, NULLIF, ORDER BY, GROUP BY, or a window function&#x27;s PARTITION BY.</span></li>
       <li><a class="id" href="rules/predicates-local-variable-predicate.html">Local Variable Predicate</a> <code class="rule-key">silentscan/predicates/local-variable-predicate</code><span class="snippet">A predicate compares a column against a DECLARE&#x27;d local variable&#x27;s value, never a formal parameter.</span></li>
       <li><a class="id" href="rules/predicates-openrowset-with-clr-type-rejected.html">Openrowset With CLR Type Rejected</a> <code class="rule-key">silentscan/predicates/openrowset-with-clr-type-rejected</code><span class="snippet">An OPENROWSET(BULK ...) inline-schema WITH clause declares a column typed geometry, geography, or hierarchyid.</span></li>

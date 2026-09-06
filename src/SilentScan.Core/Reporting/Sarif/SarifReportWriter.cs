@@ -91,6 +91,9 @@ public static class SarifReportWriter
         results.AddRange(report.Find<ViewCheckOptionContradictionFinding>("ViewCheckOptionContradictionScanner").Select(ToResult));
         results.AddRange(report.Find<CreateDatabaseOptionConflictFinding>("CreateDatabaseOptionConflictScanner").Select(ToResult));
         results.AddRange(report.Find<GraphPseudoColumnAssignmentFinding>("GraphPseudoColumnAssignmentScanner").Select(ToResult));
+        results.AddRange(report.Find<LegacyLobUtf8CollationFinding>("LegacyLobUtf8CollationScanner").Select(ToResult));
+        results.AddRange(report.Find<LegacyLobConversionTargetFinding>("LegacyLobConversionTargetScanner").Select(ToResult));
+        results.AddRange(report.Find<GroupByValidityFinding>("GroupByValidityScanner").Select(ToResult));
         results.AddRange(report.Find<WaitForFinding>("WaitForScanner").Select(ToResult));
         results.AddRange(report.Find<CursorCloseOnCommitFinding>("CursorCloseOnCommitScanner").Select(ToResult));
         results.AddRange(report.Find<ViewOrderingFinding>("ViewOrderingScanner").Select(ToResult));
@@ -1303,6 +1306,39 @@ public static class SarifReportWriter
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
 
+    private static SarifResult ToResult(LegacyLobUtf8CollationFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.LegacyLobUtf8CollationRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"Column '{finding.ColumnName}' on {finding.TableQualifiedName} is {finding.TypeDisplay} with collation '{finding.CollationName}' - TEXT/NTEXT cannot carry a UTF-8 or supplementary-character-aware collation, so this CREATE/ALTER never compiles.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(LegacyLobConversionTargetFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.LegacyLobConversionTargetRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"Conversion targets {finding.TypeDisplay} with collation '{finding.CollationName}' - TEXT/NTEXT cannot carry a UTF-8 or supplementary-character-aware collation, so this statement never compiles.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(GroupByValidityFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.GroupByValidityRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var clause = finding.Kind switch
+        {
+            GroupByValidityFindingKind.Having => "HAVING clause",
+            GroupByValidityFindingKind.OrderBy => "ORDER BY clause",
+            _ => "select list",
+        };
+        var message = $"'{finding.ExpressionText}' in the {clause} is neither an aggregate function argument nor contained in the GROUP BY clause - this statement never compiles.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
     private static SarifResult ToResult(WaitForFinding finding)
     {
 
@@ -1467,6 +1503,8 @@ public static class SarifReportWriter
         {
             CartesianJoinKind.AlwaysFalseInnerJoinPredicate =>
                 $"The INNER JOIN between {finding.FirstTableQualifiedName} and {finding.SecondTableQualifiedName} has an ON predicate that provably never evaluates to TRUE - this join can never match any row.",
+            CartesianJoinKind.JoinPredicateEmptyWithWhereClause =>
+                $"The INNER JOIN between {finding.FirstTableQualifiedName} and {finding.SecondTableQualifiedName} has an ON predicate that, combined with the statement's WHERE clause, provably never holds at the same time - this join can never match any row.",
             CartesianJoinKind.ExplicitCrossJoin =>
                 $"{finding.FirstTableQualifiedName} and {finding.SecondTableQualifiedName} are combined via a CROSS JOIN with no predicate anywhere in the statement connecting the two - a true cartesian product.",
             _ =>

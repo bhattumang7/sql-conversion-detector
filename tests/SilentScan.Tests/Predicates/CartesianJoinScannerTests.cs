@@ -197,4 +197,59 @@ public sealed class CartesianJoinScannerTests
 
         Assert.Contains(findings, f => f.Kind == CartesianJoinKind.ExplicitCrossJoin);
     }
+
+    [Fact]
+    public void EquiJoin_WhereClauseConstrainsBothSidesToDisjointConstants_Fires()
+    {
+        var findings = Scan(
+            "SELECT * FROM dbo.A a INNER JOIN dbo.B b ON a.X = b.Y WHERE a.X = 5 AND b.Y = 10;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(CartesianJoinKind.JoinPredicateEmptyWithWhereClause, finding.Kind);
+    }
+
+    [Fact]
+    public void EquiJoin_WhereClauseConstrainsBothSidesToDisjointRanges_Fires()
+    {
+        var findings = Scan(
+            "SELECT * FROM dbo.A a INNER JOIN dbo.B b ON a.X = b.Y WHERE a.X > 100 AND b.Y < 10;");
+
+        Assert.Contains(findings, f => f.Kind == CartesianJoinKind.JoinPredicateEmptyWithWhereClause);
+    }
+
+    [Fact]
+    public void EquiJoin_WhereClauseConstrainsBothSidesToSameConstant_NegativeControl_DoesNotFire()
+    {
+        var findings = Scan(
+            "SELECT * FROM dbo.A a INNER JOIN dbo.B b ON a.X = b.Y WHERE a.X = 5 AND b.Y = 5;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void EquiJoin_WhereClauseConstrainsOnlyOneSide_NegativeControl_DoesNotFire()
+    {
+        var findings = Scan(
+            "SELECT * FROM dbo.A a INNER JOIN dbo.B b ON a.X = b.Y WHERE a.X = 5;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void EquiJoin_NoWhereClause_NegativeControl_DoesNotFire()
+    {
+        var findings = Scan(
+            "SELECT * FROM dbo.A a INNER JOIN dbo.B b ON a.X = b.Y;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void NonEquiJoin_NoColumnToColumnEquality_NegativeControl_DoesNotFire()
+    {
+        var findings = Scan(
+            "SELECT * FROM dbo.A a INNER JOIN dbo.B b ON a.Id = b.AId WHERE a.X = 5 AND b.X = 10;");
+
+        Assert.Empty(findings);
+    }
 }

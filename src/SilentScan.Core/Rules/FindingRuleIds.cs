@@ -143,6 +143,7 @@ public static class FindingRuleIds
     public const string SchemaboundAliasTypeRuleId = "silentscan/catalog/schemabound-alias-type";
     public const string SparseColumnDisallowedTypeRuleId = "silentscan/catalog/sparse-column-disallowed-type";
     public const string LegacyLobUtf8CollationRuleId = "silentscan/catalog/legacy-lob-utf8-collation";
+    public const string LegacyLobConversionTargetRuleId = "silentscan/predicates/legacy-lob-conversion-target";
     public const string MemoryOptimizedUtf8CollationRuleId = "silentscan/catalog/memory-optimized-utf8-collation";
     public const string NativelyCompiledUnsupportedBuiltinRuleId = "silentscan/predicate/natively-compiled-unsupported-builtin";
     public const string NativelyCompiledClrTypeRuleId = "silentscan/predicate/natively-compiled-clr-type";
@@ -394,6 +395,15 @@ public static class FindingRuleIds
         CartesianJoinKind.CommaJoin => "silentscan/join/cartesian-comma-join",
         CartesianJoinKind.ExplicitCrossJoin => "silentscan/join/cartesian-cross-join",
         CartesianJoinKind.AlwaysFalseInnerJoinPredicate => "silentscan/join/always-false-inner-join-predicate",
+        CartesianJoinKind.JoinPredicateEmptyWithWhereClause => "silentscan/join/join-predicate-empty-with-where-clause",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
+    public static string GroupByValidityRuleId(GroupByValidityFindingKind kind) => kind switch
+    {
+        GroupByValidityFindingKind.SelectList => "silentscan/group-by/invalid-select-list-column",
+        GroupByValidityFindingKind.Having => "silentscan/group-by/invalid-having-column",
+        GroupByValidityFindingKind.OrderBy => "silentscan/group-by/invalid-order-by-column",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
     public const string TruncateSwallowedRuleId = "silentscan/control-flow/truncate-swallowed-by-catch";

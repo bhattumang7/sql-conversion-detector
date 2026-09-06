@@ -70,6 +70,7 @@ public static class SarifRuleCatalog
     public const string SchemaboundAliasTypeRuleId = FindingRuleIds.SchemaboundAliasTypeRuleId;
     public const string SparseColumnDisallowedTypeRuleId = FindingRuleIds.SparseColumnDisallowedTypeRuleId;
     public const string LegacyLobUtf8CollationRuleId = FindingRuleIds.LegacyLobUtf8CollationRuleId;
+    public const string LegacyLobConversionTargetRuleId = FindingRuleIds.LegacyLobConversionTargetRuleId;
     public const string MemoryOptimizedUtf8CollationRuleId = FindingRuleIds.MemoryOptimizedUtf8CollationRuleId;
     public const string NativelyCompiledUnsupportedBuiltinRuleId = FindingRuleIds.NativelyCompiledUnsupportedBuiltinRuleId;
     public const string NativelyCompiledClrTypeRuleId = FindingRuleIds.NativelyCompiledClrTypeRuleId;
@@ -259,6 +260,7 @@ public static class SarifRuleCatalog
     public static string SessionDateSettingRuleId(SessionDateSettingKind kind) => FindingRuleIds.SessionDateSettingRuleId(kind);
     public const string AmbiguousDateLiteralConversionRuleId = FindingRuleIds.AmbiguousDateLiteralConversionRuleId;
     public static string CartesianJoinRuleId(CartesianJoinKind kind) => FindingRuleIds.CartesianJoinRuleId(kind);
+    public static string GroupByValidityRuleId(GroupByValidityFindingKind kind) => FindingRuleIds.GroupByValidityRuleId(kind);
     public const string TruncateSwallowedRuleId = FindingRuleIds.TruncateSwallowedRuleId;
     public static string DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind kind) => FindingRuleIds.DatabaseConfigurationRuleId(kind);
     public static string UnindexedTempTableUsageRuleId(UnindexedTempTableUsageKind kind) => FindingRuleIds.UnindexedTempTableUsageRuleId(kind);

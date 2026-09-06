@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
@@ -46,6 +47,7 @@ public static class CartesianJoinScanner
             var topLevel = from.TableReferences;
 
             ReportAlwaysFalseInnerJoinPredicates(topLevel, scopeChain, walker, sourcePath);
+            ReportJoinPredicateEmptyWithWhereClause(topLevel, whereClause, scopeChain, walker, sourcePath);
             var allNamed = topLevel.SelectMany(PredicateTreeWalker.FlattenNamedTables).ToList();
             if (allNamed.Count < 2)
             {
@@ -115,6 +117,135 @@ public static class CartesianJoinScanner
                 }
             }
         }
+
+        private void ReportJoinPredicateEmptyWithWhereClause(
+            IList<TableReference> topLevel, WhereClause? whereClause, ScopeChain scopeChain, ModuleWalker walker, string sourcePath)
+        {
+            foreach (var join in topLevel.SelectMany(PredicateTreeWalker.FlattenJoinNodes))
+            {
+                if (join.QualifiedJoinType != QualifiedJoinType.Inner
+                    || join.SearchCondition is not { } condition
+                    || join.FirstTableReference is not NamedTableReference first
+                    || join.SecondTableReference is not NamedTableReference second
+                    || PredicateSurvivalAnalyzer.IsUnsatisfiable(condition, columnRef => walker.ResolveColumnFacts(columnRef, scopeChain)))
+                {
+                    continue;
+                }
+
+                var onConjuncts = PredicateTreeWalker.FlattenAnd(condition).ToList();
+                if (FindEquiJoinEdge(onConjuncts, AliasKey(first), AliasKey(second)) is not { } edge)
+                {
+                    continue;
+                }
+
+                var allConjuncts = onConjuncts.Concat(PredicateTreeWalker.FlattenAnd(whereClause?.SearchCondition)).ToList();
+                var firstRange = BuildNumericRange(allConjuncts, edge.FirstQualifier, edge.FirstColumn);
+                var secondRange = BuildNumericRange(allConjuncts, edge.SecondQualifier, edge.SecondColumn);
+
+                if (!firstRange.Intersect(secondRange).IsEmpty)
+                {
+                    continue;
+                }
+
+                Findings.Add(new CartesianJoinFinding(
+                    CartesianJoinKind.JoinPredicateEmptyWithWhereClause,
+                    SchemaObjectNameHelper.Qualify(first.SchemaObject),
+                    SchemaObjectNameHelper.Qualify(second.SchemaObject),
+                    sourcePath, condition.StartLine, condition.StartColumn,
+                    FindingConfidence.High));
+            }
+        }
+
+        private readonly record struct EquiJoinEdge(string FirstQualifier, string FirstColumn, string SecondQualifier, string SecondColumn);
+
+        private static EquiJoinEdge? FindEquiJoinEdge(IEnumerable<BooleanExpression> conjuncts, string firstAlias, string secondAlias)
+        {
+            foreach (var conjunct in conjuncts)
+            {
+                if (conjunct is not BooleanComparisonExpression { ComparisonType: BooleanComparisonType.Equals } cmp
+                    || TryGetQualifiedColumn(cmp.FirstExpression) is not { } left
+                    || TryGetQualifiedColumn(cmp.SecondExpression) is not { } right)
+                {
+                    continue;
+                }
+
+                if (string.Equals(left.Qualifier, firstAlias, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(right.Qualifier, secondAlias, StringComparison.OrdinalIgnoreCase))
+                {
+                    return new EquiJoinEdge(left.Qualifier, left.Column, right.Qualifier, right.Column);
+                }
+
+                if (string.Equals(left.Qualifier, secondAlias, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(right.Qualifier, firstAlias, StringComparison.OrdinalIgnoreCase))
+                {
+                    return new EquiJoinEdge(right.Qualifier, right.Column, left.Qualifier, left.Column);
+                }
+            }
+
+            return null;
+        }
+
+        private static (string Qualifier, string Column)? TryGetQualifiedColumn(ScalarExpression expr) =>
+            expr is ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: >= 2 } ids }
+                ? (ids[^2].Value, ids[^1].Value)
+                : null;
+
+        private static NumericValueRangeSet BuildNumericRange(IEnumerable<BooleanExpression> conjuncts, string qualifier, string column)
+        {
+            var range = NumericValueRangeSet.Universal;
+            foreach (var conjunct in conjuncts)
+            {
+                if (conjunct is not BooleanComparisonExpression cmp || CmpOpHelper.ToCmpOp(cmp.ComparisonType) is not { } op)
+                {
+                    continue;
+                }
+
+                if (TryGetQualifiedColumn(cmp.FirstExpression) is { } left && MatchesColumn(left, qualifier, column)
+                    && TryGetNumericLiteral(cmp.SecondExpression) is { } rightValue)
+                {
+                    range = range.Intersect(ToRangeSet(op, rightValue));
+                    continue;
+                }
+
+                if (TryGetQualifiedColumn(cmp.SecondExpression) is { } right && MatchesColumn(right, qualifier, column)
+                    && TryGetNumericLiteral(cmp.FirstExpression) is { } leftValue)
+                {
+                    range = range.Intersect(ToRangeSet(CmpOpHelper.Flip(op), leftValue));
+                }
+            }
+
+            return range;
+        }
+
+        private static bool MatchesColumn((string Qualifier, string Column) candidate, string qualifier, string column) =>
+            string.Equals(candidate.Qualifier, qualifier, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(candidate.Column, column, StringComparison.OrdinalIgnoreCase);
+
+        private static decimal? TryGetNumericLiteral(ScalarExpression expr) => expr switch
+        {
+            IntegerLiteral lit => ParseDecimal(lit.Value),
+            NumericLiteral lit => ParseDecimal(lit.Value),
+            MoneyLiteral lit => ParseDecimal(lit.Value),
+            UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } unary =>
+                TryGetNumericLiteral(unary.Expression) is { } v ? -v : null,
+            UnaryExpression { UnaryExpressionType: UnaryExpressionType.Positive } unary =>
+                TryGetNumericLiteral(unary.Expression),
+            _ => null,
+        };
+
+        private static decimal? ParseDecimal(string value) =>
+            decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : null;
+
+        private static NumericValueRangeSet ToRangeSet(CmpOp op, decimal value) => op switch
+        {
+            CmpOp.Eq => NumericValueRangeSet.ForEquals(value),
+            CmpOp.Ne => NumericValueRangeSet.ForNotEquals(value),
+            CmpOp.Lt => NumericValueRangeSet.ForLessThan(value),
+            CmpOp.Le => NumericValueRangeSet.ForLessThanOrEqual(value),
+            CmpOp.Gt => NumericValueRangeSet.ForGreaterThan(value),
+            CmpOp.Ge => NumericValueRangeSet.ForGreaterThanOrEqual(value),
+            _ => NumericValueRangeSet.Universal,
+        };
 
         private void ReportExplicitCrossJoinGaps(
             IList<TableReference> topLevel, AliasUnionFind unionFind, string sourcePath)

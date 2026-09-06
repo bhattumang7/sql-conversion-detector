@@ -13,6 +13,8 @@ public static class RuleRegistry
         new ViewCheckOptionContradictionRule(),
         new CreateDatabaseOptionConflictRule(),
         new GraphPseudoColumnAssignmentRule(),
+        new LegacyLobConversionTargetRule(),
+        new GroupByValidityRule(),
         new CursorCloseOnCommitRule(),
         new CompositeIndexLeadingColumnRule(),
         new MissingStatisticsRule(),
