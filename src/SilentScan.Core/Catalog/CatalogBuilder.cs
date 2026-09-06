@@ -1509,6 +1509,12 @@ public static class CatalogBuilder
             ? c with { Type = c.Type with { Collation = context.DefaultCollation } }
             : c)];
 
+        var typesByName = columns.ToDictionary(c => c.Name, c => c.Type, Collation.IdentifierComparer(context.DefaultCollation));
+        columns = [.. columns.Select(c => computedExpressions.TryGetValue(c.Name, out var expression) && !c.IsComputedNonDeterministic
+            && ComputedColumnDeterminismChecker.IsNonDeterministic(expression, name => typesByName.GetValueOrDefault(name))
+                ? c with { IsComputedNonDeterministic = true }
+                : c)];
+
         if (context.SourcePath is null)
         {
             return columns;

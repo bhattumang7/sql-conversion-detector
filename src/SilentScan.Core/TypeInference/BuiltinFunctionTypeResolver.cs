@@ -11,6 +11,7 @@ public static class BuiltinFunctionTypeResolver
         ["SYSDATETIMEOFFSET"] = new SqlType(SqlTypeCategory.DateTimeOffset, Precision: 7),
         ["NEWID"] = new SqlType(SqlTypeCategory.UniqueIdentifier),
         ["NEWSEQUENTIALID"] = new SqlType(SqlTypeCategory.UniqueIdentifier),
+        ["TEXTPTR"] = new SqlType(SqlTypeCategory.VarBinary, Length: 16),
 
         ["LEN"] = new SqlType(SqlTypeCategory.Int),
         ["DATALENGTH"] = new SqlType(SqlTypeCategory.Int),
