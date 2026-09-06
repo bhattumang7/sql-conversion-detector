@@ -20,7 +20,10 @@ Remove any existing comments and do not write any new comments in the code. Not 
 Do not write unnecessary markdown documents that won't have meaning in 10 years.
 
 ## Local database
-- `mssql-silentscan-sql`, `silentscan-sql2025`, and `silentscan-sql` are local SQL instances in Docker for running tests and verifying behaviour.
+- `mssql-silentscan-sql`, `silentscan-sql2025` (this is SQL 2025 instance), and `silentscan-sql` are local SQL instances in Docker for running tests and verifying behaviour. silentscan-mssql-fts-2025 has full text search installed.
+
+## Adding red test first
+Add a red test first before adding a correction in SUT.
 
 ## To do list
 `docs/detection-tasklist.md` has the list of to do items. Read it only if asked.
