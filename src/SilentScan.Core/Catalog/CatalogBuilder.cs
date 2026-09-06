@@ -10,6 +10,8 @@ public static class CatalogBuilder
 {
     private const string SpRenameConstructKind = "sp_rename";
 
+    private static readonly Dictionary<string, SqlType?> EmptyColumnTypes = [];
+
     public static DatabaseCatalog Build(
         IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null,
         bool? manifestAnsiNullDefaultOn = null, IScanStage? stage = null, IEnumerable<CatalogTable>? knownTables = null)
@@ -1482,7 +1484,9 @@ public static class CatalogBuilder
             IsGeneratedAlwaysPeriod: columnDefinition.GeneratedAlways is GeneratedAlwaysType.RowStart or GeneratedAlwaysType.RowEnd,
             IsSparse: columnDefinition.StorageOptions?.SparseOption == SparseColumnOption.Sparse,
             IsComputedNonDeterministic: columnDefinition.ComputedColumnExpression is { } expressionForDeterminism
-                && ComputedColumnDeterminismChecker.IsNonDeterministic(expressionForDeterminism));
+                && ComputedColumnDeterminismChecker.IsNonDeterministic(expressionForDeterminism),
+            IsComputedImprecise: columnDefinition.ComputedColumnExpression is { } expressionForPrecision
+                && ComputedColumnTypeResolver.IsImprecise(expressionForPrecision, EmptyColumnTypes, context.TypeAliases));
     }
 
     private static ColumnEncryptionEnclaveSupport ResolveEnclaveSupport(ColumnEncryptionDefinition? encryption, DatabaseCatalog? catalog) =>
@@ -1513,6 +1517,10 @@ public static class CatalogBuilder
         columns = [.. columns.Select(c => computedExpressions.TryGetValue(c.Name, out var expression) && !c.IsComputedNonDeterministic
             && ComputedColumnDeterminismChecker.IsNonDeterministic(expression, name => typesByName.GetValueOrDefault(name))
                 ? c with { IsComputedNonDeterministic = true }
+                : c)];
+        columns = [.. columns.Select(c => computedExpressions.TryGetValue(c.Name, out var expression) && !c.IsComputedImprecise
+            && ComputedColumnTypeResolver.IsImprecise(expression, typesByName, context.TypeAliases)
+                ? c with { IsComputedImprecise = true }
                 : c)];
 
         if (context.SourcePath is null)

@@ -19,4 +19,5 @@ public sealed record CatalogColumn(
     string? MaskingFunctionName = null,
     bool IsGeneratedAlwaysPeriod = false,
     bool IsSparse = false,
-    bool IsComputedNonDeterministic = false);
+    bool IsComputedNonDeterministic = false,
+    bool IsComputedImprecise = false);

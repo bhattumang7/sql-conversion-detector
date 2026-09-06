@@ -284,6 +284,49 @@ public sealed class FullTextIndexDdlScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == FullTextIndexDdlFindingKind.NonDeterministicComputedColumn && f.ColumnName == "Stamped");
     }
 
+    [Theory]
+    [InlineData("CAST(SQRT(N) AS NVARCHAR(50))")]
+    [InlineData("CAST(N + 1.0 AS NVARCHAR(50))")]
+    [InlineData("STR(Id)")]
+    [InlineData("CAST(GREATEST(Id, 1) AS NVARCHAR(50))")]
+    [InlineData("CAST(N AS NVARCHAR(50))")]
+    public void ImpreciseExpression_InNonpersistedComputedColumn_Fires(string expression)
+    {
+        var findings = Scan(
+            $"""
+            CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY, N FLOAT NOT NULL, Body VARCHAR(200) NULL, Stamped AS ({expression}));
+            CREATE FULLTEXT INDEX ON dbo.T(Stamped) KEY INDEX PK_T;
+            """);
+
+        Assert.Contains(findings, f => f.Kind == FullTextIndexDdlFindingKind.NonDeterministicComputedColumn && f.ColumnName == "Stamped");
+    }
+
+    [Theory]
+    [InlineData("CAST(Id + 1 AS NVARCHAR(50))")]
+    [InlineData("CAST(Id AS NVARCHAR(50))")]
+    public void PreciseExpression_InNonpersistedComputedColumn_NeverFires(string expression)
+    {
+        var findings = Scan(
+            $"""
+            CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY, N FLOAT NOT NULL, Body VARCHAR(200) NULL, Stamped AS ({expression}));
+            CREATE FULLTEXT INDEX ON dbo.T(Stamped) KEY INDEX PK_T;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void PersistedImpreciseComputedColumn_NeverFires()
+    {
+        var findings = Scan(
+            """
+            CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY, N FLOAT NOT NULL, Stamped AS (CAST(SQRT(N) AS NVARCHAR(50))) PERSISTED);
+            CREATE FULLTEXT INDEX ON dbo.T(Stamped) KEY INDEX PK_T;
+            """);
+
+        Assert.Empty(findings);
+    }
+
     [Fact]
     public void MoreThan1024IndexedColumns_Fires()
     {

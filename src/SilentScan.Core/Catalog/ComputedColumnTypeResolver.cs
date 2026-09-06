@@ -73,4 +73,118 @@ internal static class ComputedColumnTypeResolver
 
         _ => null,
     };
+
+    private static readonly HashSet<string> AlwaysImpreciseFunctionNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "STR", "GREATEST", "LEAST",
+    };
+
+    public static bool IsImprecise(
+        ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases)
+    {
+        var visitor = new ImpreciseVisitor(columnTypes, typeAliases);
+        expression.Accept(visitor);
+        return visitor.Found;
+    }
+
+    private sealed class ImpreciseVisitor(IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases) : TSqlFragmentVisitor
+    {
+        public bool Found { get; private set; }
+
+        public override void ExplicitVisit(FunctionCall node)
+        {
+            if (AlwaysImpreciseFunctionNames.Contains(node.FunctionName.Value) || IsFloatFamily(node))
+            {
+                Found = true;
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(BinaryExpression node)
+        {
+            if (IsFloatFamily(node))
+            {
+                Found = true;
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(ColumnReferenceExpression node)
+        {
+            if (IsFloatFamily(node))
+            {
+                Found = true;
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(CastCall node)
+        {
+            if (IsFloatFamily(node))
+            {
+                Found = true;
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(ConvertCall node)
+        {
+            if (IsFloatFamily(node))
+            {
+                Found = true;
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(TryCastCall node)
+        {
+            if (IsFloatFamily(node))
+            {
+                Found = true;
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(TryConvertCall node)
+        {
+            if (IsFloatFamily(node))
+            {
+                Found = true;
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(ParseCall node)
+        {
+            if (IsFloatFamilyDataType(node.DataType))
+            {
+                Found = true;
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(TryParseCall node)
+        {
+            if (IsFloatFamilyDataType(node.DataType))
+            {
+                Found = true;
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        private bool IsFloatFamily(ScalarExpression node) =>
+            Resolve(node, columnTypes, typeAliases) is { Category: SqlTypeCategory.Float or SqlTypeCategory.Real };
+
+        private static bool IsFloatFamilyDataType(DataTypeReference dataType) =>
+            SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null) is { Category: SqlTypeCategory.Float or SqlTypeCategory.Real };
+    }
 }

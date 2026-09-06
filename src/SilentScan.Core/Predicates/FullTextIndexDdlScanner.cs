@@ -72,11 +72,11 @@ public static class FullTextIndexDdlScanner
                 type.ToString(), fullTextIndex.SourcePath, fullTextIndex.Line, fullTextIndex.Column));
         }
 
-        if (column.IsComputed && !column.IsPersisted && column.IsComputedNonDeterministic)
+        if (column.IsComputed && !column.IsPersisted && (column.IsComputedNonDeterministic || column.IsComputedImprecise))
         {
             findings.Add(new FullTextIndexDdlFinding(
                 FullTextIndexDdlFindingKind.NonDeterministicComputedColumn, fullTextIndex.TableQualifiedName, column.Name,
-                "nondeterministic nonpersisted computed column", fullTextIndex.SourcePath, fullTextIndex.Line, fullTextIndex.Column));
+                "nondeterministic or imprecise nonpersisted computed column", fullTextIndex.SourcePath, fullTextIndex.Line, fullTextIndex.Column));
         }
 
         if (ftColumn.LanguageTermRaw is { } languageTermRaw
