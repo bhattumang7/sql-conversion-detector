@@ -1,0 +1,7 @@
+#!/bin/sh
+msg_file="$1"
+
+if grep -qiE '^(Co-Authored-By|Claude-Session):|claude|anthropic|haiku' "$msg_file"; then
+    echo "commit-msg hook: message must not reference Claude/Anthropic or carry a Co-Authored-By/Claude-Session trailer." >&2
+    exit 1
+fi
