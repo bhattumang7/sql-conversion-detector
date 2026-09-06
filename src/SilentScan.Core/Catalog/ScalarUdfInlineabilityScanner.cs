@@ -10,8 +10,13 @@ public static class ScalarUdfInlineabilityScanner
 
     private static readonly HashSet<string> TimeDependentIntrinsics = new(StringComparer.OrdinalIgnoreCase)
     {
-        "GETDATE", "GETUTCDATE", "SYSDATETIME", "SYSUTCDATETIME", "SYSDATETIMEOFFSET", "CURRENT_TIMESTAMP",
+        "GETDATE", "GETUTCDATE", "SYSDATETIME", "SYSUTCDATETIME", "SYSDATETIMEOFFSET",
     };
+
+    private static readonly HashSet<ParameterlessCallType> TimeDependentParameterlessCalls =
+    [
+        ParameterlessCallType.CurrentTimestamp, ParameterlessCallType.CurrentDate,
+    ];
 
     private static readonly HashSet<string> XmlInstanceMethods = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -212,6 +217,21 @@ public static class ScalarUdfInlineabilityScanner
             else if (node.FunctionName is { Value: { } functionName } && TimeDependentIntrinsics.Contains(functionName))
             {
                 Report($"time-dependent intrinsic {functionName.ToUpperInvariant()}()");
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(ParameterlessCall node)
+        {
+            if (TimeDependentParameterlessCalls.Contains(node.ParameterlessCallType))
+            {
+                Report($"time-dependent intrinsic {node.ParameterlessCallType switch
+                {
+                    ParameterlessCallType.CurrentTimestamp => "CURRENT_TIMESTAMP",
+                    ParameterlessCallType.CurrentDate => "CURRENT_DATE",
+                    _ => node.ParameterlessCallType.ToString(),
+                }}");
             }
 
             base.ExplicitVisit(node);

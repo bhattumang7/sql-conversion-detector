@@ -80,6 +80,54 @@ public sealed class ScalarUdfInfoTests
     }
 
     [Fact]
+    public void Build_FunctionUsingCurrentTimestamp_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_CurrentTimestamp (@x INT)
+            RETURNS DATETIME
+            AS
+            BEGIN
+                RETURN CURRENT_TIMESTAMP;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_CurrentTimestamp", out var info));
+        Assert.Contains("CURRENT_TIMESTAMP", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionUsingCurrentDate_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_CurrentDate (@x INT)
+            RETURNS DATE
+            AS
+            BEGIN
+                RETURN CURRENT_DATE;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_CurrentDate", out var info));
+        Assert.Contains("CURRENT_DATE", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionUsingCurrentUser_IsInlineable()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_CurrentUser (@x INT)
+            RETURNS SYSNAME
+            AS
+            BEGIN
+                RETURN CURRENT_USER;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_CurrentUser", out var info));
+        Assert.True(string.IsNullOrEmpty(info!.InlineabilityBlocker));
+    }
+
+    [Fact]
     public void Build_FunctionUsingWhileLoop_RecordsInlineabilityBlocker()
     {
         var catalog = BuildFrom("""
