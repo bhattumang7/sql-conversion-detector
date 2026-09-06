@@ -50,7 +50,6 @@ public static class SarifRuleCatalog
     public static string AlwaysEncryptedAssignmentMismatchRuleId(AlwaysEncryptedAssignmentMismatchKind kind) => FindingRuleIds.AlwaysEncryptedAssignmentMismatchRuleId(kind);
     public static string SelectiveXmlIndexValueColumnRuleId(SelectiveXmlIndexValueColumnFindingKind kind) => FindingRuleIds.SelectiveXmlIndexValueColumnRuleId(kind);
     public static string FullTextIndexDdlRuleId(FullTextIndexDdlFindingKind kind) => FindingRuleIds.FullTextIndexDdlRuleId(kind);
-    public static string ComputedColumnIndexKeyRuleId(ComputedColumnIndexKeyFindingKind kind) => FindingRuleIds.ComputedColumnIndexKeyRuleId(kind);
     public static string SemanticSearchRuleId(SemanticSearchFindingKind kind) => FindingRuleIds.SemanticSearchRuleId(kind);
     public static string DynamicDataMaskingRuleId(DynamicDataMaskingFindingKind kind) => FindingRuleIds.DynamicDataMaskingRuleId(kind);
     public const string FloatEqualityRuleId = FindingRuleIds.FloatEqualityRuleId;

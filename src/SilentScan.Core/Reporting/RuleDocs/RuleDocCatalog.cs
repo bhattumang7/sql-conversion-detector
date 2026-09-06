@@ -143,8 +143,6 @@ public static class RuleDocCatalog
         [Catalog.FullTextIndexUnsupportedColumnType.RuleId] = Catalog.FullTextIndexUnsupportedColumnType.Content,
         [Catalog.FullTextIndexInvalidLanguageId.RuleId] = Catalog.FullTextIndexInvalidLanguageId.Content,
         [Catalog.FullTextIndexNonDeterministicComputedColumn.RuleId] = Catalog.FullTextIndexNonDeterministicComputedColumn.Content,
-        [Catalog.ComputedColumnIndexKeyNonDeterministic.RuleId] = Catalog.ComputedColumnIndexKeyNonDeterministic.Content,
-        [Catalog.ComputedColumnIndexKeyImprecise.RuleId] = Catalog.ComputedColumnIndexKeyImprecise.Content,
         [Catalog.FullTextIndexTooManyColumns.RuleId] = Catalog.FullTextIndexTooManyColumns.Content,
         [Catalog.SemanticSearchTableNotIndexed.RuleId] = Catalog.SemanticSearchTableNotIndexed.Content,
         [Catalog.SemanticSearchColumnNotIndexed.RuleId] = Catalog.SemanticSearchColumnNotIndexed.Content,
